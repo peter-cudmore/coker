@@ -1,0 +1,342 @@
+{
+  "name": "hexapod",
+  "body_names": [
+    "base",
+    "front_left",
+    "mid_left",
+    "read_left",
+    "front_right",
+    "mid_right",
+    "rear_right"
+  ],
+  "body_components": [
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "body_anchors": [
+    null,
+    [
+      0,
+      0,
+      {
+        "translation": [
+          86.60254,
+          50.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.5235987
+        ]
+      }
+    ],
+    [
+      0,
+      0,
+      {
+        "translation": [
+          -0.000004371139,
+          100.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.5707964
+        ]
+      }
+    ],
+    [
+      0,
+      0,
+      {
+        "translation": [
+          -86.60254,
+          50.000008,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          2.6179938
+        ]
+      }
+    ],
+    [
+      0,
+      0,
+      {
+        "translation": [
+          86.60254,
+          -50.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -0.5235987
+        ]
+      }
+    ],
+    [
+      0,
+      0,
+      {
+        "translation": [
+          -0.000004371139,
+          -100.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -1.5707964
+        ]
+      }
+    ],
+    [
+      0,
+      0,
+      {
+        "translation": [
+          -86.60254,
+          -50.000008,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -2.6179938
+        ]
+      }
+    ]
+  ],
+  "components": [
+    {
+      "parents": [
+        null
+      ],
+      "link_names": [
+        "body"
+      ],
+      "joint_basis": [
+        null
+      ],
+      "transforms": [
+        {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "kinematics": [
+        {
+          "centre_of_mass": {
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "mass": 1.0,
+          "inertia": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "end_effector_names": [],
+      "end_effector_parents": [],
+      "end_effector_transform": []
+    },
+    {
+      "parents": [
+        null,
+        0,
+        1
+      ],
+      "link_names": [
+        "coxa",
+        "femur",
+        "tibia"
+      ],
+      "joint_basis": [
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "transforms": [
+        {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "translation": [
+            50.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "translation": [
+            80.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "kinematics": [
+        {
+          "centre_of_mass": {
+            "translation": [
+              7.083,
+              0.003,
+              0.217
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "mass": 127.677,
+          "inertia": [
+            10961.79,
+            -2.51,
+            -31.522,
+            19145.553,
+            -2.755,
+            17119.771
+          ]
+        },
+        {
+          "centre_of_mass": {
+            "translation": [
+              90.0,
+              -0.34,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "mass": 250.748,
+          "inertia": [
+            20670.926,
+            -0.378,
+            29.919,
+            30410.0,
+            0.0,
+            30940.0
+          ]
+        },
+        {
+          "centre_of_mass": {
+            "translation": [
+              162.971,
+              -0.518,
+              -27.122
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "mass": 8.216,
+          "inertia": [
+            16793.318,
+            4.209,
+            561.098,
+            15265.321,
+            -8.506,
+            2889.306
+          ]
+        }
+      ],
+      "end_effector_names": [
+        "foot"
+      ],
+      "end_effector_parents": [
+        2
+      ],
+      "end_effector_transform": [
+        {
+          "translation": [
+            34.630337,
+            0.0,
+            -156.20737
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    }
+  ]
+}
