@@ -1,3 +1,4 @@
+import dataclasses
 import enum
 import numpy as np
 from typing import Dict, Callable
@@ -26,6 +27,58 @@ class OP(enum.Enum):
     DOT = 16
     CROSS = 17
     TRANSPOSE = 18
+    NEG = 19
+
+    def compute_shape(self, *dims: Dimension) -> Dimension:
+        return compute_shape[self](*dims)
+
+
+class Operator:
+    def pre_process(self, *args):
+        return args
+
+    def compute_shape(self, *dims: Dimension) -> Dimension:
+        raise NotImplementedError
+
+
+class ConcatenateOP(Operator):
+    __slots__ = ('axis', )
+
+    def __init__(self, axis=0):
+        self.axis = axis
+
+    def pre_process(self, *args):
+
+        assert len(args) == 1
+        return args[0]
+
+    def compute_shape(self, *dims: Dimension) -> Dimension:
+
+        out_dims = list(dims[0].dim)
+        for d in dims[1:]:
+            assert all(
+                d.dim[i] == out_dims[i] for i in range(len(out_dims))
+                if i != self.axis
+            )
+            out_dims[self.axis] += d.dim[self.axis]
+
+        return Dimension(tuple(out_dims))
+
+
+class ReshapeOP(Operator):
+    def __init__(self, newshape):
+        self.newshape = newshape
+
+    def compute_shape(self, dim: Dimension) -> Dimension:
+        return Dimension(self.newshape)
+
+
+class NormOP(Operator):
+    def __init__(self, ord=2):
+        self.ord = 2
+
+    def compute_shape(self, *dims: Dimension) -> Dimension:
+        return Dimension(None)
 
 
 compute_shape: Dict[OP, Callable[[Dimension, Dimension], Dimension]] = {}
@@ -40,9 +93,11 @@ def register_shape(*ops: OP):
 
     return inner
 
-@register_shape(OP.VALUE)
+
+@register_shape(OP.VALUE, OP.NEG)
 def dimension_identity(dim: Dimension):
     return dim
+
 
 @register_shape(OP.ADD, OP.SUB)
 def same_dimension(d_1: Dimension, d_2: Dimension) -> Dimension:
@@ -129,6 +184,12 @@ def transpose_shape(d: Dimension):
     return Dimension(tuple(reversed(d.dim)))
 
 
+@register_shape(OP.DIV)
+def scalar_binary(d1: Dimension, d2: Dimension):
+    assert d2.is_scalar()
+    return d1
+
+
 numpy_atomics = {
     np.cross: OP.CROSS,
     np.dot: OP.DOT,
@@ -141,5 +202,20 @@ numpy_atomics = {
     np.tan: OP.TAN,
     np.exp: OP.EXP,
     np.power: OP.PWR,
-    np.transpose: OP.TRANSPOSE
+    np.transpose: OP.TRANSPOSE,
+    np.divide: OP.DIV,
+    np.arccos: OP.ARCCOS,
+    np.arcsin: OP.ARCSIN,
+    np.sqrt: OP.SQRT,
+    np.negative: OP.NEG
 }
+
+
+
+
+numpy_composites = {
+    np.concatenate: ConcatenateOP,
+    np.reshape: ReshapeOP,
+    np.linalg.norm: NormOP
+}
+

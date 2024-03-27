@@ -1,6 +1,6 @@
 import numpy as np
 from coker.toolkits.spatial.types import Vec3, Scalar
-
+from coker.algebra.kernel import Tracer
 
 def quaternion_mul(q, p):
 
@@ -24,23 +24,23 @@ class UnitQuaternion:
 
     @staticmethod
     def from_axis_angle(axis: Vec3, angle: Scalar):
-
-        if axis.nonzero():
-            q_0 = np.cos(angle / 2)
-            s = np.sin(angle / 2)
-            v = s * axis / np.linalg.norm(axis)
-            return UnitQuaternion(q_0, v)
-        else:
-            return UnitQuaternion(1, np.array([0, 0, 0]))
+        try:
+            if not axis.nonzero():
+                return UnitQuaternion(1, np.array([0, 0, 0]))
+        except AttributeError:
+            pass
+        q_0 = np.cos(angle / 2)
+        s = np.sin(angle / 2)
+        v = s * axis / np.linalg.norm(axis)
+        return UnitQuaternion(q_0, v)
 
     def __mul__(self, other) -> 'UnitQuaternion':
-        if isinstance(other, Vec3):
-            assert other.shape == (3,), f"Cannot mul a vector of shape {other.shape}"
-            p = UnitQuaternion(0, other)
-        elif isinstance(other, UnitQuaternion):
-            p = other
-        else:
-            raise NotImplemented
+        if isinstance(other, UnitQuaternion):
+            return quaternion_mul(self, other)
+
+        assert other.shape == (3,), f"Cannot mul a vector of shape {other.shape}"
+        p = UnitQuaternion(0, other)
+
         return quaternion_mul(self, p)
 
     def __rmul__(self, other):
@@ -63,6 +63,12 @@ class UnitQuaternion:
         elif isinstance(other, Vec3):
             qpq_inv = self * other * self.inverse()
             return qpq_inv.v
+        elif isinstance(other, Tracer):
+            assert other.shape[0] == 3
+            qpq_inv = self * other * self.inverse()
+            result = qpq_inv.v
+            return np.reshape(result, newshape=other.shape)
+
         raise NotImplementedError(f"Quaternion conjugation not implemented for {type(other)}")
 
     @staticmethod

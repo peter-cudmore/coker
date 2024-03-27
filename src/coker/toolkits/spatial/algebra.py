@@ -47,9 +47,11 @@ class Rotation3:
 
     @staticmethod
     def from_quaterion(q: UnitQuaternion):
-        if q.q_0 == 1:
-            return Rotation3.zero()
-
+        try:
+            if q.q_0 == 1:
+                return Rotation3.zero()
+        except NotImplementedError:
+            pass
         theta = 2 * np.arccos(q.q_0)
         r = np.sqrt(1 - q.q_0 * q.q_0)  # sin(theta/2)
         u = q.v / r
@@ -66,6 +68,13 @@ class Rotation3:
     def __eq__(self, other):
         return isinstance(other, Rotation3) and (self.axis == other.axis).all() and self.angle == other.angle
 
+    def as_matrix(self):
+        k = hat(self.axis)
+        s = np.sin(self.angle)
+        c = np.cos(self.angle)
+
+        return np.eye(3) + s * k + (1 - c) * (k @ k)
+
 
 class Isometry3:
     def __init__(self,
@@ -75,6 +84,13 @@ class Isometry3:
         self.rotation = rotation or Rotation3.zero()
 
         self.translation = np.array([0, 0, 0], dtype=float) if translation is None else translation
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, Isometry3)
+            and self.rotation == other.rotation
+            and (self.translation == other.translation).all()
+        )
 
     @staticmethod
     def identity():
@@ -102,13 +118,22 @@ class Isometry3:
         q = self.rotation.inverse()
         return Isometry3(q, -q.as_quaternion().conjugate(self.translation))
 
+    def as_matrix(self):
+        r = self.rotation.as_matrix()
+        p = np.reshape(self.translation, newshape=(3, 1))
+        o = np.array([[0, 0, 0, 1.0]], dtype=float)
+
+        result = np.concatenate((r, p), axis=1)
+
+        return np.concatenate((result, o))
+
 
 class Screw:
     __slots__ = ('rotation', 'translation', 'magnitude')
 
-    def __init__(self, rotation: Vec3, translation: Vec3, magnitude: float = 1):
-        self.rotation = rotation
-        self.translation = translation
+    def __init__(self, rotation: Vec3, translation: Optional[Vec3] = None, magnitude: float = 1):
+        self.rotation = rotation if rotation is not None else np.array([0,0,0])
+        self.translation = translation if translation is not None else np.array([0, 0, 0])
         self.magnitude = magnitude
 
     @staticmethod
@@ -147,6 +172,13 @@ class Screw:
 
         return Isometry3(rotation=rotation, translation=translation)
 
+    def __eq__(self, other):
+        return (
+            isinstance(other, Screw)
+            and (self.rotation == other.rotation).all()
+            and (self.translation == other.translation).all()
+            and self.magnitude == other.magnitude
+        )
 
 class SE3Adjoint:
     def __init__(self, transform: Isometry3):
@@ -184,6 +216,10 @@ class SE3Adjoint:
             return SE3Adjoint(t)
         raise NotImplemented
 
+    def __call__(self, arg: Screw) -> Screw:
+        assert isinstance(arg, Screw)
+        return self.apply(arg)
+
 
 class SE3CoAdjoint:
     def __init__(self, transform: Isometry3):
@@ -206,6 +242,10 @@ class SE3CoAdjoint:
         if isinstance(other, Screw):
             return self.apply(other)
         raise NotImplemented
+
+    def __call__(self, arg: Screw) -> Screw:
+        assert isinstance(arg, Screw)
+        return self.apply(arg)
 
     def transpose(self):
         return SE3Adjoint(self.transform)

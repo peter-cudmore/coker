@@ -1,4 +1,5 @@
 from typing import List
+import numpy as np
 from coker.backends.backend import ArrayLike, Backend
 from coker.algebra.kernel import Tracer, Tensor, OP
 
@@ -10,6 +11,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     work_list = [i for i in range(len(graph.nodes)) if i not in workspace]
 
     def get_node(node):
+
         if isinstance(node, Tracer):
             return workspace[node.index]
         elif isinstance(node, Tensor):

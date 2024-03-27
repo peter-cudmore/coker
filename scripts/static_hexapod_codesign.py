@@ -1,47 +1,48 @@
+import dataclasses
+
 import numpy as np
-from coker.toolkits.codesign import DesignVariable, norm
+from coker.toolkits.codesign import ProblemBuilder
 
-from coker.algebra import Tensor
-
-
-def build_hexapod_model(root_pose, q, g):
-    pass
 
 
 def hexapod_codesign():
     motor_max = 0.52    # Netwon Meters
 
-    femur_length = DesignVariable()
-    coxa_length = DesignVariable()
-    tibia_length = DesignVariable()
+    with ProblemBuilder() as builder:
+        femur_length = builder.new_variable(name='l_f')
+        coxa_length = builder.new_variable(name='l_c')
+        tibia_length = builder.new_variable(name='l_c')
+        static_torques = builder.new_variable(r'\tau', shape=(18,))
+        contact_forces = builder.new_variable('f_z', shape=(6,))
+        q = builder.new_variable('q', shape=(18, ))
+        q_dot = np.zeros(shape=(18,))
+        q_ddot = np.zeros(shape=(18,))
+        rest_height = builder.new_variable('h')
 
-    static_torques = DesignVariable(shape=(18,))
+        model = build_hexapod_model(
+                femur_length, coxa_length, tibia_length
+        )
 
-    joint_positions = DesignVariable(shape=(18, ))
-    joint_velocities = np.zeros(shape=(18,))
-    joint_acceleration = np.zeros(shape=(18,))
-    rest_height = DesignVariable()
-    body_position = Tensor.from_list([0, 0, 0, 0, 0, rest_height])
-    body_velocity = np.zeros(shape=(6,))
-    body_acceleration = np.zeros(shape=(6,))
+        constraints = [
+            -0.5 * motor_max < static_torques < 0.5 * motor_max,
+            -np.pi/2 < q < np.pi / 2,
+            0 < femur_length < 0.2,
+            0 < coxa_length < 0.2,
+            0 < tibia_length < 0.2,
+            rest_height > 0.2,
+            0 < contact_forces
+        ] + [
 
-    g = np.array([0, 0, -9.8])
-    model = build_hexapod_model(
-        root_pose=body_position,
-        q=joint_positions,
-        g=g
-    )
+        ]
 
-    feet = model.forward_kinematics()
+        # Amps... approximately
+        cost = 1.47 * np.ones(18).T @ np.abs(static_torques)
 
-    constraints = [
-        -0.5 < static_torques < 0.5,
-        -np.pi/2 < joint_positions < np.pi / 2,
-        0 < femur_length < 0.2,
-        0 < coxa_length < 0.2,
-        0 < tibia_length < 0.2,
-        tibia_length < 2 * rest_height
-    ]
 
-    cost = 1.47 * norm(static_torques, 1)  # Amps... approximately
+
+
+
+
+
+
 

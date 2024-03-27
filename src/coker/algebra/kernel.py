@@ -2,12 +2,12 @@ import dataclasses
 import enum
 
 import numpy as np
-from typing import List, Callable, Tuple, Dict, Optional
+from typing import List, Callable, Tuple, Any
 from collections import defaultdict
 
 from coker.algebra.tensor import Tensor
 from coker.algebra.dimensions import Dimension
-from coker.algebra.ops import OP, compute_shape, numpy_atomics
+from coker.algebra.ops import OP, compute_shape, numpy_atomics, numpy_composites
 
 
 def get_basis(dimension: Dimension , i: int):
@@ -109,12 +109,15 @@ class Tape:
             else:
                 dims.append(get_dim_by_class(arg))
 
-        return compute_shape[op](*dims)
+        return op.compute_shape(*dims)
 
     def append(self, op: OP, *args) -> int:
-
+        args = [
+            strip_symbols_from_array(a) for a in args
+        ]
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
+
         self.nodes.append((op, *args))
         self.dim.append(out_dim)
         return index
@@ -136,15 +139,30 @@ class Tape:
         assert index in self.input_indicies
         op, args = value
 
-
         self.input_indicies.remove(index)
         self.nodes[index] = value
+
+
+def is_additive_identity(space: Dimension, arg) -> bool:
+
+    if isinstance(arg, (float, int, complex)) and arg == 0:
+        return True
+
+    try:
+        return (space.dim == arg.shape) and (arg == 0).all()
+    except:
+        pass
+
+    return False
 
 
 class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __init__(self, tape: Tape, index: int):
         self.tape = tape
         self.index = index
+
+
+
 
     def __hash__(self):
         return hash(hash(self.tape) + self.index)
@@ -173,11 +191,15 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return Tracer(self.tape, index)
 
     def __add__(self, other):
+        if is_additive_identity(other, self):
+            return self
         index = self.tape.append(OP.ADD, self, other)
 
         return Tracer(self.tape, index)
 
     def __radd__(self, other):
+        if is_additive_identity(self.dim, other):
+            return self
         index = self.tape.append(OP.ADD, other, self)
         return Tracer(self.tape, index)
 
@@ -256,11 +278,20 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         try:
             op = numpy_atomics[func]
+            index = self.tape.append(op, *args)
+            return Tracer(self.tape, index)
         except KeyError:
-            raise NotImplementedError(f"{func} is not implemented")
-        index = self.tape.append(op, *args)
+            pass
 
-        return Tracer(self.tape, index)
+        try:
+            op = numpy_composites[func](**kwargs)
+            args = op.pre_process(*args)
+            index = self.tape.append(op, *args)
+            return Tracer(self.tape, index)
+        except KeyError:
+            pass
+
+        raise NotImplementedError(f"{func} with {kwargs} is not implemented")
 
 
 def py_evaluate_tape(tape, args, outputs, backend='numpy'):
@@ -300,29 +331,40 @@ def kernel(arguments: List[Scalar | VectorSpace],
     args = [tape.input(v) for v in arguments]
 
     result = implementation(*args)
+
+    if isinstance(result, np.ndarray):
+        result = strip_symbols_from_array(result)
+
     if isinstance(result, Tensor):
         result = result.collapse()
 
     return Kernel(tape, result)
 
 
-def strip_symbols_from_array(array: np.ndarray):
+def strip_symbols_from_array(array: np.ndarray, float_type=float):
+
+    if not isinstance(array, np.ndarray):
+        return array
 
     symbols = defaultdict(list)
-    iterator = array.flat
-    constants = np.zeros_like(array, dtype=float)
 
-    while True:
-        index = iterator.index
-        value = iterator[index]
-        if isinstance(value, Tracer):
-            symbols[value].append(iterator.coords)
-        else:
-            constants[iterator.coords] = float(value)
+    with np.nditer(array, flags=['refs_ok', 'multi_index'], op_flags=['readwrite']) as it:
+        for x in it:
+            try:
+                x[...] = float_type(x)
+            except TypeError as e:
 
-        try:
-            next(iterator)
-        except StopIteration:
-            break
+                value = x.tolist()
+                assert isinstance(value, Tracer), "Unexpected object in array: {}".format(value)
+                symbols[value].append(it.multi_index)
+                x[...] = 0.0
 
-    
+    symbol_array = array.astype(float)
+
+    for symbol, coords in symbols.items():
+        basis = np.zeros_like(array)
+        for c in coords:
+            basis[c] = 1
+        symbol_array = symbol_array + basis * symbol
+
+    return symbol_array

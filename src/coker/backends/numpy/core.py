@@ -7,6 +7,7 @@ import scipy as sy
 
 from coker.algebra import Tensor, Dimension, OP
 from coker.algebra.kernel import Expression, Tracer, VectorSpace
+from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike
 from coker.backends.evaluator import evaluate_inner
@@ -29,11 +30,18 @@ def is_scalar_symbol(v):
     return isinstance(v, (sp.Symbol, sp.Expr))
 
 
+def div(num, den):
+    if (num == 0).all() and (den == 0):
+        return num
+    else:
+        return np.divide(num, den)
+
+
 impls = {
     OP.ADD: np.add,
     OP.SUB: np.subtract,
     OP.MUL: np.multiply,
-    OP.DIV: np.divide,
+    OP.DIV: div,
     OP.MATMUL: np.matmul,
     OP.SIN: np.sin,
     OP.COS: np.cos,
@@ -45,17 +53,34 @@ impls = {
     OP.ARCSIN: np.arcsin,
     OP.DOT: np.dot,
     OP.CROSS: np.cross,
-    OP.TRANSPOSE: np.transpose
+    OP.TRANSPOSE: np.transpose,
+    OP.NEG: np.negative,
+    OP.SQRT: np.sqrt,
 }
+
+parameterised_impls = {
+    ConcatenateOP: lambda op, x, y: np.concatenate((x, y), axis=op.axis),
+    ReshapeOP: lambda op, x: np.reshape(x, newshape=op.newshape),
+    NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord)
+}
+
+
+def call_parameterised_op(op, *args):
+    kls = op.__class__
+    result = parameterised_impls[kls](op, *args)
+
+    return result
 
 
 def jacobian(f: sp.Expr, x):
     result = sp.Matrix([f]).jacobian(x)
     return result
 
+
 def hessian(f: sp.Expr, x):
     h = sp.hessian(f, [x])
     return h
+
 
 def reshape_sympy_matrix(arg, shape):
     if len(shape) == 1:
@@ -84,9 +109,11 @@ class NumpyBackend(Backend):
         return np.ndarray, np.int32, np.int64, np.float64, np.float32
 
     def to_native(self, array: Tensor) -> ArrayLike:
+
         return array
 
     def from_native(self, array: ArrayLike) -> Tensor:
+
         return array
 
     def reshape(self, arg, dim: Dimension):
@@ -109,7 +136,15 @@ class NumpyBackend(Backend):
         raise NotImplementedError(f"Don't know how to resize {arg.__class__.__name__}")
 
     def call(self, op, *args) -> ArrayLike:
-        return impls[op](*args)
+        try:
+            return impls[op](*args)
+        except KeyError:
+            pass
+
+        if isinstance(op, tuple(parameterised_impls.keys())):
+            return call_parameterised_op(op, *args)
+        raise NotImplementedError(f"{op} is not implemented")
+
 
     def build_optimisation_problem(
         self,

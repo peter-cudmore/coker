@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from util import is_close
+from util import is_close, validate_symbolic_call
 
 u_x = np.array([1, 0, 0], dtype=float)
 u_y = np.array([0, 1, 0], dtype=float)
@@ -77,3 +77,59 @@ def test_screws():
     r_expected = Isometry3.identity()
     assert is_close(r.translation, r_expected.translation)
     assert r.rotation == r_expected.rotation
+
+
+def test_symbolic_isometries():
+    from coker.algebra.kernel import Scalar
+    from coker.toolkits.spatial import Isometry3, Rotation3
+
+    def translation(x):
+        v = np.array([x, 0, 0])
+        iso = Isometry3(translation=v)
+        return iso.as_matrix()
+
+    test_set = [
+        [1.0],
+        [0.0],
+        [-2.0]
+    ]
+
+    validate_symbolic_call(
+        'test_translation',
+        translation,
+        [Scalar('x')],
+        test_set)
+
+    def rotation(theta):
+        r = Rotation3(axis=np.array([0, 0, 1]), angle=theta)
+        return r.as_matrix()
+
+    test_set = [
+        [0.0],
+        [np.pi / 2],
+        [-np.pi / 2]
+    ]
+
+    validate_symbolic_call(
+        'test_rotation',
+        rotation,
+        [Scalar('x')],
+        test_set)
+
+    def combined(x, theta):
+        p = np.array([x, 0, 0])
+        r = Rotation3(axis=np.array([0, 0, 1]), angle=theta)
+        iso = Isometry3(translation=p, rotation=r)
+        return iso.as_matrix()
+
+    test_set = [
+        [0.0, 0.0],
+        [1.0, np.pi/2],
+        [-1.0, -np.pi / 3],
+    ]
+
+    validate_symbolic_call('test_isometry',
+                           combined,
+                           [Scalar('x'), Scalar('theta')],
+                           test_set)
+
