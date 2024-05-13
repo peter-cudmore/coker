@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from util import is_close, validate_symbolic_call
+from test.util import is_close, validate_symbolic_call
 
 u_x = np.array([1, 0, 0], dtype=float)
 u_y = np.array([0, 1, 0], dtype=float)
@@ -60,7 +60,17 @@ def test_isometry():
     rot_and_shift = Isometry3(rotation=Rotation3(axis=u_z, angle=np.pi / 2), translation=u_x)
     test_point = np.array([1, 0, 0, 1], dtype=float).reshape((4, 1))
     image = rot_and_shift @ test_point
+
     assert is_close(image, np.array([1, 1, 0, 1], dtype=float).reshape((4, 1)), tolerance=1e-4)
+
+    # potential bug in screw code
+    ax = Rotation3(axis=u_z, angle=0)
+    iso = Isometry3(rotation=ax)
+    eye = Isometry3.identity()
+
+    assert is_close(iso.as_matrix(), eye.as_matrix(), tolerance=1e-9)
+    xform = iso @ eye
+    assert is_close(xform.as_matrix(), eye.as_matrix(), 1e-9)
 
 
 def test_screws():
@@ -77,6 +87,28 @@ def test_screws():
     r_expected = Isometry3.identity()
     assert is_close(r.translation, r_expected.translation)
     assert r.rotation == r_expected.rotation
+
+    array = s.to_array()
+    expected_array = np.array([0, 0, np.pi/2, 0, 0, 0])
+    assert np.allclose(array, expected_array)
+
+
+def test_prismatic_screw():
+    from coker.toolkits.spatial.algebra import Screw, Isometry3, Rotation3
+
+    screw = Screw.from_tuple(0, 0, 0, 0, 0, 1)
+    identity = screw.exp(0).as_matrix()
+    assert is_close(identity, np.eye(4),  1e-9)
+
+    transform = screw.exp(5)
+    expected_matrix = np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 5],
+        [0, 0, 0, 1]
+    ], dtype=float)
+    actual = transform.as_matrix()
+    assert is_close(actual, expected_matrix,  1e-6)
 
 
 def test_symbolic_isometries():

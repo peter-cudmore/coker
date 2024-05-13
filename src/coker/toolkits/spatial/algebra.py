@@ -114,6 +114,10 @@ class Isometry3:
 
         raise NotImplementedError
 
+    def apply(self, other):
+        assert other.shape == (3,)
+        return self.rotation.as_quaternion().conjugate(other) + self.translation
+
     def transpose(self):
         q = self.rotation.inverse()
         return Isometry3(q, -q.as_quaternion().conjugate(self.translation))
@@ -132,7 +136,7 @@ class Screw:
     __slots__ = ('rotation', 'translation', 'magnitude')
 
     def __init__(self, rotation: Vec3, translation: Optional[Vec3] = None, magnitude: float = 1):
-        self.rotation = rotation if rotation is not None else np.array([0,0,0])
+        self.rotation = rotation if rotation is not None else np.array([0, 0, 0])
         self.translation = translation if translation is not None else np.array([0, 0, 0])
         self.magnitude = magnitude
 
@@ -147,6 +151,8 @@ class Screw:
 
         return Screw(rotation/mag, translation / mag, mag)
 
+    def to_array(self) -> np.ndarray:
+        return np.hstack([self.rotation, self.translation]) * self.magnitude
 
     @staticmethod
     def zero():
@@ -160,15 +166,24 @@ class Screw:
         return Screw(self.rotation, self.translation, self.magnitude * other)
 
     def exp(self, angle=1) -> Isometry3:
-        alpha = self.magnitude * angle
+        if self.magnitude != 0:
+            alpha = self.magnitude * angle
+        else:
+            alpha = angle
+        if (self.rotation == 0).all():
+           return Isometry3(
+               rotation=Rotation3.zero(),
+               translation=self.translation * alpha
+           )
+
         w = hat(self.rotation)
         s = np.sin(alpha)
         c = np.cos(alpha)
         ww = w @ w
 
         r_add = w * s + (1 - c) * ww
-        rotation = Rotation3(axis=self.rotation, angle=alpha)
         translation = alpha * self.translation * np.dot(self.rotation, self.translation) - r_add @ np.cross(self.rotation, self.translation)
+        rotation = Rotation3(axis=self.rotation, angle=alpha)
 
         return Isometry3(rotation=rotation, translation=translation)
 
