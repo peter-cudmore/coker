@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
 import numpy as np
@@ -12,6 +11,20 @@ class Inertia:
     mass: float
     moments: np.ndarray
 
+    def as_matrix(self):
+        inertial_component = np.array([
+            [self.moments[0], self.moments[1], self.moments[2]],
+            [self.moments[1], self.moments[3], self.moments[4]],
+            [self.moments[2], self.moments[4], self.moments[5]]]
+            ,dtype=float
+        )
+        mass_component = self.mass * np.eye(3,dtype=float)
+        zeros = np.zeros((3, 3), dtype=float)
+        return np.block([
+            [inertial_component, zeros],
+            [zeros, mass_component]
+        ])
+
 
 class JointType:
     @property
@@ -24,7 +37,17 @@ class Weld(JointType):
 
 
 class Free(JointType):
-    pass
+
+    @property
+    def axes(self) -> List[Screw]:
+        return [
+            Screw.e_x(),
+            Screw.e_y(),
+            Screw.e_z(),
+            Screw.w_x(),
+            Screw.w_y(),
+            Screw.w_z(),
+        ]
 
 
 class Revolute(JointType):
@@ -45,6 +68,7 @@ class Planar(JointType):
         return list(self._axes)
 
 
+@dataclass
 class RigidBody:
     WORLD = -1
 
@@ -88,9 +112,9 @@ class RigidBody:
 
         if len(angles.shape) != 1:
             assert angles.shape[0] == self.total_joints()
-            q = np.reshape(angles, newshape=(self.total_joints(), ))
+            q = np.reshape(angles, newshape=(self.total_joints(),))
         else:
-            assert angles.shape == (self.total_joints(), )
+            assert angles.shape == (self.total_joints(),)
             q = angles
         joint_transforms = self._get_joint_transforms(q)
         joint_xforms = self._accumulate_joint_xforms(q, joint_transforms)
@@ -142,6 +166,14 @@ class RigidBody:
             transforms.append(g_theta)
         return transforms
 
+    def joint_locations(self, angles, effector) -> List[Isometry3]:
+        xforms = self._get_absolute_joint_xform(angles)
+        link, _ = self.end_effectors[effector]
+        transforms = [
+            self._rest_transforms[i] @ xforms[i] for i in self.get_dependent_joints(link)
+        ]
+        return transforms
+
     def forward_kinematics(self, angles) -> List[Isometry3]:
         abs_xforms = self._get_absolute_joint_xform(angles)
         transforms = self._accumulate_joint_xforms(angles, abs_xforms)
@@ -153,22 +185,51 @@ class RigidBody:
 
         return out
 
-    def manipulator_jacobian(self, angles):
+    def get_dependent_joints(self, parent_link: int):
+        result = list()
+        while parent_link != self.WORLD:
+            result.append(parent_link)
+            parent_link = self.parents[parent_link]
+        return reversed(result)
+
+    def spatial_manipulator_jacobian(self, angles):
+        return np.concatenate(
+            [self.spatial_single_manipulator_jacobian(angles, i) for i, _ in enumerate(self.end_effectors)]
+        )
+
+    def spatial_single_manipulator_jacobian(self, angles, end_effector):
         abs_xforms = self._get_absolute_joint_xform(angles)
         xforms = self._accumulate_joint_xforms(angles, abs_xforms)
 
+        effector_parent, _ = self.end_effectors[end_effector]
+        dependent_joints = self.get_dependent_joints(effector_parent)
+
         columns = []
-        joint_idx = 0
-        for bases in self.joint_bases:
-            parent = self.parents[joint_idx]
-            for zeta in bases:
-                zeta_prime = SE3Adjoint(self._rest_transforms[joint_idx]).apply(zeta)
 
-                if parent != self.WORLD:
-                    zeta_prime = SE3Adjoint(xforms[parent]).apply(zeta_prime)
-                columns.append(
-                    zeta_prime.to_array().reshape((6,1))
-                )
-            joint_idx += 1
+        for joint_idx, bases in enumerate(self.joint_bases):
+            if joint_idx in dependent_joints:
+                parent = self.parents[joint_idx]
+                for zeta in bases:
+                    zeta_prime = SE3Adjoint(self._rest_transforms[joint_idx]).apply(zeta)
+                    if parent != self.WORLD:
+                        zeta_prime = SE3Adjoint(xforms[parent]).apply(zeta_prime)
+                    columns.append(
+                        np.reshape(zeta_prime.to_array(), newshape=(6, 1))
+                    )
+            else:
+                zeta_prime = np.zeros((6, len(bases)))
+                columns.append(zeta_prime)
 
-        return np.hstack(columns)
+        return np.concatenate(columns, axis=1)
+
+    def body_manipulator_jacobian(self, angles):
+        g_list = self.forward_kinematics(angles)
+        ad_g_inv = [
+            SE3Adjoint(g).inverse().as_matrix()
+            for i, g in enumerate(g_list)
+        ]
+        columns = [
+            ad_g @ self.spatial_single_manipulator_jacobian(angles, i)
+            for i, ad_g in enumerate(ad_g_inv)
+        ]
+        return np.concatenate(columns, axis=1)

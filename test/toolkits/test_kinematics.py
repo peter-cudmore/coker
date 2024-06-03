@@ -277,7 +277,18 @@ def test_scara_jacobian():
         assert np.allclose(expected_matrix, m), f"Failed on {angles}"
 
     for angles in test_angles:
-        jacobian = scara_model.manipulator_jacobian(angles)
+        jacobian = scara_model.spatial_manipulator_jacobian(angles)
         expected_jacobian = murray_spatial_jacobian(angles)
         assert np.allclose(jacobian, expected_jacobian), f"Incorrect Jacobian on {angles}"
+
+    for angles in test_angles:
+        body_tool_transform, = scara_model.forward_kinematics(angles)
+        ad = SE3Adjoint(body_tool_transform)
+        body_jacobian = scara_model.body_manipulator_jacobian(angles)
+        jacobian = ad @ body_jacobian
+        expected_jacobian = murray_spatial_jacobian(angles)
+        assert np.allclose(jacobian, expected_jacobian), f"Incorrect Jacobian on {angles}"
+
+# def test_scara_lagrangian()
+
 

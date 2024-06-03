@@ -79,7 +79,7 @@ class Expression:
     @property
     def tape(self) -> 'Tape':
         l_tape = self.lhs.tape if isinstance(self.lhs, Tracer) else None
-        r_tape = self.rhs.tape if isinstance(self.lhs, Tracer) else None
+        r_tape = self.rhs.tape if isinstance(self.rhs, Tracer) else None
         if l_tape and not r_tape:
             return l_tape
         elif r_tape and not l_tape:
@@ -161,9 +161,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         self.tape = tape
         self.index = index
 
-
-
-
     def __hash__(self):
         return hash(hash(self.tape) + self.index)
 
@@ -233,7 +230,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
     def _do_integer_power(self, power):
         if power <= 0:
-            raise NotImplementedError
+            raise NotImplementedError()
         result = self
         for _ in range(1, power):
             result = self * result
@@ -255,7 +252,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             index = self.tape.append(OP.DOT, p, self)
             return Tracer(self.tape, index)
 
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def __lt__(self, other):
         difference = other - self
@@ -269,10 +266,21 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         try:
             op = numpy_atomics[ufunc]
+            index = self.tape.append(op, *inputs)
+            return Tracer(self.tape, index)
+
         except KeyError:
-            raise NotImplementedError(f"{ufunc} is not implemented")
-        index = self.tape.append(op, *inputs)
-        return Tracer(self.tape, index)
+           pass
+
+        if ufunc == np.less:
+            # lhs -> numpy item
+            # rhs -> Tracer
+            # op lhs < rhs
+            lhs, rhs = inputs
+            return rhs > lhs
+
+        raise NotImplementedError(f"{ufunc} is not implemented")
+
 
     def __array_function__(self, func, types, args, kwargs):
 

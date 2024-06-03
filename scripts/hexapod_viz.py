@@ -6,7 +6,6 @@ import pathlib
 
 project_root = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(project_root.absolute() / 'src'))
-from coker.toolkits.kinematics import CompositeBodyModel, flatten_model, forward_kinematics, KinematicTree
 
 leg_json = project_root / 'assets' / 'leg.json'
 hexapod_json = project_root / "assets" / "hexapod.json"

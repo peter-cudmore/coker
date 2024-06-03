@@ -1,12 +1,83 @@
-import dataclasses
+import matplotlib.pyplot as plt
+from typing import List
 
 import numpy as np
-from coker.toolkits.codesign import ProblemBuilder
+from coker.toolkits.codesign import ProblemBuilder, Minimise
+from coker.toolkits.kinematics import RigidBody, Isometry3, Inertia, Screw, Revolute, Free
+from coker.toolkits.spatial import Rotation3
+
+coxa_intertia = Inertia(
+    centre_of_mass=Isometry3(translation=np.array([7.083, 0.003, 0.217])),
+    mass=127.677,
+    moments=np.array([10961.79, -2.51, -31.522, 19145.553, -2.755, 17119.771])
+)
+femur_inertia = Inertia(
+    centre_of_mass=Isometry3(translation=np.array([90.0, -0.34, 0.0])),
+    mass=250.748,
+    moments=np.array([20670.926, -0.378, 29.919, 30410.0, 0.0, 30940.0])
+)
+tibia_inertia = Inertia(
+    centre_of_mass=Isometry3(translation=np.array([162.971, -0.518, -27.12])),
+    mass=8.216,
+    moments=np.array([16793.318, 4.209, 561.098, 15265.321, -8.506, 2889.306])
+)
+body_intertia = Inertia(
+    centre_of_mass=Isometry3.identity(),
+    mass=1000,
+    moments=1e6 * np.array([1, 0, 0, 1 , 0, 1])
+)
+
+def build_hexapod_leg(model,body_idx, anchor, coxa_length, femur_length, tibia_length):
+    coxa = model.add_link(
+        parent=body_idx,
+        at=anchor,
+        joint=Revolute(Screw.w_z()),
+        inertia=coxa_intertia
+    )
+    femur_coxa_joint = Isometry3(translation= coxa_length * np.array([1., 0., 0.]))
+    femur_tibia_joint = Isometry3(translation=femur_length * np.array([1., 0., 0.]))
+    v = np.array([34.630337, 0.0, -156.20737])
+    v = tibia_length * v / np.sqrt(v.dot(v))
+    foot_transform = Isometry3(translation=v)
+
+    femur = model.add_link(
+        parent=coxa,
+        at=femur_coxa_joint,
+        joint=Revolute(Screw.w_y()),
+        inertia=femur_inertia
+    )
+
+    tibia = model.add_link(
+        parent=femur,
+        at=femur_tibia_joint,
+        joint=Revolute(Screw.w_y()),
+        inertia=tibia_inertia
+    )
+    foot = model.add_effector(
+        parent=tibia,
+        at=foot_transform
+    )
+
+    return coxa, femur, tibia, foot
 
 
+def build_hexapod_model(coxa_length, femur_length,tibia_length):
+    model = RigidBody()
+    anchors = get_anchors()
+    body_idx = model.add_link(
+        parent=model.WORLD,
+        at=Isometry3.identity(),
+        inertia=body_intertia,
+        joint=Free()
+    )
+    _ = [
+        build_hexapod_leg(model, body_idx,  anchor, coxa_length, femur_length, tibia_length)
+        for anchor in anchors
+    ]
+    return model
 
 def hexapod_codesign():
-    motor_max = 0.52    # Netwon Meters
+    motor_max = 0.52  # Netwon Meters
 
     with ProblemBuilder() as builder:
         femur_length = builder.new_variable(name='l_f')
@@ -14,35 +85,91 @@ def hexapod_codesign():
         tibia_length = builder.new_variable(name='l_c')
         static_torques = builder.new_variable(r'\tau', shape=(18,))
         contact_forces = builder.new_variable('f_z', shape=(6,))
-        q = builder.new_variable('q', shape=(18, ))
-        q_dot = np.zeros(shape=(18,))
-        q_ddot = np.zeros(shape=(18,))
+
+        q_joints = builder.new_variable('q', shape=(18,))
         rest_height = builder.new_variable('h')
+        q = np.concatenate([rest_height * np.array([0., 0., 1, 0, 0, 0]), q_joints])
 
-        model = build_hexapod_model(
-                femur_length, coxa_length, tibia_length
-        )
+        q_dot = np.zeros(shape=(24,), dtype=float)
+        q_ddot = np.zeros(shape=(24,), dtype=float)
 
+        model = build_hexapod_model(1000 * femur_length, 1000 * coxa_length, 1000 * tibia_length)
+        ones = np.ones(shape=(18,), dtype=float)
         constraints = [
-            -0.5 * motor_max < static_torques < 0.5 * motor_max,
-            -np.pi/2 < q < np.pi / 2,
-            0 < femur_length < 0.2,
-            0 < coxa_length < 0.2,
-            0 < tibia_length < 0.2,
-            rest_height > 0.2,
-            0 < contact_forces
-        ] + [
-
+          -0.5 * motor_max*ones < static_torques,
+          static_torques < 0.5 * motor_max * ones,
+          - ones * np.pi / 2 < q_joints,
+          q_joints < ones * np.pi / 2,
+          0.01 < femur_length,
+          femur_length < 0.2,
+          0.01 < coxa_length,
+          coxa_length < 0.2,
+          0.05 < tibia_length,
+          tibia_length < 0.2,
+          rest_height > 0.2
         ]
+        e_z = np.array([0, 0, 1], dtype=float)
+
+        potential_energy = model.potential_energy(q, -9.8 * e_z)
+
+        # static torque = partial(potential, q)
+
+        Js_st = model.spatial_manipulator_jacobian(q)
+        assert Js_st.shape == (6 * 6, 24)
 
         # Amps... approximately
-        cost = 1.47 * np.ones(18).T @ np.abs(static_torques)
+        cost = 1.47 * np.abs(static_torques).T @ np.ones(shape=(18,))
+
+        builder.constraints = constraints
+        builder.objective = Minimise(cost)
+        builder.outputs = [coxa_length, femur_length, tibia_length, q_joints]
+        problem = builder.build()
+
+e_z = np.array([0, 0, 1], dtype=float)
 
 
+def get_anchors(distance_from_center=50):
+    angles = [np.pi / 6, np.pi / 2, 5 * np.pi / 6, -5 * np.pi / 6, -np.pi / 2, -np.pi / 6]
+
+    return [Isometry3(rotation=Rotation3(axis=e_z, angle=a))
+            @ Isometry3(translation=np.array([distance_from_center, 0, 0]))
+            for a in angles]
 
 
+def main():
+
+    origin = np.zeros((3,), dtype=float)
+    lines = []
+    angles = np.zeros(shape=(24,), dtype=float)
+    anchors = get_anchors()
+    model = build_hexapod_model(50,80,90)
+    feet_idx = range(len(model.end_effectors))
+    feet = model.forward_kinematics(angles)
+    for foot_idx, foot in zip(feet_idx, feet):
+        joints = model.joint_locations(angles, foot_idx)
+
+        joint_p = [p @ origin for p in joints]
+        joint_p.append(foot @ origin)
+        lines.append(joint_p)
+
+    lines.append([a @ origin for a in anchors])
+    ax = plt.figure().add_subplot(projection='3d')
+    for line in lines:
+        plot_lines(ax, line)
+    ax.set_xlabel('forward')
+
+    ax.set_xlabel('forward (mm)')
+    ax.set_ylabel('left (mm)')
+    ax.set_zlabel('up (mm)')
+    ax.set_title('Hexapod Pose')
+    plt.show()
 
 
+def plot_lines(ax: plt.Axes, lines: List[np.ndarray]):
+    line_array = np.vstack(lines).T
+    ax.scatter(line_array[0, :], line_array[1, :], line_array[2, :], 'ko')
+    ax.plot(line_array[0, :], line_array[1, :], line_array[2, :])
 
 
-
+if __name__ == '__main__':
+    hexapod_codesign()

@@ -56,6 +56,7 @@ impls = {
     OP.TRANSPOSE: np.transpose,
     OP.NEG: np.negative,
     OP.SQRT: np.sqrt,
+    OP.ABS: np.abs
 }
 
 parameterised_impls = {
@@ -213,18 +214,19 @@ class NumpyBackend(Backend):
             c = evaluate_inner(
                     tape, arguments, constraint.as_halfplane_bound(), self, workspace
                 )
-            c_jac: sp.MatrixExpr = jacobian(c, x)
-            c_hess: sp.MatrixExpr = hessian(c, x)
+            c_func = sp.lambdify(problem_args, c)
+            c_jac = jacobian(c, x)
+            c_hess = hessian(c, x)
 
-            if c_hess.is_ZeroMatrix:
+            if not c_jac.free_symbols:
+                c_0 = c_func(np.zeros_like(x))
                 this_constraint = sy.optimize.LinearConstraint(
-                   c_jac.evalf(), -np.inf, 0
+                   c_jac.evalf(), -c_0, np.inf
                 )
             else:
-
                 this_constraint = sy.optimize.NonlinearConstraint(
                      sp.lambdify(problem_args, c),
-                        -np.inf, 0,
+                        0, np.inf,
                         jac=sp.lambdify(problem_args, c_jac),
                         hess=sp.lambdify(problem_args, c_hess),
                 )

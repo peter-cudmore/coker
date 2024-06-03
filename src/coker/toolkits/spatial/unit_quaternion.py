@@ -5,8 +5,11 @@ from coker.algebra.kernel import Tracer
 def quaternion_mul(q, p):
 
     qp_0 = q.q_0 * p.q_0 - np.dot(q.v, p.v)
-    qp_v = q.q_0 * p.v + p.q_0 * q.v + np.cross(q.v, p.v)
+    try:
+        qp_v = q.q_0 * p.v + p.q_0 * q.v + np.cross(q.v, p.v)
+    except Exception as e:
 
+        raise e
     return UnitQuaternion(qp_0, qp_v)
 
 
@@ -50,7 +53,7 @@ class UnitQuaternion:
         elif isinstance(other, UnitQuaternion):
             p = other
         else:
-            raise NotImplementedError
+            raise NotImplementedError()
 
         return quaternion_mul(p, self)
 

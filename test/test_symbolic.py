@@ -137,3 +137,40 @@ def test_cos_and_sin():
 
     assert is_close(result, expected)
 
+
+def test_cross_product():
+
+    def f_impl(u, v):
+        return np.cross(u, v)
+
+    u_test = np.array([1, 0, 1], dtype=float)
+    v_test = np.array([2, 1, 1], dtype=float)
+    f_test = f_impl(u_test, v_test)
+
+    f = kernel(
+        arguments=[VectorSpace(name='x', dimension=3), VectorSpace(name='y', dimension=3)],
+        implementation=f_impl
+    )
+
+    result = f(u_test, v_test)
+
+    assert is_close(result, f_test)
+
+def test_tensor_product():
+
+    a = np.array([
+        [[1, 0, 1], [0, 1, 0]],
+        [[0, 0, 1], [0, 1, 1]]],
+                 dtype=float)
+    assert a.shape == (2, 2, 3)
+
+    def f_impl(x):
+        return a @ x
+
+    x_test = np.array([2, 3, 4],dtype=float)
+
+    b_test = f_impl(x_test)
+    f = kernel(arguments=[VectorSpace(name='x', dimension=3)], implementation=f_impl)
+
+    b = f(x_test)
+    assert is_close(b, b_test)

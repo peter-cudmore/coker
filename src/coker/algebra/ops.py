@@ -28,6 +28,7 @@ class OP(enum.Enum):
     CROSS = 17
     TRANSPOSE = 18
     NEG = 19
+    ABS = 20
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -94,7 +95,7 @@ def register_shape(*ops: OP):
     return inner
 
 
-@register_shape(OP.VALUE, OP.NEG)
+@register_shape(OP.VALUE, OP.NEG, OP.ABS)
 def dimension_identity(dim: Dimension):
     return dim
 
@@ -121,6 +122,7 @@ def shape_mul(d_1: Dimension, d_2: Dimension):
 
 @register_shape(OP.MATMUL)
 def shape_matmul(d_1: Dimension, d_2: Dimension):
+
     if d_1.is_scalar() or d_2.is_scalar():
         raise InvalidArgument("Matrix multiplication is not defined for scalars")
 
@@ -132,7 +134,7 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     c = d_1.dim[-1]
     out_dims = []
-    if d_1.is_matrix() or d_2.is_multilinear_map():
+    if d_1.is_matrix() or d_1.is_multilinear_map():
         out_dims.append(d_1.dim[:-1])
 
     r = d_2.dim[0]
@@ -207,7 +209,8 @@ numpy_atomics = {
     np.arccos: OP.ARCCOS,
     np.arcsin: OP.ARCSIN,
     np.sqrt: OP.SQRT,
-    np.negative: OP.NEG
+    np.negative: OP.NEG,
+    np.abs: OP.ABS
 }
 
 

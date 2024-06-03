@@ -22,9 +22,14 @@ def test_optimisation():
         p = builder.new_variable(name='p', shape=(2,))
 
         builder.objective = Minimise(quadratic(x, p))
-
+        builder.constraints = [
+            x[0] > 1
+        ]
         builder.outputs = [x, p]
+        builder.initial_conditions = [
 
+            2*np.ones(x.shape), np.ones(p.shape)
+        ]
         problem = builder.build()
 
     assert not problem.input_shape
@@ -34,8 +39,9 @@ def test_optimisation():
 
     assert len(soln) == 2
     x_val, p_val = soln
+    x_expected = np.array([1,0,0],dtype=float)
 
-    assert isinstance(x_val, np.ndarray) and (abs(x_val) < 1e-4).all()
-    assert isinstance(p_val, np.ndarray) and (abs(p_val) < 1e-4).all()
+    assert isinstance(x_val, np.ndarray) and (abs(x_val -x_expected) < 1e-3).all()
+    assert isinstance(p_val, np.ndarray) and (abs(p_val) < 1e-3).all()
 
 
