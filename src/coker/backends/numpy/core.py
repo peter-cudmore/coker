@@ -79,7 +79,7 @@ def jacobian(f: sp.Expr, x):
 
 
 def hessian(f: sp.Expr, x):
-    h = sp.hessian(f, [x])
+    h = sp.hessian(f, x)
     return h
 
 
@@ -107,14 +107,12 @@ class NumpyBackend(Backend):
         super(NumpyBackend, self).__init__(*args, **kwargs)
 
     def native_types(self) -> Tuple[Type]:
-        return np.ndarray, np.int32, np.int64, np.float64, np.float32
+        return np.ndarray, np.int32, np.int64, np.float64, np.float32, float, complex, int
 
     def to_native(self, array: Tensor) -> ArrayLike:
-
         return array
 
     def from_native(self, array: ArrayLike) -> Tensor:
-
         return array
 
     def reshape(self, arg, dim: Dimension):
@@ -137,8 +135,10 @@ class NumpyBackend(Backend):
         raise NotImplementedError(f"Don't know how to resize {arg.__class__.__name__}")
 
     def call(self, op, *args) -> ArrayLike:
+
         try:
-            return impls[op](*args)
+            result = impls[op](*args)
+            return result
         except KeyError:
             pass
 
@@ -187,8 +187,12 @@ class NumpyBackend(Backend):
         n = 0
         mappings = []
         for index in decision_variables:
-            dim = tape.dim[index]
-            flat_dim = reduce(mul, dim)
+            dim: Dimension = tape.dim[index]
+            if dim.is_scalar():
+                flat_dim = 1
+            else:
+                flat_dim = reduce(mul, dim)
+
             mappings.append(
                 (index, dim, (n, flat_dim + n))
             )
@@ -210,25 +214,26 @@ class NumpyBackend(Backend):
         cost_hess = sp.lambdify(problem_args, hessian(cost, x))
 
         out_constriants = []
-        for constraint in constraints:
+        for i, constraint in enumerate(constraints):
             c = evaluate_inner(
                     tape, arguments, constraint.as_halfplane_bound(), self, workspace
                 )
             c_func = sp.lambdify(problem_args, c)
-            c_jac = jacobian(c, x)
-            c_hess = hessian(c, x)
+            c_jac = jacobian(c, problem_args)
 
             if not c_jac.free_symbols:
-                c_0 = c_func(np.zeros_like(x))
+                c_0 = c_func(
+                    *[np.zeros_like(x_i) for x_i in problem_args]
+                             )
                 this_constraint = sy.optimize.LinearConstraint(
                    c_jac.evalf(), -c_0, np.inf
                 )
             else:
                 this_constraint = sy.optimize.NonlinearConstraint(
                      sp.lambdify(problem_args, c),
-                        0, np.inf,
+                        0,  np.inf,
                         jac=sp.lambdify(problem_args, c_jac),
-                        hess=sp.lambdify(problem_args, c_hess),
+                        hess='cs'
                 )
             out_constriants.append(this_constraint)
 

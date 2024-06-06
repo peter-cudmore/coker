@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from coker.toolkits.spatial import Isometry3, Rotation3
 from test.util import is_close, validate_symbolic_call
 
 u_x = np.array([1, 0, 0], dtype=float)
@@ -164,4 +165,29 @@ def test_symbolic_isometries():
                            combined,
                            [Scalar('x'), Scalar('theta')],
                            test_set)
+
+
+def test_as_matrix():
+    from coker.toolkits.spatial import SE3Adjoint, SE3CoAdjoint, Screw
+
+    transforms =[
+        Isometry3(rotation=Rotation3(axis=np.array([0, 0, 1]), angle=np.pi / 2)),
+        Isometry3.identity(),
+        Isometry3(translation=np.array([1,0,1]))
+    ]
+    for transform in transforms:
+
+        screw_1 = Screw.from_tuple(1,0,0, 1, 2, 3)
+        adj = SE3Adjoint(transform=transform)
+
+        image_screw = adj.apply(screw_1).to_array()
+        image_screw_2 = adj.as_matrix() @ screw_1.to_array()
+
+        assert np.allclose(image_screw, image_screw_2)
+
+        coadj = SE3CoAdjoint(transform)
+        image_screw = coadj.apply(screw_1).to_array()
+        image_screw_2 = coadj.as_matrix() @ screw_1.to_array()
+
+        assert np.allclose(image_screw, image_screw_2)
 

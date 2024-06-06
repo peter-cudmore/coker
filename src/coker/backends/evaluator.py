@@ -14,10 +14,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
 
         if isinstance(node, Tracer):
             return workspace[node.index]
-        elif isinstance(node, Tensor):
-            return backend.from_native(node)
-
-        return node
+        return backend.from_native(node)
 
     for w in work_list:
         op, *nodes = graph.nodes[w]
@@ -28,6 +25,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
                 value, = args
             else:
                 value = backend.call(op, *[get_node(n) for n in nodes])
+
         except KeyError as ex:
             raise NotImplementedError(f"Op {op} not implemented in python")
         workspace[w] = backend.reshape(value, graph.dim[w])

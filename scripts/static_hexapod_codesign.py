@@ -24,17 +24,18 @@ tibia_inertia = Inertia(
 body_intertia = Inertia(
     centre_of_mass=Isometry3.identity(),
     mass=1000,
-    moments=1e6 * np.array([1, 0, 0, 1 , 0, 1])
+    moments=1e6 * np.array([1, 0, 0, 1, 0, 1])
 )
 
-def build_hexapod_leg(model,body_idx, anchor, coxa_length, femur_length, tibia_length):
+
+def build_hexapod_leg(model, body_idx, anchor, coxa_length, femur_length, tibia_length):
     coxa = model.add_link(
         parent=body_idx,
         at=anchor,
         joint=Revolute(Screw.w_z()),
         inertia=coxa_intertia
     )
-    femur_coxa_joint = Isometry3(translation= coxa_length * np.array([1., 0., 0.]))
+    femur_coxa_joint = Isometry3(translation=coxa_length * np.array([1., 0., 0.]))
     femur_tibia_joint = Isometry3(translation=femur_length * np.array([1., 0., 0.]))
     v = np.array([34.630337, 0.0, -156.20737])
     v = tibia_length * v / np.sqrt(v.dot(v))
@@ -61,7 +62,7 @@ def build_hexapod_leg(model,body_idx, anchor, coxa_length, femur_length, tibia_l
     return coxa, femur, tibia, foot
 
 
-def build_hexapod_model(coxa_length, femur_length,tibia_length):
+def build_hexapod_model(coxa_length, femur_length, tibia_length):
     model = RigidBody()
     anchors = get_anchors()
     body_idx = model.add_link(
@@ -71,10 +72,73 @@ def build_hexapod_model(coxa_length, femur_length,tibia_length):
         joint=Free()
     )
     _ = [
-        build_hexapod_leg(model, body_idx,  anchor, coxa_length, femur_length, tibia_length)
+        build_hexapod_leg(model, body_idx, anchor, coxa_length, femur_length, tibia_length)
         for anchor in anchors
     ]
     return model
+
+
+def static_hexapod_codesign():
+    # static torque
+    # A q, the (J^s_{st})^T maps spatial wrenches applied at the end effector
+    # to joint torques.
+    # If this force, F_i, is equal and opposite to the force applied to the
+    # body
+    #
+    # For each foot, we have an external force f^i_ext
+    # applied at the tip. This is a "free" force
+    # that satisfies f^i_z >= 0, \sum_i f^i_{xy} = 0
+    #
+    # we transform that to a wrench at the base; call this w_b^i
+
+    # For each Link, we have a force due to gravity, applied at the com
+    # we transform this to a wrench applied at the base
+
+    # by newton, we have sum of all forces and wrenches at the base
+    # must balance.
+
+    # we want to do this by minimising joint torque
+    # while maximising area spanned by footprint
+
+    # this gives an optimisation problem in q, [l_coxa, l_femur, l_tibia]
+
+    def problem_torques(q, h, lc, lf, lt, forces):
+        model = build_hexapod_model(lc, lf, lt)
+        q_actual = np.concatenate([h * np.array([0, 0, 0, 0, 0, 1]), q])
+        q_dot = np.zeros_like(q_actual)
+        q_ddot = np.zeros_like(q_dot)
+        g = np.array([0, 0, -9800])  # mm/s^2
+
+        torques = model.inverse_dynamics(q_actual, q_dot, q_ddot, g, forces)
+
+        foot_positions = model.forward_kinematics(q_actual)
+        origin = np.zeros((3,))
+        e_z = np.array([[0], [0], [1]], dtype=float)
+        contact_constraints = [
+            e_z.T @ f.apply(origin) > 0 for f in foot_positions
+        ]
+        # contact cone constraints
+
+        # motor torque bounds
+        torque_constraints = [t < 1500 for t in torques[5:]]
+        torque_constraints += [t > - 1500 for t in torques[5:]]
+
+        return torques, contact_constraints, torque_constraints
+
+
+    q_test = np.zeros((18,))
+    h_test = 0
+    lc_test = 50 #mm
+    lf_test = 50
+    lt_test = 100
+    f_rest = 9800   #nmm
+    forces = [f_rest * np.array([0, 0, 0, 0, 0, 1])] * 6
+
+    t_test, cc_test, tc_test = problem_torques(q_test, h_test, lc_test, lf_test, lt_test, forces)
+
+    print(t_test/1000)
+    return
+
 
 def hexapod_codesign():
     motor_max = 0.52  # Netwon Meters
@@ -96,17 +160,17 @@ def hexapod_codesign():
         model = build_hexapod_model(1000 * femur_length, 1000 * coxa_length, 1000 * tibia_length)
         ones = np.ones(shape=(18,), dtype=float)
         constraints = [
-          -0.5 * motor_max*ones < static_torques,
-          static_torques < 0.5 * motor_max * ones,
-          - ones * np.pi / 2 < q_joints,
-          q_joints < ones * np.pi / 2,
-          0.01 < femur_length,
-          femur_length < 0.2,
-          0.01 < coxa_length,
-          coxa_length < 0.2,
-          0.05 < tibia_length,
-          tibia_length < 0.2,
-          rest_height > 0.2
+            -0.5 * motor_max * ones < static_torques,
+            static_torques < 0.5 * motor_max * ones,
+            - ones * np.pi / 2 < q_joints,
+            q_joints < ones * np.pi / 2,
+            0.01 < femur_length,
+            femur_length < 0.2,
+            0.01 < coxa_length,
+            coxa_length < 0.2,
+            0.05 < tibia_length,
+            tibia_length < 0.2,
+            rest_height > 0.2
         ]
         e_z = np.array([0, 0, 1], dtype=float)
 
@@ -118,12 +182,14 @@ def hexapod_codesign():
         assert Js_st.shape == (6 * 6, 24)
 
         # Amps... approximately
-        cost = 1.47 * np.abs(static_torques).T @ np.ones(shape=(18,))
+        cost = 1.47 * np.abs(static_torques).T @ np.ones(shape=(18,)) + potential_energy
 
         builder.constraints = constraints
         builder.objective = Minimise(cost)
         builder.outputs = [coxa_length, femur_length, tibia_length, q_joints]
+
         problem = builder.build()
+
 
 e_z = np.array([0, 0, 1], dtype=float)
 
@@ -137,12 +203,11 @@ def get_anchors(distance_from_center=50):
 
 
 def main():
-
     origin = np.zeros((3,), dtype=float)
     lines = []
     angles = np.zeros(shape=(24,), dtype=float)
     anchors = get_anchors()
-    model = build_hexapod_model(50,80,90)
+    model = build_hexapod_model(50, 80, 90)
     feet_idx = range(len(model.end_effectors))
     feet = model.forward_kinematics(angles)
     for foot_idx, foot in zip(feet_idx, feet):
@@ -172,4 +237,4 @@ def plot_lines(ax: plt.Axes, lines: List[np.ndarray]):
 
 
 if __name__ == '__main__':
-    hexapod_codesign()
+    static_hexapod_codesign()

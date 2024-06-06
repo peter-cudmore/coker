@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Dict
 import numpy as np
 
-from coker.toolkits.spatial import Isometry3, Screw, SE3Adjoint
+from coker.toolkits.spatial import Isometry3, Screw, SE3Adjoint, SE3CoAdjoint, hat, se3Adjoint
 
 
 @dataclass
@@ -24,6 +24,14 @@ class Inertia:
             [inertial_component, zeros],
             [zeros, mass_component]
         ])
+
+    def as_matrix_origin(self):
+        p_hat = hat(self.centre_of_mass.translation)
+        assert self.centre_of_mass.rotation.angle == 0
+        m = self.as_matrix()
+        m[3:6, 0:3] = self.mass * p_hat
+        m[0:3, 3:6] = -self.mass * p_hat
+        return m
 
 
 class JointType:
@@ -116,7 +124,7 @@ class RigidBody:
         else:
             assert angles.shape == (self.total_joints(),)
             q = angles
-        joint_transforms = self._get_joint_transforms(q)
+        joint_transforms = self._get_absolute_joint_xform(q)
         joint_xforms = self._accumulate_joint_xforms(q, joint_transforms)
         origin = np.array([0, 0, 0])
         total_energy = 0
@@ -139,6 +147,31 @@ class RigidBody:
 
             accumulated_xform.append(t)
         return accumulated_xform
+
+    def _get_joint_local_bases(self):
+        result = []
+        for bases in self.joint_bases:
+            for basis in bases:
+                result.append(basis)
+        return result
+
+    def _get_joint_global_bases(self):
+        result = []
+        for rest_transform, bases in zip(self._rest_transforms, self.joint_bases):
+            for basis in bases:
+                result.append(SE3Adjoint(rest_transform).apply(basis))
+        return result
+
+    def _get_joint_dependency_map(self):
+        result =  {}
+        joint_idx = 0
+        for i, bases in enumerate(self.joint_bases):
+            result[i] = []
+            for _ in bases:
+                result[i].append(joint_idx)
+                joint_idx += 1
+
+        return result
 
     def _get_joint_transforms(self, angles) -> List[Isometry3]:
         joint_idx = 0
@@ -185,7 +218,7 @@ class RigidBody:
 
         return out
 
-    def get_dependent_joints(self, parent_link: int):
+    def get_dependent_links(self, parent_link: int):
         result = list()
         while parent_link != self.WORLD:
             result.append(parent_link)
@@ -202,15 +235,15 @@ class RigidBody:
         xforms = self._accumulate_joint_xforms(angles, abs_xforms)
 
         effector_parent, _ = self.end_effectors[end_effector]
-        dependent_joints = self.get_dependent_joints(effector_parent)
+        dependent_link = self.get_dependent_links(effector_parent)
 
         columns = []
 
-        for joint_idx, bases in enumerate(self.joint_bases):
-            if joint_idx in dependent_joints:
-                parent = self.parents[joint_idx]
+        for link_idx, bases in enumerate(self.joint_bases):
+            if link_idx in dependent_link:
+                parent = self.parents[link_idx]
                 for zeta in bases:
-                    zeta_prime = SE3Adjoint(self._rest_transforms[joint_idx]).apply(zeta)
+                    zeta_prime = SE3Adjoint(self._rest_transforms[link_idx]).apply(zeta)
                     if parent != self.WORLD:
                         zeta_prime = SE3Adjoint(xforms[parent]).apply(zeta_prime)
                     columns.append(
@@ -233,3 +266,128 @@ class RigidBody:
             for i, ad_g in enumerate(ad_g_inv)
         ]
         return np.concatenate(columns, axis=1)
+
+    def inverse_dynamics(self, angles, angle_rates, angle_accel, gravity: np.ndarray, end_effector_forces: Dict[int, Screw] = None) -> np.ndarray:
+        """Compute torques for forces"""
+        transforms = []
+        velocities = []
+        accelerations = []
+        forces = []
+        inverse_bases = []
+        a_g = np.concatenate([np.zeros((3,)), gravity])
+
+        x_forms = self._get_joint_transforms(angles)
+        def spatial_cross(a, b):
+            y_1 = np.cross(a[0:3], b[0:3])
+            y_2 = np.cross(a[3:6], b[0:3]) + np.cross(a[0:3], b[3:6])
+            return np.concatenate([y_1, y_2])
+        def spatial_cross_star(a,b):
+            y_1 = np.cross(a[0:3], b[0:3]) + np.cross(a[3:6], b[3:6])
+            y_2 = np.cross(a[0:3], b[3:6])
+            return np.concatenate([y_1, y_2])
+
+        joint_idx = 0
+        for link, bases in enumerate(self.joint_bases):
+            parent = self.parents[link]
+            s = []
+
+            # g_i is the transform of the parent frame into the child frame
+            # so that for a linear chain g_{01} @ g_{12} @ ... @ g_n
+            # is the same as g_{0n}
+            g_i = self.transforms[link] @ x_forms[link]
+
+            vJ = np.zeros((6,))
+            aJ = np.zeros((6,))
+            for basis in bases:
+                s_i = basis.to_array()
+                s.append(s_i.reshape((6, 1)))
+                vJ += s_i * angle_rates[joint_idx]
+                aJ += s_i * angle_accel[joint_idx]
+                joint_idx += 1
+
+            adj = SE3Adjoint(g_i.inverse()).as_matrix()
+            if parent != self.WORLD:
+                v_i = adj @ velocities[parent] + vJ
+                s_dot = spatial_cross(v_i, vJ)
+                a_i = adj @ accelerations[parent] + aJ + s_dot
+            else:
+                v_i = vJ
+                a_i = -adj @ a_g + aJ
+
+            # Ineratia at center of mass,
+            # need to transfrom to origin
+            com_adj = SE3Adjoint(self.inertia[link].centre_of_mass.inverse())
+
+            iota = com_adj.as_matrix().transpose() @ self.inertia[link].as_matrix() @ com_adj.as_matrix()
+            f_i = iota @ a_i + spatial_cross_star(v_i, (iota @ v_i))
+            transforms.append(g_i)
+            velocities.append(v_i)
+            accelerations.append(a_i)
+            forces.append(f_i)
+            if s:
+                s_matrix = np.concatenate(s, axis=1)
+                inverse_bases.append(s_matrix)
+            else:
+                inverse_bases.append(None)
+        torques = []
+
+        if end_effector_forces is not None:
+            fk = self.forward_kinematics(angles)
+            if isinstance(end_effector_forces, dict):
+                iterator = end_effector_forces.items()
+            else:
+                iterator = enumerate(end_effector_forces)
+            for (idx, force) in iterator:
+                parent, _ = self.end_effectors[idx]
+                forces[parent] -= SE3CoAdjoint(fk[idx]).as_matrix() @ force
+
+        for i, S_i in reversed(list(enumerate(inverse_bases))):
+            parent = self.parents[i]
+            f_i = forces[i]
+            if parent != self.WORLD:
+                t = SE3CoAdjoint(transforms[i].inverse())
+                parent_force = t.as_matrix() @ f_i
+                forces[parent] = forces[parent] + parent_force
+
+            if S_i is None:
+                continue
+            torque = S_i.T @ f_i
+            torques = [torque] + torques
+
+        return np.concatenate(torques)
+
+    def _get_link_com_jacobians(self, angles):
+        joint_transforms = self._get_absolute_joint_xform(angles)   # exp(zeta_hat)
+        joint_map = self._get_joint_dependency_map()            # link: [joint idx]
+        joint_bases = self._get_joint_global_bases()                # zeta_j
+        total_angles = self.total_joints()
+        jacobians = []
+        for i, inertia in enumerate(self.inertia):
+            g = inertia.centre_of_mass @ self._rest_transforms[i]   # g_sli
+            jacobian = [np.zeros((6, 1))] * total_angles
+            next_idx = i
+
+            while next_idx != self.WORLD:
+                g = joint_transforms[next_idx] @ g
+                for joint_idx in reversed(joint_map[next_idx]):
+                    zeta_j = joint_bases[joint_idx]
+                    adj_inv = SE3Adjoint(g).inverse()
+                    zeta_j_dagger = adj_inv.apply(zeta_j)
+                    jacobian[ joint_idx] = np.reshape(zeta_j_dagger.to_array(), newshape=(6, 1))
+
+                next_idx = self.parents[next_idx]
+
+            jac = np.concatenate(jacobian, axis=1)
+            jacobians.append(jac)
+
+        return jacobians
+
+    def mass_matrix(self, angles):
+        jacobians = self._get_link_com_jacobians(angles)
+        n = self.total_joints()
+        mass_matrix = np.zeros((n, n), dtype=float)
+        for j, inertia in zip(jacobians, self.inertia):
+
+            mass_matrix += j.T @ inertia.as_matrix() @ j
+
+        return mass_matrix

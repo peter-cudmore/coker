@@ -34,6 +34,9 @@ class Rotation3:
         self.axis = axis
         self.angle = angle
 
+    def __repr__(self):
+        return f'Rotation3({repr(self.axis)}, {repr(self.angle)})'
+
     @staticmethod
     def zero():
         return Rotation3(np.array(e_z.copy(), dtype=float), angle=0)
@@ -91,6 +94,9 @@ class Isometry3:
 
         self.translation = np.array([0, 0, 0], dtype=float) if translation is None else translation
 
+    def __repr__(self):
+        return f'Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})'
+
     def __eq__(self, other):
         return (
             isinstance(other, Isometry3)
@@ -143,7 +149,6 @@ class Isometry3:
         return Isometry3(rotation=r, translation=-p)
 
 
-
 class Screw:
     __slots__ = ('rotation', 'translation', 'magnitude')
 
@@ -154,6 +159,10 @@ class Screw:
         self.rotation = rotation if rotation is not None else np.array([0, 0, 0])
         self.translation = translation if translation is not None else np.array([0, 0, 0])
         self.magnitude = magnitude
+
+    def __repr__(self):
+        l = self.to_array().tolist()
+        return repr(l)
 
     @staticmethod
     def w_z():
@@ -191,6 +200,17 @@ class Screw:
 
     def to_array(self) -> np.ndarray:
         return np.concatenate([self.rotation, self.translation]) * self.magnitude
+
+    @staticmethod
+    def from_array(array):
+        assert array.shape == (6,)
+        rotation = array[0:3]
+        translation = array[3:6]
+        if (rotation == 0.0).all():
+            return Screw(rotation, translation, 1)
+
+        mag = np.linalg.norm(rotation).astype(float).flatten()[0]
+        return Screw(rotation / mag, translation / mag, mag)
 
     @staticmethod
     def zero():
@@ -269,6 +289,9 @@ class SE3Adjoint:
 
         raise NotImplemented()
 
+    def __repr__(self):
+        return f'Adj[{repr(self.transform)}]'
+
     def __rmatmul__(self, other):
         if isinstance(other, SE3Adjoint):
             t = other.transform @ self.transform
@@ -294,12 +317,22 @@ class SE3CoAdjoint:
     def __init__(self, transform: Isometry3):
         self.transform = transform
 
+    def as_matrix(self):
+        r = self.transform.rotation.as_matrix().T
+        p_hat = hat(self.transform.translation)
+        row_1 = np.concatenate([r, -r @ p_hat], axis=1)
+        row_2 = np.concatenate([np.zeros((3, 3), dtype=float), r], axis=1)
+        return np.concatenate([row_1, row_2], axis=0)
+
+    def __repr__(self):
+        return f'Adj^*[{repr(self.transform)}]'
+
     def apply(self, zeta: Screw) -> Screw:
         q_inv = self.transform.rotation.as_quaternion().inverse()
         p = self.transform.translation
 
-        rotation = q_inv.conjugate(zeta.rotation)
-        translation = -q_inv.conjugate(hat(p) @ zeta.rotation) + q_inv.conjugate(zeta.translation)
+        translation = q_inv.conjugate(zeta.translation)
+        rotation = -q_inv.conjugate(hat(p) @ zeta.translation) + q_inv.conjugate(zeta.rotation)
 
         return Screw(
             rotation=rotation,

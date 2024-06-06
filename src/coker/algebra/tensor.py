@@ -10,7 +10,8 @@ class Tensor:
 
     @staticmethod
     def from_array(array: np.ndarray):
-        assert array.dtype != np.object_
+
+        assert array.dtype != np.object_, f"{array}"
         return Tensor(array.shape, array)
 
     @staticmethod

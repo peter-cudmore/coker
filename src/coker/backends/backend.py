@@ -27,6 +27,11 @@ class Backend(metaclass=ABCMeta):
     def call(self, op, *args) -> ArrayLike:
         pass
 
+    def evaluate(self, graph, inputs: ArrayLike, outputs: ArrayLike):
+        from evaluator import evaluate_inner
+        workspace = {}
+        return evaluate_inner(graph, inputs, outputs, self, workspace)
+
 
 def get_backend_by_name(name: str) -> Backend:
 

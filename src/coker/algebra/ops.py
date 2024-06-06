@@ -135,18 +135,21 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
     c = d_1.dim[-1]
     out_dims = []
     if d_1.is_matrix() or d_1.is_multilinear_map():
-        out_dims.append(d_1.dim[:-1])
+        out_dims += [d for d in d_1.dim[:-1]]
 
     r = d_2.dim[0]
 
     if d_2.is_matrix() or d_2.is_multilinear_map():
-        out_dims.append(d_1.dim[1:])
+        out_dims += [d for d in d_2.dim[1:]]
 
     if c != r:
         raise InvalidArgument("Cannot multiply: product axis has different shape")
 
     if out_dims:
-        return Dimension(tuple(*out_dims))
+        try:
+            return Dimension(tuple(out_dims))
+        except TypeError as ex:
+            raise ex
     else:
         return Dimension(None)
 
