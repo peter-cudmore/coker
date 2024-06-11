@@ -103,11 +103,9 @@ class Tape:
     def _compute_shape(self, op: OP, *args) -> Dimension:
         dims = []
         for arg in args:
-            if isinstance(arg, Tracer):
-                assert arg.tape is self, "Tracer belongs to another tape"
-                dims.append(arg.dim)
-            else:
-                dims.append(get_dim_by_class(arg))
+            assert isinstance(arg, Tracer)
+            assert arg.tape is self, "Tracer belongs to another tape"
+            dims.append(arg.dim)
 
         return op.compute_shape(*dims)
 
@@ -115,12 +113,22 @@ class Tape:
         args = [
             strip_symbols_from_array(a) for a in args
         ]
+        args = [
+            self.insert_value(a) if not isinstance(a, Tracer) else a
+            for a in args
+        ]
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
-
         self.nodes.append((op, *args))
         self.dim.append(out_dim)
         return index
+
+    def insert_value(self, arg):
+        dim = get_dim_by_class(arg)
+        idx = len(self.dim)
+        self.nodes.append((OP.VALUE, arg))
+        self.dim.append(dim)
+        return Tracer(self, idx)
 
     def input(self, v: VectorSpace | Scalar):
         if isinstance(v, VectorSpace):
@@ -163,6 +171,9 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __hash__(self):
         return hash(hash(self.tape) + self.index)
+
+    def __repr__(self):
+        return f"Tracer({self.index})"
 
     @property
     def shape(self) -> Tuple:
@@ -247,7 +258,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         elif isinstance(item, int):
             dimension = self.tape.dim[self.index]
-            assert not dimension.is_scalar()
+            assert not dimension.is_scalar(), f"Tried to index a scalar"
             p = get_basis(dimension, item)
             index = self.tape.append(OP.DOT, p, self)
             return Tracer(self.tape, index)
@@ -310,7 +321,14 @@ def py_evaluate_tape(tape, args, outputs, backend='numpy'):
 class Kernel:
     def __init__(self, tape: Tape, outputs: List[Tracer]):
         self.tape = tape
-        self.output = outputs
+        if isinstance(outputs, Tracer):
+            self.output = [outputs]
+            self.is_single = True
+        else:
+            self.outputs = outputs
+            self.is_single = False
+    def __repr__(self):
+        return f"Kernel:{self.input_shape()} -> {self.output_shape()}"
 
     def input_shape(self) -> Tuple[Dimension, ...]:
         return tuple(Dimension(self.tape.dim[i]) for i in self.tape.input_indicies)
@@ -324,6 +342,8 @@ class Kernel:
         #
 
         output = py_evaluate_tape(self.tape, args, self.output)
+        if self.is_single:
+            return output[0]
         return output
 
     def compile(self, backend: str):

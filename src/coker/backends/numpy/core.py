@@ -203,8 +203,8 @@ class NumpyBackend(Backend):
             tape.substitute(idx, (OP.VALUE, x[start: stop]))
 
         workspace = {}
-        cost = evaluate_inner(
-            tape, arguments, cost,
+        cost, = evaluate_inner(
+            tape, arguments, [cost],
             self, workspace)
 
         problem_args = [x, *arg_symbols]
@@ -215,8 +215,8 @@ class NumpyBackend(Backend):
 
         out_constriants = []
         for i, constraint in enumerate(constraints):
-            c = evaluate_inner(
-                    tape, arguments, constraint.as_halfplane_bound(), self, workspace
+            c, = evaluate_inner(
+                    tape, arguments, [constraint.as_halfplane_bound()], self, workspace
                 )
             c_func = sp.lambdify(problem_args, c)
             c_jac = jacobian(c, problem_args)
@@ -238,7 +238,7 @@ class NumpyBackend(Backend):
             out_constriants.append(this_constraint)
 
         out_symbols = [
-            evaluate_inner(tape, arguments, o, self, workspace)
+            evaluate_inner(tape, arguments, [o], self, workspace)
             for o in outputs
         ]
 
@@ -258,7 +258,7 @@ class NumpyBackend(Backend):
             )
 
             inner_args = [soln.x] + list(*solver_args)
-            result = [o(*inner_args) for o in out_map]
+            result = [o(*inner_args)[0] for o in out_map]
             return [
                 self.from_native(r) for r in result
             ]

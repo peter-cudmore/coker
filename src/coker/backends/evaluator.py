@@ -30,11 +30,11 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
             raise NotImplementedError(f"Op {op} not implemented in python")
         workspace[w] = backend.reshape(value, graph.dim[w])
 
-    return workspace[outputs.index]
+    return [backend.to_native(workspace[o.index]) for o in outputs]
 
 
 def evaluate(graph, args, outputs, backend='numpy'):
     from coker.backends import get_backend_by_name
 
     backend_impl: Backend = get_backend_by_name(backend)
-    return evaluate_inner(graph, args, outputs, backend_impl, {})
+    return backend_impl.evaluate(graph, args, outputs)

@@ -69,7 +69,7 @@ def test_slicing_symbolic_vector():
         implementation=f_impl
     )
 
-    assert f.output.shape == (2,)
+    assert f.output[0].shape == (2,)
     y_eval = f(x_test)
 
     assert is_close(y_test, y_eval)

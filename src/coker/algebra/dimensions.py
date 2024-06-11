@@ -7,6 +7,13 @@ class Dimension:
         assert tuple_or_none is None or isinstance(tuple_or_none, tuple)
         self.dim = tuple_or_none
 
+    def flat(self):
+        d = 1
+        if self.dim is not None:
+            for d_i in self.dim:
+                d *= d_i
+        return d
+
     def __eq__(self, other):
         return self.dim == other.dim
 

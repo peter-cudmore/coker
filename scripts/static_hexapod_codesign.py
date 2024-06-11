@@ -125,7 +125,6 @@ def static_hexapod_codesign():
 
         return torques, contact_constraints, torque_constraints
 
-
     q_test = np.zeros((18,))
     h_test = 0
     lc_test = 50 #mm
@@ -136,7 +135,6 @@ def static_hexapod_codesign():
 
     t_test, cc_test, tc_test = problem_torques(q_test, h_test, lc_test, lf_test, lt_test, forces)
 
-    print(t_test/1000)
     return
 
 

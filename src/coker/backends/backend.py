@@ -28,7 +28,7 @@ class Backend(metaclass=ABCMeta):
         pass
 
     def evaluate(self, graph, inputs: ArrayLike, outputs: ArrayLike):
-        from evaluator import evaluate_inner
+        from coker.backends.evaluator import evaluate_inner
         workspace = {}
         return evaluate_inner(graph, inputs, outputs, self, workspace)
 
