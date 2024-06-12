@@ -86,7 +86,7 @@ def test_edge_graph():
 
     f_tilde = rewrite_graph(f)
 
-    nodes_2, edges_2 = build_edge_graph(f_tilde)
+    nodes_2, edges_2, d = assign_layers_to_edge_graph(f_tilde)
     assert len(nodes_2) == 1
     assert len(edges_2) == 1
 

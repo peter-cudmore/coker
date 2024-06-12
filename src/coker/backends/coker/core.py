@@ -7,100 +7,9 @@ import numpy as np
 import coker
 from coker import Tensor, Tracer, OP, Kernel
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
-
-
-class dok_ndarray:
-    def __init__(self, shape, keys=None):
-        self.shape = shape
-        self.keys = keys if keys is not None else {}
-
-    def __setitem__(self, key, value):
-        self.keys[key] = value
-
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            key = (key, )
-        return self.keys[key]
-
-    def clone(self) -> 'dok_ndarray':
-        return dok_ndarray(shape=self.shape, keys=self.keys.copy())
-
-
-    def toarray(self):
-        m = np.zeros(shape=self.shape)
-        for k, v in self.keys.items():
-            m[k] = v
-
-        return m
-
-    @staticmethod
-    def fromarray(other: np.ndarray):
-        shape = other.shape
-        keys = {
-            item.index: item[0]
-            for item in np.nditer(other, flags=['multi_index'])
-            if float(item[0]) != 0.0
-        }
-        return dok_ndarray(shape, keys)
-
-    def __neg__(self):
-        keys = {k: -v for k,v in self.keys.items()}
-        return dok_ndarray(shape=self.shape, keys=keys)
-
-    def __mul__(self, other):
-        assert isinstance(other, (float, int))
-
-        if other == 0:
-            return dok_ndarray(shape=self.shape, keys={})
-
-        keys = {
-            k: v * other for k, v in self.keys.items()
-        }
-        return dok_ndarray(shape=self.shape, keys=keys)
-
-    def __rmul__(self, other):
-        return self.__mul__(other)
-
-    def __add__(self, other):
-        if isinstance(other, dok_ndarray):
-            keys = self.keys.copy()
-            for k in other.keys.items():
-                if k in keys:
-                    keys[k] += other[k]
-                else:
-                    keys[k] = other[k]
-        else:
-            raise NotImplementedError()
-        return dok_ndarray(shape=self.shape, keys=keys)
-
-    def __sub__(self, other):
-        if isinstance(other, dok_ndarray):
-            keys = self.keys.copy()
-            for k in other.keys.items():
-                if k in keys:
-                    keys[k] -= other[k]
-                else:
-                    keys[k] = -other[k]
-        else:
-            raise NotImplementedError()
-        return dok_ndarray(shape=self.shape, keys=keys)
-
-    def __matmul__(self, other):
-        assert self.shape[-1] == other.shape[0]
-        keys = {}
-        for k, v in self.keys.items():
-            *k_prime, i = k
-            k_prime = tuple(k_prime)
-            if k_prime in keys:
-                keys[k_prime] += v * other[i]
-            else:
-                keys[k_prime] = v * other[i]
-
-        shape = (*self.shape[:-1], *other.shape[1:])
-
-        return dok_ndarray(shape=shape, keys=keys)
-
-
+from coker.backends.coker.sparse_tensor import dok_ndarray
+from .ast_rewriting import rewrite_graph
+from .ast_preprocessing import generate_output_labels
 
 # Key Assumptions
 # - Inputs are a tuple of nd arrays of known size
@@ -210,8 +119,6 @@ class Projection:
         return m
 
 
-
-
 def partition_graph(graph: coker.Tape, outputs: List[Tracer]):
     constants = set()
     inputs = set()
@@ -271,7 +178,6 @@ def partition_graph(graph: coker.Tape, outputs: List[Tracer]):
             layers[i] = max_layer
 
     return layers, dependents
-
 
 
 @dataclasses.dataclass
@@ -796,59 +702,6 @@ def evaluate_inner(graph, args, outputs, workspace: dict):
     return backend.to_native(workspace[outputs.index])
 
 
-def generate_labels(kernel: Kernel):
-
-    tape = kernel.tape
-    constants = set()
-    tape_indegree = []
-    tape_outdegree = []
-
-    labeled_nodes = set()             # output of these nodes are considered 'new variables'
-
-    for i, node in enumerate(tape.nodes):
-        tape_outdegree.append(0)
-
-        if isinstance(node, Tracer):
-            tape_indegree.append(0)
-            labeled_nodes.add(i)
-            continue
-
-        op, *args = node
-        if op == OP.VALUE:
-            constants.add(i)
-            tape_indegree.append(0)
-            continue
-
-        indices = [a.index for a in args]
-        in_nodes = [idx for idx in indices if idx not in constants]
-
-        if not in_nodes:
-            constants.add(i)
-            tape_indegree.append(0)
-            continue
-
-        # non-constant op
-        #
-        for j in in_nodes:
-            tape_outdegree[j] += 1
-        tape_indegree.append(len(in_nodes))
-
-        # Strictly Linear nodes
-        if op in {op.ADD, OP.SUB, OP.NEG}:
-            continue
-
-        # Multi-linear terms that mayne nonlinear
-        if op in {OP.MUL, OP.CROSS, OP.MATMUL, OP.DOT} and len(in_nodes) == 1:
-            continue
-
-        labeled_nodes.add(i)
-
-    for i, degree in enumerate(tape_outdegree):
-        if degree >= 2:
-            labeled_nodes.add(i)
-
-    return tape_indegree, tape_outdegree, labeled_nodes, constants
-
 
 @dataclasses.dataclass
 class Input:
@@ -889,94 +742,11 @@ class EdgeBuilder:
                 self.unknowns.add(a.index)
 
 
-def try_rewrite_mul(nodes: list, atoms, constants, i):
-
-    op, lhs, rhs = nodes[i]
-    assert op == OP.MUL
-
-
-    # case 1
-    #  *(x,b )         ->  *(b, x)
-    if lhs.index in atoms and rhs.index in constants:
-        nodes[i] = (op, rhs, lhs)
-        return
-
-    # Case 2
-    #  *(x,x)          ->  *(x, x)
-    if (lhs.index in atoms and rhs.index in atoms):
-        return
-
-    # Case 2b
-    if (lhs.index in constants and rhs.index in constants):
-        constants.add(i)
-        return
-
-    # Case 3
-    #  *((a, x), x)    -> *(a,  *(x, x))
-    if lhs.index not in atoms and nodes[lhs.index][0] == op.MUL:
-        _, parent_lhs, parent_rhs = nodes[lhs.index]
-        #  n_lhs = *(a, x) -> n_lhs = a
-        #
-        if parent_lhs.index in constants and parent_rhs.index in atoms:
-            nodes[lhs.index] = (op.MUL, parent_rhs, rhs)
-            nodes[i] = (op, parent_lhs, lhs)
-
-    # Case 4
-    #  *(x, (b, x))    -> *(b,  *(x, x))
-    elif rhs.index not in atoms and nodes[rhs.index][0] == op.MUL:
-        _, parent_lhs, parent_rhs = nodes[rhs.index]
-        if parent_lhs.index in constants and parent_rhs.index in atoms:
-            nodes[rhs.index] = (op.MUL, lhs, parent_rhs)
-            nodes[i] = (op, parent_lhs, rhs)
-
-    # Case 5
-    #  *((a, x), *(b,x)) -> *(ab, *(x,x))
-
-    elif (rhs.index not in atoms and lhs.index in atoms
-            and nodes[rhs.index][0] == op.MUL and nodes[lhs.index][0] == op.MUL):
-        _, pll, plr = nodes[lhs.index]
-        _, prl, prr = nodes[rhs.index]
-        if pll.index in constants and prl.index in constants:
-            nodes[lhs.index] = (OP.VALUE, constants[pll.index] * constants[prl.index])
-            nodes[rhs.index] = (OP.MUL, plr, prr)
-
-    #  *(?, x))     -> *(x, ?)      (polynomails)
-    #  *(?, ?)      -> *(?,?)       (more polynomials)
-
-
-def rewrite_graph(kernel: Kernel):
-    constants = {}
-
-    _, _, labels, _ = generate_labels(kernel)
-
-    outputs = {o.index for o in kernel.output}
-    inputs = set(kernel.tape.input_indicies)
-    atoms = inputs.copy()
-    work_set = [
-        i for i in range(len(kernel.tape.nodes)) if i not in inputs
-    ]
-    nodes = kernel.tape.nodes
-    for i in work_set:
-        op, *args = nodes[i]
-        if op == OP.VALUE:
-            arg, = args
-            constants[i] = arg
-            continue
-
-        if all([a.index in constants for a in args]):
-            constants[i] = get_backend_by_name('numpy').call(op, *[constants[a.index] for a in args])
-            continue
-
-        if op == OP.MUL:
-            try_rewrite_mul(nodes, atoms, constants, i)
-
-    kernel.tape.nodes = nodes
-    return kernel
 
 
 def build_edge_graph(kernel: Kernel):
 
-    tape_indegree, tape_outdegree, labels, constants_idx = generate_labels(kernel)
+    labels, constants_idx = generate_output_labels(kernel)
     tape = kernel.tape
 
     workset = [o.index for o in kernel.output]
@@ -987,8 +757,7 @@ def build_edge_graph(kernel: Kernel):
     }
     seen |= set(constants.keys())
 
-    # nodes are Mutli-linear or Nonlinear ops
-    # key is output index,
+    # nodes are Mutli-linear or Nonlinear ops,  key is output index,
     nodes: Dict[int, Tuple[int, ...]] = {}
 
     # edges are mappings y = f(x)
@@ -1070,35 +839,13 @@ def assign_layers_to_edge_graph(kernel: Kernel):
 
     while work_set:
         this_idx = work_set.pop()
-        parent = adjacency[this_idx]
-        distance[parent] = max(distance[this_idx] + 1, distance[parent])
-        if parent not in kernel.tape.input_indicies:
-            work_set.insert(0, parent)
+        parents = adjacency[this_idx]
+        for parent in parents:
+            distance[parent] = max(distance[this_idx] + 1, distance[parent])
+            if parent not in kernel.tape.input_indicies:
+                work_set.insert(0, parent)
 
     return nodes, edges, distance
-
-
-def parse_tape_into_opgraph(kernel: Kernel):
-
-    work_set = [o.index for o in kernel.output]
-
-
-    def complete_edge(last_node):
-        pass
-
-    while work_set:
-        i = work_set.pop(0)
-
-        if i in tape.input_indicies:
-            labels[i] = f"x_{i}"
-            complete_edge(i)
-            continue
-
-
-
-
-
-
 
 
 class CokerBackend(Backend):
