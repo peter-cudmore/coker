@@ -14,6 +14,22 @@ class Dimension:
                 d *= d_i
         return d
 
+    def index_iterator(self, row_major=False):
+        if not self.dim:
+            return (0, )
+
+        mods = []
+
+        count = 1
+        iterator = reversed(self.dim) if row_major else iter(self.dim)
+
+        for d in iterator:
+            count = d * count
+            mods.insert(0, count)
+
+        for i in range(count):
+            yield tuple(i % m for m in mods)
+
     def __eq__(self, other):
         return self.dim == other.dim
 

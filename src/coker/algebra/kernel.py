@@ -97,6 +97,9 @@ class Tape:
         self.dim = []
         self.input_indicies = []
 
+    def __len__(self):
+        return len(self.nodes)
+
     def __hash__(self):
         return id(self)
 
@@ -168,6 +171,27 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __init__(self, tape: Tape, index: int):
         self.tape = tape
         self.index = index
+
+    def is_input(self):
+        return self.index in self.tape.input_indicies
+
+    def is_constant(self):
+
+        if self.is_input():
+            return False
+        op, *args = self.tape.nodes[self.index]
+        if op != OP.VALUE:
+            return False
+        return True
+
+    def value(self):
+        op, *args = self.tape.nodes[self.index]
+
+        if op != OP.VALUE:
+            return self.tape.nodes[self.index]
+
+        arg, = args
+        return arg
 
     def __hash__(self):
         return hash(hash(self.tape) + self.index)
@@ -325,8 +349,9 @@ class Kernel:
             self.output = [outputs]
             self.is_single = True
         else:
-            self.outputs = outputs
+            self.output = outputs
             self.is_single = False
+
     def __repr__(self):
         return f"Kernel:{self.input_shape()} -> {self.output_shape()}"
 

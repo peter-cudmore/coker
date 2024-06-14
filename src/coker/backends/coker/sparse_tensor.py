@@ -3,6 +3,7 @@ from typing import Optional, Dict, Tuple, Union, NewType
 
 MultiIndex = NewType('MultiIndex', Union[Tuple[int, ...], int])
 
+scalar = (float, int)
 
 class dok_ndarray:
     def __init__(self, shape, data: Optional[Dict[MultiIndex, float]] = None):
@@ -28,6 +29,17 @@ class dok_ndarray:
         return m
 
     @staticmethod
+    def zeros(shape):
+        return dok_ndarray(shape)
+
+    @staticmethod
+    def eye(n):
+        shape = (n, n)
+        keys = {(i, i): 1 for i in range(n)}
+
+        return dok_ndarray(shape, keys)
+
+    @staticmethod
     def fromarray(other: np.ndarray):
         shape = other.shape
         keys = {
@@ -36,6 +48,21 @@ class dok_ndarray:
             if float(item[0]) != 0.0
         }
         return dok_ndarray(shape, keys)
+
+    @staticmethod
+    def from_maybe(arg: Optional[Union[np.ndarray, 'dok_ndarray']],
+                        expected_shape: Optional[Tuple[int, ...]]=None) -> 'dok_ndarray':
+
+        if isinstance(arg, np.ndarray):
+            assert expected_shape is None or arg.shape == expected_shape
+            return dok_ndarray.fromarray(arg)
+        if isinstance(arg, dok_ndarray):
+            assert expected_shape is None or arg.shape == expected_shape
+            return arg
+        if arg is None and expected_shape is not None:
+            return dok_ndarray(expected_shape)
+
+        raise TypeError(f"Don't know how to turn {arg} into an array of shape {expected_shape}")
 
     def __neg__(self):
         keys = {k: -v for k,v in self.keys.items()}
@@ -104,3 +131,43 @@ class dok_ndarray:
             self.shape = shape
             return
         raise NotImplementedError(f"Don't know how to reshape a {self.shape} tensor into a {shape} tensor")
+
+
+def tensor_vector_product(tensor: dok_ndarray, vector: np.ndarray, axis=1):
+    assert isinstance(axis, int) and 0 <= axis < len(tensor.shape)
+
+    shape = (s for i,s in enumerate(tensor.shape) if i is not axis)
+    new_data = {}
+    for k, v in tensor.keys.items():
+        i = k[axis]
+        entry = float(v * vector[i])
+        new_key = (k_i for i, k_i in enumerate(k) if i is not axis)
+        if new_key in new_data:
+            new_data[new_key] += entry
+        else:
+            new_data[new_key] = entry
+
+    return dok_ndarray(shape, new_data)
+
+
+def tensor_sum(lhs: dok_ndarray, rhs, l_index=0, r_index=0):
+    assert lhs.shape[l_index] == rhs.shape[r_index]
+
+    new_shape = (*[s for i, s in enumerate(lhs.shape) if i is not l_index],
+                 *[s for i, s in enumerate(rhs.shape) if i is not r_index])
+
+    new_data = {}
+    for k_l, v_l in lhs.keys.items():
+        for k_r, v_r in rhs.keys.items():
+            if k_l[l_index] == k_r[r_index]:
+                new_key = (
+                    *k_l[0:l_index], *k_l[l_index + 1:],
+                    *k_r[0:r_index], *k_r[r_index + 1:]
+                )
+
+                v = v_l * v_r
+                if new_key in new_data:
+                    new_data[new_key] += v
+                else:
+                    new_data[new_key] = v
+    return dok_ndarray(new_shape, new_data)
