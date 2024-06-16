@@ -42,11 +42,13 @@ class dok_ndarray:
     @staticmethod
     def fromarray(other: np.ndarray):
         shape = other.shape
-        keys = {
-            item.index: float(item[0])
-            for item in np.nditer(other, flags=['multi_index'])
-            if float(item[0]) != 0.0
-        }
+        keys ={}
+        with np.nditer(other, op_flags=['readonly'], flags=['multi_index','reduce_ok']) as it:
+            for item in it:
+                if item != 0:
+                    index = tuple(it.multi_index)
+                    keys[index] = float(item)
+
         return dok_ndarray(shape, keys)
 
     @staticmethod
@@ -64,12 +66,27 @@ class dok_ndarray:
 
         raise TypeError(f"Don't know how to turn {arg} into an array of shape {expected_shape}")
 
+    def __float__(self):
+        if all(s == 1 for s in  self.shape):
+            if len(self.keys) == 1:
+                v, = self.keys.values()
+                return float(v)
+            else:
+                assert len(self.keys) == 0
+                return 0.0
+
+        raise TypeError(F"Cannot cast a {self.shape} array to a float")
+
     def __neg__(self):
         keys = {k: -v for k,v in self.keys.items()}
         return dok_ndarray(self.shape, keys)
 
     def __mul__(self, other):
-        assert isinstance(other, (float, int))
+        if isinstance(other, (dok_ndarray, np.ndarray)):
+            assert other.shape in {(1, ), (1, 1)}
+            other = float(other)
+        else:
+            assert isinstance(other, (float, int)) , f"Cannot multiply by {other}"
 
         if other == 0:
             return dok_ndarray(self.shape, {})
@@ -82,17 +99,30 @@ class dok_ndarray:
     def __rmul__(self, other):
         return self.__mul__(other)
 
+    def __radd__(self, other):
+        return self.__add__(other)
+
     def __add__(self, other):
-        if isinstance(other, dok_ndarray):
-            keys = self.keys.copy()
-            for k in other.keys.items():
-                if k in keys:
-                    keys[k] += other[k]
+        if isinstance(other, scalar):
+            if all(s == 1 for s in self.shape):
+                k = tuple(0 for _ in self.shape)
+                if self.keys:
+                    data = {k: self.keys[k] + other}
                 else:
-                    keys[k] = other[k]
-        else:
-            raise NotImplementedError()
-        return dok_ndarray(self.shape, keys)
+                    data = {k: other}
+                return dok_ndarray(self.shape, data)
+
+        if isinstance(other, dok_ndarray):
+            assert other.shape == self.shape, f"Cannot add tensors of shape {other.shape} to {self.shape}"
+            keys = self.keys.copy()
+            for k,v in other.keys.items():
+                if k in keys:
+                    keys[k] += v
+                else:
+                    keys[k] = v
+            return dok_ndarray(self.shape, keys)
+
+        raise NotImplementedError(f"Cannot add {other} to a tensor of shape {self.shape}")
 
     def __sub__(self, other):
         if isinstance(other, dok_ndarray):
@@ -121,6 +151,11 @@ class dok_ndarray:
 
         return dok_ndarray(shape, keys)
 
+    def __array_ufunc__(self, ufunc, method, args, out=None):
+        if ufunc == np.matmul and method == '__call__':
+            return args @ self.toarray()
+        raise NotImplementedError
+
     def reshape(self, shape):
         if len(shape) > len(self.shape) and all(s_i == s_n for s_i, s_n in zip(shape, (*self.shape, 1))):
             self.keys = {(*k, 0): v for k, v in self.keys.items()}
@@ -136,7 +171,7 @@ class dok_ndarray:
 def tensor_vector_product(tensor: dok_ndarray, vector: np.ndarray, axis=1):
     assert isinstance(axis, int) and 0 <= axis < len(tensor.shape)
 
-    shape = (s for i,s in enumerate(tensor.shape) if i is not axis)
+    shape = tuple(s for i,s in enumerate(tensor.shape) if i is not axis)
     new_data = {}
     for k, v in tensor.keys.items():
         i = k[axis]

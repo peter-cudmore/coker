@@ -14,6 +14,37 @@ b = np.array([4, 5])
 c = 2
 
 
+class TestSparseTensor:
+
+    def test_convert(self):
+        eye = np.eye(3, dtype=float)
+        sparse_eye = dok_ndarray.fromarray(eye)
+        assert sparse_eye.shape == (3,3)
+        assert sparse_eye.keys == {(0,0):1.0, (1,1):1.0, (2,2):1.0}
+        assert np.allclose(sparse_eye.toarray(), eye)
+
+    def test_matmul(self):
+        t = dok_ndarray(shape=(3, 3), data={(2,2): 1})
+        t_test= np.array([[0,0,0], [0,0,0],[0,0, 1]])
+        assert np.allclose(t.toarray(), t_test)
+
+        b = np.array([1, 2, 3])
+
+        y_expected = t_test @ b
+
+        y = t @ b
+
+        assert np.allclose(y.toarray(), y_expected)
+
+        c = np.eye(3)
+
+        id_1 = t @ c
+        id_2 = c @ t
+
+        id_1_array = id_1.toarray()
+        assert np.allclose(id_1_array, id_2)
+
+
 def f_quadratic_layer(x):
     y = A @ x + b
     return y.T @ y + c
@@ -60,18 +91,12 @@ def test_scalar_weights():
     assert w(1) == 1
 
 
-
 def test_coker_graph():
     alpha = 3
     beta = 4
     f = kernel(
         arguments=[Scalar('x')], implementation=lambda x: alpha * x + beta * x * x
     )
-
-    # distance should have
-    # input indicies :  2
-    # node :            1
-    # output indicies : 0
 
     g = create_opgraph(f)
 
@@ -80,10 +105,38 @@ def test_coker_graph():
     result = f(1)
 
     assert result == g(1)
-
+    dx = 2
     y, dy = g.push_forward(
         1,  # x = 1
         2   # dx = 2
     )
     assert y == result
-    assert dy == alpha + 2 * beta
+    assert dy == (alpha + 2 * beta) * dx
+
+
+def test_coker_vector():
+
+    A = np.array([
+        [2, 0, 0,],
+        [0, 0, -2],
+        [0, 2, 0]
+    ])
+    b = np.array([1, 1, 1])
+    f = kernel(
+        arguments=[VectorSpace('x', 3)], implementation=lambda x: A @ x + b
+    )
+
+    g = create_opgraph(f)
+    x_vec = np.array([1, 2, 3])
+    result = f(x_vec)
+
+    assert np.allclose(result, g(x_vec))
+    dx = np.array([-1, -1, -1])
+    y, dy = g.push_forward(x_vec, dx)
+    assert np.allclose(y, result)
+    assert np.allclose(dy,  A @ dx)
+
+    assert len(g.layers) == 3
+
+
+

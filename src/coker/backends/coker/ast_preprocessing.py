@@ -7,7 +7,7 @@ from coker import OP, Kernel, Tracer
 from .sparse_tensor import dok_ndarray, scalar
 from coker.backends.backend import get_backend_by_name
 import numpy as np
-from coker.backends.coker.layers import InputLayer, OutputLayer, GenericLayerOP
+from coker.backends.coker.layers import InputLayer, OutputLayer, GenericLayerOP, IdentityLayer
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.weights import BilinearWeights
 
@@ -27,18 +27,20 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
     tape = kernel.tape
     constants = set()
     tape_outdegree = [0] * len(tape)
-
+    sources = {}
     sink_nodes = {o.index for o in kernel.output}
     # output of these nodes are \considered 'new variables'
 
     for i, node in enumerate(tape.nodes):
 
         if isinstance(node, Tracer):
+            sources[i] = [i]
             sink_nodes.add(i)
             continue
 
         op, *args = node
         if op == OP.VALUE:
+            sources[i] = []
             constants.add(i)
             continue
 
@@ -46,12 +48,14 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
         in_nodes = [idx for idx in indices if idx not in constants]
 
         if not in_nodes:
+            sources[i] = []
             constants.add(i)
             continue
 
         # non-constant op
         #
         for j in in_nodes:
+
             tape_outdegree[j] += 1
 
         # Strictly Linear nodes
@@ -76,24 +80,24 @@ def label_layers(kernel: Kernel, sink_nodes: Dict):
     tape = kernel.tape
     distance = [0] * len(tape)
 
-    def recurse_node(sink, n):
-        if n in tape.input_indicies:
-            edges[sink].add(n)
+    def recurse_node(sink, node):
+        if node in tape.input_indicies:
+            edges[sink].add(node)
             return
-        op, *args = tape.nodes[n]
+        op, *args = tape.nodes[node]
 
         if op == OP.VALUE:
-            edges[n].add(sink)
+            edges[node].add(sink)
             return {}
 
         for a in args:
             idx = a.index
-            edges[n] |= {sink}
+            edges[node] |= {sink}
             if idx in sink_nodes:
-                distance[idx] = max(distance[idx], 1 + distance[n])
+                distance[idx] = max(distance[idx], 1 + distance[node])
                 edges[sink].add(a.index)
             else:
-                distance[idx] = max(distance[idx], distance[n])
+                distance[idx] = max(distance[idx], distance[node])
                 recurse_node(sink, a.index)
 
     for o in reversed(list(sink_nodes)):
@@ -136,6 +140,10 @@ ops = {
     OP.SUB: lambda x, y: x - y,
     OP.MATMUL: lambda x, y: x @ y,
 }
+
+
+def is_constant(a):
+    return isinstance(a, scalar) or isinstance(a, np.ndarray) or isinstance(a, dok_ndarray)
 
 
 def create_opgraph(kernel: Kernel):
@@ -213,12 +221,16 @@ def create_opgraph(kernel: Kernel):
         weights[sink] = BilinearWeights(linear=dok_ndarray.eye(count), memory=memory[sink])
 
         op, *args = tape.nodes[sink]
-
         args = [
             get_recursive(a) for a in args
         ]
-        assert not isinstance(op, BilinearWeights)
-        layers.append(GenericLayerOP(memory[sink], op, *args))
+        if op in {OP.MUL, OP.ADD, OP.SUB, OP.MATMUL, OP.NEG, OP.DOT, OP.CROSS} and any(is_constant(a) for a in args):
+            w = ops[op](*args)
+            layers.append(IdentityLayer(memory[sink], w))
+        else:
+            assert not isinstance(op, BilinearWeights)
+
+            layers.append(GenericLayerOP(memory[sink], op, *args))
 
     output_layer = OutputLayer()
     for output in kernel.output:
@@ -247,7 +259,7 @@ class SparseNet:
 
         for layer in self.intermediate_layers:
             in_specs = layer.inputs()
-            out_spec = layer.output
+            out_spec, = layer.outputs()
             out = layer(*[workspace[k] for k in in_specs])
             workspace[out_spec] = out
         return self.output_layer.call(workspace)
@@ -260,7 +272,7 @@ class SparseNet:
 
         for layer in self.intermediate_layers:
             in_specs = layer.inputs()
-            out_spec = layer.output
+            out_spec, = layer.outputs()
             x_i = [workspace[k] for k in in_specs]
             dx_i = [dworkspace[k] for k in in_specs]
             out, dout = layer.push_forward(*x_i, *dx_i)

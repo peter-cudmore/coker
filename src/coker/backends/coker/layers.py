@@ -1,4 +1,4 @@
-from coker import Dimension
+from coker import Dimension, OP
 from coker.backends import get_backend_by_name
 from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.memory import MemorySpec
@@ -116,7 +116,7 @@ class GenericLayerOP:
         self.weights = weights
         self.output = output
 
-        assert all(isinstance(w, BilinearWeights) for w in weights)
+        assert all(isinstance(w, BilinearWeights) for w in weights),  f"Unkown type in {weights}"
 
     def inputs(self) -> List[MemorySpec]:
         return [w.memory for w in self.weights]
@@ -132,12 +132,38 @@ class GenericLayerOP:
     def push_forward(self, *tangent_space):
         n = len(self.weights)
         x, dx = tangent_space[0:n], tangent_space[n:]
+        y = self(*x)
 
-        raise NotImplementedError()
+        x, dx = zip(*[w_i.push_forwards(x_i, dx_i) for w_i, x_i, dx_i in zip(self.weights, x, dx)])
+        df = differentials[self.op](*x)
+        dy = sum(df_i * dx_i for df_i, dx_i in zip(df, dx))
+
+        return y, dy
+
+class IdentityLayer:
+    def __init__(self, memory: MemorySpec, weights:BilinearWeights):
+        self.memory = memory
+        self.weights = weights
+
+    def __call__(self, x):
+        y = self.weights(x)
+        return y
+
+    def push_forward(self, x, dx):
+        return self.weights.push_forwards(x, dx)
+
+    def inputs(self) -> List[MemorySpec]:
+        return [self.weights.memory]
+
+    def outputs(self) -> List[MemorySpec]:
+        return [self.memory]
 
 
 
-
-
-
-
+differentials = {
+    OP.SIN: np.cos,
+    OP.COS: lambda x: -np.sin(x),
+    OP.MUL: lambda a, b: [b, a],
+    OP.ADD: lambda a, b: [1, 1],
+    OP.SUB: lambda a, b: [1, -1],
+}
