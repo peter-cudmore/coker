@@ -12,6 +12,7 @@ from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 from coker.backends.backend import Backend, ArrayLike
 from coker.backends.evaluator import evaluate_inner
 
+
 def to_array(value, shape):
 
     if isinstance(value, np.ndarray) and value.shape == shape:
@@ -100,6 +101,7 @@ def reshape_sympy_matrix(arg, shape):
         return value
 
     return sp.Matrix(*out_shape, lookup)
+
 
 
 class NumpyBackend(Backend):

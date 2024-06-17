@@ -316,7 +316,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         raise NotImplementedError(f"{ufunc} is not implemented")
 
-
     def __array_function__(self, func, types, args, kwargs):
 
         try:
@@ -343,8 +342,9 @@ def py_evaluate_tape(tape, args, outputs, backend='numpy'):
 
 
 class Kernel:
-    def __init__(self, tape: Tape, outputs: List[Tracer]):
+    def __init__(self, tape: Tape, outputs: List[Tracer], backend='jax'):
         self.tape = tape
+        self.backend = backend
         if isinstance(outputs, Tracer):
             self.output = [outputs]
             self.is_single = True
@@ -366,7 +366,7 @@ class Kernel:
         # todo: check dimensions
         #
 
-        output = py_evaluate_tape(self.tape, args, self.output)
+        output = py_evaluate_tape(self.tape, args, self.output, self.backend)
         if self.is_single:
             return output[0]
         return output

@@ -137,7 +137,6 @@ class BilinearWeights:
     def __neg__(self):
         return BilinearWeights(self.memory, -self.constant, -self.linear, -self.quadratic)
 
-
     def __rmatmul__(self, other):
         if isinstance(other, (np.ndarray, dok_ndarray)):
             constant = other @ self.constant

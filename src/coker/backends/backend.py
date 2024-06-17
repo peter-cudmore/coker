@@ -33,18 +33,40 @@ class Backend(metaclass=ABCMeta):
         return evaluate_inner(graph, inputs, outputs, self, workspace)
 
 
+
+__known_backends = {}
+
+def coker_backend(name: str):
+    def func(backend: Backend):
+        __known_backends[name] = backend
+        return backend
+    return func
+
+def instantiate_backend(name: str):
+    if name == 'numpy':
+        import coker.backends.numpy.core
+        backend = coker.backends.numpy.core.NumpyBackend()
+    elif name == 'jax':
+        import coker.backends.jax
+        backend = coker.backends.jax.JaxBackend()
+    else:
+        raise ValueError(f'Unknown backend: {name}')
+
+
+    __backends[name] = backend
+    return backend
+
+
 def get_backend_by_name(name: str) -> Backend:
 
-    if name == 'numpy':
-        try:
-            return __backends['numpy']
-        except KeyError:
-            pass
-
-        from coker.backends.numpy import NumpyBackend
-        impl = NumpyBackend()
-        __backends['numpy'] = impl
-        return impl
+    try:
+        return __backends[name]
+    except KeyError:
+        pass
+    try:
+        return instantiate_backend(name)
+    except KeyError:
+        pass
 
     raise NotImplementedError(f"Unknown backend {name}")
 

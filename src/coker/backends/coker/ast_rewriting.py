@@ -1,6 +1,5 @@
-from coker import OP, Kernel, Tracer
+from coker import OP, Kernel
 from coker.backends import get_backend_by_name
-from .ast_preprocessing import label_sinks
 
 def try_rewrite_mul(nodes: list, atoms, constants, i):
     op, lhs, rhs = nodes[i]

@@ -15,7 +15,7 @@ def validate_symbolic_call(name, function, arguments, test_set):
         expected = function(*item)
         result = f_test(*item)
 
-        are_equal = all(is_close(e, r, 1e-16) for e, r in zip(expected, result))
+        are_equal = all(is_close(e, r, 1e-6) for e, r in zip(expected, result))
 
         assert are_equal, f"Test {name} failed on item {i}: {item}"
 

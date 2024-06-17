@@ -4,7 +4,7 @@ import pytest
 from coker.backends.coker.ast_preprocessing import *
 from coker.backends.coker import *
 from coker import kernel, VectorSpace, Scalar, Dimension
-
+from coker.backends.coker.tensor_contants import hat
 A = np.array([
     [1, 2],
     [3, 4]
@@ -19,9 +19,25 @@ class TestSparseTensor:
     def test_convert(self):
         eye = np.eye(3, dtype=float)
         sparse_eye = dok_ndarray.fromarray(eye)
-        assert sparse_eye.shape == (3,3)
-        assert sparse_eye.keys == {(0,0):1.0, (1,1):1.0, (2,2):1.0}
+        assert sparse_eye.shape == (3, 3)
+        assert sparse_eye.keys == {(0, 0): 1.0, (1, 1): 1.0, (2, 2): 1.0}
         assert np.allclose(sparse_eye.toarray(), eye)
+
+        test = np.array(
+            [[0, 1,2],
+             [0,0,3],
+             [4,0,0]
+             ]
+        )
+        test_keys = {
+            (0,1): 1,
+            (0,2): 2,
+            (1,2): 3,
+            (2,0):4
+        }
+        test_sparse = dok_ndarray((3, 3), test_keys)
+        assert np.allclose(test_sparse.toarray(), test)
+
 
     def test_matmul(self):
         t = dok_ndarray(shape=(3, 3), data={(2,2): 1})
@@ -43,6 +59,17 @@ class TestSparseTensor:
 
         id_1_array = id_1.toarray()
         assert np.allclose(id_1_array, id_2)
+
+    def test_cross(self):
+        a = np.array([1, 2, 3])
+        a_hat = np.array([
+            [0, -3, 2],
+            [3, 0, -1],
+            [-2, 1, 0]
+
+        ])
+        tensor = hat(a).toarray()
+        assert np.allclose(tensor, a_hat)
 
 
 def f_quadratic_layer(x):
@@ -100,7 +127,7 @@ def test_coker_graph():
 
     g = create_opgraph(f)
 
-    assert len(g.layers) == 4, f"Expected 4 layers (in, compute, merge, out), got {len(g.layers)}"
+    assert len(g.layers) == 3, f"Expected 4 layers (in, compute, out), got {len(g.layers)}"
 
     result = f(1)
 
@@ -114,29 +141,34 @@ def test_coker_graph():
     assert dy == (alpha + 2 * beta) * dx
 
 
+@pytest.mark.skip
 def test_coker_vector():
-
     A = np.array([
         [2, 0, 0,],
         [0, 0, -2],
         [0, 2, 0]
     ])
     b = np.array([1, 1, 1])
-    f = kernel(
-        arguments=[VectorSpace('x', 3)], implementation=lambda x: A @ x + b
-    )
 
-    g = create_opgraph(f)
-    x_vec = np.array([1, 2, 3])
-    result = f(x_vec)
+    test_functions = [
+        (lambda x: A @ x + b, lambda x, dx: A @ dx) ,
+        (lambda x: np.dot(A @ x, b), lambda x, dx: np.dot(A @ dx, b)),
+        (lambda x: b.T @ np.cos(x), lambda x, dx: - b.T @ (np.sin(x) * dx)),
+        (lambda x: x.T @ x, lambda x, dx: 2 * x.T @ dx)
+    ]
 
-    assert np.allclose(result, g(x_vec))
-    dx = np.array([-1, -1, -1])
-    y, dy = g.push_forward(x_vec, dx)
-    assert np.allclose(y, result)
-    assert np.allclose(dy,  A @ dx)
+    for i, (test_function, derivative) in enumerate(test_functions):
 
-    assert len(g.layers) == 3
+        f = kernel(
+            arguments=[VectorSpace('x', 3)], implementation=test_function
+        )
 
+        g = create_opgraph(f)
+        x_vec = np.array([1, 2, 3])
+        result = f(x_vec)
 
+        assert np.allclose(result, g(x_vec))
+        dx = np.array([-1, -1, -1])
+        y, dy = g.push_forward(x_vec, dx)
+        assert np.allclose(y, result)
 

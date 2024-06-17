@@ -1,15 +1,15 @@
-
 from collections import defaultdict
 from typing import Set, Dict, Tuple, List
 
-
 from coker import OP, Kernel, Tracer
-from .sparse_tensor import dok_ndarray, scalar
+from .sparse_tensor import dok_ndarray, is_constant
 from coker.backends.backend import get_backend_by_name
 import numpy as np
 from coker.backends.coker.layers import InputLayer, OutputLayer, GenericLayerOP, IdentityLayer
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.weights import BilinearWeights
+from coker.backends.coker.ast_rewriting import rewrite_graph
+from coker.backends.coker.op_impl import *
 
 
 def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
@@ -33,14 +33,15 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
 
     for i, node in enumerate(tape.nodes):
 
-        if isinstance(node, Tracer):
-            sources[i] = [i]
+        if i in tape.input_indicies:
+            sources[i] = [-1]
             sink_nodes.add(i)
             continue
+        else:
+            sources[i] = []
 
         op, *args = node
         if op == OP.VALUE:
-            sources[i] = []
             constants.add(i)
             continue
 
@@ -48,14 +49,13 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
         in_nodes = [idx for idx in indices if idx not in constants]
 
         if not in_nodes:
-            sources[i] = []
             constants.add(i)
             continue
 
         # non-constant op
         #
         for j in in_nodes:
-
+            sources[i] += sources[j]
             tape_outdegree[j] += 1
 
         # Strictly Linear nodes
@@ -63,8 +63,9 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
             continue
 
         # Multi-linear terms that mayne nonlinear
-        if op in {OP.MUL, OP.CROSS, OP.MATMUL, OP.DOT} and len(in_nodes) == 1:
-            continue
+        if op in {OP.MUL, OP.CROSS, OP.MATMUL, OP.DOT}:
+            if len(set(sources[i])) == 1:
+                continue
 
         sink_nodes.add(i)
 
@@ -122,8 +123,8 @@ def label_sources(kernel: Kernel, sink_nodes=None, constants=None) -> Dict[int, 
         sink_nodes, constants = label_sinks(kernel)
 
     arguments = {i: set() for i in constants}
-    arguments.update({i:{i} for i in sink_nodes})
-    arguments.update({i:{i} for i in kernel.tape.input_indicies})
+    arguments.update({i: {i} for i in sink_nodes})
+    arguments.update({i: {i} for i in kernel.tape.input_indicies})
     workset = [i for i in range(len(kernel.tape)) if i not in arguments]
 
     for idx in workset:
@@ -134,19 +135,20 @@ def label_sources(kernel: Kernel, sink_nodes=None, constants=None) -> Dict[int, 
     return arguments
 
 
+
+
 ops = {
     OP.MUL: lambda x, y: x * y,
     OP.ADD: lambda x, y: x + y,
     OP.SUB: lambda x, y: x - y,
     OP.MATMUL: lambda x, y: x @ y,
+    OP.CROSS: cross
 }
 
 
-def is_constant(a):
-    return isinstance(a, scalar) or isinstance(a, np.ndarray) or isinstance(a, dok_ndarray)
-
 
 def create_opgraph(kernel: Kernel):
+    kernel = rewrite_graph(kernel)
 
     sinks, constants = label_sinks(kernel)
     edges, distance = label_layers(kernel, sinks)
@@ -155,7 +157,7 @@ def create_opgraph(kernel: Kernel):
     tape = kernel.tape
 
     # label edges
-#    for
+    #    for
 
     actual_edges = {
         i: edges[i] | v for i, v in sources.items()
@@ -241,8 +243,6 @@ def create_opgraph(kernel: Kernel):
     return SparseNet(list(memory.values()), input_layer, output_layer, layers)
 
 
-
-
 class SparseNet:
     def __init__(self, memory, input_layer: InputLayer, output_layer: OutputLayer, intermediate_layers):
         self.memory = memory
@@ -290,7 +290,3 @@ class SparseNet:
 
     def apply_output_map(self, context):
         return self.output_layer.call(context)
-
-
-
-

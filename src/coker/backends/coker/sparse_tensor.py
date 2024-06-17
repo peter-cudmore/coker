@@ -5,18 +5,33 @@ MultiIndex = NewType('MultiIndex', Union[Tuple[int, ...], int])
 
 scalar = (float, int)
 
+
+def is_constant(a):
+    return isinstance(a, scalar) or isinstance(a, np.ndarray) or isinstance(a, dok_ndarray)
+
+
+
 class dok_ndarray:
     def __init__(self, shape, data: Optional[Dict[MultiIndex, float]] = None):
         self.shape = shape
         self.keys = data if data is not None else {}
 
     def __setitem__(self, key, value):
-        self.keys[key] = value
+        if isinstance(key, int):
+            key = (key,)
+        if value != 0:
+            self.keys[key] = value
+        else:
+            if key in self.keys:
+                del self.keys[key]
 
     def __getitem__(self, key):
         if isinstance(key, int):
             key = (key, )
-        return self.keys[key]
+        try:
+            return self.keys[key]
+        except KeyError:
+            return 0
 
     def clone(self) -> 'dok_ndarray':
         return dok_ndarray(self.shape, self.keys.copy())
@@ -65,6 +80,17 @@ class dok_ndarray:
             return dok_ndarray(expected_shape)
 
         raise TypeError(f"Don't know how to turn {arg} into an array of shape {expected_shape}")
+
+    @property
+    def T(self):
+        if len(self.shape) == 1:
+            return dok_ndarray((1, self.shape[0]), {(1, k):v for (k,), v in self.keys.items()})
+        elif len(self.shape) == 2:
+            return dok_ndarray(
+                tuple(reversed(self.shape)),
+                {(k2, k1): v for (k1,k2), v in self.keys.items()}
+            )
+        raise NotImplementedError("Can't unambiguously transpose a higher dimensional array")
 
     def __float__(self):
         if all(s == 1 for s in  self.shape):
@@ -137,17 +163,30 @@ class dok_ndarray:
         return dok_ndarray(self.shape, keys)
 
     def __matmul__(self, other):
-        assert self.shape[-1] == other.shape[0]
+        try:
+            if self.shape[-1] != other.shape[0]:
+                raise TypeError
+        except AttributeError:
+            return other.__rmatmul__(self)
+
+        shape = (*self.shape[:-1], *other.shape[1:])
+
+        if not self.keys:
+            return dok_ndarray(shape, {})
+
         keys = {}
+        assert len(self.shape) > 1
         for k, v in self.keys.items():
+
             *k_prime, i = k
+
             k_prime = tuple(k_prime)
             if k_prime in keys:
                 keys[k_prime] += v * other[i]
             else:
                 keys[k_prime] = v * other[i]
 
-        shape = (*self.shape[:-1], *other.shape[1:])
+
 
         return dok_ndarray(shape, keys)
 
@@ -176,7 +215,7 @@ def tensor_vector_product(tensor: dok_ndarray, vector: np.ndarray, axis=1):
     for k, v in tensor.keys.items():
         i = k[axis]
         entry = float(v * vector[i])
-        new_key = (k_i for i, k_i in enumerate(k) if i is not axis)
+        new_key = tuple(k_i for i, k_i in enumerate(k) if i is not axis)
         if new_key in new_data:
             new_data[new_key] += entry
         else:
