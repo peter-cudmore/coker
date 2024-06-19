@@ -29,6 +29,8 @@ class OP(enum.Enum):
     TRANSPOSE = 18
     NEG = 19
     ABS = 20
+    CASE = 21
+    EQUAL = 22
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -80,6 +82,9 @@ class NormOP(Operator):
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return Dimension(None)
+
+
+
 
 
 compute_shape: Dict[OP, Callable[[Dimension, Dimension], Dimension]] = {}

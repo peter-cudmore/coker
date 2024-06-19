@@ -1,144 +1,17 @@
-import dataclasses
+from typing import Tuple, Type
+from coker import Tensor, Tracer, Kernel, OP, ExprOp
+from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
+from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
+from coker.backends.coker.ast_preprocessing import (
+    SparseNet, label_layers, label_sinks, label_sources
+)
+from coker.backends.coker.ast_rewriting import rewrite_graph
+from coker.backends.coker.layers import (
+    MemorySpec, InputLayer, OutputLayer, GenericLayerOP, IdentityLayer
+)
+from coker.backends.coker.weights import BilinearWeights
+from coker.backends.coker.op_impl import ops
 
-from collections import defaultdict
-from typing import Tuple, Type, Optional, Iterator, List,Set, Union, Dict
-import numpy as np
-
-import coker
-from coker import Tensor, Tracer, OP
-from coker.backends.backend import Backend, ArrayLike
-
-
-def flatten_dim(dim: coker.Dimension):
-    d = 1
-    if not dim.is_scalar():
-        for d_i in dim:
-            d *= d_i
-    return d
-
-
-@dataclasses.dataclass
-class FlatProjection:
-    arg_idx: int
-    coord: Optional[Tuple[int, ...]]
-
-
-def to_vec(item, dim):
-    if isinstance(item, np.ndarray):
-        assert dim == item.shape
-        try:
-            r, = item.shape
-            return item
-        except ValueError:
-            pass
-        return item.flatten(order='F')
-    if isinstance(item, (float, complex, int)):
-        return np.array([item])
-    raise NotImplementedError(type(item))
-
-
-def to_array(item, dim):
-    if isinstance(item, np.ndarray):
-        assert dim == item.shape
-        try:
-            r, = item.shape
-            np.reshape(item, newshape=(r, 1))
-        except ValueError:
-            pass
-        return item
-    if isinstance(item, (float, complex, int)):
-        return np.array([[item]])
-    raise NotImplementedError(type(item))
-
-
-
-class Projection:
-    def __init__(self, domain: int, rnge: int):
-        self.domain = domain
-        self.range = rnge
-        self.dok = set()
-
-    def extend_domain(self, domain: int):
-        assert domain > self.domain
-        self.domain = domain
-
-    def extend_range(self, r: int):
-        assert self.range < r
-        self.range = r
-
-    def from_slice(self, range_start: int,  slc:slice):
-        assert range_start >= 0
-        assert range_start + slc.stop < self.range
-        step = slc.step if slc.step else 1
-        for i, j in enumerate(range(slc.start, slc.stop, step)):
-            self.dok.add((i, j))
-
-    def to_numpy(self):
-        m = np.zeros((self.range, self.domain))
-        for i, j in self.dok:
-            m[i, j] = 1
-        return m
-
-
-def partition_graph(graph: coker.Tape, outputs: List[Tracer]):
-    constants = set()
-    inputs = set()
-    linear_terms = set()
-    n = len(graph.nodes)
-    layers = [0] * n
-    max_layer = 0
-    dependents = defaultdict(set)
-
-    for i in range(n):
-        if i in graph.input_indicies:
-            # argument
-            layers[i] = 0
-            inputs.add(i)
-            continue
-
-        op, *args = graph.nodes[i]
-        if op is OP.VALUE or all(arg.index in constants for arg in args):
-            constants.add(i)
-            layers[i] = 0
-            continue
-
-        for arg in args:
-            dependents[arg.index].add(i)
-
-        # always linear
-        if op in {OP.ADD, OP.SUB, OP.NEG, OP.TRANSPOSE}:
-            layers[i] = max(layers[arg.index] for arg in args)
-            linear_terms.add(i)
-
-        # maybe linear, maybe quadratic
-        elif op in {OP.DOT, OP.MUL, OP.DIV, OP.MATMUL}:
-            lhs, rhs = args
-            if lhs.index in constants:
-                layers[i] = layers[rhs.index]
-                linear_terms.add(i)
-            elif rhs.index in constants:
-                layers[i] = layers[lhs.index]
-                linear_terms.add(i)
-            else:
-                layer = max(layers[lhs.index], layers[rhs.index]) + 1
-                if layer > max_layer:
-                    max_layer = layer
-                layers[i] = layer
-
-        else:
-            # OP is nonlinear
-            layer = max(layers[arg.index] for arg in args) + 1
-            if layer > max_layer:
-                max_layer = layer
-            layers[i] = layer
-
-    if isinstance(outputs, Tracer):
-        layers[outputs.index] = max_layer
-    else:
-        for i in {o.index for o in outputs}:
-            layers[i] = max_layer
-
-    return layers, dependents
 
 class CokerBackend(Backend):
     def __init__(self):
@@ -156,10 +29,107 @@ class CokerBackend(Backend):
     def call(self, op, *args) -> ArrayLike:
         pass
 
-    def evaluate(self, graph, inputs: ArrayLike, outputs: ArrayLike):
-        pass
+    def evaluate(self, kernel, inputs: ArrayLike):
+
+        g = create_opgraph(kernel)
+
+        return [g(*inputs)]
 
     def reshape(self, array: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
         pass
 
 
+def create_opgraph(kernel: Kernel):
+    kernel = rewrite_graph(kernel)
+
+    sinks, constants = label_sinks(kernel)
+    edges, distance = label_layers(kernel, sinks)
+
+    sources = label_sources(kernel, sinks, constants)
+    tape = kernel.tape
+
+    # label edges
+    #    for
+
+    actual_edges = {
+        i: edges[i] | v for i, v in sources.items()
+        if v and i not in sinks
+    }
+
+    assert set(actual_edges.keys()) | constants | set(tape.input_indicies) | set(sinks) == set(range(len(kernel.tape)))
+
+    # for each input, we want to create a map from the argument into a general input stack
+    # so that the input map takes (x_1, x_2, x_3, x_4) -> X
+    # and then each element of nodes is a linear map from X -> x_i  (i.e a projection)
+
+    # for each 'sink' we append onto the X vector the dimension of the sink output
+    # and so that we have X = f_i(W(X,X)) for each nonlinearity
+
+    # for each 'output' we then have a set of projections that map from X -> y_0, y_1, ...
+    #
+    weights = {}
+
+    input_layer = InputLayer()
+    for i in tape.input_indicies:
+        input_layer.add_input(tape.dim[i])
+
+    layers = []
+
+    # contains the memory spec for the 'outputs' of each layer, including the input layer
+    memory = {
+        0: MemorySpec(location=0, count=input_layer.dimension)
+    }
+
+    # contains the projections from the memory to the argument space
+    # for each set of weights. In the case of the input layer, this is a map from the flattened memory
+    # of the input domain, to the specific arguments/shapes in used in the consequtive layers.
+    weights = {
+        i: BilinearWeights(linear=input_layer.get_projection(i), memory=memory[0]) for i in kernel.tape.input_indicies
+    }
+
+    def eval_numeric(op, *args):
+        backend = get_backend_by_name('numpy', set_current=False)
+        return backend.call(op, *args)
+
+    def get_recursive(arg: Tracer):
+        if arg.index in sinks:
+            return weights[arg.index]
+
+        if arg.is_constant():
+            return arg.value()
+
+        op, *args = arg.value()
+        args = [get_recursive(arg) for arg in args]
+
+        if any(isinstance(arg, BilinearWeights) for arg in args):
+            return ops[op](*args)
+        return eval_numeric(op, *args)
+
+    stack = sorted([s for s in sinks if s not in tape.input_indicies], key=lambda i: distance[i], reverse=True)
+
+    while stack:
+        sink = stack.pop()
+        count = tape.dim[sink].flat()
+        layer_idx = distance[sink]
+        memory[sink] = MemorySpec(location=layer_idx, count=count)
+        weights[sink] = BilinearWeights(linear=dok_ndarray.eye(count), memory=memory[sink])
+
+        op, *args = tape.nodes[sink]
+        args = [
+            get_recursive(a) for a in args
+        ]
+        if op in {OP.MUL, OP.ADD, OP.SUB, OP.MATMUL, OP.NEG, OP.DOT, OP.CROSS} and any(is_constant(a) for a in args):
+            w = ops[op](*args)
+            layers.append(IdentityLayer(memory[sink], w))
+        else:
+            assert not isinstance(op, BilinearWeights)
+
+            layers.append(GenericLayerOP(memory[sink], op, *args))
+
+    output_layer = OutputLayer()
+    for output in kernel.output:
+        idx = output.index
+        dim = output.dim
+        output_layer.add_output(memory[idx], dim)
+
+    return SparseNet(list(memory.values()), input_layer, output_layer, layers)

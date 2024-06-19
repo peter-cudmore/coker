@@ -1,8 +1,9 @@
 import dataclasses
 import enum
+import operator
 
 import numpy as np
-from typing import List, Callable, Tuple, Any
+from typing import List, Callable, Tuple, Union
 from collections import defaultdict
 
 from coker.algebra.tensor import Tensor
@@ -61,6 +62,7 @@ def get_dim_by_class(arg):
 class ExprOp(enum.Enum):
     LESS_THAN = "<"
     GREATER_THAN = ">"
+    EQUAL = '='
 
 
 class Expression:
@@ -71,6 +73,7 @@ class Expression:
         self.op = op
 
     def as_halfplane_bound(self):
+        """Inequality is satisfied when result is negative."""
         if self.op == ExprOp.LESS_THAN:
             return self.lhs - self.rhs
 
@@ -298,9 +301,17 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         difference = self - other
         return Expression(ExprOp.GREATER_THAN, 0, difference)
 
+    def __eq__(self, other):
+        return Expression(ExprOp.EQUAL, self, other)
+
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         try:
             op = numpy_atomics[ufunc]
+
+            if op == OP.DIV:
+                assert inputs[1] > 0
+                if isinstance(inputs[1],Tracer):
+                    pass
             index = self.tape.append(op, *inputs)
             return Tracer(self.tape, index)
 
@@ -335,14 +346,27 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         raise NotImplementedError(f"{func} with {kwargs} is not implemented")
 
+    def norm(self):
+        assert (len(self.shape) == 1 and self.shape[0] > 1) or (
+            len(self.shape) == 2 and self.shape[1] == 1
+        )
+        return np.sqrt(self.T @ self)
 
-def py_evaluate_tape(tape, args, outputs, backend='numpy'):
+    def normalise(self):
+        norm = self.norm()
+        idx = self.tape.append(
+            OP.CASE, norm == 0, np.zeros_like(self.shape),
+            self / norm
+        )
+        return Tracer(self.tape, idx)
+
+def py_evaluate_tape(kernel, args):
     from coker.backends.evaluator import evaluate
-    return evaluate(tape, args, outputs, backend)
 
+    return evaluate(kernel, args)
 
 class Kernel:
-    def __init__(self, tape: Tape, outputs: List[Tracer], backend='jax'):
+    def __init__(self, tape: Tape, outputs: List[Tracer], backend='coker'):
         self.tape = tape
         self.backend = backend
         if isinstance(outputs, Tracer):
@@ -366,7 +390,7 @@ class Kernel:
         # todo: check dimensions
         #
 
-        output = py_evaluate_tape(self.tape, args, self.output, self.backend)
+        output = py_evaluate_tape(self, args)
         if self.is_single:
             return output[0]
         return output
@@ -421,3 +445,14 @@ def strip_symbols_from_array(array: np.ndarray, float_type=float):
         symbol_array = symbol_array + basis * symbol
 
     return symbol_array
+
+
+def normalise(v: Union[np.ndarray, Tracer]):
+    if isinstance(v, np.ndarray):
+        if all(v_i == 0 for v_i in v):
+            return np.zeros_like(v), 0
+        else:
+            r = np.linalg.norm(v)
+            return v / r, r
+    else:
+        return v.normalise(), v.norm()

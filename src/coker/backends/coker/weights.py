@@ -1,17 +1,19 @@
+
 from coker import Dimension
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.sparse_tensor import dok_ndarray, scalar, tensor_vector_product
-from coker.backends.coker.core import to_vec
 import numpy as np
+
 
 def dense_array_cast(x):
     if isinstance(x, scalar):
         return np.array([x])
+
     return x
 
 
 
-class BilinearWeights:
+class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __init__(self, memory: MemorySpec, constant=None, linear=None, quadratic=None):
         self.memory = memory
@@ -22,16 +24,16 @@ class BilinearWeights:
         s, = out_shape
         self.dimension = s
         self.linear = dok_ndarray.from_maybe(linear, expected_shape=(s, memory.count))
-        self.constant = dok_ndarray.from_maybe(constant, expected_shape=(memory.count, ))
+        self.constant = dok_ndarray.from_maybe(constant, expected_shape=(s, ))
         self.quadratic = dok_ndarray.from_maybe(quadratic, expected_shape=(s, memory.count, memory.count))
 
     def __call__(self, x):
         x_v = dense_array_cast(x)
-        qx = self.quadratic @ x_v
+        qxx = (self.quadratic @ (x_v, x_v)).toarray()
         ax = (self.linear @ x_v).toarray()
-        qxx = (qx @ x_v).toarray()
 
-        return self.constant.toarray() + ax + qxx
+        c = self.constant.toarray()
+        return c + ax + qxx
 
     def diff(self, x):
         dq = tensor_vector_product(self.quadratic, x, axis=1) + tensor_vector_product(self.quadratic, x, axis=2)
@@ -138,16 +140,35 @@ class BilinearWeights:
         return BilinearWeights(self.memory, -self.constant, -self.linear, -self.quadratic)
 
     def __rmatmul__(self, other):
+
         if isinstance(other, (np.ndarray, dok_ndarray)):
             constant = other @ self.constant
             linear = other @ self.linear
             quadratic = other @ self.quadratic
+
             return BilinearWeights(self.memory, constant, linear, quadratic)
 
         raise TypeError(f'Cannot matmul {type(other)}')
+
+    def __matmul__(self, other):
+        assert isinstance(other, BilinearWeights) and other.memory is self.memory
 
     def __array_ufunc__(self, ufunc, method, args, out=None):
         if ufunc == np.matmul and method == '__call__':
             return self.__rmatmul__(args)
 
         raise NotImplementedError
+
+    def dot(self, rhs: 'BilinearWeights'):
+
+        assert self.memory == rhs.memory
+        c = self.constant.T @ rhs.constant
+        l = self.linear.T @ rhs.constant + self.constant.T @ rhs.linear
+        q = self.linear.T @ rhs.linear + self.constant.T @ rhs.quadratic + self.constant.T @ rhs.quadratic
+
+        #        cubic = self.linear.T @ rhs.quadratic + rhs.linear.T @ self.quadratic
+
+
+        return BilinearWeights(self.memory, c,l, q)
+
+

@@ -1,17 +1,58 @@
+import operator
+from functools import reduce
+
 import numpy as np
 from typing import Optional, Dict, Tuple, Union, NewType
+
 
 MultiIndex = NewType('MultiIndex', Union[Tuple[int, ...], int])
 
 scalar = (float, int)
+NDArray = NewType('NDArray', Union[np.ndarray, 'dok_ndarray'])
 
 
 def is_constant(a):
     return isinstance(a, scalar) or isinstance(a, np.ndarray) or isinstance(a, dok_ndarray)
 
+def cast_vector(arg, dim):
+    if len(arg.shape) == 1:
+        if arg.shape[0] == dim:
+            return arg
+    elif len(arg.shape) == 2:
+        if arg.shape[0] == dim and arg.shape[1] == 1:
+            return arg.reshape((dim, ))
+
+    raise TypeError(f"Cannot cast {arg.shape} vector to a {(dim,)} vector")
 
 
-class dok_ndarray:
+
+
+class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
+    """Sparse Multilinear map
+
+    Understood as a vector of linear tensor fields.
+    Some notation:
+
+    - `e^j` always refers to the basis vectors for the V_i vector space (i.e. a column vector)
+    - `E_i` always refers to the basis covectors for the V_j vector space (i.e. a row vector)
+
+
+    M = \alpha^i_{jkm} E_i*e^j*e^k*e^m...
+
+    Operations:
+        - addition, subtraction, and scalar multiplication as usual
+        - 'matmul' is tensor contraction along the last + first dimensions
+           that is, if N @ M means that if
+                N = n_{ab...di}E_a e^b ...e^d e^i
+           and
+                M = m_{ijk...}E_ie^je^k...
+           then
+                NM = (nm)_{ab...djk}E_a e^b ...  e^d * e^je^k ...
+           with
+                the coefficients (nm) being summed appropriately.
+
+        -
+    """
     def __init__(self, shape, data: Optional[Dict[MultiIndex, float]] = None):
         self.shape = shape
         self.keys = data if data is not None else {}
@@ -162,13 +203,39 @@ class dok_ndarray:
             raise NotImplementedError()
         return dok_ndarray(self.shape, keys)
 
-    def __matmul__(self, other):
-        try:
+    def evaluate(self, *vectors: NDArray) -> NDArray:
+        assert (len(vectors) == len(self.shape)) - 1
+
+        vectors = [
+            cast_vector(v, s) for v, s in zip(vectors, self.shape[1:])
+        ]
+        data = {}
+        for k, v in self.keys.items():
+            i, *k_prod = k
+            a_k = v * reduce(operator.mul, (vec[j] for vec, j in zip(vectors, k_prod)), 1)
+            if (i,) not in data:
+                data[(i,)] = a_k
+            else:
+                data[(i,)] += a_k
+
+        shape = (self.shape[0], )
+        return dok_ndarray(shape, data)
+
+    def __matmul__(self, other: Union[NDArray, Tuple[NDArray]]):
+        """Tensor contraction
+
+        it T = a_{ijk} e_i e^j e^k
+
+        """
+        if isinstance(other, tuple):
+            assert len(other) == len(self.shape) - 1
+            return self.evaluate(*other)
+
+        elif isinstance(other, (dok_ndarray, np.ndarray)):
             if self.shape[-1] != other.shape[0]:
                 raise TypeError
-        except AttributeError:
+        else:
             return other.__rmatmul__(self)
-
         shape = (*self.shape[:-1], *other.shape[1:])
 
         if not self.keys:
@@ -186,13 +253,32 @@ class dok_ndarray:
             else:
                 keys[k_prime] = v * other[i]
 
-
-
         return dok_ndarray(shape, keys)
+
+    def __rmatmul__(self, other):
+        assert len(other.shape) > 1
+        assert other.shape[-1] == self.shape[0]
+        shape = (*other.shape[:-1], *self.shape[1:])
+        data = {}
+        with np.nditer(other, flags=['multi_index'], op_flags=['readonly']) as it:
+            for v in it:
+                *key_1, i_1 = it.multi_index
+                for (i_2, *key_2), v_2 in self.keys.items():
+                    if i_1 != i_2:
+                        continue
+                    key = (*key_1, *key_2)
+                    if key in data:
+                        data[key] += v_2 * float(v)
+                    else:
+                        data[key] = v_2 * float(v)
+        return dok_ndarray(shape, data)
 
     def __array_ufunc__(self, ufunc, method, args, out=None):
         if ufunc == np.matmul and method == '__call__':
-            return args @ self.toarray()
+            return self.__rmatmul__(args).toarray()
+
+
+
         raise NotImplementedError
 
     def reshape(self, shape):

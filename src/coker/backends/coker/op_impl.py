@@ -7,31 +7,54 @@ from coker.backends.coker.weights import BilinearWeights
 def cross(x, y):
     if is_constant(x):
         Ax = hat(x)
-        return Ax @ y
+        return (Ax).toarray() @ y
     if is_constant(y):
         Ay = -hat(y)
-        return Ay @ x
+        return Ay.toarray() @ x
 
     assert isinstance(x, BilinearWeights)
     # W_ix + b_i \cross W_jy + b_j
-    return (levi_civita_3_tensor @ y)  @ x
+    return levi_civita_3_tensor @ (x, y)
 
 
 def dot(x, y):
     if is_constant(x):
-        return x.T @ y
+        if len(x.shape) == 1:
+            n, = x.shape
+            xt = x.T.reshape((1, n))
+        else:
+            n, m = x.shape
+            assert m == 1
+            xt = x.T
+        return xt @ y
     if is_constant(y):
         return y.T @ x
 
-    assert isinstance(x, BilinearWeights)
+    if isinstance(x, BilinearWeights) and isinstance(y, BilinearWeights):
+        return x.dot(y)
 
     raise NotImplementedError
 
 
 def transpose(x):
     if is_constant(x):
+        if len(x.shape) == 1:
+            n, = x.shape
+            return x.reshape((n, 1)).T
+
         return x.T
 
     assert isinstance(x, BilinearWeights)
     raise NotImplementedError
+
+
+ops = {
+    OP.MUL: lambda x, y: x * y,
+    OP.ADD: lambda x, y: x + y,
+    OP.SUB: lambda x, y: x - y,
+    OP.MATMUL: lambda x, y: x @ y,
+    OP.CROSS: cross,
+    OP.DOT: dot,
+    OP.TRANSPOSE: transpose
+}
 

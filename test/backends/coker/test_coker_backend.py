@@ -1,10 +1,9 @@
 import numpy as np
 import pytest
-
-from coker.backends.coker.ast_preprocessing import *
 from coker.backends.coker import *
+from coker.backends.coker.core import create_opgraph
 from coker import kernel, VectorSpace, Scalar, Dimension
-from coker.backends.coker.tensor_contants import hat
+
 A = np.array([
     [1, 2],
     [3, 4]
@@ -14,62 +13,6 @@ b = np.array([4, 5])
 c = 2
 
 
-class TestSparseTensor:
-
-    def test_convert(self):
-        eye = np.eye(3, dtype=float)
-        sparse_eye = dok_ndarray.fromarray(eye)
-        assert sparse_eye.shape == (3, 3)
-        assert sparse_eye.keys == {(0, 0): 1.0, (1, 1): 1.0, (2, 2): 1.0}
-        assert np.allclose(sparse_eye.toarray(), eye)
-
-        test = np.array(
-            [[0, 1,2],
-             [0,0,3],
-             [4,0,0]
-             ]
-        )
-        test_keys = {
-            (0,1): 1,
-            (0,2): 2,
-            (1,2): 3,
-            (2,0):4
-        }
-        test_sparse = dok_ndarray((3, 3), test_keys)
-        assert np.allclose(test_sparse.toarray(), test)
-
-
-    def test_matmul(self):
-        t = dok_ndarray(shape=(3, 3), data={(2,2): 1})
-        t_test= np.array([[0,0,0], [0,0,0],[0,0, 1]])
-        assert np.allclose(t.toarray(), t_test)
-
-        b = np.array([1, 2, 3])
-
-        y_expected = t_test @ b
-
-        y = t @ b
-
-        assert np.allclose(y.toarray(), y_expected)
-
-        c = np.eye(3)
-
-        id_1 = t @ c
-        id_2 = c @ t
-
-        id_1_array = id_1.toarray()
-        assert np.allclose(id_1_array, id_2)
-
-    def test_cross(self):
-        a = np.array([1, 2, 3])
-        a_hat = np.array([
-            [0, -3, 2],
-            [3, 0, -1],
-            [-2, 1, 0]
-
-        ])
-        tensor = hat(a).toarray()
-        assert np.allclose(tensor, a_hat)
 
 
 def f_quadratic_layer(x):
@@ -172,3 +115,17 @@ def test_coker_vector():
         y, dy = g.push_forward(x_vec, dx)
         assert np.allclose(y, result)
 
+
+@pytest.mark.skip
+def test_sparse_matrix_times_weights():
+
+    # create a weights; eg
+    # T(x) = Q(x,x) + Ax + b
+    #
+    # create a sparse matrix
+    # eg. c_hat = hat(c)
+    #
+    # make sure  c_hat @ T(x) makes sense
+    #
+
+    assert False

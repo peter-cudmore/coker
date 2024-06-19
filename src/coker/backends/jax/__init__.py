@@ -68,7 +68,15 @@ def call_parameterised_op(op, *args):
     return result
 
 
+def proj(i, n):
+    p = np.zeros((n, n))
+    p[i, i] = 1
+    return p
 
+def basis(i,n):
+    p = np.zeros((n, ))
+    p[i] = 1
+    return p
 
 class JaxBackend(Backend):
     def __init__(self, *args, **kwargs):
@@ -120,7 +128,27 @@ class JaxBackend(Backend):
         outputs: List[Tracer]
     ):
 
-        raise NotImplementedError
+        n_constraints = len(constraints)
+        c = np.zeros((n_constraints,))
+        # halfspace = {x: h(x)_i >=0 for all i}
+        for i, constraint in enumerate(constraints):
+            c_i = -basis(i, n_constraints) * constraint.as_halfplane_bound()
+            c += c_i
+
+        # arguments = x
+        # cost = f(x)
+        # constraints = c(x) >= 0
+        # outputs => y = g(x)
+        #
+        # solve x^* = argmin f(x) s.t. c(x) >=0
+        #
+        # return g(x^*)
+
+
+        assert False
+
+
+
 
 #
 # OP v_1, v_2, v_3

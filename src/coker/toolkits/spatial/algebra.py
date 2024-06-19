@@ -2,6 +2,7 @@ from typing import Optional
 import numpy as np
 from coker.toolkits.spatial.types import Vec3, Scalar
 from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
+from coker.algebra.kernel import normalise
 
 SE3_BASIS = np.array(
     [
@@ -61,9 +62,11 @@ class Rotation3:
                 return Rotation3.zero()
         except NotImplementedError:
             pass
-        theta = 2 * np.arccos(q.q_0)
-        r = np.sqrt(1 - q.q_0 * q.q_0)  # sin(theta/2)
-        u = q.v / r
+        u, r = normalise(q.v)
+        theta =2 * np.arctan2(r, q.q_0)
+#        theta = 2 * np.arccos(q.q_0)
+#        r = np.sqrt(1 - q.q_0 * q.q_0)  # sin(theta/2)
+#        u = q.v / r
         return Rotation3(axis=u, angle=theta)
 
     def __mul__(self, other: 'Rotation3'):

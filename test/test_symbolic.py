@@ -74,9 +74,39 @@ def test_slicing_symbolic_vector():
 
     assert is_close(y_test, y_eval)
 
+def test_cross_product():
+    u_test = np.array([1, 0, 1], dtype=float)
+    v_test = np.array([2, 1, 1], dtype=float)
+
+    def f_impl(u, v):
+        return np.cross(u, v)
+
+    f_test = f_impl(u_test, v_test)
+
+    f = kernel(
+        arguments=[VectorSpace(name='x', dimension=3), VectorSpace(name='y', dimension=3)],
+        implementation=f_impl
+    )
+
+    result = f(u_test, v_test)
+
+    assert is_close(result, f_test)
+
+
+def test_dot():
+
+    a = np.array([1, 0, 1], dtype=float)
+    x_test = np.array([0, 0, 1], dtype=float)
+
+    def f_dot(x):
+        return np.dot(a, x)
+
+    y_dot_test = f_dot(x_test)
+    y_dot_result = kernel([VectorSpace(name='x', dimension=3)], f_dot)(x_test)
+    assert np.allclose(y_dot_result, y_dot_test)
+
 
 def test_dot_and_cross():
-
     a = np.array([1, 0, 1], dtype=float)
     b = np.array([2, 1, 1], dtype=float)
     x_test = np.array([0, 0, 1], dtype=float)
@@ -138,23 +168,6 @@ def test_cos_and_sin():
     assert is_close(result, expected)
 
 
-def test_cross_product():
-
-    def f_impl(u, v):
-        return np.cross(u, v)
-
-    u_test = np.array([1, 0, 1], dtype=float)
-    v_test = np.array([2, 1, 1], dtype=float)
-    f_test = f_impl(u_test, v_test)
-
-    f = kernel(
-        arguments=[VectorSpace(name='x', dimension=3), VectorSpace(name='y', dimension=3)],
-        implementation=f_impl
-    )
-
-    result = f(u_test, v_test)
-
-    assert is_close(result, f_test)
 
 def test_tensor_product():
 

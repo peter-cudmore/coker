@@ -73,7 +73,7 @@ def rewrite_graph(kernel: Kernel):
             continue
 
         if all([a.index in constants for a in args]):
-            constants[i] = get_backend_by_name('numpy').call(op, *[constants[a.index] for a in args])
+            constants[i] = get_backend_by_name('numpy', set_current=False).call(op, *[constants[a.index] for a in args])
             continue
 
         if op == OP.MUL:

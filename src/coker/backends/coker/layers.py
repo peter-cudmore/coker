@@ -15,7 +15,7 @@ def vec(item):
         return item.flatten(order='F')
     if isinstance(item, (int, float)):
         return np.array([item])
-    raise NotImplementedError()
+    raise NotImplementedError(type(item))
 
 
 class InputLayer:
@@ -125,7 +125,7 @@ class GenericLayerOP:
         return [self.output]
 
     def __call__(self, *x):
-        backend = get_backend_by_name('numpy')
+        backend = get_backend_by_name('numpy', set_current=False)
         x = [w_i(x_i) for w_i, x_i in zip(self.weights, x)]
         return backend.call(self.op,*x)
 

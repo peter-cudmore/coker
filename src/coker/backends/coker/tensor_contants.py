@@ -16,3 +16,6 @@ levi_civita_3_tensor = dok_ndarray(
         (2, 1, 0): -1,
     }
 )
+
+def dot_tensor(n):
+    return dok_ndarray((1, n, n), data={(0, i, i): 1 for i in range(n)})
