@@ -7,7 +7,7 @@ from coker import Dimension, Kernel
 from coker.backends.backend import Backend, ArrayLike
 from coker.backends.evaluator import evaluate_inner
 from coker.backends.casadi.casadi import *
-
+from coker.backends.casadi.optimiser import build_optimisation_problem
 
 scalar_types = (float, int)
 
@@ -99,7 +99,5 @@ class CasadiBackend(Backend):
 
         return [self.to_numpy_array(y)]
 
-    def build_optimisation_problem(self, cost, constraints, inputs, outputs):
-
-        tape = cost.tape
-        cost_fn = lower(tape, [cost])
+    def build_optimisation_problem(self, cost, constraints, parameters, outputs, initial_conditions):
+        return build_optimisation_problem(cost, constraints, parameters, outputs, initial_conditions)

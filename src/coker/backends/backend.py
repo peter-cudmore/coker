@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 from typing import Any, Tuple, Type
 from coker import Kernel
 from coker import Tracer, Expression
-from typing import List
+from typing import List, Dict
 
 ArrayLike = Any
 
@@ -36,8 +36,9 @@ class Backend(metaclass=ABCMeta):
         self,
         cost: Tracer,  # cost
         constraints: List[Expression],
-        arguments: List[Tracer],
+        parameters: List[Tracer],
         outputs: List[Tracer],
+        initial_conditions: Dict[int, ArrayLike],
     ):
         raise NotImplementedError
 

@@ -238,9 +238,7 @@ class NumpyBackend(Backend):
                 )
             out_constriants.append(this_constraint)
 
-        out_symbols = [
-            evaluate_inner(tape, arguments, [o], self, workspace) for o in outputs
-        ]
+        out_symbols = evaluate_inner(tape, arguments, outputs, self, workspace)
 
         out_map = [sp.lambdify(problem_args, o) for o in out_symbols]
 

@@ -24,7 +24,7 @@ def test_optimisation(backend):
         builder.objective = Minimise(quadratic(x, p, z))
         e_y = np.array([[0], [1], [0]], dtype=float)
         builder.constraints = [
-#            1 < (z ** 2),
+            1 < (z ** 2),
             # numpy implementation doesn't like nonlinear constraints
             x[0] > 1,
             2 < e_y.T @ x
@@ -42,8 +42,9 @@ def test_optimisation(backend):
 
     assert len(soln) == 3
     x_val, p_val, z_val = soln
-    x_expected = np.array([1, 2, 0], dtype=float)
 
-    assert isinstance(x_val, np.ndarray) and (abs(x_val - x_expected) < 1e-3).all()
-    assert isinstance(p_val, np.ndarray) and (abs(p_val) < 1e-3).all()
-    assert abs(z_val) < 1e-3
+    x_expected = np.array([1, 2, 0], dtype=float)
+    p_expected = np.array([0, 0], dtype=float)
+    assert np.allclose(x_val, x_expected, atol=1e-6)
+    assert np.allclose(p_val, p_expected, atol=1e-6)
+    assert 1 - 1e-6 < abs(z_val) < 1 + 1e-6

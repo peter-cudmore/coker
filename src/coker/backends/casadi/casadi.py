@@ -73,17 +73,30 @@ def call_parameterised_op(op, *args):
 
 def to_casadi(value):
     if isinstance(value, np.ndarray):
-        return ca.DM(value)
+        if len(value.shape) == 1:
+            value = value.reshape(-1, 1)
+        v = ca.MX(*value.shape)
+        it = np.nditer(value, op_flags=['readonly'], flags=['multi_index'])
+        for x in it:
+            if x != 0:
+                k = it.multi_index
+                v[k] = x
+        return v
+
+    if value == np.inf:
+        return ca.inf
+    if value == -np.inf:
+        return -ca.inf
 
     return value
 
 
-def lower(tape: Tape, output: List[Tracer]):
-    workspace = {}
+def extract_symbols(arg: ca.MX):
+    v = {arg.dep(i) for i in range(arg.n_dep()) if arg.dep(i).is_symbolic()}
+    return v
 
-    for i in tape.input_indicies:
-        workspace[i] = ca.MX.sym(f"x_i", *tape.dim[i].shape)
 
+def substitute(output: List[Tracer], workspace):
     def get_node(node: Tracer):
         if node.index in workspace:
             return workspace[node.index]
@@ -105,6 +118,22 @@ def lower(tape: Tape, output: List[Tracer]):
         workspace[node.index] = v
         return v
 
-    result = [get_node(o) for o in output]
+    return [get_node(o) for o in output]
 
-    return ca.Function("f", [workspace[i] for i in tape.input_indicies], result)
+
+def lower(tape: Tape, output: List[Tracer], workspace=None):
+    workspace = {} if not workspace else workspace
+    inputs = dict()
+    for i in tape.input_indicies:
+        if i not in workspace:
+            v = ca.MX.sym(f"x_i", *tape.dim[i].shape)
+            workspace[i] = v
+            inputs[v.__hash__()] = v
+        else:
+            s = extract_symbols(workspace[i])
+
+            inputs.update({s_i.__hash__(): s_i for s_i in s})
+
+    result = substitute(output, workspace)
+
+    return ca.Function("f", list(inputs.values()), result)

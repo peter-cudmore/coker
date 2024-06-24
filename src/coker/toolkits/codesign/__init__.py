@@ -34,7 +34,8 @@ class MathematicalProgram:
     def __call__(self, *args):
         assert len(args) == len(self.input_shape)
 
-        return self.impl(args)
+
+        return [np.reshape(o, dim.shape) for o, dim in zip(self.impl(args), self.output_shape)]
 
 
 class ProblemBuilder:
@@ -86,6 +87,7 @@ class ProblemBuilder:
             self.constraints,
             self.arguments,
             self.outputs,
+            self.initial_conditions
         )
 
         return MathematicalProgram(self.input_shape, self.output_shape, impl)

@@ -71,11 +71,15 @@ class Expression:
         self.op = op
 
     def as_halfplane_bound(self):
-        """Inequality is satisfied when result is negative."""
         if self.op == ExprOp.LESS_THAN:
-            return self.lhs - self.rhs
-
-        return self.rhs - self.lhs
+            # lhs < rhs ->  (lhs - rhs) < 0
+            return self.lhs - self.rhs, -np.inf, 0
+        elif self.op == ExprOp.GREATER_THAN:
+            # lhs > rhs -> (lhs - rhs) > 0
+            return self.lhs - self.rhs, 0, np.inf
+        elif self.op == ExprOp.EQUAL:
+            return self.rhs - self.lhs, -1e-9, 1e-9
+        raise NotImplementedError
 
     @property
     def tape(self) -> "Tape":
@@ -287,13 +291,10 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         raise NotImplementedError()
 
     def __lt__(self, other):
-        difference = other - self
-
-        return Expression(ExprOp.GREATER_THAN, 0, difference)
+        return Expression(ExprOp.LESS_THAN, self, other)
 
     def __gt__(self, other):
-        difference = self - other
-        return Expression(ExprOp.GREATER_THAN, 0, difference)
+        return Expression(ExprOp.GREATER_THAN, self, other)
 
     def __eq__(self, other):
         return Expression(ExprOp.EQUAL, self, other)
