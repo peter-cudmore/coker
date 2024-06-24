@@ -5,7 +5,7 @@ import numpy as np
 import sympy as sp
 import scipy as sy
 
-from coker.algebra import Tensor, Dimension, OP
+from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Expression, Tracer, VectorSpace
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
@@ -21,8 +21,7 @@ def to_array(value, shape):
     raise NotImplementedError
 
 
-scalar_types = (np.float32, np.float64,
-                np.int32, np.int64, float, complex, int)
+scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int)
 
 
 def is_scalar_symbol(v):
@@ -57,13 +56,13 @@ impls = {
     OP.TRANSPOSE: np.transpose,
     OP.NEG: np.negative,
     OP.SQRT: np.sqrt,
-    OP.ABS: np.abs
+    OP.ABS: np.abs,
 }
 
 parameterised_impls = {
     ConcatenateOP: lambda op, x, y: np.concatenate((x, y), axis=op.axis),
     ReshapeOP: lambda op, x: np.reshape(x, newshape=op.newshape),
-    NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord)
+    NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
 }
 
 
@@ -103,18 +102,26 @@ def reshape_sympy_matrix(arg, shape):
     return sp.Matrix(*out_shape, lookup)
 
 
-
 class NumpyBackend(Backend):
     def __init__(self, *args, **kwargs):
         super(NumpyBackend, self).__init__(*args, **kwargs)
 
     def native_types(self) -> Tuple[Type]:
-        return np.ndarray, np.int32, np.int64, np.float64, np.float32, float, complex, int
+        return (
+            np.ndarray,
+            np.int32,
+            np.int64,
+            np.float64,
+            np.float32,
+            float,
+            complex,
+            int,
+        )
 
-    def to_native(self, array: Tensor) -> ArrayLike:
+    def to_numpy_array(self, array) -> ArrayLike:
         return array
 
-    def from_native(self, array: ArrayLike) -> Tensor:
+    def to_backend_array(self, array: ArrayLike):
         return array
 
     def reshape(self, arg, dim: Dimension):
@@ -123,9 +130,9 @@ class NumpyBackend(Backend):
                 return arg
             else:
                 try:
-                    inner, = arg
+                    (inner,) = arg
                 except ValueError as ex:
-                    raise TypeError(f'Expecting a scalar, got {arg}') from ex
+                    raise TypeError(f"Expecting a scalar, got {arg}") from ex
                 return self.reshape(inner, dim)
         elif isinstance(arg, (sp.Matrix, sp.Array, sp.MatrixSlice)):
             if arg.shape == dim.dim:
@@ -148,13 +155,12 @@ class NumpyBackend(Backend):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
 
-
     def build_optimisation_problem(
         self,
         cost: Tracer,  # cost
         constraints: List[Expression],
         arguments: List[Tracer],
-        outputs: List[Tracer]
+        outputs: List[Tracer],
     ):
 
         impl = None
@@ -174,17 +180,13 @@ class NumpyBackend(Backend):
         # c_i = X^T Q_i X + P_i X + R_i + N_i(Z)
 
         arg_indexes = {a.index for a in arguments}
-        decision_variables = [
-            i for i in tape.input_indicies if i not in arg_indexes
-        ]
+        decision_variables = [i for i in tape.input_indicies if i not in arg_indexes]
 
         arg_symbols = []
         for i, a in enumerate(arguments):
             shape = (a.shape[0], 1) if len(a.shape) == 1 else a.shape
             assert len(shape) == 2
-            arg_symbols.append(
-                sp.MatrixSymbol(f'p_{i}', *shape)
-            )
+            arg_symbols.append(sp.MatrixSymbol(f"p_{i}", *shape))
 
         n = 0
         mappings = []
@@ -195,65 +197,60 @@ class NumpyBackend(Backend):
             else:
                 flat_dim = reduce(mul, dim)
 
-            mappings.append(
-                (index, dim, (n, flat_dim + n))
-            )
+            mappings.append((index, dim, (n, flat_dim + n)))
             n += flat_dim
 
-        x = sp.Array([sp.symbols(f'x_{i}') for i in range(n)])
+        x = sp.Array([sp.symbols(f"x_{i}") for i in range(n)])
         for idx, dim, (start, stop) in mappings:
-            tape.substitute(idx, (OP.VALUE, x[start: stop]))
+            tape.substitute(idx, (OP.VALUE, x[start:stop]))
 
         workspace = {}
-        cost, = evaluate_inner(
-            tape, arguments, [cost],
-            self, workspace)
+        (cost,) = evaluate_inner(tape, arguments, [cost], self, workspace)
 
         problem_args = [x, *arg_symbols]
         cost_f = sp.lambdify(problem_args, cost)
 
-        cost_jac = lambda a: sp.lambdify(problem_args, jacobian(cost, x))(a).reshape(x.shape)
+        cost_jac = lambda a: sp.lambdify(problem_args, jacobian(cost, x))(a).reshape(
+            x.shape
+        )
         cost_hess = sp.lambdify(problem_args, hessian(cost, x))
 
         out_constriants = []
         for i, constraint in enumerate(constraints):
-            c, = evaluate_inner(
-                    tape, arguments, [constraint.as_halfplane_bound()], self, workspace
-                )
+            (c,) = evaluate_inner(
+                tape, arguments, [constraint.as_halfplane_bound()], self, workspace
+            )
             c_func = sp.lambdify(problem_args, c)
             c_jac = jacobian(c, problem_args)
 
             if not c_jac.free_symbols:
-                c_0 = c_func(
-                    *[np.zeros_like(x_i) for x_i in problem_args]
-                             )
+                c_0 = c_func(*[np.zeros_like(x_i) for x_i in problem_args])
                 this_constraint = sy.optimize.LinearConstraint(
-                   c_jac.evalf(), -c_0, np.inf
+                    c_jac.evalf(), -c_0, np.inf
                 )
             else:
                 this_constraint = sy.optimize.NonlinearConstraint(
-                     sp.lambdify(problem_args, c),
-                        0,  np.inf,
-                        jac=sp.lambdify(problem_args, c_jac),
-                        hess='cs'
+                    sp.lambdify(problem_args, c),
+                    0,
+                    np.inf,
+                    jac=sp.lambdify(problem_args, c_jac),
+                    hess="cs",
                 )
             out_constriants.append(this_constraint)
 
         out_symbols = [
-            evaluate_inner(tape, arguments, [o], self, workspace)
-            for o in outputs
+            evaluate_inner(tape, arguments, [o], self, workspace) for o in outputs
         ]
 
-        out_map = [
-            sp.lambdify(problem_args, o) for o in out_symbols
-        ]
+        out_map = [sp.lambdify(problem_args, o) for o in out_symbols]
 
         def solver(*solver_args):
             x0 = np.zeros(n)
 
             soln = sy.optimize.minimize(
-                cost_f, x0,
-                method='trust-constr',
+                cost_f,
+                x0,
+                method="trust-constr",
                 jac=cost_jac,
                 hess=cost_hess,
                 constraints=out_constriants,
@@ -261,11 +258,10 @@ class NumpyBackend(Backend):
 
             inner_args = [soln.x] + list(*solver_args)
             result = [o(*inner_args)[0] for o in out_map]
-            return [
-                self.from_native(r) for r in result
-            ]
+            return [self.to_backend_array(r) for r in result]
 
         return solver
+
 
 #
 # OP v_1, v_2, v_3
@@ -277,4 +273,3 @@ class NumpyBackend(Backend):
 #
 # if OP is linear
 # -
-

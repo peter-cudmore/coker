@@ -6,27 +6,24 @@ from coker.algebra.kernel import normalise
 
 SE3_BASIS = np.array(
     [
-        [[0, 0, 0],
-         [0, 0, -1],
-         [0, 1, 0]],
-        [[0, 0, 1],
-         [0, 0, 0],
-         [-1, 0, 0]],
-        [[0, -1, 0],
-         [1, 0, 0],
-         [0, 0, 0]]
+        [[0, 0, 0], [0, 0, -1], [0, 1, 0]],
+        [[0, 0, 1], [0, 0, 0], [-1, 0, 0]],
+        [[0, -1, 0], [1, 0, 0], [0, 0, 0]],
     ],
-    dtype=float
+    dtype=float,
 )
 
 e_x = np.array([1, 0, 0])
 e_y = np.array([0, 1, 0])
 e_z = np.array([0, 0, 1])
 
+
 def hat(u: Vec3):
 
     result = SE3_BASIS @ u
     return result
+
+
 #   return np.dot(SE3_BASIS, u)
 
 
@@ -36,7 +33,7 @@ class Rotation3:
         self.angle = angle
 
     def __repr__(self):
-        return f'Rotation3({repr(self.axis)}, {repr(self.angle)})'
+        return f"Rotation3({repr(self.axis)}, {repr(self.angle)})"
 
     @staticmethod
     def zero():
@@ -63,13 +60,13 @@ class Rotation3:
         except NotImplementedError:
             pass
         u, r = normalise(q.v)
-        theta =2 * np.arctan2(r, q.q_0)
-#        theta = 2 * np.arccos(q.q_0)
-#        r = np.sqrt(1 - q.q_0 * q.q_0)  # sin(theta/2)
-#        u = q.v / r
+        theta = 2 * np.arctan2(r, q.q_0)
+        #        theta = 2 * np.arccos(q.q_0)
+        #        r = np.sqrt(1 - q.q_0 * q.q_0)  # sin(theta/2)
+        #        u = q.v / r
         return Rotation3(axis=u, angle=theta)
 
-    def __mul__(self, other: 'Rotation3'):
+    def __mul__(self, other: "Rotation3"):
         q_1 = self.as_quaternion()
         q_2 = other.as_quaternion()
 
@@ -78,7 +75,11 @@ class Rotation3:
         return Rotation3.from_quaterion(q_21)
 
     def __eq__(self, other):
-        return isinstance(other, Rotation3) and (self.axis == other.axis).all() and self.angle == other.angle
+        return (
+            isinstance(other, Rotation3)
+            and (self.axis == other.axis).all()
+            and self.angle == other.angle
+        )
 
     def as_matrix(self):
         k = hat(self.axis)
@@ -89,16 +90,18 @@ class Rotation3:
 
 
 class Isometry3:
-    def __init__(self,
-                 rotation: Optional[Rotation3] = None,
-                 translation: Optional[Vec3] = None):
+    def __init__(
+        self, rotation: Optional[Rotation3] = None, translation: Optional[Vec3] = None
+    ):
 
         self.rotation = rotation or Rotation3.zero()
 
-        self.translation = np.array([0, 0, 0], dtype=float) if translation is None else translation
+        self.translation = (
+            np.array([0, 0, 0], dtype=float) if translation is None else translation
+        )
 
     def __repr__(self):
-        return f'Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})'
+        return f"Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})"
 
     def __eq__(self, other):
         return (
@@ -109,22 +112,24 @@ class Isometry3:
 
     @staticmethod
     def identity():
-        return Isometry3(
-            Rotation3.zero(),
-            translation=np.array([0, 0, 0], dtype=float)
-        )
+        return Isometry3(Rotation3.zero(), translation=np.array([0, 0, 0], dtype=float))
 
     def __matmul__(self, other):
         if isinstance(other, Isometry3):
             rotation = self.rotation * other.rotation
-            translation = self.rotation.as_quaternion().conjugate(
-                other.translation
-            ) + self.translation
+            translation = (
+                self.rotation.as_quaternion().conjugate(other.translation)
+                + self.translation
+            )
             return Isometry3(rotation, translation)
         elif isinstance(other, np.ndarray) and other.shape == (3,):
             return self.rotation.as_quaternion().conjugate(other) + self.translation
         elif isinstance(other, np.ndarray) and other.shape == (4, 1):
-            result = np.reshape(self.rotation.as_quaternion().conjugate(other[0:3, 0]) + self.translation, newshape=(3, 1))
+            result = np.reshape(
+                self.rotation.as_quaternion().conjugate(other[0:3, 0])
+                + self.translation,
+                newshape=(3, 1),
+            )
             return np.concatenate([result, other[3:4, 0:1]], axis=0)
 
         raise NotImplementedError()
@@ -153,14 +158,18 @@ class Isometry3:
 
 
 class Screw:
-    __slots__ = ('rotation', 'translation', 'magnitude')
+    __slots__ = ("rotation", "translation", "magnitude")
 
-    def __init__(self,
-                 rotation: Optional[Vec3] = None,
-                 translation: Optional[Vec3] = None,
-                 magnitude: float = 1):
+    def __init__(
+        self,
+        rotation: Optional[Vec3] = None,
+        translation: Optional[Vec3] = None,
+        magnitude: float = 1,
+    ):
         self.rotation = rotation if rotation is not None else np.array([0, 0, 0])
-        self.translation = translation if translation is not None else np.array([0, 0, 0])
+        self.translation = (
+            translation if translation is not None else np.array([0, 0, 0])
+        )
         self.magnitude = magnitude
 
     def __repr__(self):
@@ -186,6 +195,7 @@ class Screw:
     @staticmethod
     def e_x():
         return Screw(translation=e_x.copy())
+
     @staticmethod
     def e_y():
         return Screw(translation=e_y.copy())
@@ -199,7 +209,7 @@ class Screw:
 
         mag = np.linalg.norm(rotation).astype(float).flatten()[0]
 
-        return Screw(rotation/mag, translation / mag, mag)
+        return Screw(rotation / mag, translation / mag, mag)
 
     def to_array(self) -> np.ndarray:
         return np.concatenate([self.rotation, self.translation]) * self.magnitude
@@ -220,7 +230,7 @@ class Screw:
         return Screw(
             rotation=np.array([1, 0, 0], dtype=float),
             translation=np.array([0, 0, 0], dtype=float),
-            magnitude=0
+            magnitude=0,
         )
 
     def __mul__(self, other: Scalar):
@@ -232,10 +242,9 @@ class Screw:
         else:
             alpha = angle
         if (self.rotation == 0).all():
-           return Isometry3(
-               rotation=Rotation3.zero(),
-               translation=self.translation * alpha
-           )
+            return Isometry3(
+                rotation=Rotation3.zero(), translation=self.translation * alpha
+            )
 
         w = hat(self.rotation)
         s = np.sin(alpha)
@@ -260,6 +269,7 @@ class Screw:
             and self.magnitude == other.magnitude
         )
 
+
 class SE3Adjoint:
     def __init__(self, transform: Isometry3):
         self.transform = transform
@@ -273,9 +283,7 @@ class SE3Adjoint:
         translation = hat(p) @ rotation + q.conjugate(zeta.translation)
 
         return Screw(
-            rotation=rotation,
-            translation=translation,
-            magnitude=zeta.magnitude
+            rotation=rotation, translation=translation, magnitude=zeta.magnitude
         )
 
     def transpose(self):
@@ -293,7 +301,7 @@ class SE3Adjoint:
         raise NotImplemented()
 
     def __repr__(self):
-        return f'Adj[{repr(self.transform)}]'
+        return f"Adj[{repr(self.transform)}]"
 
     def __rmatmul__(self, other):
         if isinstance(other, SE3Adjoint):
@@ -328,19 +336,19 @@ class SE3CoAdjoint:
         return np.concatenate([row_1, row_2], axis=0)
 
     def __repr__(self):
-        return f'Adj^*[{repr(self.transform)}]'
+        return f"Adj^*[{repr(self.transform)}]"
 
     def apply(self, zeta: Screw) -> Screw:
         q_inv = self.transform.rotation.as_quaternion().inverse()
         p = self.transform.translation
 
         translation = q_inv.conjugate(zeta.translation)
-        rotation = -q_inv.conjugate(hat(p) @ zeta.translation) + q_inv.conjugate(zeta.rotation)
+        rotation = -q_inv.conjugate(hat(p) @ zeta.translation) + q_inv.conjugate(
+            zeta.rotation
+        )
 
         return Screw(
-            rotation=rotation,
-            translation=translation,
-            magnitude=zeta.magnitude
+            rotation=rotation, translation=translation, magnitude=zeta.magnitude
         )
 
     def __matmul__(self, other):
@@ -362,18 +370,15 @@ class se3Adjoint:
 
     def apply(self, other: Screw) -> Screw:
         w = np.cross(self.vector.rotation, other.rotation)
-        v = np.cross(self.vector.translation, other.rotation) \
-            - np.cross(self.vector.rotation, other.translation)
+        v = np.cross(self.vector.translation, other.rotation) - np.cross(
+            self.vector.rotation, other.translation
+        )
 
         m = self.vector.magnitude * other.magnitude
 
-        return Screw(
-            translation=v,
-            rotation=w,
-            magnitude=m
-        )
+        return Screw(translation=v, rotation=w, magnitude=m)
 
-    def transpose(self) -> 'se3CoAdjoint':
+    def transpose(self) -> "se3CoAdjoint":
         return se3CoAdjoint(self.vector)
 
     def __matmul__(self, other: Screw):
@@ -392,18 +397,15 @@ class se3CoAdjoint:
         return self.apply(other)
 
     def apply(self, other: Screw) -> Screw:
-        w = np.cross(self.vector.rotation, other.rotation) \
-            + np.cross(self.vector.translation, other.translation)
+        w = np.cross(self.vector.rotation, other.rotation) + np.cross(
+            self.vector.translation, other.translation
+        )
 
         v = np.cross(self.vector.rotation, other.translation)
 
         m = self.vector.magnitude * other.magnitude
 
-        return Screw(
-            translation=-v,
-            rotation=-w,
-            angle=m
-        )
+        return Screw(translation=-v, rotation=-w, angle=m)
 
     def transpose(self) -> se3Adjoint:
         return se3Adjoint(self.vector)
@@ -411,6 +413,8 @@ class se3CoAdjoint:
 
 def se3_bracket(left: Screw, right: Screw) -> Screw:
     w = np.cross(left.rotation, right.rotation)
-    v = np.cross(left.rotation, right.translation) - np.cross(right.rotation, left.translation)
+    v = np.cross(left.rotation, right.translation) - np.cross(
+        right.rotation, left.translation
+    )
 
     return Screw(translation=v, rotation=w, angle=right.magnitude * left.magnitude)

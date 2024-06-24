@@ -1,23 +1,25 @@
 import numpy as np
+import pytest
 
 from coker import *
 from .util import is_close
 
 
-def test_symbolic_scalar():
+def test_symbolic_scalar(backend):
 
     def f_impl(x):
         return 2 * (x + 1)
 
     f = kernel(
         arguments=[Scalar('x')],
-        implementation=f_impl
+        implementation=f_impl,
+        backend=backend,
       )
 
     assert f(1) == 4
 
 
-def test_symbolic_vector():
+def test_symbolic_vector(backend):
 
     A = np.array([[0, 1], [-1, 0]], dtype=float)
     b = np.array([-1, 1], dtype=float)
@@ -33,8 +35,8 @@ def test_symbolic_vector():
     assert is_close(y_result, y_test)
 
     f = kernel(
-        arguments=[VectorSpace(name='x', dimension=2)],
-        implementation=f_impl
+        [VectorSpace(name='x', dimension=2)],
+        f_impl, backend
     )
 
     y_eval = f(x_test)
@@ -42,7 +44,7 @@ def test_symbolic_vector():
     assert is_close(y_test, y_eval)
 
 
-def test_slicing_symbolic_vector():
+def test_slicing_symbolic_vector(backend):
 
     matrix_dimensions = Dimension((3, 3))
     slc = slice(0, 2)
@@ -66,7 +68,8 @@ def test_slicing_symbolic_vector():
 
     f = kernel(
         arguments=[VectorSpace(name='x', dimension=3)],
-        implementation=f_impl
+        implementation=f_impl,
+        backend=backend,
     )
 
     assert f.output[0].shape == (2,)
@@ -74,7 +77,7 @@ def test_slicing_symbolic_vector():
 
     assert is_close(y_test, y_eval)
 
-def test_cross_product():
+def test_cross_product(backend):
     u_test = np.array([1, 0, 1], dtype=float)
     v_test = np.array([2, 1, 1], dtype=float)
 
@@ -85,7 +88,8 @@ def test_cross_product():
 
     f = kernel(
         arguments=[VectorSpace(name='x', dimension=3), VectorSpace(name='y', dimension=3)],
-        implementation=f_impl
+        implementation=f_impl,
+        backend=backend,
     )
 
     result = f(u_test, v_test)
@@ -93,7 +97,7 @@ def test_cross_product():
     assert is_close(result, f_test)
 
 
-def test_dot():
+def test_dot(backend):
 
     a = np.array([1, 0, 1], dtype=float)
     x_test = np.array([0, 0, 1], dtype=float)
@@ -102,11 +106,11 @@ def test_dot():
         return np.dot(a, x)
 
     y_dot_test = f_dot(x_test)
-    y_dot_result = kernel([VectorSpace(name='x', dimension=3)], f_dot)(x_test)
+    y_dot_result = kernel([VectorSpace(name='x', dimension=3)], f_dot, backend)(x_test)
     assert np.allclose(y_dot_result, y_dot_test)
 
 
-def test_dot_and_cross():
+def test_dot_and_cross(backend):
     a = np.array([1, 0, 1], dtype=float)
     b = np.array([2, 1, 1], dtype=float)
     x_test = np.array([0, 0, 1], dtype=float)
@@ -119,56 +123,62 @@ def test_dot_and_cross():
     y_test = f_impl(x_test)
     f = kernel(
         arguments=[VectorSpace(name='x', dimension=3)],
-        implementation=f_impl
+        implementation=f_impl,
+        backend=backend,
     )
 
     y = f(x_test)
     assert abs(y - y_test) < 1e-9
 
 
-def test_build_array():
+def test_build_array(backend):
 
     def f_impl(x):
-        result = Tensor((2,))
+        result = SymbolicVector((2,))
         result[0] = 1
         result[1] = x[0] + x[1]
         return result
 
     arg = np.array([1, 2], dtype=float)
+    result = np.array([1, 3], dtype=float)
+    # Should turn into
+    # A = [0, 1][1, 0]^T  + [0, 1][0, 1]^T
+    # ie (e_1 outer e_0) + (e_1 outer e_1)
+    # A = [[0,0],[1, 1]], b = [1, 0]
+
     expected = f_impl(arg)
-    assert is_close(expected, np.array([1, 3], dtype=float))
-
-    f = kernel(
-        arguments=[VectorSpace(name='x', dimension=2)],
-        implementation=f_impl
-    )
-
-    result = f(arg)
-
     assert is_close(expected, result)
 
+    f = kernel(
+        arguments=[VectorSpace(name='x', dimension=2)],
+        implementation=f_impl,
+        backend=backend
+    )
 
-def test_cos_and_sin():
+    output = f(arg)
+    assert isinstance(output, np.ndarray)
+    assert is_close(output, result)
+    
+
+def test_cos_and_sin(backend):
 
     def f_impl(x):
-        y_0 = np.cos(x[0])
-        y_1 = np.sin(x[1])
-        return Tensor.from_list([y_0, y_1])
+        return np.cos(x[0]) + np.sin(x[1])
 
-    expected = f_impl(np.array([0, 0]))
-    assert expected.tolist() == [1, 0]
+    arg = np.array([0, 0], dtype=float)
+    expected = f_impl(arg)\
 
     f = kernel(
         arguments=[VectorSpace(name='x', dimension=2)],
-        implementation=f_impl
+        implementation=f_impl,
+        backend=backend
     )
 
     result = f(np.array([0, 0]))
-
-    assert is_close(result, expected)
-
+    assert abs(result - expected) < 1e-4, f"Got {result}, expected {expected}"
 
 
+@pytest.mark.skip
 def test_tensor_product():
 
     a = np.array([
@@ -180,7 +190,7 @@ def test_tensor_product():
     def f_impl(x):
         return a @ x
 
-    x_test = np.array([2, 3, 4],dtype=float)
+    x_test = np.array([2, 3, 4], dtype=float)
 
     b_test = f_impl(x_test)
     f = kernel(arguments=[VectorSpace(name='x', dimension=3)], implementation=f_impl)

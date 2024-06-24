@@ -13,8 +13,6 @@ b = np.array([4, 5])
 c = 2
 
 
-
-
 def f_quadratic_layer(x):
     y = A @ x + b
     return y.T @ y + c
@@ -46,16 +44,18 @@ def test_input_layer():
     mapped_input = input_layer(
         0, np.array([1, 2, 3])
     )
-    assert np.allclose(mapped_input, np.array([0,1,2,3]))
+    assert np.allclose(mapped_input, np.array([0, 1, 2, 3]))
 
 
 def test_scalar_weights():
     # Scalar input
     spec = MemorySpec(0, 1)
 
-    w = BilinearWeights(spec, constant=dok_ndarray((1, ), {(0,): 1}))
+    w = BilinearWeights(spec, constant=dok_ndarray((1, 1), {(0, 0): 1}),
+                        shape=(1, 1)
+                        )
 
-    assert w.constant.keys == {(0,): 1}
+    assert w.constant.keys == {(0, 0): 1}
     assert w.constant.toarray() == np.array([1])
     assert w(0) == 1
     assert w(1) == 1
@@ -84,7 +84,6 @@ def test_coker_graph():
     assert dy == (alpha + 2 * beta) * dx
 
 
-@pytest.mark.skip
 def test_coker_vector():
     A = np.array([
         [2, 0, 0,],
@@ -96,8 +95,7 @@ def test_coker_vector():
     test_functions = [
         (lambda x: A @ x + b, lambda x, dx: A @ dx) ,
         (lambda x: np.dot(A @ x, b), lambda x, dx: np.dot(A @ dx, b)),
-        (lambda x: b.T @ np.cos(x), lambda x, dx: - b.T @ (np.sin(x) * dx)),
-        (lambda x: x.T @ x, lambda x, dx: 2 * x.T @ dx)
+        (lambda x: np.dot(b, np.cos(x)), lambda x, dx: - b.T @ (np.sin(x) * dx)),
     ]
 
     for i, (test_function, derivative) in enumerate(test_functions):
@@ -116,16 +114,42 @@ def test_coker_vector():
         assert np.allclose(y, result)
 
 
-@pytest.mark.skip
-def test_sparse_matrix_times_weights():
+def test_sin_cos():
 
-    # create a weights; eg
-    # T(x) = Q(x,x) + Ax + b
-    #
-    # create a sparse matrix
-    # eg. c_hat = hat(c)
-    #
-    # make sure  c_hat @ T(x) makes sense
-    #
+    def f_impl(x):
+        return np.sin(x[0]) + np.cos(x[1])
 
-    assert False
+    f = kernel([VectorSpace('x', 2)], f_impl)
+    g = create_opgraph(f)
+
+    arg = np.array([1, 2])
+
+    assert abs(f(arg) - g(arg)) < 1e-5
+
+
+def test_dot_derivative():
+
+    f, df = lambda x: np.dot(x, x), lambda x, dx: 2 * x.T @ dx
+
+    f_kernel = kernel([VectorSpace('x', 3)], f)
+
+    g = create_opgraph(f_kernel)
+
+    assert len(g.intermediate_layers) == 1
+
+    test_values = [
+        np.array([0, 0, 0]),
+        np.array([1, 0, 0]),
+        np.array([0, 1, 0]),
+        np.array([0, 0, 1]),
+        np.array([1, 1, 1]),
+    ]
+    tangent_vector = np.array([0,1,0])
+    for test_value in test_values:
+        f_v = f(test_value)
+        df_v = df(test_value, tangent_vector)
+        g_v,dg_v = g.push_forward(test_value, tangent_vector)
+
+        assert np.allclose(f_v, g_v)
+
+

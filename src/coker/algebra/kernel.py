@@ -6,18 +6,16 @@ import numpy as np
 from typing import List, Callable, Tuple, Union
 from collections import defaultdict
 
-from coker.algebra.tensor import Tensor
+from coker.algebra.tensor import SymbolicVector
 from coker.algebra.dimensions import Dimension
 from coker.algebra.ops import OP, compute_shape, numpy_atomics, numpy_composites
 
 
-def get_basis(dimension: Dimension , i: int):
-    return np.array([
-        1 if j == i else 0 for j in range(dimension.dim[0])
-    ])
+def get_basis(dimension: Dimension, i: int):
+    return np.array([1 if j == i else 0 for j in range(dimension.dim[0])])
 
 
-def get_projection(dimension:Dimension, slc: slice):
+def get_projection(dimension: Dimension, slc: slice):
     if isinstance(dimension.dim, tuple):
         cols = dimension.dim[0]
     else:
@@ -62,7 +60,7 @@ def get_dim_by_class(arg):
 class ExprOp(enum.Enum):
     LESS_THAN = "<"
     GREATER_THAN = ">"
-    EQUAL = '='
+    EQUAL = "="
 
 
 class Expression:
@@ -80,7 +78,7 @@ class Expression:
         return self.rhs - self.lhs
 
     @property
-    def tape(self) -> 'Tape':
+    def tape(self) -> "Tape":
         l_tape = self.lhs.tape if isinstance(self.lhs, Tracer) else None
         r_tape = self.rhs.tape if isinstance(self.rhs, Tracer) else None
         if l_tape and not r_tape:
@@ -116,13 +114,8 @@ class Tape:
         return op.compute_shape(*dims)
 
     def append(self, op: OP, *args) -> int:
-        args = [
-            strip_symbols_from_array(a) for a in args
-        ]
-        args = [
-            self.insert_value(a) if not isinstance(a, Tracer) else a
-            for a in args
-        ]
+        args = [strip_symbols_from_array(a) for a in args]
+        args = [self.insert_value(a) if not isinstance(a, Tracer) else a for a in args]
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
         self.nodes.append((op, *args))
@@ -130,6 +123,7 @@ class Tape:
         return index
 
     def insert_value(self, arg):
+
         dim = get_dim_by_class(arg)
         idx = len(self.dim)
         self.nodes.append((OP.VALUE, arg))
@@ -193,7 +187,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         if op != OP.VALUE:
             return self.tape.nodes[self.index]
 
-        arg, = args
+        (arg,) = args
         return arg
 
     def __hash__(self):
@@ -243,7 +237,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return Tracer(self.tape, index)
 
     def __rmatmul__(self, other):
-        index = self.tape.append(OP.MATMUL,other, self)
+        index = self.tape.append(OP.MATMUL, other, self)
         return Tracer(self.tape, index)
 
     def __matmul__(self, other):
@@ -310,13 +304,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
             if op == OP.DIV:
                 assert inputs[1] > 0
-                if isinstance(inputs[1],Tracer):
+                if isinstance(inputs[1], Tracer):
                     pass
             index = self.tape.append(op, *inputs)
             return Tracer(self.tape, index)
 
         except KeyError:
-           pass
+            pass
 
         if ufunc == np.less:
             # lhs -> numpy item
@@ -355,18 +349,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def normalise(self):
         norm = self.norm()
         idx = self.tape.append(
-            OP.CASE, norm == 0, np.zeros_like(self.shape),
-            self / norm
+            OP.CASE, norm == 0, np.zeros_like(self.shape), self / norm
         )
         return Tracer(self.tape, idx)
 
-def py_evaluate_tape(kernel, args):
-    from coker.backends.evaluator import evaluate
-
-    return evaluate(kernel, args)
 
 class Kernel:
-    def __init__(self, tape: Tape, outputs: List[Tracer], backend='coker'):
+    def __init__(self, tape: Tape, outputs: List[Tracer], backend="coker"):
         self.tape = tape
         self.backend = backend
         if isinstance(outputs, Tracer):
@@ -388,9 +377,10 @@ class Kernel:
     def __call__(self, *args):
         assert len(args) == len(self.tape.input_indicies)
         # todo: check dimensions
-        #
+        from coker.backends import get_backend_by_name
 
-        output = py_evaluate_tape(self, args)
+        backend = get_backend_by_name(self.backend)
+        output = backend.evaluate(self, args)
         if self.is_single:
             return output[0]
         return output
@@ -399,8 +389,11 @@ class Kernel:
         pass
 
 
-def kernel(arguments: List[Scalar | VectorSpace],
-           implementation: Callable[[Element, ...], Element]):
+def kernel(
+    arguments: List[Scalar | VectorSpace],
+    implementation: Callable[[Element, ...], Element],
+    backend: str = "coker",
+):
     # create symbols
     # call function to construct expression graph
 
@@ -412,10 +405,10 @@ def kernel(arguments: List[Scalar | VectorSpace],
     if isinstance(result, np.ndarray):
         result = strip_symbols_from_array(result)
 
-    if isinstance(result, Tensor):
+    if isinstance(result, SymbolicVector):
         result = result.collapse()
 
-    return Kernel(tape, result)
+    return Kernel(tape, result, backend)
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):
@@ -425,14 +418,18 @@ def strip_symbols_from_array(array: np.ndarray, float_type=float):
 
     symbols = defaultdict(list)
 
-    with np.nditer(array, flags=['refs_ok', 'multi_index'], op_flags=['readwrite']) as it:
+    with np.nditer(
+        array, flags=["refs_ok", "multi_index"], op_flags=["readwrite"]
+    ) as it:
         for x in it:
             try:
                 x[...] = float_type(x)
             except TypeError as e:
 
                 value = x.tolist()
-                assert isinstance(value, Tracer), "Unexpected object in array: {}".format(value)
+                assert isinstance(
+                    value, Tracer
+                ), "Unexpected object in array: {}".format(value)
                 symbols[value].append(it.multi_index)
                 x[...] = 0.0
 

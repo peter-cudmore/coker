@@ -1,15 +1,16 @@
 import numpy as np
 import pytest
 
+
 def is_close(a, b, tolerance=1e-16):
     assert a.shape == b.shape, "shapes don't match"
     return np.linalg.norm(a-b, ord=np.inf) < tolerance
 
 
-def validate_symbolic_call(name, function, arguments, test_set):
+def validate_symbolic_call(name, function, arguments, test_set, backend):
     from coker.algebra.kernel import kernel
 
-    f_test = kernel(implementation=function, arguments=arguments)
+    f_test = kernel(implementation=function, arguments=arguments, backend=backend)
 
     for i, item in enumerate(test_set):
         expected = function(*item)
@@ -20,10 +21,10 @@ def validate_symbolic_call(name, function, arguments, test_set):
         assert are_equal, f"Test {name} failed on item {i}: {item}"
 
 
-def validate_symbolic_call_throws(function, arguments, value_exception_pairs):
+def validate_symbolic_call_throws(function, arguments, value_exception_pairs, backend):
     from coker.algebra.kernel import kernel
 
-    f_test = kernel(implementation=function, arguments=arguments)
+    f_test = kernel(implementation=function, arguments=arguments, backend=backend)
 
     for item, exception in value_exception_pairs:
         with pytest.raises(exception) as ex:

@@ -1,6 +1,7 @@
 from coker import OP, Kernel
 from coker.backends import get_backend_by_name
 
+
 def try_rewrite_mul(nodes: list, atoms, constants, i):
     op, lhs, rhs = nodes[i]
     assert op == OP.MUL
@@ -13,11 +14,11 @@ def try_rewrite_mul(nodes: list, atoms, constants, i):
 
     # Case 2
     #  *(x,x)          ->  *(x, x)
-    if (lhs.index in atoms and rhs.index in atoms):
+    if lhs.index in atoms and rhs.index in atoms:
         return
 
     # Case 2b
-    if (lhs.index in constants and rhs.index in constants):
+    if lhs.index in constants and rhs.index in constants:
         constants.add(i)
         return
 
@@ -42,8 +43,12 @@ def try_rewrite_mul(nodes: list, atoms, constants, i):
     # Case 5
     #  *((a, x), *(b,x)) -> *(ab, *(x,x))
 
-    elif (rhs.index not in atoms and lhs.index in atoms
-            and nodes[rhs.index][0] == op.MUL and nodes[lhs.index][0] == op.MUL):
+    elif (
+        rhs.index not in atoms
+        and lhs.index in atoms
+        and nodes[rhs.index][0] == op.MUL
+        and nodes[lhs.index][0] == op.MUL
+    ):
         _, pll, plr = nodes[lhs.index]
         _, prl, prr = nodes[rhs.index]
         if pll.index in constants and prl.index in constants:
@@ -57,23 +62,22 @@ def try_rewrite_mul(nodes: list, atoms, constants, i):
 def rewrite_graph(kernel: Kernel):
     constants = {}
 
-
     outputs = {o.index for o in kernel.output}
     inputs = set(kernel.tape.input_indicies)
     atoms = inputs.copy()
-    work_set = [
-        i for i in range(len(kernel.tape.nodes)) if i not in inputs
-    ]
+    work_set = [i for i in range(len(kernel.tape.nodes)) if i not in inputs]
     nodes = kernel.tape.nodes
     for i in work_set:
         op, *args = nodes[i]
         if op == OP.VALUE:
-            arg, = args
+            (arg,) = args
             constants[i] = arg
             continue
 
         if all([a.index in constants for a in args]):
-            constants[i] = get_backend_by_name('numpy', set_current=False).call(op, *[constants[a.index] for a in args])
+            constants[i] = get_backend_by_name("numpy", set_current=False).call(
+                op, *[constants[a.index] for a in args]
+            )
             continue
 
         if op == OP.MUL:
@@ -81,4 +85,3 @@ def rewrite_graph(kernel: Kernel):
 
     kernel.tape.nodes = nodes
     return kernel
-

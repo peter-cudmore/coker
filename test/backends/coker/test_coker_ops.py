@@ -4,14 +4,15 @@ import pytest
 from coker.backends.coker.op_impl import *
 from coker.backends.coker.weights import MemorySpec, BilinearWeights
 
+from coker import kernel, VectorSpace
 
 x_symbol = BilinearWeights(
     MemorySpec(0, 3),
-    linear=dok_ndarray.eye(3)
+    linear=dok_ndarray.eye(3),
+    shape=(3,)
 )
 
 
-@pytest.mark.skip
 def test_dot():
 
     a_np = np.array([1, 2, 3])
@@ -23,4 +24,6 @@ def test_dot():
     a, b = [dok_ndarray.fromarray(o) for o in [a_np, b_np]]
 
     assert dot(a, b) == dot_np
+
+
 

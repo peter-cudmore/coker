@@ -45,7 +45,10 @@ def test_matmul_array():
     id_2 = c @ t
 
     id_1_array = id_1.toarray()
+    assert np.allclose(id_1_array, t_test)
+    assert np.allclose(id_2, t_test)
     assert np.allclose(id_1_array, id_2)
+
 
 
 def test_matmul_tensor():
@@ -83,3 +86,33 @@ def test_cross():
     axa = np.cross(a, a)
     axa_test = hat(a) @ a
     assert np.allclose(axa_test.toarray(), axa)
+
+
+
+def test_tensor_products():
+
+    # (4, 4, 1) @ (1,)      -> (4,4)
+    # (n, m, l) @ (l, m)    -> (n,)
+    # (n, m) * (1, l)       -> (n, m, l)
+
+    assert False
+
+
+
+def test_outer_product():
+    a = np.array([[1, 2, 3]])
+    b = dok_ndarray(shape=(3, 1), data={(0, 0): 1, (2, 0): 3})
+    b_array = b.toarray()
+    outer = b @ a
+    assert outer.shape == (3, 3)
+
+    expected = np.outer(b_array, a)
+    actual = (b @ a).toarray()
+
+    assert np.allclose(expected, actual)
+
+    a_dok = dok_ndarray.fromarray(a)
+    ba = b @ a_dok
+    ba_array = ba.toarray()
+    assert np.allclose(ba_array, actual)
+

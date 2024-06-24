@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from coker.toolkits.codesign import ProblemBuilder, Minimise
 from coker import kernel, VectorSpace, Dimension
@@ -9,7 +10,7 @@ def quadratic(x, p, z):
     return x.T @ x + p.T @ p + z ** 2
 
 
-def test_optimisation():
+def test_optimisation(backend):
     # define decision variables
     # objective
     # constraints
@@ -32,7 +33,7 @@ def test_optimisation():
         builder.initial_conditions = [
             2 * np.ones(x.shape), np.ones(p.shape), 4
         ]
-        problem = builder.build()
+        problem = builder.build(backend)
 
     assert not problem.input_shape
     assert problem.output_shape == (Dimension((3,)), Dimension((2,)), Dimension(None))
@@ -45,4 +46,4 @@ def test_optimisation():
 
     assert isinstance(x_val, np.ndarray) and (abs(x_val - x_expected) < 1e-3).all()
     assert isinstance(p_val, np.ndarray) and (abs(p_val) < 1e-3).all()
-    assert abs(z_val ) < 1e-3
+    assert abs(z_val) < 1e-3

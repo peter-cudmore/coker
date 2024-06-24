@@ -1,8 +1,7 @@
-
 class Dimension:
     def __init__(self, tuple_or_none):
         if isinstance(tuple_or_none, int):
-            tuple_or_none = (tuple_or_none, )
+            tuple_or_none = (tuple_or_none,)
 
         assert tuple_or_none is None or isinstance(tuple_or_none, tuple)
         self.dim = tuple_or_none
@@ -16,7 +15,7 @@ class Dimension:
 
     def index_iterator(self, row_major=False):
         if not self.dim:
-            return (0, )
+            return (0,)
 
         mods = []
 
@@ -57,3 +56,8 @@ class Dimension:
 
         return repr(self.dim)
 
+    @property
+    def shape(self):
+        if self.dim is None:
+            return (1,)
+        return self.dim

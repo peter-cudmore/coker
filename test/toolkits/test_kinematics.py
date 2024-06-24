@@ -1,8 +1,4 @@
-import numpy as np
-import pytest
-
 from coker.algebra.kernel import kernel, VectorSpace
-from coker.toolkits.spatial import Screw, Isometry3, SE3Adjoint
 from coker.toolkits.kinematics import *
 # Test based on 3-link open-chain manipulator
 # from Murry Et. Al
@@ -203,7 +199,7 @@ def build_three_link_model():
     return model
 
 
-def test_pe():
+def test_pe(backend):
     model = build_three_link_model()
 
     def murray_V(angles):
@@ -227,7 +223,8 @@ def test_pe():
 
     v_kernel = kernel(
         [VectorSpace('q', 3)],
-        lambda a: model.potential_energy(angles=a, gravity_vector=np.array([0, 0, -9.8]).T)
+        lambda a: model.potential_energy(angles=a, gravity_vector=np.array([0, 0, -9.8]).T),
+        backend
     )
 
     assert v_kernel(q) == v
@@ -560,7 +557,7 @@ def build_double_pendulum():
     return model, double_pendulum_dynamics
 
 
-def test_double_pendulum():
+def test_double_pendulum(backend):
     model, dynamics = build_double_pendulum()
     g = np.array([0, 0, -9.8])
 
@@ -570,7 +567,7 @@ def test_double_pendulum():
 
         return 0.5 * np.dot(dq, m @ dq) - v
 
-    f = kernel([VectorSpace('q', 2), VectorSpace('dq', 2)], lagrange_impl)
+    f = kernel([VectorSpace('q', 2), VectorSpace('dq', 2)], lagrange_impl, backend)
     test_scenarios = [
         (np.array([0, np.pi / 2]), np.zeros((2,)), np.zeros((2,))),
         (np.array([0, np.pi/2]), np.zeros((2,)), np.zeros((2,))),

@@ -6,7 +6,7 @@ import numpy as np
 
 from coker import Dimension
 from coker.algebra.kernel import Tape, Tracer, VectorSpace, Scalar
-from coker.backends import get_current_backend
+from coker.backends import get_backend_by_name, get_current_backend
 
 
 @dataclasses.dataclass
@@ -20,11 +20,12 @@ class Minimise:
 
 
 class MathematicalProgram:
-    def __init__(self,
-                 input_shape: Tuple[Dimension, ...],
-                 output_shape: Tuple[Dimension, ...],
-                 impl: Callable
-                 ):
+    def __init__(
+        self,
+        input_shape: Tuple[Dimension, ...],
+        output_shape: Tuple[Dimension, ...],
+        impl: Callable,
+    ):
 
         self.input_shape = input_shape
         self.output_shape = output_shape
@@ -54,7 +55,9 @@ class ProblemBuilder:
             initial_value = 0 if initial_value is None else initial_value
         else:
             v = self.tape.input(VectorSpace(name, shape))
-            initial_value = np.zeros(shape=shape) if initial_value is None else initial_value
+            initial_value = (
+                np.zeros(shape=shape) if initial_value is None else initial_value
+            )
 
         self.initial_conditions[v] = initial_value
         return v
@@ -67,18 +70,22 @@ class ProblemBuilder:
     def output_shape(self) -> Tuple[Dimension, ...]:
         return tuple(o.dim for o in self.outputs)
 
-    def build(self) -> MathematicalProgram:
+    def build(self, backend: Optional[str] = None) -> MathematicalProgram:
         assert isinstance(self.objective, Minimise)
         assert self.tape is not None
         assert self.outputs
 
-        backend = get_current_backend()
+        backend = (
+            get_backend_by_name(backend)
+            if backend is not None
+            else get_current_backend()
+        )
 
         impl = backend.build_optimisation_problem(
             self.objective.expression,  # cost
             self.constraints,
             self.arguments,
-            self.outputs
+            self.outputs,
         )
 
         return MathematicalProgram(self.input_shape, self.output_shape, impl)
@@ -94,9 +101,3 @@ class ProblemBuilder:
 
 def norm(arg, order=2):
     pass
-
-
-
-
-
-

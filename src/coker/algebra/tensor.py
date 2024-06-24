@@ -1,7 +1,7 @@
 import numpy as np
 
 
-class Tensor:
+class SymbolicVector:
     def __init__(self, shape, data=None, symbolics=None):
 
         self.shape = shape
@@ -12,11 +12,11 @@ class Tensor:
     def from_array(array: np.ndarray):
 
         assert array.dtype != np.object_, f"{array}"
-        return Tensor(array.shape, array)
+        return SymbolicVector(array.shape, array)
 
     @staticmethod
     def zeros(shape):
-        return Tensor(shape)
+        return SymbolicVector(shape)
 
     def __setitem__(self, key, value):
         if isinstance(key, int):
@@ -59,11 +59,12 @@ class Tensor:
         for key, value in self.symbolics.items():
             p = projector_from_key(self.shape, key)
             out += value * p
+
         return out
 
     @staticmethod
     def from_list(data):
-        shape = (len(data), )
+        shape = (len(data),)
         dense = np.zeros(shape)
         symbols = {}
 
@@ -80,7 +81,7 @@ class Tensor:
         if not symbols:
             return dense
         else:
-            return Tensor(shape, dense, symbols)
+            return SymbolicVector(shape, dense, symbols)
 
 
 def projector_from_key(shape, key):

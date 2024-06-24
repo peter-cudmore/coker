@@ -35,6 +35,15 @@ class OP(enum.Enum):
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
 
+    def is_linear(self):
+        return self in {OP.ADD, OP.SUB, OP.TRANSPOSE, OP.NEG}
+
+    def is_bilinear(self):
+        return self in {OP.MUL, OP.MATMUL, OP.CROSS, OP.DOT}
+
+    def is_nonlinear(self):
+        return not self.is_linear() and not self.is_bilinear()
+
 
 class Operator:
     def pre_process(self, *args):
@@ -43,12 +52,24 @@ class Operator:
     def compute_shape(self, *dims: Dimension) -> Dimension:
         raise NotImplementedError
 
+    def is_linear(self):
+        raise NotImplementedError
+
+    def is_bilinear(self):
+        return False
+
+    def is_nonlinear(self):
+        return not self.is_linear() and not self.is_bilinear()
+
 
 class ConcatenateOP(Operator):
-    __slots__ = ('axis', )
+    __slots__ = ("axis",)
 
     def __init__(self, axis=0):
         self.axis = axis
+
+    def is_linear(self):
+        return True
 
     def pre_process(self, *args):
 
@@ -60,8 +81,7 @@ class ConcatenateOP(Operator):
         out_dims = list(dims[0].dim)
         for d in dims[1:]:
             assert all(
-                d.dim[i] == out_dims[i] for i in range(len(out_dims))
-                if i != self.axis
+                d.dim[i] == out_dims[i] for i in range(len(out_dims)) if i != self.axis
             )
             out_dims[self.axis] += d.dim[self.axis]
 
@@ -75,6 +95,9 @@ class ReshapeOP(Operator):
     def compute_shape(self, dim: Dimension) -> Dimension:
         return Dimension(self.newshape)
 
+    def is_linear(self):
+        return True
+
 
 class NormOP(Operator):
     def __init__(self, ord=2):
@@ -83,8 +106,8 @@ class NormOP(Operator):
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return Dimension(None)
 
-
-
+    def is_linear(self):
+        return False
 
 
 compute_shape: Dict[OP, Callable[[Dimension, Dimension], Dimension]] = {}
@@ -100,7 +123,9 @@ def register_shape(*ops: OP):
     return inner
 
 
-@register_shape(OP.VALUE, OP.NEG, OP.ABS)
+@register_shape(
+    OP.VALUE, OP.NEG, OP.ABS, OP.SIN, OP.COS, OP.TAN, OP.ARCSIN, OP.ARCCOS, OP.ARCTAN
+)
 def dimension_identity(dim: Dimension):
     return dim
 
@@ -121,8 +146,10 @@ def shape_mul(d_1: Dimension, d_2: Dimension):
     if d_2.is_scalar() or d_2.dim == 1:
         return d_1
 
-    raise InvalidArgument("Multiplication is not define between two non-scalars. "
-                          "Consider using other operations")
+    raise InvalidArgument(
+        "Multiplication is not define between two non-scalars. "
+        "Consider using other operations"
+    )
 
 
 @register_shape(OP.MATMUL)
@@ -159,7 +186,7 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
         return Dimension(None)
 
 
-@register_shape(OP.SIN, OP.COS, OP.TAN, OP.ARCCOS, OP.ARCSIN, OP.EXP, OP.SQRT)
+@register_shape(OP.EXP, OP.SQRT)
 def scalar_shape(d: Dimension):
     if d.is_scalar():
         return d
@@ -218,15 +245,12 @@ numpy_atomics = {
     np.arcsin: OP.ARCSIN,
     np.sqrt: OP.SQRT,
     np.negative: OP.NEG,
-    np.abs: OP.ABS
+    np.abs: OP.ABS,
 }
-
-
 
 
 numpy_composites = {
     np.concatenate: ConcatenateOP,
     np.reshape: ReshapeOP,
-    np.linalg.norm: NormOP
+    np.linalg.norm: NormOP,
 }
-

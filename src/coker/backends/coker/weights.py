@@ -1,42 +1,61 @@
-
+from typing import Tuple
+from functools import reduce
 from coker import Dimension
 from coker.backends.coker.memory import MemorySpec
-from coker.backends.coker.sparse_tensor import dok_ndarray, scalar, tensor_vector_product
+from coker.backends.coker.sparse_tensor import (
+    dok_ndarray,
+    scalar,
+    tensor_vector_product,
+    cast_vector,
+)
 import numpy as np
 
 
 def dense_array_cast(x):
     if isinstance(x, scalar):
         return np.array([x])
-
     return x
-
 
 
 class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
-    def __init__(self, memory: MemorySpec, constant=None, linear=None, quadratic=None):
+    def __init__(
+        self,
+        memory: MemorySpec,
+        shape: Tuple[int, ...],
+        constant=None,
+        linear=None,
+        quadratic=None,
+    ):
         self.memory = memory
 
-        out_shape = {m.shape[0] for m in [constant, linear, quadratic] if m is not None}
-        assert out_shape, f"Cannot create weights with no arguments"
-        assert len(out_shape) == 1, f"Weights have inconsistent shapes"
-        s, = out_shape
-        self.dimension = s
-        self.linear = dok_ndarray.from_maybe(linear, expected_shape=(s, memory.count))
-        self.constant = dok_ndarray.from_maybe(constant, expected_shape=(s, ))
-        self.quadratic = dok_ndarray.from_maybe(quadratic, expected_shape=(s, memory.count, memory.count))
+        assert isinstance(shape, tuple)
+        self.shape = shape
+
+        self.constant = dok_ndarray.from_maybe(constant, expected_shape=shape)
+        self.linear = dok_ndarray.from_maybe(
+            linear, expected_shape=(*shape, memory.count)
+        )
+        self.quadratic = dok_ndarray.from_maybe(
+            quadratic, expected_shape=(*shape, memory.count, memory.count)
+        )
 
     def __call__(self, x):
         x_v = dense_array_cast(x)
-        qxx = (self.quadratic @ (x_v, x_v)).toarray()
+        try:
+            qxx = (self.quadratic @ (x_v, x_v)).toarray()
+        except TypeError as ex:
+            raise ex
+
         ax = (self.linear @ x_v).toarray()
 
         c = self.constant.toarray()
         return c + ax + qxx
 
     def diff(self, x):
-        dq = tensor_vector_product(self.quadratic, x, axis=1) + tensor_vector_product(self.quadratic, x, axis=2)
+        dq = tensor_vector_product(self.quadratic, x, axis=1) + tensor_vector_product(
+            self.quadratic, x, axis=2
+        )
 
         return dq + self.linear
 
@@ -45,13 +64,13 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         dx = dense_array_cast(dx)
 
         dw = self.diff(x)
-        qx = self.quadratic @ x
+        qxx = self.quadratic @ (x, x)
         lx = self.linear @ x
-        w = self.constant.clone() + lx + qx @ x
+        w = self.constant.clone() + lx + qxx
         return w.toarray(), (dw @ dx).toarray()
 
     def is_scalar(self):
-        return self.dimension == 1
+        return self.shape == (1,)
 
     def is_constant(self):
         return not self.linear.keys and not self.quadratic.keys
@@ -67,7 +86,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             assert isinstance(arg, int)
             n = arg
         a = dok_ndarray.eye(n)
-        b = np.zeros((n,))
+        b = np.zeros((n, 1))
         Q = dok_ndarray.zeros((n, n, n))
         return BilinearWeights(a, b, Q)
 
@@ -76,24 +95,56 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             constant = other * self.constant
             linear = other * self.linear
             quadratic = other * self.quadratic
-            return BilinearWeights(self.memory, constant=constant, linear=linear, quadratic=quadratic)
+            return BilinearWeights(
+                self.memory,
+                shape=self.shape,
+                constant=constant,
+                linear=linear,
+                quadratic=quadratic,
+            )
 
-        if self.is_scalar() and isinstance(other, BilinearWeights):
-            assert self.memory == other.memory, f"Cannot multiply weights with different source"
-            if self.is_constant():
-                return float(self.constant) * other
-            if other.is_constant() and other.is_scalar():
-                return float(other.constant) * self
+        try:
+            assert all(s == 1 for s in other.shape) and not isinstance(
+                other, BilinearWeights
+            )
+            return float(other) * self
+        except (AttributeError, AssertionError):
+            pass
 
-            if self.is_linear() and other.is_linear():
-                result = float(self.constant) * other
-                result.quadratic = dok_ndarray((1,1,1), {(0,0,0): float(self.linear) * float(other.linear)})
-                return result
+        if self.is_scalar():
+            if isinstance(other, BilinearWeights):
+                assert (
+                    self.memory == other.memory
+                ), f"Cannot multiply weights with different source"
+                if self.is_constant():
+                    return float(self.constant) * other
+                if other.is_constant() and other.is_scalar():
+                    return float(other.constant) * self
 
+                if self.is_linear() and other.is_linear():
+                    result = float(self.constant) * other
+                    result.quadratic = dok_ndarray(
+                        (1, 1, 1), {(0, 0, 0): float(self.linear) * float(other.linear)}
+                    )
+                    return result
 
-        raise TypeError(f'Cannot multiply {self} by {type(other)}')
+            if isinstance(other, (np.ndarray, dok_ndarray)):
+                other = dok_ndarray.fromarray(other)
+                constants = float(self.constant) * other
+
+                # Other : (l, m)
+                # self.linear: Array(1, n),         ->          (l, m, n)
+                # self.quadratic : Array(1, n, n)   ->          (l, m, n, n)
+                # linear =
+                linear = outer_product(other, self.linear)
+                quadratic = outer_product(other, self.quadratic)
+                return BilinearWeights(
+                    self.memory, other.shape, constants, linear, quadratic
+                )
+        raise TypeError(f"Cannot multiply {self} by {type(other)}")
 
     def __rmul__(self, other):
+        assert isinstance(other, scalar)
         return self.__mul__(other)
 
     def __add__(self, other):
@@ -101,11 +152,18 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             linear = self.linear.clone()
             constant = self.constant + other
             quadratic = self.quadratic.clone()
-            return BilinearWeights(self.memory, constant=constant, linear=linear, quadratic=quadratic)
+            return BilinearWeights(
+                self.memory,
+                self.shape,
+                constant=constant,
+                linear=linear,
+                quadratic=quadratic,
+            )
         elif isinstance(other, BilinearWeights):
             assert self.memory == other.memory
             return BilinearWeights(
                 self.memory,
+                self.shape,
                 self.constant + other.constant,
                 self.linear + other.linear,
                 self.quadratic + other.quadratic,
@@ -113,31 +171,41 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         elif isinstance(other, np.ndarray):
             return BilinearWeights(
                 self.memory,
+                self.shape,
                 self.constant + dok_ndarray.fromarray(other),
                 self.linear.clone(),
-                self.quadratic.clone()
+                self.quadratic.clone(),
             )
 
-        raise TypeError(f'Cannot add {type(other)}')
+        raise TypeError(f"Cannot add {type(other)}")
 
     def __sub__(self, other):
         if isinstance(other, scalar):
             linear = self.linear.clone()
             constant = self.constant - other
             quadratic = self.quadratic.clone()
-            return BilinearWeights(self.memory, constant=constant, linear=linear, quadratic=quadratic)
+            return BilinearWeights(
+                self.memory,
+                self.shape,
+                constant=constant,
+                linear=linear,
+                quadratic=quadratic,
+            )
         elif isinstance(other, BilinearWeights):
             assert self.memory == other.memory
             return BilinearWeights(
                 self.memory,
+                self.shape,
                 self.constant - other.constant,
                 self.linear - other.linear,
                 self.quadratic - other.quadratic,
             )
-        raise TypeError(f'Cannot add {type(other)}')
+        raise TypeError(f"Cannot add {type(other)}")
 
     def __neg__(self):
-        return BilinearWeights(self.memory, -self.constant, -self.linear, -self.quadratic)
+        return BilinearWeights(
+            self.memory, self.shape, -self.constant, -self.linear, -self.quadratic
+        )
 
     def __rmatmul__(self, other):
 
@@ -145,30 +213,96 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             constant = other @ self.constant
             linear = other @ self.linear
             quadratic = other @ self.quadratic
+            shape = constant.shape
+            return BilinearWeights(self.memory, shape, constant, linear, quadratic)
 
-            return BilinearWeights(self.memory, constant, linear, quadratic)
-
-        raise TypeError(f'Cannot matmul {type(other)}')
+        raise TypeError(f"Cannot matmul {type(other)}")
 
     def __matmul__(self, other):
         assert isinstance(other, BilinearWeights) and other.memory is self.memory
 
+    def clone(self):
+        return BilinearWeights(
+            self.memory,
+            self.shape,
+            self.constant.clone(),
+            self.linear.clone(),
+            self.quadratic.clone(),
+        )
+
     def __array_ufunc__(self, ufunc, method, args, out=None):
-        if ufunc == np.matmul and method == '__call__':
+        if ufunc == np.matmul and method == "__call__":
             return self.__rmatmul__(args)
+        if ufunc == np.multiply and method == "__call__":
+            if self.is_scalar():
+                return self.__mul__(args)
+
+        if ufunc == np.add and method == "__call__":
+            return self.__add__(args)
+
+        if ufunc == np.subtract and method == "__call__":
+            if self.is_scalar() and isinstance(args, scalar):
+                if self.constant.is_empty():
+                    constant = dok_ndarray((1, 1), {(0, 0): -args})
+                else:
+                    constant = self.constant.clone()
+                    constant[(0, 0)] = args - constant[(0, 0)]
+                linear = -self.linear
+                quadratic = -self.quadratic
+
+                return BilinearWeights(
+                    self.memory, self.shape, constant, linear, quadratic
+                )
 
         raise NotImplementedError
 
-    def dot(self, rhs: 'BilinearWeights'):
+    def __truediv__(self, other):
+        if not isinstance(other, scalar):
+            raise TypeError(f"Cannot divide {self} by {type(other)}")
+
+        return BilinearWeights(
+            self.memory,
+            self.shape,
+            self.constant / other,
+            self.linear / other,
+            self.quadratic / other,
+        )
+
+    def dot(self, rhs: "BilinearWeights"):
 
         assert self.memory == rhs.memory
         c = self.constant.T @ rhs.constant
         l = self.linear.T @ rhs.constant + self.constant.T @ rhs.linear
-        q = self.linear.T @ rhs.linear + self.constant.T @ rhs.quadratic + self.constant.T @ rhs.quadratic
+        q = (
+            self.linear.T @ rhs.linear
+            + self.constant.T @ rhs.quadratic
+            + self.constant.T @ rhs.quadratic
+        )
 
         #        cubic = self.linear.T @ rhs.quadratic + rhs.linear.T @ self.quadratic
 
+        return BilinearWeights(self.memory, c.shape, c, l, q)
 
-        return BilinearWeights(self.memory, c,l, q)
+    @staticmethod
+    def identity2(memory: MemorySpec, shape: Tuple[int, ...]):
+
+        data = {}
+        for i in range(memory.count):
+            key = np.unravel_index(i, shape, order="F")
+            data[(*key, i)] = 1
+
+        linear = dok_ndarray((*shape, 1), data)
+
+        return BilinearWeights(memory, shape, linear=linear)
 
 
+def outer_product(lhs: dok_ndarray, rhs: dok_ndarray):
+    assert rhs.shape[0] == 1
+    shape = (*lhs.shape, *rhs.shape[1:])
+    data = {}
+    for k_l, v_l in lhs.keys.items():
+        for k_r, v_r in rhs.keys.items():
+            key = tuple((*k_l, *k_r[1:]))
+            data[key] = v_l * v_r
+
+    return dok_ndarray(shape, data)

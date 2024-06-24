@@ -112,7 +112,7 @@ def test_prismatic_screw():
     assert is_close(actual, expected_matrix,  1e-6)
 
 
-def test_symbolic_isometries():
+def test_symbolic_isometries(backend):
     from coker.algebra.kernel import Scalar
     from coker.toolkits.spatial import Isometry3, Rotation3
 
@@ -131,7 +131,8 @@ def test_symbolic_isometries():
         'test_translation',
         translation,
         [Scalar('x')],
-        test_set)
+        test_set,
+        backend)
 
     def rotation(theta):
         r = Rotation3(axis=np.array([0, 0, 1]), angle=theta)
@@ -147,7 +148,7 @@ def test_symbolic_isometries():
         'test_rotation',
         rotation,
         [Scalar('x')],
-        test_set)
+        test_set, backend)
 
     def combined(x, theta):
         p = np.array([x, 0, 0])
@@ -164,7 +165,7 @@ def test_symbolic_isometries():
     validate_symbolic_call('test_isometry',
                            combined,
                            [Scalar('x'), Scalar('theta')],
-                           test_set)
+                           test_set, backend)
 
 
 def test_as_matrix():

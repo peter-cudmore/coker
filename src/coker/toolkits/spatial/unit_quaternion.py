@@ -2,6 +2,7 @@ import numpy as np
 from coker.toolkits.spatial.types import Vec3, Scalar
 from coker.algebra.kernel import Tracer
 
+
 def quaternion_mul(q, p):
 
     qp_0 = q.q_0 * p.q_0 - np.dot(q.v, p.v)
@@ -14,16 +15,18 @@ def quaternion_mul(q, p):
 
 
 class UnitQuaternion:
-    __slots__ = ['q_0', 'v']
+    __slots__ = ["q_0", "v"]
 
     def __init__(self, q_0: Scalar, v: Vec3):
         self.q_0 = q_0
         self.v = v
 
     def __eq__(self, other):
-        return (isinstance(other, UnitQuaternion)
-                and self.q_0 == other.q_0
-                and (self.v == other.v).all())
+        return (
+            isinstance(other, UnitQuaternion)
+            and self.q_0 == other.q_0
+            and (self.v == other.v).all()
+        )
 
     @staticmethod
     def from_axis_angle(axis: Vec3, angle: Scalar):
@@ -37,7 +40,7 @@ class UnitQuaternion:
         v = s * axis / np.linalg.norm(axis)
         return UnitQuaternion(q_0, v)
 
-    def __mul__(self, other) -> 'UnitQuaternion':
+    def __mul__(self, other) -> "UnitQuaternion":
         if isinstance(other, UnitQuaternion):
             return quaternion_mul(self, other)
 
@@ -72,9 +75,10 @@ class UnitQuaternion:
             result = qpq_inv.v
             return np.reshape(result, newshape=other.shape)
 
-        raise NotImplementedError(f"Quaternion conjugation not implemented for {type(other)}")
+        raise NotImplementedError(
+            f"Quaternion conjugation not implemented for {type(other)}"
+        )
 
     @staticmethod
     def from_elements(q_0, q_1, q_2, q_3):
         return UnitQuaternion(q_0, np.array([q_1, q_2, q_3]))
-

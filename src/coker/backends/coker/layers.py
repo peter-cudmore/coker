@@ -12,7 +12,7 @@ import numpy as np
 
 def vec(item):
     if isinstance(item, np.ndarray):
-        return item.flatten(order='F')
+        return item.flatten(order="F")
     if isinstance(item, (int, float)):
         return np.array([item])
     raise NotImplementedError(type(item))
@@ -20,15 +20,14 @@ def vec(item):
 
 class InputLayer:
     def __init__(self):
-
-        """ maps such that arg_i = map_i(x)
+        """maps such that arg_i = map_i(x)
 
         - For scalars; map_i is a linear operator
         - For vector; map_i is a matrix
 
 
         """
-        self.vec_to_arg_maps: List[Set[Tuple[int,...]]] = []
+        self.vec_to_arg_maps: List[Set[Tuple[int, ...]]] = []
         self.out_shape = []
         self.dimension = 0
 
@@ -37,7 +36,7 @@ class InputLayer:
         if dim.is_scalar():
             self.vec_to_arg_maps.append({(0, self.dimension)})
             self.dimension += 1
-            self.out_shape.append((1, ))
+            self.out_shape.append((1,))
         else:
             basis = set()
             for i, idx in enumerate(dim.index_iterator(row_major=False)):
@@ -49,7 +48,7 @@ class InputLayer:
                 basis.add((*idx, self.dimension))
                 self.dimension += 1
             self.vec_to_arg_maps.append(basis)
-            self.out_shape.append((*dim, ))
+            self.out_shape.append((*dim,))
 
         return idx
 
@@ -80,9 +79,9 @@ class InputLayer:
         """
         n_args = len(self.vec_to_arg_maps)
         assert len(tangent_space) == 2 * n_args
-        dx = tangent_space[n_args:2 * n_args]
+        dx = tangent_space[n_args : 2 * n_args]
 
-        return np.concatenate([vec(dx_i) for dx_i in dx ])
+        return np.concatenate([vec(dx_i) for dx_i in dx])
 
 
 class OutputLayer:
@@ -101,6 +100,7 @@ class OutputLayer:
 
         def shape_fn(array):
             return np.reshape(array, shape.dim)
+
         self.outputs[memory] = shape_fn
 
     def call(self, context: Dict[MemorySpec, np.ndarray]):
@@ -116,7 +116,9 @@ class GenericLayerOP:
         self.weights = weights
         self.output = output
 
-        assert all(isinstance(w, BilinearWeights) for w in weights),  f"Unkown type in {weights}"
+        assert all(
+            isinstance(w, BilinearWeights) for w in weights
+        ), f"Unkown type in {weights}"
 
     def inputs(self) -> List[MemorySpec]:
         return [w.memory for w in self.weights]
@@ -125,23 +127,31 @@ class GenericLayerOP:
         return [self.output]
 
     def __call__(self, *x):
-        backend = get_backend_by_name('numpy', set_current=False)
+        backend = get_backend_by_name("numpy", set_current=False)
         x = [w_i(x_i) for w_i, x_i in zip(self.weights, x)]
-        return backend.call(self.op,*x)
+        return backend.call(self.op, *x)
 
     def push_forward(self, *tangent_space):
         n = len(self.weights)
         x, dx = tangent_space[0:n], tangent_space[n:]
         y = self(*x)
 
-        x, dx = zip(*[w_i.push_forwards(x_i, dx_i) for w_i, x_i, dx_i in zip(self.weights, x, dx)])
+        x, dx = zip(
+            *[
+                w_i.push_forwards(x_i, dx_i)
+                for w_i, x_i, dx_i in zip(self.weights, x, dx)
+            ]
+        )
         df = differentials[self.op](*x)
-        dy = sum(df_i * dx_i for df_i, dx_i in zip(df, dx))
-
+        if all(isinstance(df_i, (dok_ndarray, np.ndarray)) for df_i in df):
+            dy = sum(df_i @ dx_i for df_i, dx_i in zip(df, dx))
+        else:
+            dy = sum(df_i * dx_i for df_i, dx_i in zip(df, dx))
         return y, dy
 
+
 class IdentityLayer:
-    def __init__(self, memory: MemorySpec, weights:BilinearWeights):
+    def __init__(self, memory: MemorySpec, weights: BilinearWeights):
         self.memory = memory
         self.weights = weights
 
@@ -159,6 +169,12 @@ class IdentityLayer:
         return [self.memory]
 
 
+def d_dot(x, y) -> Tuple:
+    # d = x.T @ y  = sum(x_iy_i)
+    # dd_i = y.T @ dx_i
+    # dd_i = x.T @ dy_i
+    return y.T, x.T
+
 
 differentials = {
     OP.SIN: np.cos,
@@ -166,4 +182,5 @@ differentials = {
     OP.MUL: lambda a, b: [b, a],
     OP.ADD: lambda a, b: [1, 1],
     OP.SUB: lambda a, b: [1, -1],
+    OP.DOT: d_dot,
 }

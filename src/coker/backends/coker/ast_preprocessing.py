@@ -1,13 +1,10 @@
 from collections import defaultdict
-from typing import Set, Dict, Tuple, List
+from typing import Set, Dict, Tuple
 
-from coker import OP, Kernel, Tracer
-from coker.backends.backend import get_backend_by_name
+from coker import Kernel
 import numpy as np
-from coker.backends.coker.layers import InputLayer, OutputLayer, GenericLayerOP, IdentityLayer
+from coker.backends.coker.layers import InputLayer, OutputLayer
 from coker.backends.coker.memory import MemorySpec
-
-from coker.backends.coker.ast_rewriting import rewrite_graph
 from coker.backends.coker.op_impl import *
 
 
@@ -53,18 +50,25 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
 
         # non-constant op
         #
-        for j in in_nodes:
-            sources[i] += sources[j]
-            tape_outdegree[j] += 1
 
         # Strictly Linear nodes
-        if op in {op.ADD, OP.SUB, OP.NEG}:
+        if op.is_linear():
+            for j in in_nodes:
+                for source in sources[j]:
+                    if source not in sources[i]:
+                        sources[i].append(source)
             continue
 
+        for j in in_nodes:
+            sources[i] += sources[j]
+
         # Multi-linear terms that mayne nonlinear
-        if op in {OP.MUL, OP.CROSS, OP.MATMUL, OP.DOT}:
+        if op.is_bilinear():
             if len(set(sources[i])) == 1:
                 continue
+
+        if op == OP.DIV and indices[1] in constants:
+            continue
 
         sink_nodes.add(i)
 
@@ -110,7 +114,9 @@ def label_layers(kernel: Kernel, sink_nodes: Dict):
     return edges, distance
 
 
-def label_sources(kernel: Kernel, sink_nodes=None, constants=None) -> Dict[int, Set[int]]:
+def label_sources(
+    kernel: Kernel, sink_nodes=None, constants=None
+) -> Dict[int, Set[int]]:
     """
 
     Starting with the inputs and sink nodes, label all downstream nodes that depend on those sinks
@@ -135,7 +141,13 @@ def label_sources(kernel: Kernel, sink_nodes=None, constants=None) -> Dict[int, 
 
 
 class SparseNet:
-    def __init__(self, memory, input_layer: InputLayer, output_layer: OutputLayer, intermediate_layers):
+    def __init__(
+        self,
+        memory,
+        input_layer: InputLayer,
+        output_layer: OutputLayer,
+        intermediate_layers,
+    ):
         self.memory = memory
         self.input_layer = input_layer
         self.output_layer = output_layer
@@ -150,7 +162,7 @@ class SparseNet:
 
         for layer in self.intermediate_layers:
             in_specs = layer.inputs()
-            out_spec, = layer.outputs()
+            (out_spec,) = layer.outputs()
             out = layer(*[workspace[k] for k in in_specs])
             workspace[out_spec] = out
         return self.output_layer.call(workspace)
@@ -163,7 +175,7 @@ class SparseNet:
 
         for layer in self.intermediate_layers:
             in_specs = layer.inputs()
-            out_spec, = layer.outputs()
+            (out_spec,) = layer.outputs()
             x_i = [workspace[k] for k in in_specs]
             dx_i = [dworkspace[k] for k in in_specs]
             out, dout = layer.push_forward(*x_i, *dx_i)
@@ -175,9 +187,7 @@ class SparseNet:
         return y, dy
 
     def apply_input_map(self, *args) -> Dict[MemorySpec, np.ndarray]:
-        return {
-            self.memory[0]: self.input_layer(*args)
-        }
+        return {self.memory[0]: self.input_layer(*args)}
 
     def apply_output_map(self, context):
         return self.output_layer.call(context)

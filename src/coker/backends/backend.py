@@ -1,6 +1,8 @@
 from abc import ABCMeta, abstractmethod
 from typing import Any, Tuple, Type
-from coker import Tensor, Kernel
+from coker import Kernel
+from coker import Tracer, Expression
+from typing import List
 
 ArrayLike = Any
 
@@ -12,12 +14,12 @@ class Backend(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def to_native(self, array: Tensor) -> ArrayLike:
+    def to_numpy_array(self, array) -> ArrayLike:
         """Cast array from backend to numpy type."""
         pass
 
     @abstractmethod
-    def from_native(self, array: ArrayLike) -> Tensor:
+    def to_backend_array(self, array: ArrayLike):
         """Cast array from native python (numpy) to backend type."""
         pass
 
@@ -29,8 +31,19 @@ class Backend(metaclass=ABCMeta):
     def call(self, op, *args) -> ArrayLike:
         pass
 
-    def evaluate(self, kernel:Kernel, inputs: ArrayLike):
+    @abstractmethod
+    def build_optimisation_problem(
+        self,
+        cost: Tracer,  # cost
+        constraints: List[Expression],
+        arguments: List[Tracer],
+        outputs: List[Tracer],
+    ):
+        raise NotImplementedError
+
+    def evaluate(self, kernel: Kernel, inputs: ArrayLike):
         from coker.backends.evaluator import evaluate_inner
+
         workspace = {}
         return evaluate_inner(kernel.tape, inputs, kernel.output, self, workspace)
 
@@ -39,24 +52,27 @@ __known_backends = {}
 
 
 def instantiate_backend(name: str):
-    if name == 'numpy':
+    if name == "numpy":
         import coker.backends.numpy.core
+
         backend = coker.backends.numpy.core.NumpyBackend()
-    elif name == 'coker':
+    elif name == "coker":
         import coker.backends.coker
+
         backend = coker.backends.coker.CokerBackend()
-    elif name == 'jax':
+    elif name == "jax":
         import coker.backends.jax
+
         backend = coker.backends.jax.JaxBackend()
-    elif name == 'casadi':
+    elif name == "casadi":
         import coker.backends.casadi
+
         backend = coker.backends.casadi.CasadiBackend()
     else:
-        raise ValueError(f'Unknown backend: {name}')
+        raise ValueError(f"Unknown backend: {name}")
 
     __backends[name] = backend
     return backend
-
 
 
 def get_backend_by_name(name: str, set_current=True) -> Backend:
@@ -80,7 +96,7 @@ def get_backend_by_name(name: str, set_current=True) -> Backend:
 
 __backends = {}
 
-default_backend = 'coker'
+default_backend = "coker"
 __current_backend = None
 
 

@@ -1,15 +1,14 @@
 from typing import Type, Tuple, List
-from functools import reduce
-from operator import mul
+
 import numpy as np
 import jax.numpy as jnp
 
-from coker.algebra import Tensor, Dimension, OP
-from coker.algebra.kernel import Expression, Tracer, VectorSpace
+from coker.algebra import Dimension, OP
+from coker.algebra.kernel import Expression, Tracer
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike
-from coker.backends.evaluator import evaluate_inner
+
 
 def to_array(value, shape):
 
@@ -20,9 +19,18 @@ def to_array(value, shape):
 
 
 scalar_types = (
-    jnp.float32, jnp.float64, np.float64, np.float32,
-    np.int32, np.int64,
-                jnp.int32, jnp.int64, float, complex, int)
+    jnp.float32,
+    jnp.float64,
+    np.float64,
+    np.float32,
+    np.int32,
+    np.int64,
+    jnp.int32,
+    jnp.int64,
+    float,
+    complex,
+    int,
+)
 
 
 def div(num, den):
@@ -35,29 +43,29 @@ def div(num, den):
 impls = {
     OP.ADD: jnp.add,
     OP.SUB: jnp.subtract,
-    OP.MUL:jnp.multiply,
-    OP.DIV:div,
-    OP.MATMUL:jnp.matmul,
-    OP.SIN:jnp.sin,
-    OP.COS:jnp.cos,
-    OP.TAN:jnp.tan,
-    OP.EXP:jnp.exp,
-    OP.PWR:jnp.power,
-    OP.INT_PWR:jnp.power,
-    OP.ARCCOS:jnp.arccos,
-    OP.ARCSIN:jnp.arcsin,
-    OP.DOT:jnp.dot,
-    OP.CROSS:jnp.cross,
-    OP.TRANSPOSE:jnp.transpose,
-    OP.NEG:jnp.negative,
-    OP.SQRT:jnp.sqrt,
-    OP.ABS:jnp.abs
+    OP.MUL: jnp.multiply,
+    OP.DIV: div,
+    OP.MATMUL: jnp.matmul,
+    OP.SIN: jnp.sin,
+    OP.COS: jnp.cos,
+    OP.TAN: jnp.tan,
+    OP.EXP: jnp.exp,
+    OP.PWR: jnp.power,
+    OP.INT_PWR: jnp.power,
+    OP.ARCCOS: jnp.arccos,
+    OP.ARCSIN: jnp.arcsin,
+    OP.DOT: jnp.dot,
+    OP.CROSS: jnp.cross,
+    OP.TRANSPOSE: jnp.transpose,
+    OP.NEG: jnp.negative,
+    OP.SQRT: jnp.sqrt,
+    OP.ABS: jnp.abs,
 }
 
 parameterised_impls = {
-    ConcatenateOP: lambda op, x, y:jnp.concatenate((x, y), axis=op.axis),
-    ReshapeOP: lambda op, x:jnp.reshape(x, newshape=op.newshape),
-    NormOP: lambda op, x:jnp.linalg.norm(x, ord=op.ord)
+    ConcatenateOP: lambda op, x, y: jnp.concatenate((x, y), axis=op.axis),
+    ReshapeOP: lambda op, x: jnp.reshape(x, newshape=op.newshape),
+    NormOP: lambda op, x: jnp.linalg.norm(x, ord=op.ord),
 }
 
 
@@ -73,23 +81,35 @@ def proj(i, n):
     p[i, i] = 1
     return p
 
-def basis(i,n):
-    p = np.zeros((n, ))
+
+def basis(i, n):
+    p = np.zeros((n,))
     p[i] = 1
     return p
+
 
 class JaxBackend(Backend):
     def __init__(self, *args, **kwargs):
         super(JaxBackend, self).__init__(*args, **kwargs)
 
     def native_types(self) -> Tuple[Type]:
-        return np.ndarray, np.int32, np.int64, np.float64, np.float32, float, complex, int
+        return (
+            np.ndarray,
+            np.int32,
+            np.int64,
+            np.float64,
+            np.float32,
+            float,
+            complex,
+            int,
+        )
 
-    def to_native(self, array: Tensor) -> ArrayLike:
-        return array
+    def to_numpy_array(self, array) -> ArrayLike:
 
-    def from_native(self, array: ArrayLike) -> Tensor:
-        return array
+        return np.array(array)
+
+    def to_backend_array(self, array):
+        return jnp.array(array)
 
     def reshape(self, arg, dim: Dimension):
         if dim.is_scalar():
@@ -97,9 +117,9 @@ class JaxBackend(Backend):
                 return arg
             else:
                 try:
-                    inner, = arg
+                    (inner,) = arg
                 except ValueError as ex:
-                    raise TypeError(f'Expecting a scalar, got {arg}') from ex
+                    raise TypeError(f"Expecting a scalar, got {arg}") from ex
                 return self.reshape(inner, dim)
         elif isinstance(arg, jnp.ndarray):
             return jnp.reshape(arg, dim.dim)
@@ -119,14 +139,16 @@ class JaxBackend(Backend):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
 
-
     def build_optimisation_problem(
         self,
         cost: Tracer,  # cost
         constraints: List[Expression],
         arguments: List[Tracer],
-        outputs: List[Tracer]
+        outputs: List[Tracer],
     ):
+
+        tape = cost.tape
+        cost_fn = self.evaluate()
 
         n_constraints = len(constraints)
         c = np.zeros((n_constraints,))
@@ -145,11 +167,6 @@ class JaxBackend(Backend):
         # return g(x^*)
 
 
-        assert False
-
-
-
-
 #
 # OP v_1, v_2, v_3
 #
@@ -160,4 +177,3 @@ class JaxBackend(Backend):
 #
 # if OP is linear
 # -
-
