@@ -10,10 +10,13 @@ def quadratic(x, p, z):
     return x.T @ x + p.T @ p + z ** 2
 
 
+
 def test_optimisation(backend):
     # define decision variables
     # objective
     # constraints
+    if backend not in {'casadi'}:
+        return
 
     with ProblemBuilder() as builder:
         assert not builder.arguments

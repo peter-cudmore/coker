@@ -178,8 +178,7 @@ def test_cos_and_sin(backend):
     assert abs(result - expected) < 1e-4, f"Got {result}, expected {expected}"
 
 
-@pytest.mark.skip
-def test_tensor_product():
+def test_tensor_product(backend):
 
     a = np.array([
         [[1, 0, 1], [0, 1, 0]],
@@ -193,7 +192,7 @@ def test_tensor_product():
     x_test = np.array([2, 3, 4], dtype=float)
 
     b_test = f_impl(x_test)
-    f = kernel(arguments=[VectorSpace(name='x', dimension=3)], implementation=f_impl)
+    f = kernel(arguments=[VectorSpace(name='x', dimension=3)], implementation=f_impl, backend=backend)
 
     b = f(x_test)
     assert is_close(b, b_test)

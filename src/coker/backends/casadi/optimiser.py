@@ -53,25 +53,25 @@ def build_optimisation_problem(cost, constraints, parameters:List[Tracer], outpu
 
     n_constraints = len(constraints)
 
-    constraint_function = np.zeros((n_constraints,))
-    lower_bound = ca.DM(n_constraints, 1)
-    upper_bound = ca.DM(n_constraints, 1)
+#    constraint_function = np.zeros((n_constraints,))
+#    lower_bound = ca.DM(n_constraints, 1)
+#    upper_bound = ca.DM(n_constraints, 1)
+    cs = []
+    lbs = []
+    ubs = []
+
 
     for i, constraint in enumerate(constraints):
         c, lb, ub = constraint.as_halfplane_bound()
-        assert lb < ub
-        if lb != 0:
-            lower_bound[i, 0] = to_casadi(lb)
-        if ub != 0:
-            upper_bound[i, 0] = to_casadi(ub)
+        c_i, = substitute([c], workspace)
 
-        basis_i = np.array([
-            1 if i == j else 0
-            for j in range(n_constraints)
-        ])
-        constraint_function += basis_i * c
+        lbs.append(to_casadi(lb) * ca.DM.ones(*c_i.shape))
+        ubs.append(to_casadi(ub) * ca.DM.ones(*c_i.shape))
+        cs.append(c_i)
 
-    g, = substitute([constraint_function], workspace)
+    upper_bound = ca.vertcat(*ubs)
+    lower_bound = ca.vertcat(*lbs)
+    g = ca.vertcat(*cs)
 
     spec = {
         'x': x,

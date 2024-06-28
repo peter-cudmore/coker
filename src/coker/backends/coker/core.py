@@ -1,8 +1,8 @@
-from typing import Tuple, Type
+from typing import Tuple, Type, List, Dict
 
 import numpy as np
 
-from coker import Tracer, Kernel, OP, ExprOp
+from coker import Tracer, Kernel, OP, ExprOp, Expression
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
 from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
 from coker.backends.coker.ast_preprocessing import (
@@ -48,6 +48,15 @@ class CokerBackend(Backend):
     def reshape(self, array: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
         raise NotImplementedError
 
+    def build_optimisation_problem(
+        self,
+        cost: Tracer,  # cost
+        constraints: List[Expression],
+        parameters: List[Tracer],
+        outputs: List[Tracer],
+        initial_conditions: Dict[int, ArrayLike],
+    ):
+        raise NotImplementedError
 
 def create_opgraph(kernel: Kernel):
     kernel = rewrite_graph(kernel)

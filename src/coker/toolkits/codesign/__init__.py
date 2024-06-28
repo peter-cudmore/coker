@@ -60,7 +60,7 @@ class ProblemBuilder:
                 np.zeros(shape=shape) if initial_value is None else initial_value
             )
 
-        self.initial_conditions[v] = initial_value
+        self.initial_conditions[v.index] = initial_value
         return v
 
     @property

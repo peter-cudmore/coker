@@ -28,12 +28,12 @@ impls = {
 }
 
 
-def concat(a: ca.MX, b: ca.MX, axis=0):
+def concat(*args: ca.MX, axis=0):
     if not axis:
-        return ca.vertcat(a, b)
+        return ca.vertcat(*args)
 
     if axis == 1:
-        return ca.horzcat(a, b)
+        return ca.horzcat(*args)
 
     # axis = 0 -> vstack
     # axis = 1 -> hstack
@@ -58,7 +58,7 @@ def reshape(x, *shape):
 
 
 parameterised_impls = {
-    ConcatenateOP: lambda op, x, y: concat(x, y, op.axis),
+    ConcatenateOP: lambda op, *args: concat(*args, axis=op.axis),
     NormOP: lambda op, x: norm(x, ord=op.ord),
     ReshapeOP: lambda op, x: reshape(x, *op.newshape),
 }
@@ -71,11 +71,51 @@ def call_parameterised_op(op, *args):
     return result
 
 
+
+class CasadiTensor:
+    def __init__(self, *shape):
+        self.shape = shape
+        self.data = {}
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+
+    def __getitem__(self, key):
+        if key in self.data:
+            return self.data[key]
+        return 0
+
+    def __mul__(self, other):
+        self.data = {k: d * other for k, d in self.data.items()}
+
+    def __matmul__(self, other):
+        assert len(self.shape) == 3, f"Higher order tensors not yet implemented"
+        assert len(other.shape) == 2
+        assert other.shape[0] == self.shape[-1]
+        assert other.shape[1] == 1
+
+        out = ca.MX(self.shape[0], self.shape[1])
+
+        for (i, j, k), v in self.data.items():
+            out[i, j] += v * other[k, 0]
+
+        return out
+
+
+    def reshape(self, shape):
+        assert self.shape == shape
+        return self
+
+
 def to_casadi(value):
     if isinstance(value, np.ndarray):
         if len(value.shape) == 1:
             value = value.reshape(-1, 1)
-        v = ca.MX(*value.shape)
+
+        if len(value.shape) > 2:
+            v =  CasadiTensor(*value.shape)
+        else:
+            v = ca.MX(*value.shape)
         it = np.nditer(value, op_flags=['readonly'], flags=['multi_index'])
         for x in it:
             if x != 0:
@@ -103,15 +143,20 @@ def substitute(output: List[Tracer], workspace):
 
         if node.is_constant():
             v = to_casadi(node.value())
+
             if not node.dim.is_scalar():
                 shape = node.shape if not node.dim.is_vector() else (*node.dim.shape, 1)
-                v = ca.reshape(v, shape)
+
+                v = v.reshape(shape)
         else:
             op, *args = node.value()
             args = [get_node(a) for a in args]
 
             if op in impls:
-                v = impls[op](*args)
+                try:
+                    v = impls[op](*args)
+                except RuntimeError as e:
+                    raise e
             else:
                 v = call_parameterised_op(op, *args)
 

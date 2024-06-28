@@ -192,3 +192,15 @@ def test_as_matrix():
 
         assert np.allclose(image_screw, image_screw_2)
 
+
+def test_bug_1():
+
+
+    r = Isometry3(rotation=Rotation3(np.array([0., 0., 0.]), 0.0), translation=np.array([1., 0., 0.]))
+    r_2 = Isometry3(rotation=Rotation3(np.array([0, 0, 1]), 0), translation=np.array([1, 0, 0]))
+
+    p = r @ r_2
+
+    assert p.rotation.angle == 0
+    assert np.allclose(p.translation, np.array([2., 0., 0.]))
+

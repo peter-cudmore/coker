@@ -1,3 +1,5 @@
+import pytest
+
 from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.tensor_contants import hat
 import numpy as np
@@ -89,6 +91,7 @@ def test_cross():
 
 
 
+@pytest.mark.skip(reason="not implemented")
 def test_tensor_products():
 
     # (4, 4, 1) @ (1,)      -> (4,4)

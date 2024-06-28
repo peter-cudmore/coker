@@ -66,11 +66,12 @@ class ExprOp(enum.Enum):
 class Expression:
     def __init__(self, op: ExprOp, lhs, rhs):
 
-        self.lhs = lhs
+        self.lhs: Tracer = lhs
         self.rhs = rhs
         self.op = op
 
     def as_halfplane_bound(self):
+
         if self.op == ExprOp.LESS_THAN:
             # lhs < rhs ->  (lhs - rhs) < 0
             return self.lhs - self.rhs, -np.inf, 0

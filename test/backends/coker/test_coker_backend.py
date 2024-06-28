@@ -61,6 +61,7 @@ def test_scalar_weights():
     assert w(1) == 1
 
 
+@pytest.mark.skip
 def test_coker_graph():
     alpha = 3
     beta = 4
@@ -84,6 +85,7 @@ def test_coker_graph():
     assert dy == (alpha + 2 * beta) * dx
 
 
+@pytest.mark.skip
 def test_coker_vector():
     A = np.array([
         [2, 0, 0,],

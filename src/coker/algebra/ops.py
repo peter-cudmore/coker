@@ -79,6 +79,10 @@ class ConcatenateOP(Operator):
     def compute_shape(self, *dims: Dimension) -> Dimension:
 
         out_dims = list(dims[0].dim)
+        if all(d.is_scalar() or d.is_vector() for d in dims):
+            dim = Dimension((sum(d.flat() for d in dims), ))
+            return dim
+
         for d in dims[1:]:
             assert all(
                 d.dim[i] == out_dims[i] for i in range(len(out_dims)) if i != self.axis

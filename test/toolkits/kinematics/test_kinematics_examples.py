@@ -324,7 +324,8 @@ def test_scara_jacobian():
         np.array([np.pi, 0, 0, 0]),
         np.array([0, np.pi / 4, 0, 0]),
         np.array([0, 0, np.pi / 4, 0]),
-        np.array([0, 0, 0, 0.25])
+        np.array([0, 0, 0, 0.25]),
+        np.array([np.pi/4, np.pi / 2, 0, 0]),
     ]
     o = np.zeros((3,), dtype=float)
 
