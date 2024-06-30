@@ -54,8 +54,8 @@ def build_hexapod_leg(coxa_length, femur_length, tibia_length):
         joint=Revolute(Screw.w_z()),
         inertia=coxa_intertia
     )
-    femur_coxa_joint = Isometry3(translation= coxa_length * np.array([1., 0., 0.]))
-    femur_tibia_joint = Isometry3(translation= femur_length * np.array([1., 0., 0.]))
+    femur_coxa_joint = Isometry3(translation=coxa_length * np.array([1., 0., 0.]))
+    femur_tibia_joint = Isometry3(translation=femur_length * np.array([1., 0., 0.]))
     v = np.array([34.630337, 0.0, -156.20737])
     v = tibia_length * v / np.sqrt(v.dot(v))
     foot_transform = Isometry3(translation=v)
@@ -91,8 +91,18 @@ def build_hexapod_model(coxa_length, femur_length, tibia_length):
         joint=Free()
     )
     leg = build_hexapod_leg(coxa_length, femur_length, tibia_length)
+    foot, = leg.forward_kinematics(np.array([0., 0., 0.]))
     for anchor in anchors:
-        model.add_body(leg, anchor, body_idx)
+        _, (e, ) = model.add_body(leg, anchor, body_idx)
+        foot_img = anchor @ foot
+
+        zero = np.zeros(model.total_joints())
+        feet = model.forward_kinematics(zero)
+        foot_calc = feet[e]
+        assert np.allclose(foot_calc.translation, foot_img.translation)
+
+
+    assert len(model.end_effectors) == 6
     return model
 
 
@@ -224,8 +234,8 @@ def main():
     #    plot_model((.050, 0.080, 0.090), angles)
     params = (.050, 0.080, 0.090)
     model = build_hexapod_model(*params)
-    viz = KinematicsVisualiser(model, scale=0.02)
-    viz.draw()
+    q = np.zeros(shape=(24,), dtype=float)
+    plot_model(params, q, q)
     plt.show()
 
 
@@ -239,7 +249,7 @@ def plot_model(params, angles, angle_rates=None):
     feet = model.forward_kinematics(angles)
     anchors = []
     for foot_idx, foot in zip(feet_idx, feet):
-        joints = model.joint_locations(angles, foot_idx)
+        joints = model.joint_transforms(angles, foot_idx)
 
         joint_p = [p @ origin for p in joints]
         joint_p.append(foot @ origin)
@@ -302,7 +312,7 @@ def problem_1():
 
         ones = np.ones(shape=(18,), dtype=float)
 
-        cost = 0 #np.dot(tau[6:], tau[6:]) #+ 0.01 * rest_height
+        cost = np.dot(tau[6:], tau[6:]) + 0.01 * rest_height
         feet = model.forward_kinematics(q)
         origin = np.array([0, 0, 0])
         e_z = np.array([0, 0, 1])
@@ -320,7 +330,7 @@ def problem_1():
                           - ones * np.pi/4 < q_joints,
 #                          tau[6:] < ones * motor_max,
 #                          tau[6:] > - ones * motor_max,
-#                          rest_height > 0.3
+                          rest_height > 0.3
                       ] + [
            np.dot(e_z, foot @ origin) > -rest_height for foot in feet
         ] + [
@@ -357,6 +367,6 @@ def check_angles():
 
 
 if __name__ == '__main__':
-#    check_angles()
+    check_angles()
 #    problem_1()
-    main()
+#    main()

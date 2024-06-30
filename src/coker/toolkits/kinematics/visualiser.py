@@ -96,7 +96,7 @@ class KinematicsVisualiser:
         ]
 
         self.joints = [
-            JointWidget(t, scale) for t in model.joint_locations(rest_config)
+            JointWidget(t, scale) for t in model.joint_transforms(rest_config)
         ]
 
         self.end_effector_coords = [
@@ -117,7 +117,7 @@ class KinematicsVisualiser:
         for end_effectors in self.end_effector_coords:
            [ax.add_artist(a) for a in end_effectors.get_artists()]
 
-        locations = model.joint_locations(rest_config)
+        locations = model.joint_transforms(rest_config)
         for end_effectors in self.end_effectors:
             end_effectors.set_transform(locations)
             ax.add_artist(end_effectors.get_artists())
@@ -129,7 +129,7 @@ class KinematicsVisualiser:
         ax.set_zlabel('z')
 
     def update_values(self, angles):
-        joint_locations = self.model.joint_locations(angles)
+        joint_locations = self.model.joint_transforms(angles)
         fk = self.model.forward_kinematics(angles)
 
         for joint, transform in zip(self.joints, joint_locations):

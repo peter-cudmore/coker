@@ -238,31 +238,33 @@ class RigidBody:
             transforms.append(g_theta)
         return transforms
 
-    def joint_locations(self, angles, effector=None) -> List[Isometry3]:
-        abs_xforms = self._get_absolute_joint_xform(angles)
-        transforms = self._accumulate_joint_xforms(angles, abs_xforms)
-        if effector is not None:
+    def joint_transforms(self, angles, effector=None) -> List[Isometry3]:
+        joint_index = 0
+        transforms = []
+        for parent, xform, bases in zip(self.parents, self.transforms, self.joint_bases):
 
-            link, _ = self.end_effectors[effector]
-            transforms = [
-                transforms[i]  @ self._rest_transforms[i]
-                for i in self.get_dependent_links(link)
-            ]
-        else:
-            return (t @ x  for t, x in zip(transforms, self._rest_transforms))
+            g = transforms[parent] @ xform if parent != self.WORLD else xform
+            for basis in bases:
+                g = g @ basis.exp(angles[joint_index])
+                joint_index += 1
 
-        return transforms
+            transforms.append(g)
+
+        if effector is None:
+            return transforms
+
+        out = []
+        parent, _ = self.end_effectors[effector]
+
+        while parent != self.WORLD:
+            out.append(transforms[parent])
+            parent = self.parents[parent]
+        return list(reversed(out))
 
     def forward_kinematics(self, angles) -> List[Isometry3]:
-        abs_xforms = self._get_absolute_joint_xform(angles)
-        transforms = self._accumulate_joint_xforms(angles, abs_xforms)
+        xforms = self.joint_transforms(angles)
 
-        out = [
-            transforms[parent] @ self._rest_transforms[parent] @ transform
-            for parent, transform in self.end_effectors
-        ]
-
-        return out
+        return [xforms[parent] @ xform for parent, xform in self.end_effectors]
 
     def get_dependent_links(self, parent_link: int):
         result = list()
@@ -464,12 +466,13 @@ class RigidBody:
             p_actual = self.parents[idx]
             if p_body == body.WORLD:
                 body_xform = at @ xform
+
             else:
                 body_xform = xform
 
-            adj = SE3Adjoint(at).inverse()
-            self.joint_bases.append([adj.apply(b) for b in bases])
-            rest_xform = self._rest_transforms[p_actual] @ xform if p_actual != self.WORLD else body_xform
+            self.joint_bases.append([b for b in bases])
+
+            rest_xform = self._rest_transforms[p_actual] @ body_xform if p_actual != self.WORLD else body_xform
             self.transforms.append(body_xform)
             self._rest_transforms.append(rest_xform)
 

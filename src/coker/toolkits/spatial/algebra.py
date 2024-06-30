@@ -210,6 +210,9 @@ class Screw:
     def e_y():
         return Screw(translation=e_y.copy())
 
+    def __neg__(self):
+        return Screw(rotation=-self.rotation, translation=-self.translation)
+
     @staticmethod
     def from_tuple(*values):
         rotation = np.array(values[0:3])
