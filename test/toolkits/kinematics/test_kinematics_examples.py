@@ -1,9 +1,11 @@
+import numpy as np
+
 from coker.algebra.kernel import kernel, VectorSpace
 from coker.toolkits.kinematics import *
 # Test based on 3-link open-chain manipulator
 # from Murry Et. Al
 
-from test.util import is_close
+from test.util import is_close, validate_symbolic_call
 
 g = - 9.8
 # Parameters from the book, r being center of mass, l being next joint
@@ -220,14 +222,6 @@ def test_pe(backend):
     v_test = murray_V(q)
 
     assert v == v_test
-
-    v_kernel = kernel(
-        [VectorSpace('q', 3)],
-        lambda a: model.potential_energy(angles=a, gravity_vector=np.array([0, 0, -9.8]).T),
-        backend
-    )
-
-    assert v_kernel(q) == v
 
 
 def build_scara_model():

@@ -31,6 +31,7 @@ class OP(enum.Enum):
     ABS = 20
     CASE = 21
     EQUAL = 22
+    ARCTAN2 = 23
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -133,8 +134,15 @@ def register_shape(*ops: OP):
 def dimension_identity(dim: Dimension):
     return dim
 
+@register_shape(OP.CASE)
+def case_dimension(condition: bool, false_branch: Dimension, true_branch: Dimension ):
+    if false_branch!= true_branch:
+        raise InvalidShape("Arguments are of different dimensions")
 
-@register_shape(OP.ADD, OP.SUB)
+    return true_branch
+
+
+@register_shape(OP.ADD, OP.SUB, OP.ARCTAN2)
 def same_dimension(d_1: Dimension, d_2: Dimension) -> Dimension:
     if d_1 != d_2:
         raise InvalidShape("Arguments are of different dimensions")
@@ -250,6 +258,7 @@ numpy_atomics = {
     np.sqrt: OP.SQRT,
     np.negative: OP.NEG,
     np.abs: OP.ABS,
+    np.arctan2: OP.ARCTAN2,
 }
 
 

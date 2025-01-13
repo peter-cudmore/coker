@@ -350,10 +350,11 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
     def normalise(self):
         norm = self.norm()
-        idx = self.tape.append(
-            OP.CASE, norm == 0, np.zeros_like(self.shape), self / norm
-        )
-        return Tracer(self.tape, idx)
+
+        norm_path = self / norm
+
+
+        return norm_path
 
 
 class Kernel:
@@ -383,6 +384,7 @@ class Kernel:
 
         backend = get_backend_by_name(self.backend)
         output = backend.evaluate(self, args)
+
         if self.is_single:
             return output[0]
         return output
@@ -453,5 +455,10 @@ def normalise(v: Union[np.ndarray, Tracer]):
         else:
             r = np.linalg.norm(v)
             return v / r, r
-    else:
-        return v.normalise(), v.norm()
+
+    assert isinstance(v, Tracer)
+
+    unit_v = v.normalise()
+    norm_v = v.norm()
+
+    return unit_v, norm_v

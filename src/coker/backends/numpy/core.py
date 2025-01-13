@@ -31,8 +31,13 @@ def is_scalar_symbol(v):
 
 
 def div(num, den):
-    if (num == 0).all() and (den == 0):
-        return num
+    if den == 0:
+        if isinstance(num, np.ndarray) and (num == 0).all():
+            return num
+        elif num == 0:
+            return num
+        else:
+            raise ZeroDivisionError
     else:
         return np.divide(num, den)
 
@@ -57,10 +62,11 @@ impls = {
     OP.NEG: np.negative,
     OP.SQRT: np.sqrt,
     OP.ABS: np.abs,
+    OP.ARCTAN2: np.arctan2,
 }
 
 parameterised_impls = {
-    ConcatenateOP: lambda op, x, y: np.concatenate((x, y), axis=op.axis),
+    ConcatenateOP: lambda op, *x: np.concatenate(x, axis=op.axis),
     ReshapeOP: lambda op, x: np.reshape(x, newshape=op.newshape),
     NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
 }
@@ -68,6 +74,7 @@ parameterised_impls = {
 
 def call_parameterised_op(op, *args):
     kls = op.__class__
+
     result = parameterised_impls[kls](op, *args)
 
     return result

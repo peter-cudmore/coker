@@ -63,7 +63,7 @@ impls = {
 }
 
 parameterised_impls = {
-    ConcatenateOP: lambda op, x, y: jnp.concatenate((x, y), axis=op.axis),
+    ConcatenateOP: lambda op, *x: jnp.concatenate(x, axis=op.axis),
     ReshapeOP: lambda op, x: jnp.reshape(x, newshape=op.newshape),
     NormOP: lambda op, x: jnp.linalg.norm(x, ord=op.ord),
 }
@@ -139,41 +139,6 @@ class JaxBackend(Backend):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
 
-    def build_optimisation_problem(
-        self,
-        cost: Tracer,  # cost
-        constraints: List[Expression],
-        arguments: List[Tracer],
-        outputs: List[Tracer],
-    ):
-
-        tape = cost.tape
-        cost_fn = self.evaluate()
-
-        n_constraints = len(constraints)
-        c = np.zeros((n_constraints,))
-        # halfspace = {x: h(x)_i >=0 for all i}
-        for i, constraint in enumerate(constraints):
-            c_i = -basis(i, n_constraints) * constraint.as_halfplane_bound()
-            c += c_i
-
-        # arguments = x
-        # cost = f(x)
-        # constraints = c(x) >= 0
-        # outputs => y = g(x)
-        #
-        # solve x^* = argmin f(x) s.t. c(x) >=0
-        #
-        # return g(x^*)
-
-
-#
-# OP v_1, v_2, v_3
-#
-# v is either
-# a) a symbol
-# b) a constant
-# c) another node in the graph
-#
-# if OP is linear
-# -
+    def build_optimisation_problem(self, cost: Tracer, constraints: List[Expression], arguments: List[Tracer],
+                                   outputs: List[Tracer], **kwargs):
+        raise NotImplementedError

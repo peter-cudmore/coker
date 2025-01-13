@@ -1,8 +1,11 @@
 import numpy as np
 import pytest
 
+import coker
 from coker.toolkits.spatial import Isometry3, Rotation3
+from test.conftest import backends
 from test.util import is_close, validate_symbolic_call
+from coker import VectorSpace, kernel, Scalar
 
 u_x = np.array([1, 0, 0], dtype=float)
 u_y = np.array([0, 1, 0], dtype=float)
@@ -11,11 +14,15 @@ u_z = np.array([0, 0, 1], dtype=float)
 origin = np.array([0, 0, 0, 1], dtype=float).reshape((4, 1))
 
 
-def test_hat():
+def test_hat(backend):
     from coker.toolkits.spatial.algebra import hat
 
     expected = np.array([[0, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=float)
     result = hat(u_x)
+    assert is_close(result, expected)
+
+    hat_symbolic = kernel([VectorSpace('u',3)], hat, backend=backend)
+    result = hat_symbolic(u_x)
     assert is_close(result, expected)
 
 
@@ -42,6 +49,49 @@ def test_quaternions():
     assert is_close(result, u_x, tolerance=1e-4)
 
     assert identity == identity_2
+
+def test_quaternions_symbolic(backend):
+    from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
+    def conj_impl(axis, angle):
+        q_z = UnitQuaternion.from_axis_angle(axis, angle)
+        result = q_z.conjugate(u_x)
+        return result
+
+    conj = kernel([VectorSpace('u',3), coker.Scalar('angle')], conj_impl, backend=backend)
+    result = conj(u_z, np.pi/2)
+    assert is_close(result, u_y, tolerance=1e-4)
+
+    def inverse_impl(axis, angle, u):
+        q_z = UnitQuaternion.from_axis_angle(axis, angle)
+        return (q_z.inverse() * q_z).conjugate(u)
+    inverse = kernel([VectorSpace('u',3), coker.Scalar('angle'), VectorSpace('v', 3)], inverse_impl, backend=backend)
+    result = inverse(u_z, np.pi/2, u_y)
+    assert is_close(result, u_y, tolerance=1e-4)
+
+def test_quaternion_product(backend):
+
+    from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
+    def q_product(a_1, b_1, a_2, b_2):
+        q_1 = UnitQuaternion.from_axis_angle(a_1, b_1)
+        q_2 = UnitQuaternion.from_axis_angle(a_2, b_2)
+        q = q_1 * q_2
+        q_out = np.array(q.to_elements())
+        print(q_out)
+        assert q_out.shape == (4,)
+        return q_out
+
+    args = [
+        VectorSpace('a_1',3),
+        Scalar('b_1'),
+        VectorSpace('a_2',3),
+        Scalar('b_2')
+    ]
+    cases = [
+        [u_x, 0, u_x, 0],
+        [u_x, np.pi, u_y, 0],
+        [u_x, np.pi, u_x, -np.pi],
+    ]
+    validate_symbolic_call('q_product', q_product, args, cases, backend=backend)
 
 
 def test_isometry():
@@ -93,9 +143,9 @@ def test_screws():
     expected_array = np.array([0, 0, np.pi/2, 0, 0, 0])
     assert np.allclose(array, expected_array)
 
-
-
-
+    validate_symbolic_call(
+        'exp', lambda t: s.exp(t).as_matrix(), [Scalar('theta')],
+        [[0], [np.pi/3], [np.pi], [1]]  ,backend='numpy'                                          )
 
 
 def test_prismatic_screw():
@@ -171,6 +221,61 @@ def test_symbolic_isometries(backend):
                            [Scalar('x'), Scalar('theta')],
                            test_set, backend)
 
+def test_symbolic_isometry_product_translation():
+    from coker.algebra.kernel import Scalar
+    from coker.toolkits.spatial.algebra import Screw, UnitQuaternion
+
+
+    def f_impl(x, y):
+        g_0 = Isometry3(translation=x)
+        g_1 = Isometry3(translation=y)
+        return (g_0 @ g_1).as_vector()
+
+    args = [VectorSpace('x',3), VectorSpace('y',3 )]
+    test_values = [
+        [u_x, u_y],
+        [u_y, u_x]
+    ]
+    validate_symbolic_call('test_symbolic_isometry_product', f_impl, args, test_values, 'numpy')
+
+def test_symbolic_isometry_product_rotation():
+    from coker.algebra.kernel import Scalar
+    from coker.toolkits.spatial.algebra import Screw, UnitQuaternion
+
+
+    def f_impl(x, y):
+        rotation_1 = Rotation3(axis=x, angle=np.pi / 2)
+        rotation_2 = Rotation3(axis=y, angle=np.pi / 2)
+        rot = rotation_1 * rotation_2
+        return rot.as_matrix()
+
+    args = [VectorSpace('x',3), VectorSpace('y',3 )]
+    test_values = [
+        [u_x, u_y],
+        [u_y, u_x]
+    ]
+    validate_symbolic_call('test_symbolic_isometry_product', f_impl, args, test_values, 'numpy')
+
+
+def test_symbolic_isometry_product_screw():
+    from coker.algebra.kernel import Scalar
+    from coker.toolkits.spatial.algebra import Screw
+
+    s_1 = Screw(rotation=u_z, translation=np.array([0, 0, 0], dtype=float), magnitude=np.pi / 2)
+    def f_impl(t, theta_1):
+        g = Isometry3(translation=t)
+        s = s_1.exp(theta_1)
+        g = g @ s
+        return g.as_vector()
+
+    args = [VectorSpace('u',3), Scalar('theta_1')]
+    test_values = [
+        [np.array([0, 0, 0]), 0],
+        [np.array([0, 0, 0]), np.pi/2],
+    ]
+    validate_symbolic_call('test_symbolic_isometry_product', f_impl, args, test_values, 'numpy')
+
+
 
 def test_as_matrix():
     from coker.toolkits.spatial import SE3Adjoint, SE3CoAdjoint, Screw
@@ -199,7 +304,6 @@ def test_as_matrix():
 
 def test_bug_1():
 
-
     r = Isometry3(rotation=Rotation3(np.array([0., 0., 0.]), 0.0), translation=np.array([1., 0., 0.]))
     r_2 = Isometry3(rotation=Rotation3(np.array([0, 0, 1]), 0), translation=np.array([1, 0, 0]))
 
@@ -207,4 +311,6 @@ def test_bug_1():
 
     assert p.rotation.angle == 0
     assert np.allclose(p.translation, np.array([2., 0., 0.]))
+
+
 

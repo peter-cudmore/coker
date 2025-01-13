@@ -1,7 +1,9 @@
 import numpy as np
+
+from coker import VectorSpace
 from coker.toolkits.kinematics import RigidBody, Revolute, Free, Inertia, Weld
 from coker.toolkits.spatial import Isometry3, Screw, Rotation3, SE3Adjoint
-
+from test.util import validate_symbolic_call
 
 block_1m = Inertia(
     centre_of_mass=Isometry3(translation=np.array([0.5, 0, 0])),
@@ -102,6 +104,63 @@ def test_rotated_base_frame():
     tool_expected = Isometry3(translation=np.array([-1, 0, 1]), rotation=rot)
     assert is_close(tool, tool_expected)
 
+def test_rotated_base_frame_symbolic():
+
+    rotation = Rotation3(axis=np.array([0, 0, 1]), angle=np.pi)
+
+    base_model = RigidBody()
+    arm = base_model.add_link(
+        parent=base_model.WORLD,
+        at=Isometry3(rotation=rotation),
+        joint=Revolute(Screw.w_z()),
+        inertia=block_1m
+    )
+
+    end_arm = base_model.add_link(
+        parent=arm,
+        at=Isometry3(translation=np.array([1, 0, 0])),
+        joint=Revolute(Screw.w_y()),
+        inertia=block_1m
+    )
+    effector = base_model.add_effector(end_arm, at=Isometry3(translation=np.array([1, 0, 0])))
+
+    q0 = np.zeros((2,))
+    def joint_transform(q):
+
+        pivot, elbow = base_model.joint_transforms(q)
+        tool, = base_model.forward_kinematics(q)
+        return np.concatenate([pivot.as_vector() ], axis=1)
+
+
+
+#    validate_symbolic_call('joint_transform', joint_transform, [VectorSpace('q', 2)], [[q0]], 'numpy')
+
+#    pivot_expected = Isometry3(rotation=rotation)
+#    assert is_close(pivot, pivot_expected)
+#
+#    elbow_expected = Isometry3(translation=np.array([-1, 0, 0]), rotation=rotation)
+#    assert is_close(elbow, elbow_expected)
+#
+#    tool_expected = Isometry3(translation=np.array([-2, 0, 0]), rotation=rotation)
+#
+#    assert is_close(tool, tool_expected)
+#
+#    q1 = np.array([-1, 0]) * np.pi
+#
+#    tool, = base_model.forward_kinematics(q1)
+#    tool_expected = Isometry3(translation=np.array([2, 0, 0]))
+#    assert is_close(tool, tool_expected)
+#
+#    q2 = np.array([-np.pi, np.pi / 2])
+#    tool, = base_model.forward_kinematics(q2)
+#    tool_expected = Isometry3(translation=np.array([1, 0, -1]), rotation=Rotation3(axis=np.array([0, 1, 0]), angle=np.pi/2))
+#    assert is_close(tool, tool_expected)
+#
+#    q3 = np.array([0, np.pi / 2])
+#    tool, = base_model.forward_kinematics(q3)
+#    rot = Rotation3(axis=np.array([0, 0, 1]), angle=np.pi) * Rotation3(axis=np.array([0, 1, 0]), angle=np.pi/2)
+#    tool_expected = Isometry3(translation=np.array([-1, 0, 1]), rotation=rot)
+#    assert is_close(tool, tool_expected)
 
 def test_add_body():
 

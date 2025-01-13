@@ -1,5 +1,7 @@
 
 import numpy as np
+
+import coker
 from coker.toolkits.codesign import ProblemBuilder, Minimise
 from coker.toolkits.kinematics import RigidBody, Isometry3, Inertia, Screw, Revolute, Free, KinematicsVisualiser
 from coker.toolkits.spatial import Rotation3
@@ -54,6 +56,7 @@ def build_hexapod_leg(coxa_length, femur_length, tibia_length):
         joint=Revolute(Screw.w_z()),
         inertia=coxa_intertia
     )
+
     femur_coxa_joint = Isometry3(translation=coxa_length * np.array([1., 0., 0.]))
     femur_tibia_joint = Isometry3(translation=femur_length * np.array([1., 0., 0.]))
     v = np.array([34.630337, 0.0, -156.20737])
@@ -103,7 +106,28 @@ def build_hexapod_model(coxa_length, femur_length, tibia_length):
 
 
     assert len(model.end_effectors) == 6
+
+
+
+
+
     return model
+
+def build_model_kernels():
+    model =    build_hexapod_model(base_coxa_length, base_femur_length, base_tibia_length)
+    def f_impl(x):
+        isometries: List[Isometry3] = model.forward_kinematics(x)
+        return np.concatenate(
+            [np.reshape(np.concatenate([iso.translation, iso.rotation.as_vector()]), newshape=(1,6)) for iso in isometries], axis=0
+        )
+    args = [coker.VectorSpace('theta', model.total_joints())]
+
+    r_base = f_impl(np.zeros(model.total_joints()))
+
+    f = coker.kernel(args, f_impl, backend='numpy')
+    r = f(np.zeros(model.total_joints()))
+
+    return f
 
 
 def static_hexapod_codesign():
@@ -220,7 +244,7 @@ def hexapod_codesign():
 e_z = np.array([0, 0, 1], dtype=float)
 
 
-def get_anchors(distance_from_center=0.050):
+def get_anchors(distance_from_center=0.11):
     angles = [np.pi / 6, np.pi / 2, 5 * np.pi / 6, -5 * np.pi / 6, -np.pi / 2, -np.pi / 6]
 
     return [Isometry3(rotation=Rotation3(axis=e_z, angle=a))
@@ -313,23 +337,24 @@ def problem_1():
         ones = np.ones(shape=(18,), dtype=float)
 
         cost = np.dot(tau[6:], tau[6:]) + 0.01 * rest_height
+        cost = 0
         feet = model.forward_kinematics(q)
         origin = np.array([0, 0, 0])
         e_z = np.array([0, 0, 1])
-        alpha = 1000
+        alpha = 1
         for a, b in lag_iterator(feet):
             f_a = a @ origin
             f_b = b @ origin
             u = np.cross(f_a, f_b)
-            cost -= alpha * np.dot(u, u)
+            cost += alpha * np.dot(u, u)
 
         constraints = [
                       f_z[6] > 0 for f_z in contact_forces.values()
                       ] + [
                           q_joints < ones * np.pi/4,
                           - ones * np.pi/4 < q_joints,
-#                          tau[6:] < ones * motor_max,
-#                          tau[6:] > - ones * motor_max,
+                          tau[6:] < ones * motor_max,
+                          tau[6:] > - ones * motor_max,
                           rest_height > 0.3
                       ] + [
            np.dot(e_z, foot @ origin) > -rest_height for foot in feet
@@ -337,7 +362,7 @@ def problem_1():
             np.dot(e_z, foot @ origin) < 0 for foot in feet
         ]
 
-        builder.constraints = constraints
+#        builder.constraints = constraints
         builder.objective = Minimise(cost)
         builder.outputs = [q, tau]
 
@@ -367,6 +392,7 @@ def check_angles():
 
 
 if __name__ == '__main__':
-    check_angles()
+#    check_angles()
 #    problem_1()
+    build_model_kernels()
 #    main()

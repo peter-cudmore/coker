@@ -24,9 +24,12 @@ def hat(u: Vec3):
 
 class Rotation3:
     def __init__(self, axis, angle):
-        if np.allclose(axis, np.zeros(3)):
-            axis = e_z
-            angle = 0
+        try:
+            if np.allclose(axis, np.zeros(3)):
+                axis = e_z
+                angle = 0
+        except NotImplementedError:
+            pass
         self.axis = axis
         self.angle = angle
 
@@ -58,7 +61,7 @@ class Rotation3:
     @staticmethod
     def from_quaterion(q: UnitQuaternion):
         try:
-            if q.q_0 == 1:
+            if isinstance(q.q_0, (float, int))  and q.q_0 == 1:
                 return Rotation3.zero()
         except NotImplementedError:
             pass
@@ -166,6 +169,10 @@ class Isometry3:
         p = r.as_matrix() @ self.translation
         return Isometry3(rotation=r, translation=-p)
 
+    def as_vector(self) -> np.ndarray:
+        p = np.reshape(self.translation, newshape=(3, 1))
+        q = np.reshape(self.rotation.as_vector(), newshape=(3, 1))
+        return np.concatenate((p, q), axis=0)
 
 class Screw:
     __slots__ = ("rotation", "translation", "magnitude")

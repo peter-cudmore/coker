@@ -1,4 +1,6 @@
 import numpy as np
+
+from coker import normalise
 from coker.toolkits.spatial.types import Vec3, Scalar
 from coker.algebra.kernel import Tracer
 
@@ -16,6 +18,9 @@ def quaternion_mul(q, p):
 
 class UnitQuaternion:
     __slots__ = ["q_0", "v"]
+
+    def __str__(self):
+        return f"UnitQuaternion({self.q_0}, {self.v})"
 
     def __init__(self, q_0: Scalar, v: Vec3):
         self.q_0 = q_0
@@ -37,7 +42,10 @@ class UnitQuaternion:
             pass
         q_0 = np.cos(angle / 2)
         s = np.sin(angle / 2)
-        v = s * axis / np.linalg.norm(axis)
+
+        u, _ = normalise(axis)
+
+        v = s * u
         return UnitQuaternion(q_0, v)
 
     def __mul__(self, other) -> "UnitQuaternion":
@@ -56,7 +64,7 @@ class UnitQuaternion:
         elif isinstance(other, UnitQuaternion):
             p = other
         else:
-            raise NotImplementedError()
+            raise NotImplementedError("Can't right multiply by {}".format(other))
 
         return quaternion_mul(p, self)
 
@@ -82,3 +90,6 @@ class UnitQuaternion:
     @staticmethod
     def from_elements(q_0, q_1, q_2, q_3):
         return UnitQuaternion(q_0, np.array([q_1, q_2, q_3]))
+
+    def to_elements(self):
+        return [self.q_0, self.v[0], self.v[1], self.v[2]]
