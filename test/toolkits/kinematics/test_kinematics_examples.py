@@ -1,7 +1,9 @@
 import numpy as np
+import pytest
 
 from coker.algebra.kernel import kernel, VectorSpace
 from coker.toolkits.kinematics import *
+from coker.toolkits.spatial import Rotation3
 # Test based on 3-link open-chain manipulator
 # from Murry Et. Al
 
@@ -320,6 +322,7 @@ def test_scara_jacobian():
         np.array([0, 0, np.pi / 4, 0]),
         np.array([0, 0, 0, 0.25]),
         np.array([np.pi/4, np.pi / 2, 0, 0]),
+        np.array([np.pi / 4, np.pi / 2, np.pi/2, 0]),
     ]
     o = np.zeros((3,), dtype=float)
 
@@ -351,13 +354,10 @@ def test_scara_jacobian():
 def test_three_link_inverse_dynamics():
     def get_jacobians(q):
 
-        swap = np.block(
-            [[np.zeros((3,3)), np.eye(3)],
-             [np.eye(3), np.zeros((3,3))]]
-        )
+        swap = np.block([[np.zeros((3,3)), np.eye(3)],  [np.eye(3), np.zeros((3,3))]])
         j_1 = np.zeros((6,3), dtype=float)
-
         j_1[5, 0] = 1
+
         j_2 = np.zeros((6,3), dtype=float)
         j_2[0, 0] = -r_0 * np.cos(q[1])
         j_2[2, 1]= -r_0
@@ -366,8 +366,8 @@ def test_three_link_inverse_dynamics():
         j_2[5,0] = np.cos(q[1])
 
         j_3 = np.zeros((6,3), dtype=float)
-        j_3[0,0,] = -l_0*np.cos(q[1]) - r_1 *np.cos(q[1] + q[2])
-        j_3[1,1] = l_0 * np.sin(q[2])
+        j_3[0,0,] = -l_1*np.cos(q[1]) - r_1 *np.cos(q[1] + q[2])
+        j_3[1,1] = l_1 * np.sin(q[2])
         j_3[2,1] = -r_1 -l_0*np.cos(q[2])
         j_3[2,2] = -r_1
         j_3[3,1] = -1
@@ -398,15 +398,27 @@ def test_three_link_inverse_dynamics():
         np.array([1,0,0],dtype=float),
         np.array([0, 1, 0], dtype=float),
         np.array([0, 0, 1], dtype=float),
+        np.array([1, 1, 1], dtype=float),
     ]
+
+    screws = [
+        Screw.from_tuple(0,0,1,0,0,0),
+        Screw.from_tuple(-1,0,0,0,-l_0,0),
+        Screw.from_tuple(-1,0,0,0,-l_0,l_1),
+    ]
+    model_screws = model._get_joint_global_bases()
+
+    for i, (expected, test) in enumerate(zip(screws, model_screws)):
+        assert np.allclose(expected.to_array(), test.to_array()), f"Screw {i} is not correct.\n Expected {expected}\n got {test}"
 
 
     for q_test in q_tests:
+
         test_jacobians = model._get_link_com_jacobians(q_test)
         jacobians = get_jacobians(q_test)
 
         for i, (t_j, j) in enumerate(zip(test_jacobians, jacobians)):
-            assert np.allclose(t_j, j), f"Failed on jacobian {i} for test value {q_test}"
+            assert np.allclose(t_j, j), f"Failed on jacobian {i} for test value {q_test}\n Expected jacobian: {j}\n Got {t_j}"
 
         m_exact = three_link_inverse_dynamics_mass_matrix(q_test)
         m_test = model.mass_matrix(q_test)
@@ -665,4 +677,203 @@ def test_scara_inverse_dynamics():
         assert np.allclose(exact_torque, test_torque), \
             f"Failed on torque comparison for test value {q}, {q_dot, q_ddot}\n"\
             f"Expected {exact_torque} but got {test_torque}"
+
+def build_elbow_model(base_rotation=0):
+    body = RigidBody()
+    shoulder_z = body.add_link(
+        body.WORLD, Isometry3(translation=np.array([0,0,l_0]), rotation=Rotation3(axis=np.array([0,0,1]), angle=base_rotation)),
+        Revolute(Screw.w_z()), inertia=Inertia(
+            centre_of_mass=Isometry3(translation=np.array([0,0,l_0/2])),
+            mass=1,
+            moments=np.array([1,0,0,1,0,1]),
+        )
+    )
+    shoulder_x = body.add_link(shoulder_z, Isometry3.identity(), Revolute(-Screw.w_x()), inertia=Inertia.zero())
+    elbow_x = body.add_link(shoulder_x, Isometry3(translation=np.array([0,l_1,0])), Revolute(-Screw.w_x()),
+                            inertia=Inertia(centre_of_mass=Isometry3(translation=np.array([0,l_1/2,0])), mass=1, moments=np.array([1,0,0,1,0])))
+    wrist_z = body.add_link(
+        elbow_x, Isometry3(translation=np.array([0,l_2,0])), Revolute(Screw.w_z()),
+        inertia=Inertia(centre_of_mass=Isometry3(translation=np.array([0,l_2/2,0])), mass=1, moments=np.array([1,0,0,1,0]))
+    )
+    wrist_x = body.add_link(wrist_z, Isometry3.identity(), Revolute(-Screw.w_x()), inertia=Inertia.zero())
+    wrist_y = body.add_link(wrist_x, Isometry3.identity(), Revolute(Screw.w_y()), inertia=Inertia.zero())
+    effector = body.add_effector(wrist_y, Isometry3.identity())
+
+    return body
+
+def test_elbow_manipulator():
+
+    def tool_position(q, base_rotation=0):
+        return np.array([
+            -np.sin(q[0] + base_rotation)* (l_1*np.cos(q[1]) + l_2*np.cos(q[1] + q[2])),
+            np.cos(q[0]+ base_rotation) * (l_1*np.cos(q[1]) + l_2*np.cos(q[1] + q[2])),
+            l_0 - l_1* np.sin(q[1]) - l_2*np.sin(q[1] + q[2])])
+    expected_screws = [
+        Screw.from_tuple(0,0,1, 0,0,0),
+        Screw.from_tuple(-1,0, 0,0,-l_0,0),
+        Screw.from_tuple(-1,0, 0, 0,-l_0,l_1),
+        Screw.from_tuple( 0, 0, 1, l_1+ l_2, 0, 0),
+        Screw.from_tuple(-1,0,0, 0,-l_0, l_1 + l_2),
+        Screw.from_tuple(0,1,0, -l_0,0,0),
+    ]
+    model = build_elbow_model()
+    for i, (expected_screw, actual_screw) in enumerate(zip(expected_screws, model._get_joint_global_bases())):
+        rel, tes = expected_screw.to_array(), actual_screw.to_array()
+        assert np.allclose(rel, tes), f"Zeta {i +1}: expected {rel}, got {tes}"
+
+    test_configurations = [
+        np.zeros((6,)),
+        np.array([0.5,0,0,0,0,0])* np.pi ,
+        np.array([0, 0.5, 0, 0, 0, 0]) * np.pi,
+    ]
+
+    model = build_elbow_model(base_rotation=0)
+    for i, q_i in enumerate(test_configurations):
+        T_i, = model.forward_kinematics(q_i)
+        p_test = T_i.apply(np.zeros((3,)))
+        p = tool_position(q_i, base_rotation=0)
+        assert np.allclose(p_test, p), f"Failed on config {i} with args :{q_i}\n. Expected {p_test}, got {p}"
+
+
+
+def test_hexapod_leg():
+    from numpy import sin, cos
+    from coker.toolkits.spatial import Rotation3
+
+
+    def build_hexapod_leg(hip_anchor_distance, hip_anchor_angle):
+        model = RigidBody()
+        coxa_length = 0.05
+        femur_length = 0.08
+        tibia_length = 0.16
+        coxa_intertia = Inertia(
+            centre_of_mass=Isometry3(translation=np.array([0.007, 0, 0])),
+            mass=0.128,
+            moments=np.array([
+                1.096E-05, -2.510E-09, -3.152E-08, 1.915E-05, -2.755E-09, 1.712E-05
+            ])
+        )
+
+        femur_inertia = Inertia(
+            centre_of_mass=Isometry3(translation=np.array([0.04, 0.0, 0.0])),
+            mass=0.251,
+            moments=np.array([2.067E-05, -3.782E-10, 2.992E-08, 0.0, 0.0, 0.0])
+        )
+
+        tibia_inertia = Inertia(
+            centre_of_mass=Isometry3(translation=np.array([0.035, 0, -0.027])),
+            mass=0.008,
+            moments=np.array([
+                1.679E-05,
+                4.209E-09,
+                5.611E-07,
+                1.527E-05,
+                -8.506E-09,
+                2.889E-06])
+        )
+
+        body_intertia = Inertia(
+            centre_of_mass=Isometry3.identity(),
+            mass=0.0001,
+            moments=1e-9 * np.array([1, 0, 0, 1, 0, 1])
+        )
+
+        foot_angle_deg = 12.5 - 90
+
+        hip_anchor = Isometry3(rotation=Rotation3(axis=e_z, angle=hip_anchor_angle)) @ Isometry3(translation=np.array([hip_anchor_distance, 0, 0]))
+
+
+        coxa = model.add_link(
+            parent=model.WORLD,
+            at=hip_anchor,
+            joint=Revolute(Screw.w_z()),
+            inertia=coxa_intertia
+        )
+
+        femur_coxa_joint = Isometry3(translation=coxa_length * np.array([1., 0., 0.]))
+        femur_tibia_joint = Isometry3(translation=femur_length * np.array([1., 0., 0.]))
+        v = tibia_length * np.array([np.cos(np.deg2rad(foot_angle_deg)), 0.0, np.sin(np.deg2rad(foot_angle_deg))])
+        foot_transform = Isometry3(translation=v)
+
+        femur = model.add_link(
+            parent=coxa,
+            at=femur_coxa_joint,
+            joint=Revolute(-Screw.w_y()),
+            inertia=femur_inertia
+        )
+
+        tibia = model.add_link(
+            parent=femur,
+            at=femur_tibia_joint,
+            joint=Revolute(-Screw.w_y()),
+            inertia=tibia_inertia
+        )
+        model.add_effector(
+            parent=tibia,
+            at=foot_transform
+        )
+
+        return model
+
+    def exact_fk(q, hip_distance, hip_angle):
+        # derived from sympy model
+        [theta_h, theta_k, theta_a] = q.flatten().tolist()
+        a11 = hip_distance + (0.08 * cos(theta_k) + 0.16*cos(theta_a + theta_k - 1.35263017029561) + 0.05)*cos(theta_h)
+        a12 =  (0.08 * cos(theta_k) + 0.16*cos(theta_a + theta_k - 1.35263017029561) + 0.05)*sin(theta_h)
+        a13 = 0.08 * sin(theta_k) + 0.16 * sin(theta_a + theta_k - 1.35263017029561)
+        point = np.array([a11, a12, a13])
+        r = Rotation3(axis=e_z, angle=hip_angle)
+
+        return r.apply(point)
+
+    def exact_xform(q, hip_distance, hip_angle):
+        [theta_h, theta_k, theta_a] = q.flatten().tolist()
+        coxa_length = 0.05
+        femur_length = 0.08
+        tibia_length = 0.16
+
+        foot_angle_deg = 12.5 - 90
+        v = tibia_length * np.array([np.cos(np.deg2rad(foot_angle_deg)), 0.0, np.sin(np.deg2rad(foot_angle_deg))])
+        i1 =  Isometry3(rotation=Rotation3(axis=e_z, angle=hip_angle))
+        i2 = i1 @ Isometry3(translation=np.array([hip_distance, 0, 0]))
+        i3 = i2 @ Isometry3(rotation=Rotation3(e_z, angle=theta_h))
+        i4 = i3 @ Isometry3(translation=np.array([coxa_length, 0, 0]))
+        i5 = i4 @ Isometry3(rotation=Rotation3(-e_y, angle=theta_k))
+        i6 = i5 @ Isometry3(translation=np.array([femur_length, 0, 0]))
+        i7 = i6 @ Isometry3(rotation=Rotation3(-e_y, angle=theta_a))
+        i8 = i7 @ Isometry3(translation=v)
+        return i8
+
+
+    test_configurations = [
+        (0, 0),
+        (0.11, 0),
+        (0, np.pi / 2),
+        (0.11, np.pi/2)
+    ]
+
+
+    test_values = [
+        np.array([0,0,0],dtype=float),
+        np.array([np.pi/4,0,0],dtype=float),
+        np.array([-np.pi / 4, 0, 0], dtype=float),
+        np.array([0, np.pi/4, 0], dtype=float),
+        np.array([0, -np.pi / 4, 0], dtype=float),
+        np.array([0,0,  -np.pi / 4], dtype=float),
+    ]
+
+
+    for i, (hip_distance_i, hip_angle_i) in enumerate(test_configurations):
+        leg_model = build_hexapod_leg(hip_distance_i, hip_angle_i)
+        for test_value in test_values:
+            fk, = leg_model.forward_kinematics(test_value)
+            xform  = exact_xform(test_value, hip_distance_i, hip_angle_i)
+            assert is_close(xform, fk), \
+                f"For config {i} angles {test_value};\n     Expected: {xform}\n     but got: {fk}\n"
+            point = xform @ np.array([0, 0, 0])
+            soln = exact_fk(test_value, hip_distance_i, hip_angle_i)
+
+            assert np.allclose(point, soln), \
+                f"For config {i} angles {test_value};\n     Expected: {soln}\n     but got: {point}\n"
+
 

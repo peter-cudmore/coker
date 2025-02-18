@@ -2,7 +2,9 @@ import numpy as np
 import pytest
 
 import coker
-from coker.toolkits.spatial import Isometry3, Rotation3
+from coker.toolkits.spatial import Isometry3, Rotation3, SE3Adjoint, Screw
+from mpl_toolkits.mplot3d.proj3d import rot_x
+
 from test.conftest import backends
 from test.util import is_close, validate_symbolic_call
 from coker import VectorSpace, kernel, Scalar
@@ -76,7 +78,6 @@ def test_quaternion_product(backend):
         q_2 = UnitQuaternion.from_axis_angle(a_2, b_2)
         q = q_1 * q_2
         q_out = np.array(q.to_elements())
-        print(q_out)
         assert q_out.shape == (4,)
         return q_out
 
@@ -122,6 +123,15 @@ def test_isometry():
     assert is_close(iso.as_matrix(), eye.as_matrix(), tolerance=1e-9)
     xform = iso @ eye
     assert is_close(xform.as_matrix(), eye.as_matrix(), 1e-9)
+
+def test_isometry_rotations():
+    ry = Isometry3(rotation=Rotation3(axis=u_y, angle=np.pi / 2))
+    rx = Isometry3(rotation=Rotation3(axis=u_x, angle=-np.pi / 2))
+    rz = Isometry3(rotation=Rotation3(axis=u_z, angle=np.pi / 2))
+    ryx = ry @ rx
+    rzy = rz @ ry
+
+    assert is_close(rzy, ryx)
 
 
 def test_screws():
@@ -312,5 +322,94 @@ def test_bug_1():
     assert p.rotation.angle == 0
     assert np.allclose(p.translation, np.array([2., 0., 0.]))
 
+def test_adjoint():
+
+    from coker.toolkits.spatial import Screw, SE3Adjoint, Isometry3
+
+    s = Screw.w_y()
+    shift_x = Isometry3(translation=np.array([1., 0., 0.]))
+    s_shift_x = SE3Adjoint(shift_x).apply(s)
+
+    assert np.allclose(s_shift_x.to_array(), np.array([0,1,0, 0,0,1]))
+
+    rot_z = Isometry3(rotation=Rotation3(np.array([0., 0., 1.]), np.pi / 2))
+    s_rot_z = SE3Adjoint(rot_z).apply(s)
+    assert np.allclose(s_rot_z.to_array(), np.array([-1,0,0, 0,0,0]))
 
 
+def test_isometry_chain():
+
+    e_x = np.array([1,0,0])
+    e_y = np.array([0,1,0])
+    e_z = np.array([0,0,1])
+
+    #   -
+    # _| |_   == ---
+    #
+    part_1 = (
+        Isometry3(translation=e_x)
+        @ Isometry3(translation=e_y)
+        @ Isometry3(translation=e_x)
+        @ Isometry3(translation=-e_y)
+        @ Isometry3(translation=e_x)
+    )
+    part_1_equivament = Isometry3(translation=3 * e_x)
+
+    assert is_close(part_1, part_1_equivament)
+
+    part_1_rotations = (
+        Isometry3(translation=e_x)
+        @ Isometry3(rotation=Rotation3(axis=e_z, angle=np.pi / 2))
+        @ Isometry3(translation=e_x)
+        @ Isometry3(rotation=Rotation3(axis=-e_z, angle=np.pi / 2))
+        @ Isometry3(translation=e_x)
+        @ Isometry3(rotation=Rotation3(axis=-e_z, angle=np.pi / 2))
+        @ Isometry3(translation=e_x)
+        @ Isometry3(rotation=Rotation3(axis=e_z, angle=np.pi / 2))
+        @ Isometry3(translation=e_x)
+    )
+    assert is_close(part_1_rotations, part_1_equivament)
+    p = part_1_rotations.apply(np.zeros((3,)))
+    p_expected = np.array([3,0,0])
+    assert np.allclose(p, p_expected)
+
+    part_1_screws = (
+            Isometry3(translation=e_x)
+            @ Isometry3(rotation=Rotation3(axis=e_z, angle=np.pi / 2))
+            @ Isometry3(translation=e_x)
+            @ Screw.w_z().exp(-np.pi/2)
+            @ Isometry3(translation=e_x)
+            @ Isometry3(rotation=Rotation3(axis=-e_z, angle=np.pi / 2))
+            @ Isometry3(translation=e_x)
+            @ Screw.w_z().exp(np.pi / 2)
+            @ Isometry3(translation=e_x)
+    )
+    assert is_close(part_1_screws, part_1_equivament)
+
+    part_2 = (
+        Isometry3(translation=e_x)          # (1, 0, 0)
+        @ Isometry3(translation=e_y)        # (1, 1, 0)
+        @ Isometry3(translation=e_z)        # (1, 1, 1)
+    )
+    p20 = Isometry3(translation=e_x)
+    p21 = p20 @ Isometry3(rotation=Rotation3(axis=e_z, angle=np.pi / 2))
+    t21 =  Isometry3(translation=e_x).as_matrix() @ Isometry3(rotation=Rotation3(axis=e_z, angle=np.pi / 2)) .as_matrix()
+
+    assert np.allclose(p21.as_matrix(), t21)
+
+    p22 = p21 @ Isometry3(translation=e_x)
+    t22 = t21 @ Isometry3(translation=e_x).as_matrix()
+    p22m = p22.as_matrix()
+    assert np.allclose(p22m, t22)
+
+    p23 = p22 @ Isometry3(rotation=Rotation3(axis=e_y, angle=-np.pi / 2))
+    t23 = t22 @ Isometry3(rotation=Rotation3(axis=-e_y, angle=np.pi / 2)).as_matrix()
+    p23m = p23.as_matrix()
+    assert np.allclose(p23m, t23)
+
+    p24 = p23 @ Isometry3(translation=e_x)
+
+    p = part_2 @ origin
+    p_expected = p24 @ origin
+
+    assert  np.allclose(p, p_expected)

@@ -107,7 +107,7 @@ class Isometry3:
         self, rotation: Optional[Rotation3] = None, translation: Optional[Vec3] = None
     ):
 
-        self.rotation = rotation or Rotation3.zero()
+        self.rotation = Rotation3.zero() if rotation is None else rotation
 
         self.translation = (
             np.array([0, 0, 0], ) if translation is None else translation
@@ -129,7 +129,7 @@ class Isometry3:
 
     def __matmul__(self, other):
         if isinstance(other, Isometry3):
-            rotation = self.rotation * other.rotation
+            rotation = other.rotation * self.rotation
             translation = (
                 self.rotation.as_quaternion().conjugate(other.translation)
                 + self.translation
@@ -266,18 +266,12 @@ class Screw:
                 rotation=Rotation3.zero(), translation=self.translation * alpha
             )
 
-        w = hat(self.rotation)
-        s = np.sin(alpha)
-        c = np.cos(alpha)
-        ww = w @ w
-
-        r_add = w * s + (1 - c) * ww
+        rotation = Rotation3(axis=self.rotation, angle=alpha)
 
         rot_dot_t = np.dot(self.rotation, self.translation)
         rot_cross_t = np.cross(self.rotation, self.translation)
-        proj_t = rot_dot_t * self.translation
-        translation = alpha * proj_t - r_add @ rot_cross_t
-        rotation = Rotation3(axis=self.rotation, angle=alpha)
+
+        translation = rot_cross_t - rotation.apply(rot_cross_t) + rot_dot_t * alpha * self.rotation
 
         return Isometry3(rotation=rotation, translation=translation)
 

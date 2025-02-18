@@ -122,6 +122,7 @@ class RigidBody:
 
         assert 0 <= parent < idx or parent == self.WORLD
 
+
         self.parents.append(parent)
         self.transforms.append(at)
         self.joint_bases.append(joint.axes)
@@ -153,7 +154,7 @@ class RigidBody:
             assert angles.shape == (self.total_joints(),)
             q = angles
         joint_transforms = self._get_absolute_joint_xform(q)
-        joint_xforms = self._accumulate_joint_xforms(q, joint_transforms)
+        joint_xforms = self._accumulate_joint_xforms(joint_transforms)
         origin = np.array([0, 0, 0])
         total_energy = 0
         for i, inertia in enumerate(self.inertia):
@@ -164,7 +165,7 @@ class RigidBody:
 
         return total_energy
 
-    def _accumulate_joint_xforms(self, q, joint_transforms):
+    def _accumulate_joint_xforms(self, joint_transforms):
 
         accumulated_xform = []
         for i, parent in enumerate(self.parents):
@@ -203,6 +204,16 @@ class RigidBody:
 
         return result
 
+    def get_dependant_joints(self, effector_index):
+        joints = []
+
+        parent, _ = self.end_effectors[effector_index]
+        joint_map = self._get_joint_dependency_map()
+        while parent != self.WORLD:
+            joints += joint_map[parent]
+            parent = self.parents[parent]
+        return sorted(joints)
+
     def _get_joint_transforms(self, angles) -> List[Isometry3]:
         """Computes `g_si = Prod_j(exp(zeta_i q_i))`
         For each of the j angles.
@@ -225,6 +236,21 @@ class RigidBody:
     def _get_absolute_joint_xform(self, angles):
         """Express each g_j = Prod_i exp(theta_i zeta_i)
         in coordinates w.r.t the world
+
+        The position of each joint $i$ is given by
+        \prod_{j <= i} g_{j-1; j} exp(zeta_jq_j)
+
+        where g_{i-1; j} is the transfrom of the joint origin to the parent frame
+        zeta_j is the joint basis in the joint frame
+        q_j is the joint angle
+
+        want to move this to \Prod [exp(z_jq_j] g_i(0)
+
+        # g_{j-1; j} = g_{j-1; 0} g_{0; j} = g_{j-1}^{-1} g_j
+        so
+            prod = g_0 exp(zeta_0) g^{-1}_0 * g_1 exp(zeta_1) g_1^{-1} ...
+            i.e. z_j = Adj_{g_j}[zeta_j]
+
         """
         joint_idx = 0
         transforms = []
@@ -239,13 +265,13 @@ class RigidBody:
         return transforms
 
     def joint_transforms(self, angles, effector=None) -> List[Isometry3]:
+
         joint_index = 0
         transforms = []
         for parent, xform, bases in zip(self.parents, self.transforms, self.joint_bases):
-
             g = transforms[parent] @ xform if parent != self.WORLD else xform
             for basis in bases:
-                g = g @ basis.exp(angles[joint_index])
+                g =g @ basis.exp(angles[joint_index])
                 joint_index += 1
 
             transforms.append(g)
@@ -263,8 +289,7 @@ class RigidBody:
 
     def forward_kinematics(self, angles) -> List[Isometry3]:
         xforms = self.joint_transforms(angles)
-
-        return [xforms[parent] @ xform for parent, xform in self.end_effectors]
+        return [ xforms[parent] @ xform for parent, xform in self.end_effectors]
 
     def get_dependent_links(self, parent_link: int):
         result = list()
@@ -283,7 +308,7 @@ class RigidBody:
 
     def spatial_single_manipulator_jacobian(self, angles, end_effector):
         abs_xforms = self._get_absolute_joint_xform(angles)
-        xforms = self._accumulate_joint_xforms(angles, abs_xforms)
+        xforms = self._accumulate_joint_xforms(abs_xforms)
 
         effector_parent, _ = self.end_effectors[end_effector]
         dependent_link = self.get_dependent_links(effector_parent)
