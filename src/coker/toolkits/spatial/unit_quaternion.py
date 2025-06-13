@@ -8,11 +8,8 @@ from coker.algebra.kernel import Tracer
 def quaternion_mul(q, p):
 
     qp_0 = q.q_0 * p.q_0 - np.dot(q.v, p.v)
-    try:
-        qp_v = q.q_0 * p.v + p.q_0 * q.v + np.cross(q.v, p.v)
-    except Exception as e:
+    qp_v = q.q_0 * p.v + p.q_0 * q.v + np.cross(q.v, p.v)
 
-        raise e
     return UnitQuaternion(qp_0, qp_v)
 
 
@@ -82,6 +79,7 @@ class UnitQuaternion:
             qpq_inv = self * other * self.inverse()
             result = qpq_inv.v
             return np.reshape(result, newshape=other.shape)
+
 
         raise NotImplementedError(
             f"Quaternion conjugation not implemented for {type(other)}"

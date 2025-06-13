@@ -146,7 +146,7 @@ def create_opgraph(kernel: Kernel):
         memory[sink] = MemorySpec(location=location, count=count)
         dim = tape.dim[sink]
 
-        weights[sink] = BilinearWeights.identity2(memory=memory[sink], shape=dim.shape)
+        weights[sink] = BilinearWeights.identity2(memory=memory[sink])
 
         op, *args = tape.nodes[sink]
         args = [get_recursive(a) for a in args]

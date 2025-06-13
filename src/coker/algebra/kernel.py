@@ -9,6 +9,7 @@ from collections import defaultdict
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.dimensions import Dimension
 from coker.algebra.ops import OP, compute_shape, numpy_atomics, numpy_composites
+scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int)
 
 
 def get_basis(dimension: Dimension, i: int):
@@ -48,7 +49,7 @@ Inferred = None
 
 
 def get_dim_by_class(arg):
-    if isinstance(arg, (float, complex, int)):
+    if isinstance(arg, scalar_types):
         return Dimension(None)
     if isinstance(arg, np.ndarray):
         d = Dimension(arg.shape)
@@ -80,7 +81,7 @@ class Expression:
             return self.lhs - self.rhs, 0, np.inf
         elif self.op == ExprOp.EQUAL:
             return self.rhs - self.lhs, -1e-9, 1e-9
-        raise NotImplementedError
+        raise NotImplementedError("Cannot be expressed as halfplane bound")
 
     @property
     def tape(self) -> "Tape":
@@ -158,7 +159,7 @@ class Tape:
 
 def is_additive_identity(space: Dimension, arg) -> bool:
 
-    if isinstance(arg, (float, int, complex)) and arg == 0:
+    if isinstance(arg, scalar_types) and arg == 0:
         return True
 
     try:
@@ -267,7 +268,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
     def _do_integer_power(self, power):
         if power <= 0:
-            raise NotImplementedError()
+            raise NotImplementedError("Negative power")
         result = self
         for _ in range(1, power):
             result = self * result
@@ -289,7 +290,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             index = self.tape.append(OP.DOT, p, self)
             return Tracer(self.tape, index)
 
-        raise NotImplementedError()
+        raise NotImplementedError("Cannot get item {}", item)
 
     def __lt__(self, other):
         return Expression(ExprOp.LESS_THAN, self, other)
@@ -308,6 +309,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
                 assert inputs[1] > 0
                 if isinstance(inputs[1], Tracer):
                     pass
+
             index = self.tape.append(op, *inputs)
             return Tracer(self.tape, index)
 

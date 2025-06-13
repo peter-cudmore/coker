@@ -1,4 +1,5 @@
-from coker import Dimension, OP
+from coker import Dimension, OP, scalar_types
+from coker.algebra.ops import scalar_binary
 from coker.backends import get_backend_by_name
 from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.memory import MemorySpec
@@ -13,7 +14,7 @@ import numpy as np
 def vec(item):
     if isinstance(item, np.ndarray):
         return item.flatten(order="F")
-    if isinstance(item, (int, float)):
+    if isinstance(item, scalar_types):
         return np.array([item])
     raise NotImplementedError(type(item))
 

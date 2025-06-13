@@ -25,6 +25,7 @@ impls = {
     OP.NEG: lambda x: -x,
     OP.SQRT: ca.sqrt,
     OP.ABS: ca.fabs,
+    OP.ARCTAN2: ca.atan2,
 }
 
 
@@ -66,7 +67,10 @@ parameterised_impls = {
 
 def call_parameterised_op(op, *args):
     kls = op.__class__
-    result = parameterised_impls[kls](op, *args)
+    try:
+        result = parameterised_impls[kls](op, *args)
+    except KeyError as ex:
+        raise KeyError(f"Operation {op} not implemented.") from ex
 
     return result
 
@@ -180,5 +184,4 @@ def lower(tape: Tape, output: List[Tracer], workspace=None):
             inputs.update({s_i.__hash__(): s_i for s_i in s})
 
     result = substitute(output, workspace)
-
     return ca.Function("f", list(inputs.values()), result)

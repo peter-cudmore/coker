@@ -12,8 +12,12 @@ dependencies = [
 [project]
 name = "coker"
 requires-python = ">=3.8"
-
 dynamic = ["version"]
+
+[project.scripts]
+coker = "coker.projects:coker"
+
+
 
 [project.optional-dependencies]
 dev = [

@@ -35,6 +35,7 @@ Iz_0 = 1
 Iz_1 = 1
 Iz_2 = 1
 Iz_3 = 1
+from coker.backends.casadi import lower
 
 class Sampler:
 
@@ -865,6 +866,12 @@ def test_hexapod_leg():
 
     for i, (hip_distance_i, hip_angle_i) in enumerate(test_configurations):
         leg_model = build_hexapod_leg(hip_distance_i, hip_angle_i)
+        symbolic_fk = kernel(
+            arguments=[VectorSpace('q', 3)],
+            implementation=lambda q: leg_model.forward_kinematics(q)[0].apply(np.zeros((3,))),
+            backend='numpy'
+        )
+
         for test_value in test_values:
             fk, = leg_model.forward_kinematics(test_value)
             xform  = exact_xform(test_value, hip_distance_i, hip_angle_i)
@@ -875,5 +882,9 @@ def test_hexapod_leg():
 
             assert np.allclose(point, soln), \
                 f"For config {i} angles {test_value};\n     Expected: {soln}\n     but got: {point}\n"
+
+            symbolic_result = symbolic_fk(test_value)
+
+            assert np.allclose(symbolic_result, soln)
 
 

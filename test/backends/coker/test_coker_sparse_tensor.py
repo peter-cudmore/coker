@@ -35,6 +35,7 @@ def test_matmul_array():
 
     b = np.array([1, 2, 3])
 
+
     y_expected = t_test @ b
 
     y = t @ b
@@ -51,7 +52,10 @@ def test_matmul_array():
     assert np.allclose(id_2, t_test)
     assert np.allclose(id_1_array, id_2)
 
-
+    bt = b.T
+    z = bt @ t
+    z_test = bt @ t_test
+    assert np.allclose(z, z_test)
 
 def test_matmul_tensor():
     ex = np.array([[1, 0, 0]])
@@ -88,17 +92,6 @@ def test_cross():
     axa = np.cross(a, a)
     axa_test = hat(a) @ a
     assert np.allclose(axa_test.toarray(), axa)
-
-
-
-@pytest.mark.skip(reason="not implemented")
-def test_tensor_products():
-
-    # (4, 4, 1) @ (1,)      -> (4,4)
-    # (n, m, l) @ (l, m)    -> (n,)
-    # (n, m) * (1, l)       -> (n, m, l)
-
-    assert False
 
 
 

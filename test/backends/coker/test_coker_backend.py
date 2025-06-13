@@ -61,7 +61,6 @@ def test_scalar_weights():
     assert w(1) == 1
 
 
-@pytest.mark.skip
 def test_coker_graph():
     alpha = 3
     beta = 4
@@ -85,7 +84,6 @@ def test_coker_graph():
     assert dy == (alpha + 2 * beta) * dx
 
 
-@pytest.mark.skip
 def test_coker_vector():
     A = np.array([
         [2, 0, 0,],
@@ -96,7 +94,9 @@ def test_coker_vector():
 
     test_functions = [
         (lambda x: A @ x + b, lambda x, dx: A @ dx) ,
-        (lambda x: np.dot(A @ x, b), lambda x, dx: np.dot(A @ dx, b)),
+       (lambda x: np.dot(A @ x, b), lambda x, dx: np.dot(A @ dx, b)),
+        (lambda x: b + np.cos(x), lambda x, dx: - np.sin(x) * dx),
+        (lambda x: np.cos(x), lambda x, dx: -np.sin(x) * dx),
         (lambda x: np.dot(b, np.cos(x)), lambda x, dx: - b.T @ (np.sin(x) * dx)),
     ]
 
@@ -107,6 +107,7 @@ def test_coker_vector():
         )
 
         g = create_opgraph(f)
+
         x_vec = np.array([1, 2, 3])
         result = f(x_vec)
 
@@ -153,5 +154,5 @@ def test_dot_derivative():
         g_v,dg_v = g.push_forward(test_value, tangent_vector)
 
         assert np.allclose(f_v, g_v)
-
+        assert np.allclose(df_v, dg_v)
 

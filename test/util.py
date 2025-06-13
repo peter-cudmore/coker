@@ -1,8 +1,14 @@
 import numpy as np
 import pytest
-
+from coker.toolkits.spatial import Isometry3, Rotation3
 
 def is_close(a, b, tolerance=1e-16):
+
+    if isinstance(a, Isometry3) and isinstance(b, Isometry3):
+        return is_close(a.translation, b.translation, tolerance) and is_close(a.rotation, b.rotation, tolerance)
+
+    if isinstance(a, Rotation3) and isinstance(b, Rotation3):
+        return is_close(a.as_vector(), b.as_vector(), tolerance)
 
     if not isinstance(a, np.ndarray) and not isinstance(b, np.ndarray):
         return abs(a - b) < tolerance

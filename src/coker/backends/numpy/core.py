@@ -1,4 +1,4 @@
-from typing import Type, Tuple, List
+from typing import Type, Tuple, List, Any
 from functools import reduce
 from operator import mul
 import numpy as np
@@ -113,8 +113,8 @@ class NumpyBackend(Backend):
     def __init__(self, *args, **kwargs):
         super(NumpyBackend, self).__init__(*args, **kwargs)
 
-    def native_types(self) -> Tuple[Type]:
-        return (
+    def native_types(self) -> List[Any]:
+        return [
             np.ndarray,
             np.int32,
             np.int64,
@@ -123,7 +123,7 @@ class NumpyBackend(Backend):
             float,
             complex,
             int,
-        )
+        ]
 
     def to_numpy_array(self, array) -> ArrayLike:
         return array

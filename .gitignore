@@ -173,7 +173,6 @@ __pycache__/
 .Python
 .venv/
 env/
-bin/
 build/
 develop-eggs/
 dist/
@@ -231,3 +230,5 @@ docs/_build/
 
 # Pyenv
 .python-version
+
+Cargo.lock

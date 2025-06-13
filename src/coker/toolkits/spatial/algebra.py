@@ -1,3 +1,4 @@
+from types import NotImplementedType
 from typing import Optional
 import numpy as np
 from coker.toolkits.spatial.types import Vec3, Scalar
@@ -32,6 +33,22 @@ class Rotation3:
             pass
         self.axis = axis
         self.angle = angle
+
+    @staticmethod
+    def cast(other) -> 'Rotation3':
+
+        if isinstance(other, Rotation3):
+            return other
+
+        if isinstance(other, UnitQuaternion):
+            return Rotation3.from_quaterion(other)
+        if isinstance(other, Vec3):
+            return Rotation3.from_vector(other)
+        if hasattr(other, "shape") and other.shape == (3,):
+            return Rotation3.from_vector(other)
+
+        raise NotImplementedError(f"Cannot cast {other} to a rotation matrix")
+
 
     def as_vector(self) -> np.ndarray:
         return self.axis * self.angle
@@ -107,7 +124,8 @@ class Isometry3:
         self, rotation: Optional[Rotation3] = None, translation: Optional[Vec3] = None
     ):
 
-        self.rotation = Rotation3.zero() if rotation is None else rotation
+        self.rotation = Rotation3.zero() if rotation is None else (
+            Rotation3.cast(rotation))
 
         self.translation = (
             np.array([0, 0, 0], ) if translation is None else translation
@@ -145,7 +163,7 @@ class Isometry3:
             )
             return np.concatenate([result, other[3:4, 0:1]], axis=0)
 
-        raise NotImplementedError()
+        raise NotImplementedError(f"Isometry can't tranfrom {other.__class__}")
 
     def apply(self, other):
         assert other.shape == (3,)
@@ -256,6 +274,24 @@ class Screw:
     def __mul__(self, other: Scalar):
         return Screw(self.rotation, self.translation, self.magnitude * other)
 
+    @property
+    def axis(self) -> (Vec3, Vec3):
+        """
+        Returns:
+            Tuple[Vec3, Vec3]: Point and direction of axis.
+
+        """
+        q = np.cross(self.rotation, self.translation)
+
+        if (self.rotation == 0).all():
+            return q, self.translation
+
+        return q, self.rotation
+
+    @property
+    def pitch(self):
+        return self.rotation.dot(self.translation) * self.magnitude
+
     def exp(self, angle=1) -> Isometry3:
         if self.magnitude != 0:
             alpha = self.magnitude * angle
@@ -271,7 +307,18 @@ class Screw:
         rot_dot_t = np.dot(self.rotation, self.translation)
         rot_cross_t = np.cross(self.rotation, self.translation)
 
-        translation = rot_cross_t - rotation.apply(rot_cross_t) + rot_dot_t * alpha * self.rotation
+        t1 = - rotation.apply(rot_cross_t)
+        t2 = alpha * self.rotation
+
+        try:
+            t3 = rot_dot_t * t2
+        except TypeError as ex:
+            print(t2)
+            print(rot_dot_t)
+            raise ex
+
+        translation = rot_cross_t + t1 + t3
+#        translation = rot_cross_t - rotation.apply(rot_cross_t) + rot_dot_t * alpha * self.rotation
 
         return Isometry3(rotation=rotation, translation=translation)
 
@@ -312,7 +359,7 @@ class SE3Adjoint:
         if isinstance(other, np.ndarray):
             return self.as_matrix() @ other
 
-        raise NotImplemented()
+        raise NotImplemented(f"Can't matmul by {other.__class__}")
 
     def __repr__(self):
         return f"Adj[{repr(self.transform)}]"
@@ -321,7 +368,7 @@ class SE3Adjoint:
         if isinstance(other, SE3Adjoint):
             t = other.transform @ self.transform
             return SE3Adjoint(t)
-        raise NotImplemented()
+        raise NotImplemented(f"Can't rmatmul by {other.__class__}")
 
     def __call__(self, arg: Screw) -> Screw:
         assert isinstance(arg, Screw)
@@ -368,7 +415,7 @@ class SE3CoAdjoint:
     def __matmul__(self, other):
         if isinstance(other, Screw):
             return self.apply(other)
-        raise NotImplemented()
+        raise NotImplemented(f"Can't matmul by type {other.__class__}")
 
     def __call__(self, arg: Screw) -> Screw:
         assert isinstance(arg, Screw)

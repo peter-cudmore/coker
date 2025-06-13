@@ -60,11 +60,12 @@ impls = {
     OP.NEG: jnp.negative,
     OP.SQRT: jnp.sqrt,
     OP.ABS: jnp.abs,
+    OP.ARCTAN2: jnp.arctan2,
 }
 
 parameterised_impls = {
     ConcatenateOP: lambda op, *x: jnp.concatenate(x, axis=op.axis),
-    ReshapeOP: lambda op, x: jnp.reshape(x, newshape=op.newshape),
+    ReshapeOP: lambda op, x: jnp.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: jnp.linalg.norm(x, ord=op.ord),
 }
 

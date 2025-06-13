@@ -51,10 +51,10 @@ class Operator:
         return args
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
-        raise NotImplementedError
+        raise NotImplementedError("Compute shape not implemented for {}", self)
 
     def is_linear(self):
-        raise NotImplementedError
+        raise NotImplementedError("is_linear not implemented for {}", self)
 
     def is_bilinear(self):
         return False

@@ -40,6 +40,22 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             quadratic, expected_shape=(*shape, memory.count, memory.count)
         )
 
+    def transpose(self) -> 'BilinearWeights':
+        if len(self.shape) <= 2:
+            n, = self.shape
+            return BilinearWeights(
+                self.memory,
+                shape= (1, n),
+                constant=self.constant.T,
+                linear= self.linear.swap_indices(0, 1),
+                quadratic=self.quadratic.swap_indices(0, 1)
+            )
+
+
+        raise NotImplementedError(f"Cannot transpose {len(self.shape)} dimensions")
+
+
+
     def __call__(self, x):
         x_v = dense_array_cast(x)
         try:
@@ -72,23 +88,12 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
     def is_scalar(self):
         return self.shape == (1,)
 
+
     def is_constant(self):
         return not self.linear.keys and not self.quadratic.keys
 
     def is_linear(self):
         return not self.quadratic.keys
-
-    @staticmethod
-    def identity(arg):
-        if isinstance(arg, Dimension):
-            n = arg.flat()
-        else:
-            assert isinstance(arg, int)
-            n = arg
-        a = dok_ndarray.eye(n)
-        b = np.zeros((n, 1))
-        Q = dok_ndarray.zeros((n, n, n))
-        return BilinearWeights(a, b, Q)
 
     def __mul__(self, other):
         if isinstance(other, scalar):
@@ -141,6 +146,8 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 return BilinearWeights(
                     self.memory, other.shape, constants, linear, quadratic
                 )
+
+
         raise TypeError(f"Cannot multiply {self} by {type(other)}")
 
     def __rmul__(self, other):
@@ -160,7 +167,25 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 quadratic=quadratic,
             )
         elif isinstance(other, BilinearWeights):
-            assert self.memory == other.memory
+
+            if self.linear.is_empty() and self.quadratic.is_empty():
+                return BilinearWeights(
+                    other.memory,
+                    self.shape,
+                    self.constant + other.constant,
+                    other.linear,
+                    other.quadratic,
+                )
+            if other.linear.is_empty() and other.quadratic.is_empty():
+                return BilinearWeights(
+                    self.memory,
+                    self.shape,
+                    self.constant + other.constant,
+                    self.linear,
+                    self.quadratic
+                )
+
+            assert self.memory == other.memory, f"{self}, {other}"
             return BilinearWeights(
                 self.memory,
                 self.shape,
@@ -211,7 +236,12 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
         if isinstance(other, (np.ndarray, dok_ndarray)):
             constant = other @ self.constant
-            linear = other @ self.linear
+            try:
+
+                linear = other @ self.linear
+            except IndexError as ex:
+                print(f"{other}, {(self.linear.shape, self.linear.keys)}")
+                raise ex
             quadratic = other @ self.quadratic
             shape = constant.shape
             return BilinearWeights(self.memory, shape, constant, linear, quadratic)
@@ -233,8 +263,9 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
     def __array_ufunc__(self, ufunc, method, args, out=None):
         if ufunc == np.matmul and method == "__call__":
             return self.__rmatmul__(args)
+
         if ufunc == np.multiply and method == "__call__":
-            if self.is_scalar():
+            if self.is_scalar() or isinstance(args, scalar):
                 return self.__mul__(args)
 
         if ufunc == np.add and method == "__call__":
@@ -254,7 +285,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                     self.memory, self.shape, constant, linear, quadratic
                 )
 
-        raise NotImplementedError
+        raise NotImplementedError(f"{ufunc} not implemented")
 
     def __truediv__(self, other):
         if not isinstance(other, scalar):
@@ -284,14 +315,14 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         return BilinearWeights(self.memory, c.shape, c, l, q)
 
     @staticmethod
-    def identity2(memory: MemorySpec, shape: Tuple[int, ...]):
+    def identity2(memory: MemorySpec):
 
+        shape = (memory.count, )
         data = {}
         for i in range(memory.count):
-            key = np.unravel_index(i, shape, order="F")
-            data[(*key, i)] = 1
+            data[(i, i)] = 1
 
-        linear = dok_ndarray((*shape, 1), data)
+        linear = dok_ndarray((memory.count, memory.count), data)
 
         return BilinearWeights(memory, shape, linear=linear)
 

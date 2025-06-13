@@ -105,19 +105,25 @@ class RigidBody:
 
 
         """
-        self.joint_bases: List[List[Screw]] = []
+        self.joints: List[JointType] = []
+
         self.inertia: List[Inertia] = []
         self.parents: List[int] = []
         self.transforms: List[Isometry3] = []
         self.end_effectors: List[Tuple[int, Isometry3]] = []
         self._rest_transforms: List[Isometry3] = []
 
+    @property
+    def joint_bases(self) -> List[List[Screw]]:
+        return [j.axes for j in self.joints]
+
     def joint_global_basis(self, joint_index):
         bases = self.joint_bases[joint_index]
+
         adjoint = SE3Adjoint(self._rest_transforms[joint_index])
         return [adjoint.apply(b) for b in bases]
 
-    def add_link(self, parent: int, at: Isometry3, joint, inertia) -> int:
+    def add_link(self, parent: int, at: Isometry3, joint: JointType, inertia: Inertia) -> int:
         idx = len(self.parents)
 
         assert 0 <= parent < idx or parent == self.WORLD
@@ -125,7 +131,7 @@ class RigidBody:
 
         self.parents.append(parent)
         self.transforms.append(at)
-        self.joint_bases.append(joint.axes)
+        self.joints.append(joint)
         self.inertia.append(inertia)
 
         if parent != self.WORLD:
@@ -481,8 +487,8 @@ class RigidBody:
     def add_body(self, body: 'RigidBody', at: Isometry3, parent: int):
         links = []
 
-        iterator = zip(body.parents, body.joint_bases, body.transforms, body.inertia)
-        for i, (p_body, bases, xform, inertia) in enumerate(iterator):
+        iterator = zip(body.parents, body.joints, body.transforms, body.inertia)
+        for i, (p_body, joint, xform, inertia) in enumerate(iterator):
             idx = len(self.parents)
 
             self.parents.append(parent if p_body == self.WORLD else links[p_body])
@@ -495,7 +501,7 @@ class RigidBody:
             else:
                 body_xform = xform
 
-            self.joint_bases.append([b for b in bases])
+            self.joints.append(joint)
 
             rest_xform = self._rest_transforms[p_actual] @ body_xform if p_actual != self.WORLD else body_xform
             self.transforms.append(body_xform)

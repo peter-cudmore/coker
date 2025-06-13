@@ -58,18 +58,25 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __init__(self, shape, data: Optional[Dict[MultiIndex, float]] = None):
 
+        self.keys = {}
         if len(shape) == 1:
 
             shape = (shape[0], 1)
             if data is not None:
-                self.keys = {(*k, 0): v for k, v in data.items()}
+                for k in data.keys():
+                    if len(k) == 2:
+                        assert k[1] == 0
+                        self.keys[k] = data[k]
+                    elif len(k) == 1:
+                        self.keys[(*k, 0)] = data[k]
+                    else:
+                        raise TypeError("Failed to store data ")
             else:
                 self.keys = {}
         else:
             self.keys = data if data is not None else {}
         self.shape = shape
-        if not all(len(self.shape) == len(k) for k in self.keys.keys()):
-            assert False
+
 
     def is_empty(self):
         return self.keys == {}
@@ -108,6 +115,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def toarray(self):
         m = np.zeros(shape=self.shape)
+
         for k, v in self.keys.items():
             m[k] = v
 
@@ -115,6 +123,26 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             return m.flatten()
 
         return m
+
+    def swap_indices(self,i, j):
+        assert i != j and i < len(self.shape) and j < len(self.shape)
+        if i > j:
+            i, j = j, i
+
+        data = {}
+        for k, v in self.keys.items():
+            k_prime = k.copy()
+            k_i, k_j = k[i], k[j]
+            k_prime[i] = k_j
+            k_prime[j] = k_i
+            data[k_prime] = v
+
+        shape = self.shape.copy()
+        s_i, s_j = self.shape[i], self.shape[j]
+        shape[i] = s_j
+        shape[j] = s_i
+        
+        return dok_ndarray(shape=self.shape, data=data)
 
     @staticmethod
     def zeros(shape):
@@ -161,6 +189,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             result = dok_ndarray.fromarray(arg)
             return result
         if isinstance(arg, dok_ndarray):
+
             return arg.clone()
         if arg is None and expected_shape is not None:
             return dok_ndarray(expected_shape)
