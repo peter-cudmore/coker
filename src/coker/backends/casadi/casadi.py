@@ -1,7 +1,7 @@
 import casadi as ca
 import numpy as np
 
-from coker import OP, ExprOp, Tape, Tracer
+from coker import OP, Tape, Tracer
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 from typing import List
 
@@ -26,7 +26,12 @@ impls = {
     OP.SQRT: ca.sqrt,
     OP.ABS: ca.fabs,
     OP.ARCTAN2: ca.atan2,
+    OP.EQUAL: ca.eq,
+    OP.LESS_EQUAL: ca.le,
+    OP.LESS_THAN: ca.lt,
+    OP.CASE: lambda c, t, f: ca.if_else(c, t, f)
 }
+
 
 
 def concat(*args: ca.MX, axis=0):
@@ -175,7 +180,7 @@ def lower(tape: Tape, output: List[Tracer], workspace=None):
     inputs = dict()
     for i in tape.input_indicies:
         if i not in workspace:
-            v = ca.MX.sym(f"x_i", *tape.dim[i].shape)
+            v = ca.MX.sym(f"x_{i}", *tape.dim[i].shape)
             workspace[i] = v
             inputs[v.__hash__()] = v
         else:
@@ -184,4 +189,5 @@ def lower(tape: Tape, output: List[Tracer], workspace=None):
             inputs.update({s_i.__hash__(): s_i for s_i in s})
 
     result = substitute(output, workspace)
-    return ca.Function("f", list(inputs.values()), result)
+    f = ca.Function("f", list(inputs.values()), result)
+    return f

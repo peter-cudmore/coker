@@ -32,6 +32,8 @@ class OP(enum.Enum):
     CASE = 21
     EQUAL = 22
     ARCTAN2 = 23
+    LESS_THAN = 24
+    LESS_EQUAL = 25
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -134,8 +136,18 @@ def register_shape(*ops: OP):
 def dimension_identity(dim: Dimension):
     return dim
 
+@register_shape(OP.EQUAL, OP.LESS_EQUAL, OP.LESS_THAN)
+def comparison_dimension(dim1: Dimension, dim2: Dimension):
+    if dim1.dim != dim2.dim:
+        raise InvalidShape(dim1, dim2)
+    return dim1
+
+
 @register_shape(OP.CASE)
-def case_dimension(condition: bool, false_branch: Dimension, true_branch: Dimension ):
+def case_dimension(condition: Dimension, false_branch: Dimension, true_branch: Dimension ):
+    if not condition.is_scalar():
+        raise InvalidShape("Condition must be a scalar")
+
     if false_branch!= true_branch:
         raise InvalidShape("Arguments are of different dimensions")
 

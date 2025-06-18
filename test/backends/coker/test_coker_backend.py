@@ -156,3 +156,5 @@ def test_dot_derivative():
         assert np.allclose(f_v, g_v)
         assert np.allclose(df_v, dg_v)
 
+
+

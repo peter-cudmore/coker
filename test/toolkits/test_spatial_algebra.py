@@ -231,7 +231,7 @@ def test_symbolic_isometries(backend):
                            [Scalar('x'), Scalar('theta')],
                            test_set, backend)
 
-def test_symbolic_isometry_product_translation():
+def test_symbolic_isometry_product_translation(backend):
     from coker.algebra.kernel import Scalar
     from coker.toolkits.spatial.algebra import Screw, UnitQuaternion
 
@@ -246,9 +246,9 @@ def test_symbolic_isometry_product_translation():
         [u_x, u_y],
         [u_y, u_x]
     ]
-    validate_symbolic_call('test_symbolic_isometry_product', f_impl, args, test_values, 'numpy')
+    validate_symbolic_call('test_symbolic_isometry_product', f_impl, args, test_values,backend)
 
-def test_symbolic_isometry_product_rotation():
+def test_symbolic_isometry_product_rotation(backend):
     from coker.algebra.kernel import Scalar
     from coker.toolkits.spatial.algebra import Screw, UnitQuaternion
 
@@ -264,7 +264,7 @@ def test_symbolic_isometry_product_rotation():
         [u_x, u_y],
         [u_y, u_x]
     ]
-    validate_symbolic_call('test_symbolic_isometry_product', f_impl, args, test_values, 'numpy')
+    validate_symbolic_call('test_symbolic_isometry_product', f_impl, args, test_values, backend)
 
 
 def test_symbolic_isometry_product_screw():

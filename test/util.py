@@ -13,6 +13,8 @@ def is_close(a, b, tolerance=1e-16):
     if not isinstance(a, np.ndarray) and not isinstance(b, np.ndarray):
         return abs(a - b) < tolerance
 
+    if (a.shape == (1,) or b.shape == (1,)):
+        return float(a) == float(b)
     assert a.shape == b.shape, "shapes don't match"
 
 

@@ -6,6 +6,8 @@ import numpy as np
 from typing import List, Callable, Tuple, Union
 from collections import defaultdict
 
+from jax._src.core import Tracer
+
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.dimensions import Dimension
 from coker.algebra.ops import OP, compute_shape, numpy_atomics, numpy_composites
@@ -54,49 +56,46 @@ def get_dim_by_class(arg):
     if isinstance(arg, np.ndarray):
         d = Dimension(arg.shape)
         return d
+
+    if isinstance(arg, Expression):
+        return Dimension(None)
+
     else:
-        raise NotImplemented("Don't know the shape of {}".format(arg))
+        raise NotImplementedError(f"Don't know the shape of {type(arg)}")
 
 
-class ExprOp(enum.Enum):
-    LESS_THAN = "<"
-    GREATER_THAN = ">"
-    EQUAL = "="
-
-
-class Expression:
-    def __init__(self, op: ExprOp, lhs, rhs):
-
-        self.lhs: Tracer = lhs
-        self.rhs = rhs
-        self.op = op
-
-    def as_halfplane_bound(self):
-
-        if self.op == ExprOp.LESS_THAN:
-            # lhs < rhs ->  (lhs - rhs) < 0
-            return self.lhs - self.rhs, -np.inf, 0
-        elif self.op == ExprOp.GREATER_THAN:
-            # lhs > rhs -> (lhs - rhs) > 0
-            return self.lhs - self.rhs, 0, np.inf
-        elif self.op == ExprOp.EQUAL:
-            return self.rhs - self.lhs, -1e-9, 1e-9
-        raise NotImplementedError("Cannot be expressed as halfplane bound")
-
-    @property
-    def tape(self) -> "Tape":
-        l_tape = self.lhs.tape if isinstance(self.lhs, Tracer) else None
-        r_tape = self.rhs.tape if isinstance(self.rhs, Tracer) else None
-        if l_tape and not r_tape:
-            return l_tape
-        elif r_tape and not l_tape:
-            return r_tape
-        elif l_tape == r_tape and l_tape is not None:
-            return l_tape
-        else:
-            raise NotImplementedError("No tape found")
-
-
+# class ExprOp(enum.Enum):
+#    LESS_THAN = "<"
+#    GREATER_THAN = ">"
+#    EQUAL = "="
+#
+#    def __init__(self, op: ExprOp, lhs, rhs):
+#         self.lhs: Tracer = lhs
+#        self.rhs: Tracer = rhs
+#        self.op = op
+#     def as_halfplane_bound(self):
+#         if self.op == ExprOp.LESS_THAN:
+#            # lhs < rhs ->  (lhs - rhs) < 0
+#            return self.lhs - self.rhs, -np.inf, 0
+#        elif self.op == ExprOp.GREATER_THAN:
+#            # lhs > rhs -> (lhs - rhs) > 0
+#            return self.lhs - self.rhs, 0, np.inf
+#        elif self.op == ExprOp.EQUAL:
+#            return self.rhs - self.lhs, -1e-9, 1e-9
+#        raise NotImplementedError("Cannot be expressed as halfplane bound")
+#     @property
+#    def tape(self) -> "Tape":
+#        l_tape = self.lhs.tape if isinstance(self.lhs, Tracer) else None
+#        r_tape = self.rhs.tape if isinstance(self.rhs, Tracer) else None
+#        if l_tape and not r_tape:
+#            return l_tape
+#        elif r_tape and not l_tape:
+#            return r_tape
+#        elif l_tape == r_tape and l_tape is not None:
+#            return l_tape
+#        else:
+#            raise NotImplementedError("No tape found")
+#
 class Tape:
     def __init__(self):
         self.nodes = []
@@ -113,7 +112,7 @@ class Tape:
     def _compute_shape(self, op: OP, *args) -> Dimension:
         dims = []
         for arg in args:
-            assert isinstance(arg, Tracer)
+            assert isinstance(arg, Tracer) or isinstance(arg, Expression)
             assert arg.tape is self, "Tracer belongs to another tape"
             dims.append(arg.dim)
 
@@ -121,6 +120,7 @@ class Tape:
 
     def append(self, op: OP, *args) -> int:
         args = [strip_symbols_from_array(a) for a in args]
+
         args = [self.insert_value(a) if not isinstance(a, Tracer) else a for a in args]
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
@@ -186,6 +186,17 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         if op != OP.VALUE:
             return False
         return True
+
+    def as_halfplane_bound(self) -> Tuple[Tracer, float, float]:
+        op, lhs, rhs = self.tape.nodes[self.index]
+        bounds = {
+            OP.EQUAL: (-1e-9, 1e-9),
+            OP.LESS_THAN: (0, np.inf),
+            OP.LESS_EQUAL: (-1e-9, np.inf)
+        }
+        return rhs - lhs, *bounds[op]
+
+
 
     def value(self):
         op, *args = self.tape.nodes[self.index]
@@ -292,14 +303,26 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         raise NotImplementedError("Cannot get item {}", item)
 
+    def __le__(self, other):
+        idx = self.tape.append(OP.LESS_EQUAL, self, other)
+        return Tracer(self.tape, idx)
+
+    def __ge__(self, other):
+        idx = self.tape.append(OP.LESS_EQUAL, other, self)
+        return Tracer(self.tape, idx)
+
     def __lt__(self, other):
-        return Expression(ExprOp.LESS_THAN, self, other)
+        idx = self.tape.append(OP.LESS_THAN, self, other)
+        return Tracer(self.tape, idx)
 
     def __gt__(self, other):
-        return Expression(ExprOp.GREATER_THAN, self, other)
+        idx = self.tape.append(OP.LESS_THAN, other, self)
+        return Tracer(self.tape, idx)
 
     def __eq__(self, other):
-        return Expression(ExprOp.EQUAL, self, other)
+        idx = self.tape.append(OP.EQUAL, self, other)
+        return Tracer(self.tape, idx)
+
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         try:
@@ -353,10 +376,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def normalise(self):
         norm = self.norm()
 
-        norm_path = self / norm
+        condition = norm == 0
 
+        output = self.tape.append(
+            OP.CASE, condition, self, self / norm
+        )
 
-        return norm_path
+        return Tracer(self.tape, output)
 
 
 class Kernel:
@@ -458,7 +484,7 @@ def normalise(v: Union[np.ndarray, Tracer]):
             r = np.linalg.norm(v)
             return v / r, r
 
-    assert isinstance(v, Tracer)
+    assert isinstance(v, Tracer), f"Expected Tracer got {type(v)}"
 
     unit_v = v.normalise()
     norm_v = v.norm()

@@ -6,7 +6,7 @@ import sympy as sp
 import scipy as sy
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Expression, Tracer, VectorSpace
+from coker.algebra.kernel import Tracer, VectorSpace
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike
@@ -21,7 +21,7 @@ def to_array(value, shape):
     raise NotImplementedError
 
 
-scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int)
+scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int, bool, np.bool_)
 
 
 def is_scalar_symbol(v):
@@ -63,6 +63,10 @@ impls = {
     OP.SQRT: np.sqrt,
     OP.ABS: np.abs,
     OP.ARCTAN2: np.arctan2,
+    OP.EQUAL: np.equal,
+    OP.LESS_EQUAL: np.less_equal,
+    OP.LESS_THAN: np.less,
+    OP.CASE: lambda cond, t, f: t if cond else f,
 }
 
 parameterised_impls = {
@@ -165,7 +169,7 @@ class NumpyBackend(Backend):
     def build_optimisation_problem(
         self,
         cost: Tracer,  # cost
-        constraints: List[Expression],
+        constraints: List[Tracer],
         arguments: List[Tracer],
         outputs: List[Tracer],
     ):

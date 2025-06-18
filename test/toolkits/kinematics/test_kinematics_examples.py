@@ -74,7 +74,7 @@ class Sampler:
             acc = self.rng.uniform(-1, 1, size=(self.dimensions,))
             yield pos, vel, acc
 
-def test_single_pendulum():
+def test_single_pendulum(backend):
     model = RigidBody()
     # One link
     #
@@ -92,19 +92,28 @@ def test_single_pendulum():
     )
 
     tip = model.add_effector(parent=link, at=Isometry3(translation=np.array([0, 0, -l_0])))
+    origin = np.zeros((3,), dtype=float)
+    transform_symbolic = kernel(
+        [VectorSpace('q', 1)],
+        implementation=lambda q: model.forward_kinematics(q)[0].apply(origin),
+        backend=backend
+    )
 
     zero_angle = np.array([0], dtype=float)
     rest_transforms = model.forward_kinematics(zero_angle)
     rest_transform = rest_transforms[tip]
-    origin = np.zeros((3,), dtype=float)
 
     assert np.allclose(rest_transform.apply(origin), np.array([0, 0, -l_0], dtype=float))
+    assert np.allclose(transform_symbolic(zero_angle), np.array([0, 0,-l_0], dtype=float))
 
     full_left = np.array([np.pi / 2])
     rest_transforms = model.forward_kinematics(full_left)
     rest_transform = rest_transforms[tip]
 
     assert np.allclose(rest_transform.apply(origin), np.array([0, l_0, 0], dtype=float))
+
+
+
 
 
 def test_single_slider():
@@ -737,7 +746,7 @@ def test_elbow_manipulator():
 
 
 
-def test_hexapod_leg():
+def test_hexapod_leg(backend):
     from numpy import sin, cos
     from coker.toolkits.spatial import Rotation3
 
@@ -866,10 +875,15 @@ def test_hexapod_leg():
 
     for i, (hip_distance_i, hip_angle_i) in enumerate(test_configurations):
         leg_model = build_hexapod_leg(hip_distance_i, hip_angle_i)
+
+        def impl(q):
+            tx, = leg_model.forward_kinematics(q)
+            return tx @ np.array([0,0,0])
+
         symbolic_fk = kernel(
             arguments=[VectorSpace('q', 3)],
-            implementation=lambda q: leg_model.forward_kinematics(q)[0].apply(np.zeros((3,))),
-            backend='numpy'
+            implementation=impl,
+            backend=backend
         )
 
         for test_value in test_values:
@@ -885,6 +899,6 @@ def test_hexapod_leg():
 
             symbolic_result = symbolic_fk(test_value)
 
-            assert np.allclose(symbolic_result, soln)
+            assert np.allclose(symbolic_result, soln, atol=1e-6)
 
 

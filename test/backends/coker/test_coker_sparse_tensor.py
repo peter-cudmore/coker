@@ -1,5 +1,3 @@
-import pytest
-
 from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.tensor_contants import hat
 import numpy as np

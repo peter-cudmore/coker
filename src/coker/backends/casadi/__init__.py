@@ -23,7 +23,7 @@ class CasadiBackend(Backend):
 
         raise NotImplementedError
 
-    def to_backend_array(self, array) -> ca.MX:
+    def to_backend_array(self, array):
         if isinstance(array, scalar_types):
             return ca.DM(array)
         if array.shape == (1, 1):
@@ -59,7 +59,9 @@ class CasadiBackend(Backend):
             pass
 
         if isinstance(op, tuple(parameterised_impls.keys())):
-            return call_parameterised_op(op, *args)
+            result = call_parameterised_op(op, *args)
+            assert result.is_regular(), f"{op}({args}) =  {result}"
+            return result
 
         if isinstance(op, ReshapeOP):
 

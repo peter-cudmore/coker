@@ -55,7 +55,8 @@ def transpose(x):
 
         return x.T
 
-    assert isinstance(x, BilinearWeights)
+    if isinstance(x, BilinearWeights):
+        return x.transpose()
 
     raise NotImplementedError(f"Cannot transpose {type(x)}, {x.shape}")
 

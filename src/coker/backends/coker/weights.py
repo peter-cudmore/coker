@@ -10,6 +10,8 @@ from coker.backends.coker.sparse_tensor import (
 )
 import numpy as np
 
+from test.toolkits.test_codesign import quadratic
+
 
 def dense_array_cast(x):
     if isinstance(x, scalar):
@@ -41,7 +43,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         )
 
     def transpose(self) -> 'BilinearWeights':
-        if len(self.shape) <= 2:
+        if len(self.shape) == 1:
             n, = self.shape
             return BilinearWeights(
                 self.memory,
@@ -50,7 +52,15 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 linear= self.linear.swap_indices(0, 1),
                 quadratic=self.quadratic.swap_indices(0, 1)
             )
-
+        if len(self.shape) == 2:
+            n, m = self.shape
+            return BilinearWeights(
+                self.memory,
+                shape=(m, n),
+                constant=self.constant.T,
+                linear= self.linear.swap_indices(0, 1),
+                quadratic=self.quadratic.swap_indices(0, 1)
+            )
 
         raise NotImplementedError(f"Cannot transpose {len(self.shape)} dimensions")
 
@@ -250,6 +260,13 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __matmul__(self, other):
         assert isinstance(other, BilinearWeights) and other.memory is self.memory
+        assert (self.is_linear() and other.is_linear()) or self.is_constant() or other.is_constant()
+        constant = self.constant @ other.constant
+        linear = self.constant @ other.linear + self.linear @ other.constant
+        quadratic = self.constant @ other.quadratic + self.quadratic @ other.quadratic + self.linear @ other.linear
+        return BilinearWeights(self.memory, constant.shape, constant, linear, quadratic)
+
+
 
     def clone(self):
         return BilinearWeights(

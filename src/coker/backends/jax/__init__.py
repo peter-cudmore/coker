@@ -4,7 +4,7 @@ import numpy as np
 import jax.numpy as jnp
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Expression, Tracer
+from coker.algebra.kernel import Tracer
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike
@@ -30,6 +30,8 @@ scalar_types = (
     float,
     complex,
     int,
+    bool,
+    jnp.bool_
 )
 
 
@@ -61,6 +63,10 @@ impls = {
     OP.SQRT: jnp.sqrt,
     OP.ABS: jnp.abs,
     OP.ARCTAN2: jnp.arctan2,
+    OP.LESS_EQUAL: jnp.less_equal,
+    OP.LESS_THAN: jnp.less,
+    OP.EQUAL: jnp.equal,
+    OP.CASE: lambda c,t,f: t if c else f
 }
 
 parameterised_impls = {
@@ -140,6 +146,6 @@ class JaxBackend(Backend):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
 
-    def build_optimisation_problem(self, cost: Tracer, constraints: List[Expression], arguments: List[Tracer],
+    def build_optimisation_problem(self, cost: Tracer, constraints: List[Tracer], arguments: List[Tracer],
                                    outputs: List[Tracer], **kwargs):
         raise NotImplementedError

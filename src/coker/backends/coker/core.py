@@ -2,7 +2,7 @@ from typing import Tuple, Type, List, Dict
 
 import numpy as np
 
-from coker import Tracer, Kernel, OP, ExprOp, Expression
+from coker import Tracer, Kernel, OP
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
 from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
 from coker.backends.coker.ast_preprocessing import (
@@ -51,7 +51,7 @@ class CokerBackend(Backend):
     def build_optimisation_problem(
         self,
         cost: Tracer,  # cost
-        constraints: List[Expression],
+        constraints: List[Tracer],
         parameters: List[Tracer],
         outputs: List[Tracer],
         initial_conditions: Dict[int, ArrayLike],
@@ -122,10 +122,10 @@ def create_opgraph(kernel: Kernel):
             return arg.value()
 
         op, *args = arg.value()
+
         args = [get_recursive(arg) for arg in args]
 
         if any(isinstance(arg, BilinearWeights) for arg in args):
-
             result = ops[op](*args)
             return result
         v = eval_numeric(arg.shape, op, *args)
@@ -158,7 +158,13 @@ def create_opgraph(kernel: Kernel):
         else:
             assert not isinstance(op, BilinearWeights)
             assert not isinstance(op, GenericLayerOP)
-            layers.append(GenericLayerOP(memory[sink], op, *args))
+            try:
+
+                layers.append(GenericLayerOP(memory[sink], op, *args))
+            except AssertionError as ex:
+                op, *args = tape.nodes[sink]
+                args = [get_recursive(a) for a in args]
+                raise ex
 
     output_layer = OutputLayer()
     for output in kernel.output:

@@ -131,18 +131,18 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
         data = {}
         for k, v in self.keys.items():
-            k_prime = k.copy()
             k_i, k_j = k[i], k[j]
-            k_prime[i] = k_j
-            k_prime[j] = k_i
+            k_prime = (
+                *k[0:i], k_j, *k[i+j:j], k_i, *k[j + 1:]
+            )
             data[k_prime] = v
-
-        shape = self.shape.copy()
         s_i, s_j = self.shape[i], self.shape[j]
-        shape[i] = s_j
-        shape[j] = s_i
+        shape = (
+            *self.shape[0:i], s_j, *self.shape[i + j:j], s_j, *self.shape[j + 1:]
+        )
+
         
-        return dok_ndarray(shape=self.shape, data=data)
+        return dok_ndarray(shape=shape, data=data)
 
     @staticmethod
     def zeros(shape):

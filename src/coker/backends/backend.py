@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from typing import Any, Tuple, Type
 from coker import Kernel
-from coker import Tracer, Expression
+from coker import Tracer
 from typing import List, Dict
 
 ArrayLike = Any
@@ -35,7 +35,7 @@ class Backend(metaclass=ABCMeta):
     def build_optimisation_problem(
         self,
         cost: Tracer,  # cost
-        constraints: List[Expression],
+        constraints: List[Tracer],
         parameters: List[Tracer],
         outputs: List[Tracer],
         initial_conditions: Dict[int, ArrayLike],
