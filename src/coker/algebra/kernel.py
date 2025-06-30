@@ -417,6 +417,11 @@ class Kernel:
             return output[0]
         return output
 
+    def lower(self):
+        from coker.backends import get_backend_by_name
+        backend = get_backend_by_name(self.backend)
+        return backend.lower(self)
+
     def compile(self, backend: str):
         pass
 

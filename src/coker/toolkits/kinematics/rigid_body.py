@@ -305,19 +305,18 @@ class RigidBody:
         return reversed(result)
 
     def spatial_manipulator_jacobian(self, angles):
-        return np.concatenate(
-            [
+        return [
                 self.spatial_single_manipulator_jacobian(angles, i)
                 for i, _ in enumerate(self.end_effectors)
             ]
-        )
+
 
     def spatial_single_manipulator_jacobian(self, angles, end_effector):
         abs_xforms = self._get_absolute_joint_xform(angles)
         xforms = self._accumulate_joint_xforms(abs_xforms)
 
         effector_parent, _ = self.end_effectors[end_effector]
-        dependent_link = self.get_dependent_links(effector_parent)
+        dependent_link = set(self.get_dependent_links(effector_parent))
 
         columns = []
 
@@ -337,12 +336,12 @@ class RigidBody:
 
     def body_manipulator_jacobian(self, angles):
         g_list = self.forward_kinematics(angles)
-        ad_g_inv = [SE3Adjoint(g).inverse().as_matrix() for i, g in enumerate(g_list)]
+        ad_g_inv = [SE3Adjoint(g).inverse().as_matrix() for g in g_list]
         columns = [
             ad_g @ self.spatial_single_manipulator_jacobian(angles, i)
             for i, ad_g in enumerate(ad_g_inv)
         ]
-        return np.concatenate(columns, axis=1)
+        return columns
 
     def inverse_dynamics(
         self,

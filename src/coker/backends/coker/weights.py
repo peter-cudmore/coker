@@ -10,7 +10,6 @@ from coker.backends.coker.sparse_tensor import (
 )
 import numpy as np
 
-from test.toolkits.test_codesign import quadratic
 
 
 def dense_array_cast(x):

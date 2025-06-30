@@ -445,3 +445,13 @@ def test_add_multiple():
     assert is_close(t1, t1_expected), f"Twist up failed - right"
     assert is_close(t2, t2_expected), f"Twist up failed - left"
 
+    jacobians = rotator_model.spatial_manipulator_jacobian(np.zeros((5,)))
+    for i in range(2):
+        jac_1 = rotator_model.spatial_single_manipulator_jacobian(np.zeros((5,)), i)
+        jac_2 = jacobians[i]
+        assert np.allclose(jac_1, jac_2)
+
+    dscrews_0 = [
+        jac @ basis_0 for jac in jacobians
+    ]
+    assert np.linalg.norm(dscrews_0[0] - dscrews_0[1]) < 1e-4, f"{dscrews_0[0]} != {dscrews_0[1]}"

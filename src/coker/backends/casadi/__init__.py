@@ -21,7 +21,7 @@ class CasadiBackend(Backend):
         elif isinstance(array, ca.DM):
             return array.toarray(simplify=True)
 
-        raise NotImplementedError
+        raise NotImplementedError(f"Cannot convert {array} to a numpy array")
 
     def to_backend_array(self, array):
         if isinstance(array, scalar_types):
@@ -98,8 +98,17 @@ class CasadiBackend(Backend):
     def evaluate(self, kernel: Kernel, inputs: ArrayLike):
         f = lower(kernel.tape, kernel.output)
         y = f(*inputs)
+        if len(kernel.output) > 1:
+            return [self.to_array(y_i) for y_i in y ]
+        else:
+            return self.to_array(y),
 
-        return [self.to_numpy_array(y)]
+    def to_array(self, arg: Union[ca.MX, ca.DM]):
+        try:
+            return self.to_numpy_array(arg)
+        except RuntimeError:
+            return arg
+
 
     def build_optimisation_problem(self, cost, constraints, parameters, outputs, initial_conditions):
         return build_optimisation_problem(cost, constraints, parameters, outputs, initial_conditions)

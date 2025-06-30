@@ -188,9 +188,19 @@ class Isometry3:
         return Isometry3(rotation=r, translation=-p)
 
     def as_vector(self) -> np.ndarray:
+
         p = np.reshape(self.translation, newshape=(3, 1))
         q = np.reshape(self.rotation.as_vector(), newshape=(3, 1))
-        return np.concatenate((p, q), axis=0)
+        return np.concatenate((q, p), axis=0)
+
+    @staticmethod
+    def from_vector(vector: np.ndarray):
+
+        q = vector[0:3]
+        p = vector[3:6]
+        r = Rotation3.from_vector(q)
+        return Isometry3(rotation=r, translation=p)
+
 
 class Screw:
     __slots__ = ("rotation", "translation", "magnitude")
@@ -257,10 +267,14 @@ class Screw:
         assert array.shape == (6,)
         rotation = array[0:3]
         translation = array[3:6]
-        if (rotation == 0.0).all():
-            return Screw(rotation, translation, 1)
+        try:
+            if (rotation == 0.0).all():
+                return Screw(rotation, translation, 1)
+            else:
+                mag = np.linalg.norm(rotation)[0]
+        except:
+            mag = 1
 
-        mag = np.linalg.norm(rotation).astype(float).flatten()[0]
         return Screw(rotation / mag, translation / mag, mag)
 
     @staticmethod
@@ -297,7 +311,8 @@ class Screw:
             alpha = self.magnitude * angle
         else:
             alpha = angle
-        if (self.rotation == 0).all():
+
+        if isinstance (self.rotation, np.ndarray) and (self.rotation == 0).all():
             return Isometry3(
                 rotation=Rotation3.zero(), translation=self.translation * alpha
             )
@@ -309,18 +324,16 @@ class Screw:
 
         t1 = - rotation.apply(rot_cross_t)
         t2 = alpha * self.rotation
-
-        try:
-            t3 = rot_dot_t * t2
-        except TypeError as ex:
-            print(t2)
-            print(rot_dot_t)
-            raise ex
+        t3 = rot_dot_t * t2
 
         translation = rot_cross_t + t1 + t3
-#        translation = rot_cross_t - rotation.apply(rot_cross_t) + rot_dot_t * alpha * self.rotation
+
 
         return Isometry3(rotation=rotation, translation=translation)
+
+    def as_matrix(self):
+        w_hat = hat(self.rotation)
+        return np.concatenate(np.concatenate([w_hat, self.translation]), np.array([[0,0,0,1]]), axis=1)
 
     def __eq__(self, other):
         return (

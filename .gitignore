@@ -232,3 +232,5 @@ docs/_build/
 .python-version
 
 Cargo.lock
+
+*.f360

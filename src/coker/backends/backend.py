@@ -49,6 +49,9 @@ class Backend(metaclass=ABCMeta):
         return evaluate_inner(kernel.tape, inputs, kernel.output, self, workspace)
 
 
+    def lower(self, kernel: Kernel):
+        raise NotImplementedError("lowering is not implemented for this backend")
+
 __known_backends = {}
 
 
