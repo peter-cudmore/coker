@@ -96,7 +96,8 @@ class CasadiBackend(Backend):
         return lower(kernel.tape, kernel.output)
 
     def evaluate(self, kernel: Kernel, inputs: ArrayLike):
-        f = lower(kernel.tape, kernel.output)
+        ins, outs = lower(kernel.tape, kernel.output)
+        f = ca.Function('f', ins, outs)
         y = f(*inputs)
         if len(kernel.output) > 1:
             return [self.to_array(y_i) for y_i in y ]

@@ -49,7 +49,7 @@ def build_optimisation_problem(cost, constraints, parameters:List[Tracer], outpu
         parameter_offset += n_i
 
     cost_fn, = substitute([cost], workspace)
-    output_map = lower(tape, outputs, workspace)
+    output_map = ca.Function('y', *lower(tape, outputs, workspace))
 
     n_constraints = len(constraints)
 

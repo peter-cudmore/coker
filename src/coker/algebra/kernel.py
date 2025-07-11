@@ -1,16 +1,12 @@
 import dataclasses
-import enum
-import operator
 
 import numpy as np
 from typing import List, Callable, Tuple, Union
 from collections import defaultdict
 
-from jax._src.core import Tracer
-
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.dimensions import Dimension
-from coker.algebra.ops import OP, compute_shape, numpy_atomics, numpy_composites
+from coker.algebra.ops import OP, numpy_atomics, numpy_composites
 scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int)
 
 
@@ -24,10 +20,10 @@ def get_projection(dimension: Dimension, slc: slice):
     else:
         return 1
 
-    indicies = list(range(cols))[slc]
-    rows = len(indicies)
+    indices = list(range(cols))[slc]
+    rows = len(indices)
     proj = np.zeros((rows, cols), dtype=float)
-    for row, col in enumerate(indicies):
+    for row, col in enumerate(indices):
         proj[row, col] = 1
     return proj
 
@@ -57,45 +53,10 @@ def get_dim_by_class(arg):
         d = Dimension(arg.shape)
         return d
 
-    if isinstance(arg, Expression):
-        return Dimension(None)
-
     else:
         raise NotImplementedError(f"Don't know the shape of {type(arg)}")
 
 
-# class ExprOp(enum.Enum):
-#    LESS_THAN = "<"
-#    GREATER_THAN = ">"
-#    EQUAL = "="
-#
-#    def __init__(self, op: ExprOp, lhs, rhs):
-#         self.lhs: Tracer = lhs
-#        self.rhs: Tracer = rhs
-#        self.op = op
-#     def as_halfplane_bound(self):
-#         if self.op == ExprOp.LESS_THAN:
-#            # lhs < rhs ->  (lhs - rhs) < 0
-#            return self.lhs - self.rhs, -np.inf, 0
-#        elif self.op == ExprOp.GREATER_THAN:
-#            # lhs > rhs -> (lhs - rhs) > 0
-#            return self.lhs - self.rhs, 0, np.inf
-#        elif self.op == ExprOp.EQUAL:
-#            return self.rhs - self.lhs, -1e-9, 1e-9
-#        raise NotImplementedError("Cannot be expressed as halfplane bound")
-#     @property
-#    def tape(self) -> "Tape":
-#        l_tape = self.lhs.tape if isinstance(self.lhs, Tracer) else None
-#        r_tape = self.rhs.tape if isinstance(self.rhs, Tracer) else None
-#        if l_tape and not r_tape:
-#            return l_tape
-#        elif r_tape and not l_tape:
-#            return r_tape
-#        elif l_tape == r_tape and l_tape is not None:
-#            return l_tape
-#        else:
-#            raise NotImplementedError("No tape found")
-#
 class Tape:
     def __init__(self):
         self.nodes = []
@@ -161,7 +122,6 @@ def is_additive_identity(space: Dimension, arg) -> bool:
 
     if isinstance(arg, scalar_types) and arg == 0:
         return True
-
     try:
         return (space.dim == arg.shape) and (arg == 0).all()
     except:
@@ -187,7 +147,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             return False
         return True
 
-    def as_halfplane_bound(self) -> Tuple[Tracer, float, float]:
+    def as_halfplane_bound(self) -> Tuple['Tracer', float, float]:
         op, lhs, rhs = self.tape.nodes[self.index]
         bounds = {
             OP.EQUAL: (-1e-9, 1e-9),
@@ -195,8 +155,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             OP.LESS_EQUAL: (-1e-9, np.inf)
         }
         return rhs - lhs, *bounds[op]
-
-
 
     def value(self):
         op, *args = self.tape.nodes[self.index]
@@ -455,9 +413,7 @@ def strip_symbols_from_array(array: np.ndarray, float_type=float):
 
     symbols = defaultdict(list)
 
-    with np.nditer(
-        array, flags=["refs_ok", "multi_index"], op_flags=["readwrite"]
-    ) as it:
+    with np.nditer(array, flags=["refs_ok", "multi_index"], op_flags=[["readwrite"]]) as it:
         for x in it:
             try:
                 x[...] = float_type(x)

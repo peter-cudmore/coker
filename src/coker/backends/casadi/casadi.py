@@ -185,9 +185,7 @@ def lower(tape: Tape, output: List[Tracer], workspace=None):
             inputs[v.__hash__()] = v
         else:
             s = extract_symbols(workspace[i])
-
             inputs.update({s_i.__hash__(): s_i for s_i in s})
 
     result = substitute(output, workspace)
-    f = ca.Function("f", list(inputs.values()), result)
-    return f
+    return list(inputs.values()), result

@@ -116,6 +116,29 @@ class NormOP(Operator):
     def is_linear(self):
         return False
 
+class ClipOP(Operator):
+    def __init__(self, a=None, a_min=None, a_max=None):
+        self.lower = a_min
+        self.higher = a_max
+        _ = a
+
+    def pre_process(self, *args):
+        if len(args) == 1:
+            return args[0]
+
+        a, a_min, a_max = args
+        self.lower = a_min
+        self.higher = a_max
+        return a
+
+
+    def compute_shape(self, *dims: Dimension) -> Dimension:
+        assert all(d.is_scalar() for d in dims)
+        return Dimension(None)
+
+    def is_linear(self):
+        return False
+
 
 compute_shape: Dict[OP, Callable[[Dimension, Dimension], Dimension]] = {}
 
@@ -278,4 +301,5 @@ numpy_composites = {
     np.concatenate: ConcatenateOP,
     np.reshape: ReshapeOP,
     np.linalg.norm: NormOP,
+    np.clip: ClipOP,
 }
