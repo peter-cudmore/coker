@@ -1,7 +1,34 @@
 [build-system]
-requires = [ "setuptools >= 61.0" ]
+requires = [ "setuptools >= 61.0", "setuptools-git-versioning>=2.0,<3"]
 build-backend = "setuptools.build_meta"
 
+
+[project]
+name = "coker"
+requires-python = ">=3.8"
+dynamic = ["version"]
+authors = [
+    {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
+]
+maintainers = [
+     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
+]
+license="MPL-2.0"
+license-files=["LICENSE.txt"]
+classifiers = [
+
+  "Development Status :: 3 - Alpha",
+
+  # Indicate who your project is intended for
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Build Tools",
+
+  # Specify the Python versions you support here.
+  "Programming Language :: Python",
+
+]
+description = "Coker Mathematical Programming Toolkit"
+readme = "README.md"
 dependencies = [
     "numpy",
     "sympy",
@@ -9,14 +36,9 @@ dependencies = [
     "dataclass-wizard"
 ]
 
-[project]
-name = "coker"
-requires-python = ">=3.8"
-dynamic = ["version"]
 
 [project.scripts]
 coker = "coker.projects:coker"
-
 
 
 [project.optional-dependencies]
@@ -30,3 +52,6 @@ pythonpath = ["src"]
 testpaths = [
 	"test",
 ]
+
+[tool.setuptools-git-versioning]
+enabled = true
