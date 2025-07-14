@@ -27,13 +27,13 @@ def is_close(a, b, tolerance=1e-16):
 
 
 
-def validate_symbolic_call(name, function, arguments, test_set, backend):
-    from coker.algebra.kernel import kernel
+def validate_symbolic_call(name, f, arguments, test_set, backend):
+    from coker.algebra.kernel import function
 
-    f_test = kernel(implementation=function, arguments=arguments, backend=backend)
+    f_test = function(implementation=f, arguments=arguments, backend=backend)
 
     for i, item in enumerate(test_set):
-        expected = function(*item)
+        expected = f(*item)
         result = f_test(*item)
         try:
             are_equal = all(is_close(e, r, 1e-6) for e, r in zip(expected, result))
@@ -46,10 +46,10 @@ def validate_symbolic_call(name, function, arguments, test_set, backend):
         assert are_equal, f"Test {name} failed on item {i}: {item}\n Expected: {expected}\nGot: {result}"
 
 
-def validate_symbolic_call_throws(function, arguments, value_exception_pairs, backend):
-    from coker.algebra.kernel import kernel
+def validate_symbolic_call_throws(f, arguments, value_exception_pairs, backend):
+    from coker.algebra.kernel import function
 
-    f_test = kernel(implementation=function, arguments=arguments, backend=backend)
+    f_test = function(implementation=f, arguments=arguments, backend=backend)
 
     for item, exception in value_exception_pairs:
         with pytest.raises(exception) as ex:

@@ -1,4 +1,4 @@
-from coker import OP, Kernel
+from coker import OP, Function
 from coker.backends import get_backend_by_name
 
 
@@ -59,14 +59,14 @@ def try_rewrite_mul(nodes: list, atoms, constants, i):
     #  *(?, ?)      -> *(?,?)       (more polynomials)
 
 
-def rewrite_graph(kernel: Kernel):
+def rewrite_graph(function: Function):
     constants = {}
 
-    outputs = {o.index for o in kernel.output}
-    inputs = set(kernel.tape.input_indicies)
+    outputs = {o.index for o in function.output}
+    inputs = set(function.tape.input_indicies)
     atoms = inputs.copy()
-    work_set = [i for i in range(len(kernel.tape.nodes)) if i not in inputs]
-    nodes = kernel.tape.nodes
+    work_set = [i for i in range(len(function.tape.nodes)) if i not in inputs]
+    nodes = function.tape.nodes
     for i in work_set:
         op, *args = nodes[i]
         if op == OP.VALUE:
@@ -83,5 +83,5 @@ def rewrite_graph(kernel: Kernel):
         if op == OP.MUL:
             try_rewrite_mul(nodes, atoms, constants, i)
 
-    kernel.tape.nodes = nodes
-    return kernel
+    function.tape.nodes = nodes
+    return function

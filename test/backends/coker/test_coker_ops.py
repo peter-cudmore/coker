@@ -4,7 +4,7 @@ import pytest
 from coker.backends.coker.op_impl import *
 from coker.backends.coker.weights import MemorySpec, BilinearWeights
 
-from coker import kernel, VectorSpace
+from coker import function, VectorSpace
 
 x_symbol = BilinearWeights(
     MemorySpec(0, 3),

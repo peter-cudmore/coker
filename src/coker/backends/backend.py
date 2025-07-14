@@ -1,6 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from typing import Any, Tuple, Type
-from coker import Kernel
+from coker import Function
 from coker import Tracer
 from typing import List, Dict
 
@@ -42,14 +42,14 @@ class Backend(metaclass=ABCMeta):
     ):
         raise NotImplementedError
 
-    def evaluate(self, kernel: Kernel, inputs: ArrayLike):
+    def evaluate(self, function: Function, inputs: ArrayLike):
         from coker.backends.evaluator import evaluate_inner
 
         workspace = {}
-        return evaluate_inner(kernel.tape, inputs, kernel.output, self, workspace)
+        return evaluate_inner(function.tape, inputs, function.output, self, workspace)
 
 
-    def lower(self, kernel: Kernel):
+    def lower(self, function: Function):
         raise NotImplementedError("lowering is not implemented for this backend")
 
 __known_backends = {}

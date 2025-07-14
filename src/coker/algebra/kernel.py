@@ -343,7 +343,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return Tracer(self.tape, output)
 
 
-class Kernel:
+class Function:
     def __init__(self, tape: Tape, outputs: List[Tracer], backend="coker"):
         self.tape = tape
         self.backend = backend
@@ -355,7 +355,7 @@ class Kernel:
             self.is_single = False
 
     def __repr__(self):
-        return f"Kernel:{self.input_shape()} -> {self.output_shape()}"
+        return f"Function:{self.input_shape()} -> {self.output_shape()}"
 
     def input_shape(self) -> Tuple[Dimension, ...]:
         return tuple(Dimension(self.tape.dim[i]) for i in self.tape.input_indicies)
@@ -384,7 +384,7 @@ class Kernel:
         pass
 
 
-def kernel(
+def function(
     arguments: List[Scalar | VectorSpace],
     implementation: Callable[[Element, ...], Element],
     backend: str = "coker",
@@ -403,7 +403,7 @@ def kernel(
     if isinstance(result, SymbolicVector):
         result = result.collapse()
 
-    return Kernel(tape, result, backend)
+    return Function(tape, result, backend)
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):

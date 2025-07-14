@@ -2,7 +2,7 @@ import casadi as ca
 import numpy as np
 from typing import Tuple, Type, Union
 
-from coker import Dimension, Kernel
+from coker import Dimension, Function
 
 from coker.backends.backend import Backend, ArrayLike
 from coker.backends.evaluator import evaluate_inner
@@ -92,14 +92,14 @@ class CasadiBackend(Backend):
             return ca.reshape(array, *shape)
         raise NotImplementedError
 
-    def lower(self, kernel: Kernel):
-        return lower(kernel.tape, kernel.output)
+    def lower(self, function: Function):
+        return lower(function.tape, function.output)
 
-    def evaluate(self, kernel: Kernel, inputs: ArrayLike):
-        ins, outs = lower(kernel.tape, kernel.output)
+    def evaluate(self, function: Function, inputs: ArrayLike):
+        ins, outs = lower(function.tape, function.output)
         f = ca.Function('f', ins, outs)
         y = f(*inputs)
-        if len(kernel.output) > 1:
+        if len(function.output) > 1:
             return [self.to_array(y_i) for y_i in y ]
         else:
             return self.to_array(y),

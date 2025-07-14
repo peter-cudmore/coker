@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from coker.algebra.kernel import kernel, VectorSpace
+from coker.algebra.kernel import function, VectorSpace
 from coker.toolkits.kinematics import *
 from coker.toolkits.spatial import Rotation3
 # Test based on 3-link open-chain manipulator
@@ -93,7 +93,7 @@ def test_single_pendulum(backend):
 
     tip = model.add_effector(parent=link, at=Isometry3(translation=np.array([0, 0, -l_0])))
     origin = np.zeros((3,), dtype=float)
-    transform_symbolic = kernel(
+    transform_symbolic = function(
         [VectorSpace('q', 1)],
         implementation=lambda q: model.forward_kinematics(q)[0].apply(origin),
         backend=backend
@@ -584,7 +584,7 @@ def test_double_pendulum(backend):
 
         return 0.5 * np.dot(dq, m @ dq) - v
 
-    f = kernel([VectorSpace('q', 2), VectorSpace('dq', 2)], lagrange_impl, backend)
+    f = function([VectorSpace('q', 2), VectorSpace('dq', 2)], lagrange_impl, backend)
     test_scenarios = [
         (np.array([0, np.pi / 2]), np.zeros((2,)), np.zeros((2,))),
         (np.array([0, np.pi/2]), np.zeros((2,)), np.zeros((2,))),
@@ -880,7 +880,7 @@ def test_hexapod_leg(backend):
             tx, = leg_model.forward_kinematics(q)
             return tx @ np.array([0,0,0])
 
-        symbolic_fk = kernel(
+        symbolic_fk = function(
             arguments=[VectorSpace('q', 3)],
             implementation=impl,
             backend=backend

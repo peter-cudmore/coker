@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from coker.backends.coker import *
 from coker.backends.coker.core import create_opgraph
-from coker import kernel, VectorSpace, Scalar, Dimension
+from coker import function, VectorSpace, Scalar, Dimension
 
 A = np.array([
     [1, 2],
@@ -64,7 +64,7 @@ def test_scalar_weights():
 def test_coker_graph():
     alpha = 3
     beta = 4
-    f = kernel(
+    f = function(
         arguments=[Scalar('x')], implementation=lambda x: alpha * x + beta * x * x
     )
 
@@ -102,7 +102,7 @@ def test_coker_vector():
 
     for i, (test_function, derivative) in enumerate(test_functions):
 
-        f = kernel(
+        f = function(
             arguments=[VectorSpace('x', 3)], implementation=test_function
         )
 
@@ -122,7 +122,7 @@ def test_sin_cos():
     def f_impl(x):
         return np.sin(x[0]) + np.cos(x[1])
 
-    f = kernel([VectorSpace('x', 2)], f_impl)
+    f = function([VectorSpace('x', 2)], f_impl)
     g = create_opgraph(f)
 
     arg = np.array([1, 2])
@@ -134,9 +134,9 @@ def test_dot_derivative():
 
     f, df = lambda x: np.dot(x, x), lambda x, dx: 2 * x.T @ dx
 
-    f_kernel = kernel([VectorSpace('x', 3)], f)
+    f_function = function([VectorSpace('x', 3)], f)
 
-    g = create_opgraph(f_kernel)
+    g = create_opgraph(f_function)
 
     assert len(g.intermediate_layers) == 1
 

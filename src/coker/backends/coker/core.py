@@ -2,7 +2,7 @@ from typing import Tuple, Type, List, Dict
 
 import numpy as np
 
-from coker import Tracer, Kernel, OP
+from coker import Tracer, Function, OP
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
 from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
 from coker.backends.coker.ast_preprocessing import (
@@ -39,9 +39,9 @@ class CokerBackend(Backend):
     def call(self, op, *args) -> ArrayLike:
         pass
 
-    def evaluate(self, kernel, inputs: ArrayLike):
+    def evaluate(self, function, inputs: ArrayLike):
 
-        g = create_opgraph(kernel)
+        g = create_opgraph(function)
 
         return [g(*inputs)]
 
@@ -58,14 +58,14 @@ class CokerBackend(Backend):
     ):
         raise NotImplementedError
 
-def create_opgraph(kernel: Kernel):
-    kernel = rewrite_graph(kernel)
+def create_opgraph(function: Function):
+    function = rewrite_graph(function)
 
-    sinks, constants = label_sinks(kernel)
-    edges, distance = label_layers(kernel, sinks)
+    sinks, constants = label_sinks(function)
+    edges, distance = label_layers(function, sinks)
 
-    sources = label_sources(kernel, sinks, constants)
-    tape = kernel.tape
+    sources = label_sources(function, sinks, constants)
+    tape = function.tape
 
     # label edges
     #    for
@@ -74,7 +74,7 @@ def create_opgraph(kernel: Kernel):
 
     assert set(actual_edges.keys()) | constants | set(tape.input_indicies) | set(
         sinks
-    ) == set(range(len(kernel.tape)))
+    ) == set(range(len(function.tape)))
 
     # for each input, we want to create a map from the argument into a general input stack
     # so that the input map takes (x_1, x_2, x_3, x_4) -> X
@@ -105,7 +105,7 @@ def create_opgraph(kernel: Kernel):
             memory=memory[0],
             shape=tape.dim[i].shape,
         )
-        for i in kernel.tape.input_indicies
+        for i in function.tape.input_indicies
     }
 
     def eval_numeric(shape, op, *args):
@@ -167,7 +167,7 @@ def create_opgraph(kernel: Kernel):
                 raise ex
 
     output_layer = OutputLayer()
-    for output in kernel.output:
+    for output in function.output:
         idx = output.index
         dim = output.dim
         output_layer.add_output(memory[idx], dim)

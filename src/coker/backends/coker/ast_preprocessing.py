@@ -1,14 +1,14 @@
 from collections import defaultdict
 from typing import Set, Dict, Tuple
 
-from coker import Kernel
+from coker import Function
 import numpy as np
 from coker.backends.coker.layers import InputLayer, OutputLayer
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.op_impl import *
 
 
-def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
+def label_sinks(function: Function) -> Tuple[Set[int], Set[int]]:
     """
     Summary:
 
@@ -20,11 +20,11 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
             b) used as inputs to multiple different nonlinear terms
 
     """
-    tape = kernel.tape
+    tape = function.tape
     constants = set()
     tape_outdegree = [0] * len(tape)
     sources = {}
-    sink_nodes = {o.index for o in kernel.output}
+    sink_nodes = {o.index for o in function.output}
     # output of these nodes are \considered 'new variables'
 
     for i, node in enumerate(tape.nodes):
@@ -79,9 +79,9 @@ def label_sinks(kernel: Kernel) -> Tuple[Set[int], Set[int]]:
     return sink_nodes, constants
 
 
-def label_layers(kernel: Kernel, sink_nodes: Dict):
+def label_layers(function: Function, sink_nodes: Dict):
     edges = defaultdict(set)
-    tape = kernel.tape
+    tape = function.tape
     distance = [0] * len(tape)
 
     def recurse_node(sink, node):
@@ -115,7 +115,7 @@ def label_layers(kernel: Kernel, sink_nodes: Dict):
 
 
 def label_sources(
-    kernel: Kernel, sink_nodes=None, constants=None
+    function: Function, sink_nodes=None, constants=None
 ) -> Dict[int, Set[int]]:
     """
 
@@ -125,15 +125,15 @@ def label_sources(
 
     """
     if sink_nodes is None or constants is None:
-        sink_nodes, constants = label_sinks(kernel)
+        sink_nodes, constants = label_sinks(function)
 
     arguments = {i: set() for i in constants}
     arguments.update({i: {i} for i in sink_nodes})
-    arguments.update({i: {i} for i in kernel.tape.input_indicies})
-    workset = [i for i in range(len(kernel.tape)) if i not in arguments]
+    arguments.update({i: {i} for i in function.tape.input_indicies})
+    workset = [i for i in range(len(function.tape)) if i not in arguments]
 
     for idx in workset:
-        _, *args = kernel.tape.nodes[idx]
+        _, *args = function.tape.nodes[idx]
 
         arguments[idx] = set.union(*(arguments[a.index] for a in args))
 

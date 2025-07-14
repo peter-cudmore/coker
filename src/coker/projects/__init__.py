@@ -1,7 +1,7 @@
 import pathlib
 from typing import Type, Callable, Tuple, Dict
 from coker.modelling import Block
-from coker.algebra.kernel import Kernel
+from coker.algebra.kernel import Function
 from coker.helpers import get_all_subclasses
 __ALL__ = [
     'Workspace',
@@ -92,10 +92,10 @@ class Simulation(Worksheet):
 class BuildRecipe(Worksheet):
     def __init__(self, name_space: str):
         self.name_space: str = name_space
-        self.kernels:Dict[str, Kernel] = {}
+        self.kernels:Dict[str, Function] = {}
 
-    def add_kernel(self, name: str, kernel: Kernel):
-        self.kernels[name] = kernel
+    def add_function(self, name: str, function: Function):
+        self.kernels[name] = function
 
 
 def get_worksheets():

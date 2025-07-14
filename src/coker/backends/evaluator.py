@@ -46,7 +46,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     return outputs
 
 
-def evaluate(kernel, args, backend=None):
+def evaluate(function, args, backend=None):
 
     from coker.backends import get_backend_by_name, get_current_backend
 
@@ -54,4 +54,4 @@ def evaluate(kernel, args, backend=None):
         backend_impl: Backend = get_current_backend()
     else:
         backend_impl: Backend = get_backend_by_name(backend)
-    return backend_impl.evaluate(kernel, args)
+    return backend_impl.evaluate(function, args)

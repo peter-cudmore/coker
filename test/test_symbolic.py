@@ -10,7 +10,7 @@ def test_symbolic_scalar(backend):
     def f_impl(x):
         return 2 * (x + 1)
 
-    f = kernel(
+    f = function(
         arguments=[Scalar('x')],
         implementation=f_impl,
         backend=backend,
@@ -34,7 +34,7 @@ def test_symbolic_vector(backend):
 
     assert is_close(y_result, y_test)
 
-    f = kernel(
+    f = function(
         [VectorSpace(name='x', dimension=2)],
         f_impl, backend
     )
@@ -66,7 +66,7 @@ def test_slicing_symbolic_vector(backend):
 
     assert is_close(y_result, y_test)
 
-    f = kernel(
+    f = function(
         arguments=[VectorSpace(name='x', dimension=3)],
         implementation=f_impl,
         backend=backend,
@@ -86,7 +86,7 @@ def test_cross_product(backend):
 
     f_test = f_impl(u_test, v_test)
 
-    f = kernel(
+    f = function(
         arguments=[VectorSpace(name='x', dimension=3), VectorSpace(name='y', dimension=3)],
         implementation=f_impl,
         backend=backend,
@@ -106,7 +106,7 @@ def test_dot(backend):
         return np.dot(a, x)
 
     y_dot_test = f_dot(x_test)
-    y_dot_result = kernel([VectorSpace(name='x', dimension=3)], f_dot, backend)(x_test)
+    y_dot_result = function([VectorSpace(name='x', dimension=3)], f_dot, backend)(x_test)
     assert np.allclose(y_dot_result, y_dot_test)
 
 
@@ -121,7 +121,7 @@ def test_dot_and_cross(backend):
        return bax
 
     y_test = f_impl(x_test)
-    f = kernel(
+    f = function(
         arguments=[VectorSpace(name='x', dimension=3)],
         implementation=f_impl,
         backend=backend,
@@ -149,7 +149,7 @@ def test_build_array(backend):
     expected = f_impl(arg)
     assert is_close(expected, result)
 
-    f = kernel(
+    f = function(
         arguments=[VectorSpace(name='x', dimension=2)],
         implementation=f_impl,
         backend=backend
@@ -168,7 +168,7 @@ def test_cos_and_sin(backend):
     arg = np.array([0, 0], dtype=float)
     expected = f_impl(arg)\
 
-    f = kernel(
+    f = function(
         arguments=[VectorSpace(name='x', dimension=2)],
         implementation=f_impl,
         backend=backend
@@ -192,7 +192,7 @@ def test_tensor_product(backend):
     x_test = np.array([2, 3, 4], dtype=float)
 
     b_test = f_impl(x_test)
-    f = kernel(arguments=[VectorSpace(name='x', dimension=3)], implementation=f_impl, backend=backend)
+    f = function(arguments=[VectorSpace(name='x', dimension=3)], implementation=f_impl, backend=backend)
 
     b = f(x_test)
     assert is_close(b, b_test)

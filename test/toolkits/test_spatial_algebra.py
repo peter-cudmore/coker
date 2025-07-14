@@ -7,7 +7,7 @@ from mpl_toolkits.mplot3d.proj3d import rot_x
 
 from test.conftest import backends
 from test.util import is_close, validate_symbolic_call
-from coker import VectorSpace, kernel, Scalar
+from coker import VectorSpace, function, Scalar
 
 u_x = np.array([1, 0, 0], dtype=float)
 u_y = np.array([0, 1, 0], dtype=float)
@@ -23,7 +23,7 @@ def test_hat(backend):
     result = hat(u_x)
     assert is_close(result, expected)
 
-    hat_symbolic = kernel([VectorSpace('u',3)], hat, backend=backend)
+    hat_symbolic = function([VectorSpace('u',3)], hat, backend=backend)
     result = hat_symbolic(u_x)
     assert is_close(result, expected)
 
@@ -59,14 +59,14 @@ def test_quaternions_symbolic(backend):
         result = q_z.conjugate(u_x)
         return result
 
-    conj = kernel([VectorSpace('u',3), coker.Scalar('angle')], conj_impl, backend=backend)
+    conj = function([VectorSpace('u',3), coker.Scalar('angle')], conj_impl, backend=backend)
     result = conj(u_z, np.pi/2)
     assert is_close(result, u_y, tolerance=1e-4)
 
     def inverse_impl(axis, angle, u):
         q_z = UnitQuaternion.from_axis_angle(axis, angle)
         return (q_z.inverse() * q_z).conjugate(u)
-    inverse = kernel([VectorSpace('u',3), coker.Scalar('angle'), VectorSpace('v', 3)], inverse_impl, backend=backend)
+    inverse = function([VectorSpace('u',3), coker.Scalar('angle'), VectorSpace('v', 3)], inverse_impl, backend=backend)
     result = inverse(u_z, np.pi/2, u_y)
     assert is_close(result, u_y, tolerance=1e-4)
 
