@@ -12,7 +12,7 @@ from coker.toolkits.dynamical_systems import *
 # x(t) = x_0 exp(at) + \int_0^t \exp(a (t- \tau)) u(\tau) d\tau
 
 
-def test_linear_system():
+def test_scalar_linear_system():
 
     def x0(u0, p):
         return p[1]
@@ -65,3 +65,49 @@ def test_linear_system():
     expected = solution(t_final, param)
 
     assert np.isclose(soln, expected)
+
+
+def test_vector_linear_system():
+
+    def x0(u0, p):
+
+        return p[2:]
+
+    def xdot(x, u, p):
+        A =  np.array([[p[0], -1], [1, p[1]]])
+        B = np.array([0, 1])
+        return A @ x + B * u
+
+    def y(x, u, p):
+        return x
+
+    def u(t):
+        return 1
+
+    param = np.array([1, 2, 0, 1])
+
+    system = create_homogenous_ode(
+        inputs=Signal('u'),
+        parameters=VectorSpace('p', 4),
+        x0=x0,
+        xdot=xdot,
+        output=y,
+        backend='numpy'
+    )
+
+    assert np.all(system.x0(0,  None, u, param) == np.array([0, 1]))
+
+    arg_0 = (
+        0, # t,
+        np.array([0, 1]), # x
+        None, #z,
+        u(0),
+        param
+    )
+    dxdt = system.dxdt(*arg_0)
+    assert np.all(dxdt == np.array([-1, 3]))
+
+    t_final = 4
+    soln = system(t_final, u, param)
+
+    assert np.isfinite(soln).all()
