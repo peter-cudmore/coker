@@ -73,7 +73,7 @@ class Tape:
     def _compute_shape(self, op: OP, *args) -> Dimension:
         dims = []
         for arg in args:
-            assert isinstance(arg, Tracer) or isinstance(arg, Expression)
+            assert isinstance(arg, Tracer)
             assert arg.tape is self, "Tracer belongs to another tape"
             dims.append(arg.dim)
 
@@ -98,13 +98,20 @@ class Tape:
         return Tracer(self, idx)
 
     def input(self, v: VectorSpace | Scalar):
+        index = len(self.nodes)
+        if v is None:
+            self.dim.append(None)
+            self.nodes.append((OP.VALUE, None))
+            self.input_indicies.append(index)
+            return Tracer(self, index)
+
         if isinstance(v, VectorSpace):
             self.dim.append(Dimension(v.dimension))
+
         elif isinstance(v, Scalar):
             self.dim.append(Dimension(None))
         else:
-            assert False, "Unreachable"
-        index = len(self.nodes)
+            assert False, f"Invalid input type: {type(v)}"
         tracer = Tracer(self, index)
         self.nodes.append(tracer)
         self.input_indicies.append(index)
@@ -381,14 +388,14 @@ class Function:
         return backend.lower(self)
 
     def compile(self, backend: str):
-        pass
+        raise NotImplementedError("Not yet implemented")
 
 
 def function(
     arguments: List[Scalar | VectorSpace],
     implementation: Callable[[Element, ...], Element],
     backend: str = "coker",
-):
+) -> Function:
     # create symbols
     # call function to construct expression graph
 

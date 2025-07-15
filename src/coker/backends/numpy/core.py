@@ -4,6 +4,7 @@ from operator import mul
 import numpy as np
 import sympy as sp
 import scipy as sy
+from toolz.functoolz import return_none
 
 from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer, VectorSpace
@@ -11,7 +12,7 @@ from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike
 from coker.backends.evaluator import evaluate_inner
-
+import scipy as scp
 
 def to_array(value, shape):
 
@@ -165,6 +166,40 @@ class NumpyBackend(Backend):
         if isinstance(op, tuple(parameterised_impls.keys())):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
+
+    def evaluate_integrals(
+            self,
+            functions,
+            initial_conditions,
+            end_point: float,
+            inputs, solver_parameters=None):
+
+        dxdt, constraint, dqdt = functions
+        x0, z0, q0 = initial_conditions
+        u, p = inputs
+
+        if constraint is not None:
+            raise NotImplementedError("Integrators with constraints are not implemented")
+
+        if not isinstance(x0, np.ndarray):
+            x0 = np.array([x0])
+
+        if dqdt is None:
+            y0 = x0
+            f = lambda t, x: dxdt(t, x, None, u(t), p)
+
+        else:
+            y0=np.concatenate([x0, q0]),
+            f = lambda t, x: np.concatenate([dxdt(t, x, None, u(t), p), dqdt(t, x, None, u(t), p)])
+
+        sol = scp.integrate.solve_ivp(f, (0, end_point), y0, method="RK45",t_eval=[end_point])
+
+        if dqdt is None:
+            return sol.y, None, None
+
+        return sol.y[x0.shape[0]:, 0], None, sol.y[x0.shape[0]:, 0]
+
+
 
     def build_optimisation_problem(
         self,

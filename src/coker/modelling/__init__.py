@@ -1,6 +1,7 @@
 from typing import List, Union, Optional, NewType, Dict, Tuple
 import inspect
 
+from coker import Scalar
 from coker.modelling.coker_abc import CokerListableSubclasses
 
 
@@ -226,7 +227,7 @@ class Block(CokerListableSubclasses):
             })
 
 
-class Signal:
+class Signal(Scalar):
     """Real valued analog signal"""
 
     def __init__(self, name: str, clock_domain=None):
