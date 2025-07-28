@@ -1,11 +1,13 @@
 import dataclasses
 
 import numpy as np
-from typing import List, Callable, Tuple, Union
+from typing import List, Callable, Tuple, Union, Optional
 from collections import defaultdict
 
+from humanfriendly.terminal import output
+
 from coker.algebra.tensor import SymbolicVector
-from coker.algebra.dimensions import Dimension
+from coker.algebra.dimensions import *
 from coker.algebra.ops import OP, numpy_atomics, numpy_composites
 scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int)
 
@@ -28,19 +30,6 @@ def get_projection(dimension: Dimension, slc: slice):
     return proj
 
 
-@dataclasses.dataclass
-class VectorSpace:
-    name: str
-    dimension: int
-
-
-@dataclasses.dataclass
-class Scalar:
-    name: str
-
-
-class Element:
-    parent: VectorSpace
 
 
 Inferred = None
@@ -63,6 +52,9 @@ class Tape:
         self.constants = []
         self.dim = []
         self.input_indicies = []
+
+    def op(self, i):
+        return self.nodes[i][0]
 
     def __len__(self):
         return len(self.nodes)
@@ -110,6 +102,9 @@ class Tape:
 
         elif isinstance(v, Scalar):
             self.dim.append(Dimension(None))
+
+        elif isinstance(v, FunctionSpace):
+            self.dim.append(v)
         else:
             assert False, f"Invalid input type: {type(v)}"
         tracer = Tracer(self, index)
@@ -119,7 +114,6 @@ class Tape:
 
     def substitute(self, index, value):
         assert index in self.input_indicies
-        op, args = value
 
         self.input_indicies.remove(index)
         self.nodes[index] = value
@@ -349,6 +343,10 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         return Tracer(self.tape, output)
 
+    def __call__(self, *args):
+        index = self.tape.append(OP.EVALUATE, self, *args)
+        return Tracer(self.tape, index)
+
 
 class Function:
     def __init__(self, tape: Tape, outputs: List[Tracer], backend="coker"):
@@ -365,16 +363,20 @@ class Function:
         return f"Function:{self.input_shape()} -> {self.output_shape()}"
 
     def input_shape(self) -> Tuple[Dimension, ...]:
-        return tuple(Dimension(self.tape.dim[i]) for i in self.tape.input_indicies)
+        return tuple(self.tape.dim[i] for i in self.tape.input_indicies)
 
     def output_shape(self) -> Tuple[Dimension, ...]:
         return tuple(o.dim for o in self.output)
 
     def __call__(self, *args):
         assert len(args) == len(self.tape.input_indicies)
-        # todo: check dimensions
-        from coker.backends import get_backend_by_name
+        args = [
+           arg if not isinstance(self.tape.dim[idx], FunctionSpace)
+           else function(self.tape.dim[idx].arguments, arg, self.backend)
+           for idx, arg in zip(self.tape.input_indicies, args)
+        ]
 
+        from coker.backends import get_backend_by_name
         backend = get_backend_by_name(self.backend)
         output = backend.evaluate(self, args)
 
@@ -392,7 +394,7 @@ class Function:
 
 
 def function(
-    arguments: List[Scalar | VectorSpace],
+    arguments: List[Scalar | VectorSpace | FunctionSpace],
     implementation: Callable[[Element, ...], Element],
     backend: str = "coker",
 ) -> Function:
@@ -400,8 +402,8 @@ def function(
     # call function to construct expression graph
 
     tape = Tape()
-    args = [tape.input(v) for v in arguments]
 
+    args = [tape.input(v) for v in arguments]
     result = implementation(*args)
 
     if isinstance(result, np.ndarray):
@@ -410,7 +412,13 @@ def function(
     if isinstance(result, SymbolicVector):
         result = result.collapse()
 
+    if not isinstance(result, Tracer):
+        assert all(isinstance(o, Tracer) for o in result)
+
     return Function(tape, result, backend)
+
+
+
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):

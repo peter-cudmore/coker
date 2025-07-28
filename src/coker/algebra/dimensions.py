@@ -1,5 +1,9 @@
+import dataclasses
+from typing import List, Optional, Tuple
+
 class Dimension:
     def __init__(self, tuple_or_none):
+
         if isinstance(tuple_or_none, int):
             tuple_or_none = (tuple_or_none,)
 
@@ -14,6 +18,7 @@ class Dimension:
         return d
 
     def index_iterator(self, row_major=False):
+
         if not self.dim:
             return (0,)
 
@@ -61,3 +66,40 @@ class Dimension:
         if self.dim is None:
             return (1,)
         return self.dim
+
+
+@dataclasses.dataclass
+class VectorSpace:
+    name: str
+    dimension: int
+
+
+
+@dataclasses.dataclass
+class Scalar:
+    name: str
+
+
+@dataclasses.dataclass
+class FunctionSpace:
+    name: str
+    arguments: List[Scalar | VectorSpace]
+    output: List[Scalar | VectorSpace]
+    signature: Optional[Tuple[int]] = None
+    """Optional list of integers, specifying the degree of differentiability for each argument. Defaults to infinite (i.e. smooth function)."""
+
+    def input_dimensions(self):
+        return [
+            Dimension((1,)) if isinstance(arg, Scalar) else
+            Dimension(arg.dimension) for arg in self.arguments
+        ]
+
+    def output_dimensions(self):
+        return [
+            Dimension((1, )) if isinstance(out, Scalar) else
+            Dimension(out.dimension) for out in self.output
+        ]
+
+@dataclasses.dataclass
+class Element:
+    parent: VectorSpace

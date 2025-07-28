@@ -66,7 +66,8 @@ impls = {
     OP.LESS_EQUAL: jnp.less_equal,
     OP.LESS_THAN: jnp.less,
     OP.EQUAL: jnp.equal,
-    OP.CASE: lambda c,t,f: t if c else f
+    OP.CASE: lambda c,t,f: t if c else f,
+    OP.EVALUATE: lambda op, *args: op(*args),
 }
 
 parameterised_impls = {

@@ -68,6 +68,7 @@ impls = {
     OP.LESS_EQUAL: np.less_equal,
     OP.LESS_THAN: np.less,
     OP.CASE: lambda cond, t, f: t if cond else f,
+    OP.EVALUATE: lambda op, *args: op(*args),
 }
 
 parameterised_impls = {
@@ -165,6 +166,7 @@ class NumpyBackend(Backend):
 
         if isinstance(op, tuple(parameterised_impls.keys())):
             return call_parameterised_op(op, *args)
+
         raise NotImplementedError(f"{op} is not implemented")
 
     def evaluate_integrals(

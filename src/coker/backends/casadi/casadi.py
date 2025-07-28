@@ -1,7 +1,8 @@
 import casadi as ca
 import numpy as np
 
-from coker import OP, Tape, Tracer
+import coker
+from coker import OP, Tape, Tracer, FunctionSpace
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 from typing import List
 
@@ -29,7 +30,8 @@ impls = {
     OP.EQUAL: ca.eq,
     OP.LESS_EQUAL: ca.le,
     OP.LESS_THAN: ca.lt,
-    OP.CASE: lambda c, t, f: ca.if_else(c, t, f)
+    OP.CASE: lambda c, t, f: ca.if_else(c, t, f),
+    OP.EVALUATE: lambda op, *args: op(*args),
 }
 
 
@@ -141,6 +143,8 @@ def to_casadi(value):
 
 
 def extract_symbols(arg: ca.MX):
+    if isinstance(arg, (ca.Function, coker.Function)):
+        return set()
     v = {arg.dep(i) for i in range(arg.n_dep()) if arg.dep(i).is_symbolic()}
     return v
 
@@ -179,13 +183,16 @@ def lower(tape: Tape, output: List[Tracer], workspace=None):
     workspace = {} if not workspace else workspace
     inputs = dict()
     for i in tape.input_indicies:
-        if i not in workspace:
-            v = ca.MX.sym(f"x_{i}", *tape.dim[i].shape)
-            workspace[i] = v
-            inputs[v.__hash__()] = v
-        else:
+        if i in workspace:
             s = extract_symbols(workspace[i])
             inputs.update({s_i.__hash__(): s_i for s_i in s})
+            continue
+
+        assert not isinstance(tape.dim[i], FunctionSpace), "Cannot lower a partially evaluated function."
+
+        v = ca.MX.sym(f"x_{i}", *tape.dim[i].shape)
+        workspace[i] = v
+        inputs[v.__hash__()] = v
 
     result = substitute(output, workspace)
     return list(inputs.values()), result

@@ -2,9 +2,8 @@ import dataclasses
 import enum
 import numpy as np
 from typing import Dict, Callable
-
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
-from coker.algebra.dimensions import Dimension
+from coker.algebra.dimensions import *
 
 
 class OP(enum.Enum):
@@ -34,6 +33,7 @@ class OP(enum.Enum):
     ARCTAN2 = 23
     LESS_THAN = 24
     LESS_EQUAL = 25
+    EVALUATE = 26
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -151,6 +151,21 @@ def register_shape(*ops: OP):
         return func
 
     return inner
+
+@register_shape(OP.EVALUATE)
+def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
+
+    if len(args) != len(function_sig.arguments):
+        raise InvalidShape(f"Expected {len(function_sig.arguments)} arguments, got {len(args)}")
+
+    for i, (arg_dim, input_dim) in enumerate(zip(args, function_sig.input_dimensions())):
+        if arg_dim != input_dim :
+            raise InvalidShape(f"Argument {i} has dimension {arg_dim.dim}, expected {input_dim.dim}")
+    try:
+        out_dim, = function_sig.output_dimensions()
+        return out_dim
+    except ValueError:
+        return function_sig.output_dimensions()
 
 
 @register_shape(

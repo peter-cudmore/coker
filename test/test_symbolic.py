@@ -196,3 +196,39 @@ def test_tensor_product(backend):
 
     b = f(x_test)
     assert is_close(b, b_test)
+
+
+def test_functional(backend):
+
+    def f_inner(A, b, x):
+        return A @ x + b
+
+    def f_outer(f, x):
+        A = np.array([[0, 1], [1, 0]], dtype=float)
+        b = np.array([0, 0], dtype=float)
+        return f(A, b, x)
+
+
+    f_result = f_outer(f_inner, np.array([2, 3], dtype=float))
+    assert is_close(f_result, np.array([3, 2], dtype=float))
+
+    f_coker = function(
+        arguments=[
+            FunctionSpace(
+                name='f_inner',
+                arguments=[
+                    VectorSpace(name='A', dimension=(2,2)),
+                    VectorSpace(name='b', dimension=2),
+                    VectorSpace(name='x', dimension=2),
+                ],
+                output=[VectorSpace(name='y', dimension=2)],
+                signature=None
+            ),
+            VectorSpace(name='x', dimension=2)
+        ],
+        implementation=f_outer,
+        backend=backend
+    )
+
+    f_coker_result = f_coker(f_inner, np.array([2, 3], dtype=float))
+    assert is_close(f_coker_result, np.array([3, 2], dtype=float))

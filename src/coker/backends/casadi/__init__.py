@@ -2,6 +2,8 @@ import casadi as ca
 import numpy as np
 from typing import Tuple, Type, Union
 
+from sympy.core import symbol
+
 from coker import Dimension, Function
 
 from coker.backends.backend import Backend, ArrayLike
@@ -31,7 +33,7 @@ class CasadiBackend(Backend):
         elif array.shape == (1,):
             return ca.DM(array[0])
         elif len(array.shape) >= 2:
-            result = ca.DM(*array.shape)
+            result = ca.DM.zeros(*array.shape)
             with np.nditer(array, flags=["multi_index"], op_flags=["readonly"]) as it:
                 for v in it:
                     if v != 0:
@@ -93,12 +95,32 @@ class CasadiBackend(Backend):
         raise NotImplementedError
 
     def lower(self, function: Function):
+        assert not any(isinstance(shape, FunctionSpace) for shape in function.input_shape()), "Cannot lower a partially evaluated function."
         return lower(function.tape, function.output)
 
     def evaluate(self, function: Function, inputs: ArrayLike):
-        ins, outs = lower(function.tape, function.output)
+        workspace = {}
+        values = []
+        ins = []
+        for idx, (space, arg) in enumerate(zip(function.input_shape(), inputs)):
+            if isinstance(space, FunctionSpace):
+                f_arg_ins, f_arg_outs = arg.lower()
+                workspace[idx] = ca.Function(f"fx_{idx}", f_arg_ins, f_arg_outs)
+
+            else:
+                x_symbol = ca.MX.sym(f"x_{idx}", *space.shape)
+                workspace[idx] = x_symbol
+                ins.append(x_symbol)
+                if  isinstance(arg, (ca.MX, ca.SX)):
+                    values.append(arg)
+                else:
+                    values.append(self.to_backend_array(arg))
+
+
+        outs = substitute(function.output, workspace)
+
         f = ca.Function('f', ins, outs)
-        y = f(*inputs)
+        y = f(*values)
         if len(function.output) > 1:
             return [self.to_array(y_i) for y_i in y ]
         else:
