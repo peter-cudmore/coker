@@ -14,7 +14,9 @@ NDArray = NewType("NDArray", Union[np.ndarray, "dok_ndarray"])
 
 def is_constant(a):
     return (
-        isinstance(a, scalar) or isinstance(a, np.ndarray) or isinstance(a, dok_ndarray)
+        isinstance(a, scalar)
+        or isinstance(a, np.ndarray)
+        or isinstance(a, dok_ndarray)
     )
 
 
@@ -230,7 +232,9 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             assert other.shape in {(1,), (1, 1)}
             other = float(other)
         else:
-            assert isinstance(other, (float, int)), f"Cannot multiply by {other}"
+            assert isinstance(
+                other, (float, int)
+            ), f"Cannot multiply by {other}"
 
         if other == 0:
             return dok_ndarray(self.shape, {})
@@ -288,7 +292,8 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         #        n_vector = len(vectors)
 
         vectors = [
-            cast_vector(v, s) for v, s in zip(vectors, self.shape[-len(vectors) :])
+            cast_vector(v, s)
+            for v, s in zip(vectors, self.shape[-len(vectors) :])
         ]
         data = {}
         for k, v in self.keys.items():
@@ -323,7 +328,9 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
                 # other.shape == (1, 3)
                 # -> reinterpret self.shape as (3,1)
 
-                raise TypeError(f"Cannot multiply {self.shape} @ {other.shape}")
+                raise TypeError(
+                    f"Cannot multiply {self.shape} @ {other.shape}"
+                )
         else:
             return other.__rmatmul__(self)
         shape = (*self.shape[:-1], *other.shape[1:])
@@ -350,7 +357,9 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
         shape = (*other.shape[:-1], *self.shape[1:])
         data = {}
-        with np.nditer(other, flags=["multi_index"], op_flags=["readonly"]) as it:
+        with np.nditer(
+            other, flags=["multi_index"], op_flags=["readonly"]
+        ) as it:
             for v in it:
                 *key_1, i_1 = it.multi_index
                 for (i_2, *key_2), v_2 in self.keys.items():
@@ -395,7 +404,9 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         assert isinstance(other, scalar)
         assert other != 0
 
-        return dok_ndarray(self.shape, {k: v / other for k, v in self.keys.items()})
+        return dok_ndarray(
+            self.shape, {k: v / other for k, v in self.keys.items()}
+        )
 
     def reshape(self, shape):
         if len(shape) > len(self.shape) and all(
@@ -433,7 +444,9 @@ def tensor_vector_product(tensor: dok_ndarray, vector: np.ndarray, axis=1):
     return dok_ndarray(shape, new_data)
 
 
-def tensor_ndarray_product(tensor: dok_ndarray, array: np.ndarray, l_axis=-1, r_axis=0):
+def tensor_ndarray_product(
+    tensor: dok_ndarray, array: np.ndarray, l_axis=-1, r_axis=0
+):
 
     assert isinstance(array, np.ndarray) and isinstance(tensor, dok_ndarray)
     assert abs(l_axis) < len(tensor.shape)
@@ -454,7 +467,9 @@ def tensor_ndarray_product(tensor: dok_ndarray, array: np.ndarray, l_axis=-1, r_
         for x in it:
             x_idx_front = it.multi_index[0:r_axis]
             x_idx_tail = it.multi_index[r_axis + 1 :]
-            keys = (k for k in tensor.keys if k[l_axis] == it.multi_index[r_axis])
+            keys = (
+                k for k in tensor.keys if k[l_axis] == it.multi_index[r_axis]
+            )
             for k in keys:
                 k_l = k[0:l_axis]
                 k_r = k[l_axis + 1 :]

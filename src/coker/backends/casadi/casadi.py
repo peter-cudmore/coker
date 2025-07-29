@@ -98,7 +98,9 @@ class CasadiTensor:
         self.data = {k: d * other for k, d in self.data.items()}
 
     def __matmul__(self, other):
-        assert len(self.shape) == 3, f"Higher order tensors not yet implemented"
+        assert (
+            len(self.shape) == 3
+        ), f"Higher order tensors not yet implemented"
         assert len(other.shape) == 2
         assert other.shape[0] == self.shape[-1]
         assert other.shape[1] == 1
@@ -155,7 +157,11 @@ def substitute(output: List[Tracer], workspace):
             v = to_casadi(node.value())
 
             if not node.dim.is_scalar():
-                shape = node.shape if not node.dim.is_vector() else (*node.dim.shape, 1)
+                shape = (
+                    node.shape
+                    if not node.dim.is_vector()
+                    else (*node.dim.shape, 1)
+                )
 
                 v = v.reshape(shape)
         else:

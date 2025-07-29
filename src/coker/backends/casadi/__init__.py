@@ -34,7 +34,9 @@ class CasadiBackend(Backend):
             return ca.DM(array[0])
         elif len(array.shape) >= 2:
             result = ca.DM.zeros(*array.shape)
-            with np.nditer(array, flags=["multi_index"], op_flags=["readonly"]) as it:
+            with np.nditer(
+                array, flags=["multi_index"], op_flags=["readonly"]
+            ) as it:
                 for v in it:
                     if v != 0:
                         key = tuple(it.multi_index)
@@ -96,7 +98,8 @@ class CasadiBackend(Backend):
 
     def lower(self, function: Function):
         assert not any(
-            isinstance(shape, FunctionSpace) for shape in function.input_shape()
+            isinstance(shape, FunctionSpace)
+            for shape in function.input_shape()
         ), "Cannot lower a partially evaluated function."
         return lower(function.tape, function.output)
 
@@ -104,10 +107,14 @@ class CasadiBackend(Backend):
         workspace = {}
         values = []
         ins = []
-        for idx, (space, arg) in enumerate(zip(function.input_shape(), inputs)):
+        for idx, (space, arg) in enumerate(
+            zip(function.input_shape(), inputs)
+        ):
             if isinstance(space, FunctionSpace):
                 f_arg_ins, f_arg_outs = arg.lower()
-                workspace[idx] = ca.Function(f"fx_{idx}", f_arg_ins, f_arg_outs)
+                workspace[idx] = ca.Function(
+                    f"fx_{idx}", f_arg_ins, f_arg_outs
+                )
 
             else:
                 x_symbol = ca.MX.sym(f"x_{idx}", *space.shape)

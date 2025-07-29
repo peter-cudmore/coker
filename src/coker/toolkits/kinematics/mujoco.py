@@ -38,7 +38,9 @@ def to_mujoco_xml(body: RigidBody, name: str) -> ET.ElementTree:
     root.attrib["model"] = name
     world = ET.SubElement(root, "worldbody")
     floor = ET.SubElement(world, "geom")
-    floor.attrib.update(dict(name="floor", size="0 0 0.05", type="plane", condim="3"))
+    floor.attrib.update(
+        dict(name="floor", size="0 0 0.05", type="plane", condim="3")
+    )
 
     bodies = []
     joints = []

@@ -168,7 +168,11 @@ class RigidBody:
         origin = np.array([0, 0, 0])
         total_energy = 0
         for i, inertia in enumerate(self.inertia):
-            xform = joint_xforms[i] @ self._rest_transforms[i] @ inertia.centre_of_mass
+            xform = (
+                joint_xforms[i]
+                @ self._rest_transforms[i]
+                @ inertia.centre_of_mass
+            )
             point = xform @ origin
 
             total_energy -= inertia.mass * np.dot(gravity_vector, point)
@@ -198,7 +202,9 @@ class RigidBody:
 
     def _get_joint_global_bases(self):
         result = []
-        for rest_transform, bases in zip(self._rest_transforms, self.joint_bases):
+        for rest_transform, bases in zip(
+            self._rest_transforms, self.joint_bases
+        ):
             for basis in bases:
                 result.append(SE3Adjoint(rest_transform).apply(basis))
         return result
@@ -329,10 +335,16 @@ class RigidBody:
             if link_idx in dependent_link:
                 parent = self.parents[link_idx]
                 for zeta in bases:
-                    zeta_prime = SE3Adjoint(self._rest_transforms[link_idx]).apply(zeta)
+                    zeta_prime = SE3Adjoint(
+                        self._rest_transforms[link_idx]
+                    ).apply(zeta)
                     if parent != self.WORLD:
-                        zeta_prime = SE3Adjoint(xforms[parent]).apply(zeta_prime)
-                    columns.append(np.reshape(zeta_prime.to_array(), newshape=(6, 1)))
+                        zeta_prime = SE3Adjoint(xforms[parent]).apply(
+                            zeta_prime
+                        )
+                    columns.append(
+                        np.reshape(zeta_prime.to_array(), newshape=(6, 1))
+                    )
             else:
                 zeta_prime = np.zeros((6, len(bases)))
                 columns.append(zeta_prime)
@@ -451,7 +463,9 @@ class RigidBody:
         return result
 
     def _get_link_com_jacobians(self, angles):
-        joint_transforms = self._get_absolute_joint_xform(angles)  # exp(zeta_hat)
+        joint_transforms = self._get_absolute_joint_xform(
+            angles
+        )  # exp(zeta_hat)
         joint_map = self._get_joint_dependency_map()  # link: [joint idx]
         joint_bases = self._get_joint_global_bases()  # zeta_j
         total_angles = self.total_joints()
@@ -491,11 +505,15 @@ class RigidBody:
     def add_body(self, body: "RigidBody", at: Isometry3, parent: int):
         links = []
 
-        iterator = zip(body.parents, body.joints, body.transforms, body.inertia)
+        iterator = zip(
+            body.parents, body.joints, body.transforms, body.inertia
+        )
         for i, (p_body, joint, xform, inertia) in enumerate(iterator):
             idx = len(self.parents)
 
-            self.parents.append(parent if p_body == self.WORLD else links[p_body])
+            self.parents.append(
+                parent if p_body == self.WORLD else links[p_body]
+            )
             self.inertia.append(inertia)
 
             p_actual = self.parents[idx]

@@ -52,7 +52,9 @@ class Worksheet:
             f"/{name}" if name else f"/{component.__class__.__name__}{index}"
         )
         in_ports = [f"{component_path}/in_{i}" for i in component.spec.inputs]
-        out_ports = [f"{component_path}/in_{i}" for i in component.spec.outputs]
+        out_ports = [
+            f"{component_path}/in_{i}" for i in component.spec.outputs
+        ]
         handle = ComponentHandle(component_path, in_ports, out_ports)
 
         return handle

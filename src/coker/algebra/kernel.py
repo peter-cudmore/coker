@@ -1,16 +1,20 @@
-import dataclasses
-
 import numpy as np
-from typing import List, Callable, Tuple, Union, Optional
+from typing import Callable, Union
 from collections import defaultdict
-
-from humanfriendly.terminal import output
 
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.dimensions import *
 from coker.algebra.ops import OP, numpy_atomics, numpy_composites
 
-scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int)
+scalar_types = (
+    np.float32,
+    np.float64,
+    np.int32,
+    np.int64,
+    float,
+    complex,
+    int,
+)
 
 
 def get_basis(dimension: Dimension, i: int):
@@ -73,7 +77,10 @@ class Tape:
     def append(self, op: OP, *args) -> int:
         args = [strip_symbols_from_array(a) for a in args]
 
-        args = [self.insert_value(a) if not isinstance(a, Tracer) else a for a in args]
+        args = [
+            self.insert_value(a) if not isinstance(a, Tracer) else a
+            for a in args
+        ]
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
         self.nodes.append((op, *args))

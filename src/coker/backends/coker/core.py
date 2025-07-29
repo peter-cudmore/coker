@@ -71,11 +71,13 @@ def create_opgraph(function: Function):
     # label edges
     #    for
 
-    actual_edges = {i: edges[i] | v for i, v in sources.items() if v and i not in sinks}
+    actual_edges = {
+        i: edges[i] | v for i, v in sources.items() if v and i not in sinks
+    }
 
-    assert set(actual_edges.keys()) | constants | set(tape.input_indicies) | set(
-        sinks
-    ) == set(range(len(function.tape)))
+    assert set(actual_edges.keys()) | constants | set(
+        tape.input_indicies
+    ) | set(sinks) == set(range(len(function.tape)))
 
     # for each input, we want to create a map from the argument into a general input stack
     # so that the input map takes (x_1, x_2, x_3, x_4) -> X
@@ -151,9 +153,15 @@ def create_opgraph(function: Function):
 
         op, *args = tape.nodes[sink]
         args = [get_recursive(a) for a in args]
-        if op in {OP.MUL, OP.ADD, OP.SUB, OP.MATMUL, OP.NEG, OP.DOT, OP.CROSS} and any(
-            is_constant(a) for a in args
-        ):
+        if op in {
+            OP.MUL,
+            OP.ADD,
+            OP.SUB,
+            OP.MATMUL,
+            OP.NEG,
+            OP.DOT,
+            OP.CROSS,
+        } and any(is_constant(a) for a in args):
             w = ops[op](*args)
             layers.append(IdentityLayer(memory[sink], w))
         else:

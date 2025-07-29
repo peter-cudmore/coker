@@ -165,7 +165,9 @@ class NumpyBackend(Backend):
         elif isinstance(arg, np.ndarray):
             return np.reshape(arg, dim.dim)
 
-        raise NotImplementedError(f"Don't know how to resize {arg.__class__.__name__}")
+        raise NotImplementedError(
+            f"Don't know how to resize {arg.__class__.__name__}"
+        )
 
     def call(self, op, *args) -> ArrayLike:
 
@@ -254,7 +256,9 @@ class NumpyBackend(Backend):
         # c_i = X^T Q_i X + P_i X + R_i + N_i(Z)
 
         arg_indexes = {a.index for a in arguments}
-        decision_variables = [i for i in tape.input_indicies if i not in arg_indexes]
+        decision_variables = [
+            i for i in tape.input_indicies if i not in arg_indexes
+        ]
 
         arg_symbols = []
         for i, a in enumerate(arguments):
@@ -284,15 +288,19 @@ class NumpyBackend(Backend):
         problem_args = [x, *arg_symbols]
         cost_f = sp.lambdify(problem_args, cost)
 
-        cost_jac = lambda a: sp.lambdify(problem_args, jacobian(cost, x))(a).reshape(
-            x.shape
-        )
+        cost_jac = lambda a: sp.lambdify(problem_args, jacobian(cost, x))(
+            a
+        ).reshape(x.shape)
         cost_hess = sp.lambdify(problem_args, hessian(cost, x))
 
         out_constriants = []
         for i, constraint in enumerate(constraints):
             (c,) = evaluate_inner(
-                tape, arguments, [constraint.as_halfplane_bound()], self, workspace
+                tape,
+                arguments,
+                [constraint.as_halfplane_bound()],
+                self,
+                workspace,
             )
             c_func = sp.lambdify(problem_args, c)
             c_jac = jacobian(c, problem_args)

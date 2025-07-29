@@ -10,7 +10,15 @@ from typing import List, Callable
 import numpy as np
 from google.protobuf.internal.containers import ScalarMap
 
-from coker import VectorSpace, Optional, function, Tuple, Scalar, Signal, Function
+from coker import (
+    VectorSpace,
+    Optional,
+    function,
+    Tuple,
+    Scalar,
+    Signal,
+    Function,
+)
 from coker.backends import get_backend_by_name
 
 
@@ -53,7 +61,8 @@ class DynamicsSpec:
     """ g(t, x, z, u, p) = constraints(t, x, z, u, p) = 0."""
 
     outputs: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray
+        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+        np.ndarray,
     ]
     """ y(t) = outputs(t, x, z, u, p, q) """
 
@@ -131,17 +140,32 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
         backend = "casadi"
 
     x0 = function(
-        arguments=[Scalar("t"), spec.constraints, spec.inputs, spec.parameters],
+        arguments=[
+            Scalar("t"),
+            spec.constraints,
+            spec.inputs,
+            spec.parameters,
+        ],
         implementation=spec.initial_conditions,
         backend=backend,
     )
     (state_space,) = [
-        VectorSpace("x", tracer.shape[0]) if tracer.dim.is_vector() else Scalar("x")
+        (
+            VectorSpace("x", tracer.shape[0])
+            if tracer.dim.is_vector()
+            else Scalar("x")
+        )
         for tracer in x0.output
     ]
 
     # Order: t, x, z, u, p
-    arguments = [Scalar("t"), state_space, spec.algebraic, spec.inputs, spec.parameters]
+    arguments = [
+        Scalar("t"),
+        state_space,
+        spec.algebraic,
+        spec.inputs,
+        spec.parameters,
+    ]
     xdot = function(arguments, spec.dynamics, backend)
 
     assert all(
@@ -149,10 +173,14 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
     ), f"Initial conditions and dynamics have different output dimensions"
 
     constraint = (
-        function(arguments, spec.constraints, backend) if spec.algebraic else None
+        function(arguments, spec.constraints, backend)
+        if spec.algebraic
+        else None
     )
     quadrature = (
-        function(arguments, spec.quadratures, backend) if spec.quadratures else None
+        function(arguments, spec.quadratures, backend)
+        if spec.quadratures
+        else None
     )
     if quadrature is not None:
         assert (
@@ -160,7 +188,9 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
         ), "Quadratures must be a scalar or vector space"
         q = quadrature.output[0]
         arguments.append(
-            VectorSpace("q", q.dim.flat()) if not q.dim.is_scalar() else Scalar("q")
+            VectorSpace("q", q.dim.flat())
+            if not q.dim.is_scalar()
+            else Scalar("q")
         )
     else:
         arguments.append(None)

@@ -88,7 +88,9 @@ class ConcatenateOP(Operator):
 
         for d in dims[1:]:
             assert all(
-                d.dim[i] == out_dims[i] for i in range(len(out_dims)) if i != self.axis
+                d.dim[i] == out_dims[i]
+                for i in range(len(out_dims))
+                if i != self.axis
             )
             out_dims[self.axis] += d.dim[self.axis]
 
@@ -176,7 +178,15 @@ def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
 
 
 @register_shape(
-    OP.VALUE, OP.NEG, OP.ABS, OP.SIN, OP.COS, OP.TAN, OP.ARCSIN, OP.ARCCOS, OP.ARCTAN
+    OP.VALUE,
+    OP.NEG,
+    OP.ABS,
+    OP.SIN,
+    OP.COS,
+    OP.TAN,
+    OP.ARCSIN,
+    OP.ARCCOS,
+    OP.ARCTAN,
 )
 def dimension_identity(dim: Dimension):
     return dim
@@ -228,7 +238,9 @@ def shape_mul(d_1: Dimension, d_2: Dimension):
 def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     if d_1.is_scalar() or d_2.is_scalar():
-        raise InvalidArgument("Matrix multiplication is not defined for scalars")
+        raise InvalidArgument(
+            "Matrix multiplication is not defined for scalars"
+        )
 
     if d_1.is_vector():
         raise InvalidArgument("Cannot multiply vectors")
@@ -247,7 +259,9 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
         out_dims += [d for d in d_2.dim[1:]]
 
     if c != r:
-        raise InvalidArgument("Cannot multiply: product axis has different shape")
+        raise InvalidArgument(
+            "Cannot multiply: product axis has different shape"
+        )
 
     if out_dims:
         try:
@@ -277,7 +291,9 @@ def dot_shape(d_1: Dimension, d_2: Dimension):
     if d_1.dim == d_2.dim and (d_1.is_vector() or d_1.is_covector()):
         return Dimension(None)
 
-    raise InvalidArgument("Dot product only defined for vectors from the same space.")
+    raise InvalidArgument(
+        "Dot product only defined for vectors from the same space."
+    )
 
 
 @register_shape(OP.TRANSPOSE)

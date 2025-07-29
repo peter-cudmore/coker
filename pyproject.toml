@@ -78,4 +78,4 @@ testpaths = [
 enabled = true
 
 [tool.black]
-code = "src"
+line-length = 79

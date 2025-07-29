@@ -55,7 +55,8 @@ class Step(Block):
                 name,
                 parent,
                 BlockSpec(
-                    outputs=[Signal("y")], parameters=[Parameter("t_step", t_step)]
+                    outputs=[Signal("y")],
+                    parameters=[Parameter("t_step", t_step)],
                 ),
             )
             self.t_step = t_step

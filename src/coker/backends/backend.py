@@ -46,7 +46,9 @@ class Backend(metaclass=ABCMeta):
         from coker.backends.evaluator import evaluate_inner
 
         workspace = {}
-        return evaluate_inner(function.tape, inputs, function.output, self, workspace)
+        return evaluate_inner(
+            function.tape, inputs, function.output, self, workspace
+        )
 
     def evaluate_integrals(
         self,
@@ -65,7 +67,9 @@ class Backend(metaclass=ABCMeta):
         )
 
     def lower(self, function: Function):
-        raise NotImplementedError("lowering is not implemented for this backend")
+        raise NotImplementedError(
+            "lowering is not implemented for this backend"
+        )
 
 
 __known_backends = {}

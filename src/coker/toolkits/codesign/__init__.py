@@ -43,7 +43,9 @@ class MathematicalProgram:
 class ProblemBuilder:
     def __init__(self, arguments: Optional[List[VectorSpace | Scalar]] = None):
 
-        self.arguments = [self.tape.input(a) for a in arguments] if arguments else []
+        self.arguments = (
+            [self.tape.input(a) for a in arguments] if arguments else []
+        )
         self.objective = None
         self.tape: Optional[Tape] = None
         self.constraints = []
@@ -59,7 +61,9 @@ class ProblemBuilder:
         else:
             v = self.tape.input(VectorSpace(name, shape))
             initial_value = (
-                np.zeros(shape=shape) if initial_value is None else initial_value
+                np.zeros(shape=shape)
+                if initial_value is None
+                else initial_value
             )
 
         self.initial_conditions[v.index] = initial_value

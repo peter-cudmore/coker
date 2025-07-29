@@ -15,7 +15,7 @@ def to_array(value, shape):
     if isinstance(value, np.ndarray) and value.shape == shape:
         return jnp.array(value)
 
-    raise NotImplementedError
+    raise plementedError
 
 
 scalar_types = (
@@ -133,7 +133,9 @@ class JaxBackend(Backend):
             return jnp.reshape(arg, dim.dim)
         elif isinstance(arg, np.ndarray):
             return np.reshape(arg, dim.dim)
-        raise NotImplementedError(f"Don't know how to resize {arg.__class__.__name__}")
+        raise NotImplementedError(
+            f"Don't know how to resize {arg.__class__.__name__}"
+        )
 
     def call(self, op, *args) -> ArrayLike:
 

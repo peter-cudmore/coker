@@ -90,13 +90,21 @@ class FunctionSpace:
 
     def input_dimensions(self):
         return [
-            Dimension((1,)) if isinstance(arg, Scalar) else Dimension(arg.dimension)
+            (
+                Dimension((1,))
+                if isinstance(arg, Scalar)
+                else Dimension(arg.dimension)
+            )
             for arg in self.arguments
         ]
 
     def output_dimensions(self):
         return [
-            Dimension((1,)) if isinstance(out, Scalar) else Dimension(out.dimension)
+            (
+                Dimension((1,))
+                if isinstance(out, Scalar)
+                else Dimension(out.dimension)
+            )
             for out in self.output
         ]
 
