@@ -1,6 +1,7 @@
 import dataclasses
 from typing import List, Optional, Tuple
 
+
 class Dimension:
     def __init__(self, tuple_or_none):
 
@@ -74,7 +75,6 @@ class VectorSpace:
     dimension: int
 
 
-
 @dataclasses.dataclass
 class Scalar:
     name: str
@@ -90,15 +90,16 @@ class FunctionSpace:
 
     def input_dimensions(self):
         return [
-            Dimension((1,)) if isinstance(arg, Scalar) else
-            Dimension(arg.dimension) for arg in self.arguments
+            Dimension((1,)) if isinstance(arg, Scalar) else Dimension(arg.dimension)
+            for arg in self.arguments
         ]
 
     def output_dimensions(self):
         return [
-            Dimension((1, )) if isinstance(out, Scalar) else
-            Dimension(out.dimension) for out in self.output
+            Dimension((1,)) if isinstance(out, Scalar) else Dimension(out.dimension)
+            for out in self.output
         ]
+
 
 @dataclasses.dataclass
 class Element:

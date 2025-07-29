@@ -1,4 +1,3 @@
-
 from coker.backends.casadi.casadi import substitute, to_casadi, lower
 from typing import List
 from coker import Tracer
@@ -6,7 +5,10 @@ from coker import Tracer
 import casadi as ca
 import numpy as np
 
-def build_optimisation_problem(cost, constraints, parameters:List[Tracer], outputs, initial_conditions):
+
+def build_optimisation_problem(
+    cost, constraints, parameters: List[Tracer], outputs, initial_conditions
+):
 
     # p = P(parameters)
     # x = P(inputs ~ parameter)
@@ -18,7 +20,7 @@ def build_optimisation_problem(cost, constraints, parameters:List[Tracer], outpu
     parameter_dim = sum(p.dim.flat() for p in parameters)
     input_dim = sum(tape.dim[i].flat() for i in inputs)
 
-    x = ca.MX.sym('x', input_dim)
+    x = ca.MX.sym("x", input_dim)
     x0 = ca.DM(input_dim, 1)
     input_offset = 0
     parameter_offset = 0
@@ -37,7 +39,7 @@ def build_optimisation_problem(cost, constraints, parameters:List[Tracer], outpu
 
         input_offset += n_i
 
-    p = ca.MX.sym('p', parameter_dim)
+    p = ca.MX.sym("p", parameter_dim)
 
     for i in parameter_indicies:
         n_i = tape.dim[i].flat()
@@ -48,22 +50,21 @@ def build_optimisation_problem(cost, constraints, parameters:List[Tracer], outpu
         workspace[i] = projection @ p
         parameter_offset += n_i
 
-    cost_fn, = substitute([cost], workspace)
-    output_map = ca.Function('y', *lower(tape, outputs, workspace))
+    (cost_fn,) = substitute([cost], workspace)
+    output_map = ca.Function("y", *lower(tape, outputs, workspace))
 
     n_constraints = len(constraints)
 
-#    constraint_function = np.zeros((n_constraints,))
-#    lower_bound = ca.DM(n_constraints, 1)
-#    upper_bound = ca.DM(n_constraints, 1)
+    #    constraint_function = np.zeros((n_constraints,))
+    #    lower_bound = ca.DM(n_constraints, 1)
+    #    upper_bound = ca.DM(n_constraints, 1)
     cs = []
     lbs = []
     ubs = []
 
-
     for i, constraint in enumerate(constraints):
         c, lb, ub = constraint.as_halfplane_bound()
-        c_i, = substitute([c], workspace)
+        (c_i,) = substitute([c], workspace)
 
         lbs.append(to_casadi(lb) * ca.DM.ones(*c_i.shape))
         ubs.append(to_casadi(ub) * ca.DM.ones(*c_i.shape))
@@ -73,18 +74,14 @@ def build_optimisation_problem(cost, constraints, parameters:List[Tracer], outpu
     lower_bound = ca.vertcat(*lbs)
     g = ca.vertcat(*cs)
 
-    spec = {
-        'x': x,
-        'p': p,
-        'f': cost_fn,
-        'g': g
-    }
+    spec = {"x": x, "p": p, "f": cost_fn, "g": g}
 
-    solver_inner = ca.nlpsol('solver', 'ipopt', spec)
+    solver_inner = ca.nlpsol("solver", "ipopt", spec)
 
     return CasadiSolver(
         solver_inner, p, None, (lower_bound, upper_bound), output_map, x0
     )
+
 
 class CasadiSolver:
     def __init__(self, solver_inner, p, x_bounds, g_bounds, output_map, x0):
@@ -100,13 +97,12 @@ class CasadiSolver:
             raise NotImplementedError
 
         spec = {
-            'x0': self.x0,
-            'lbg': self.g_bounds[0],
-            'ubg': self.g_bounds[1],
+            "x0": self.x0,
+            "lbg": self.g_bounds[0],
+            "ubg": self.g_bounds[1],
         }
         soln = self.solver_inner(**spec)
 
-        result = self.output_map(soln['x'])
+        result = self.output_map(soln["x"])
 
         return [r.full() for r in result]
-

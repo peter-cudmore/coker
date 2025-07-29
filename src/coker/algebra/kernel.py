@@ -9,6 +9,7 @@ from humanfriendly.terminal import output
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.dimensions import *
 from coker.algebra.ops import OP, numpy_atomics, numpy_composites
+
 scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int)
 
 
@@ -28,8 +29,6 @@ def get_projection(dimension: Dimension, slc: slice):
     for row, col in enumerate(indices):
         proj[row, col] = 1
     return proj
-
-
 
 
 Inferred = None
@@ -148,12 +147,12 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             return False
         return True
 
-    def as_halfplane_bound(self) -> Tuple['Tracer', float, float]:
+    def as_halfplane_bound(self) -> Tuple["Tracer", float, float]:
         op, lhs, rhs = self.tape.nodes[self.index]
         bounds = {
             OP.EQUAL: (-1e-9, 1e-9),
             OP.LESS_THAN: (0, np.inf),
-            OP.LESS_EQUAL: (-1e-9, np.inf)
+            OP.LESS_EQUAL: (-1e-9, np.inf),
         }
         return rhs - lhs, *bounds[op]
 
@@ -282,7 +281,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         idx = self.tape.append(OP.EQUAL, self, other)
         return Tracer(self.tape, idx)
 
-
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         try:
             op = numpy_atomics[ufunc]
@@ -337,9 +335,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         condition = norm == 0
 
-        output = self.tape.append(
-            OP.CASE, condition, self, self / norm
-        )
+        output = self.tape.append(OP.CASE, condition, self, self / norm)
 
         return Tracer(self.tape, output)
 
@@ -371,12 +367,16 @@ class Function:
     def __call__(self, *args):
         assert len(args) == len(self.tape.input_indicies)
         args = [
-           arg if not isinstance(self.tape.dim[idx], FunctionSpace)
-           else function(self.tape.dim[idx].arguments, arg, self.backend)
-           for idx, arg in zip(self.tape.input_indicies, args)
+            (
+                arg
+                if not isinstance(self.tape.dim[idx], FunctionSpace)
+                else function(self.tape.dim[idx].arguments, arg, self.backend)
+            )
+            for idx, arg in zip(self.tape.input_indicies, args)
         ]
 
         from coker.backends import get_backend_by_name
+
         backend = get_backend_by_name(self.backend)
         output = backend.evaluate(self, args)
 
@@ -386,6 +386,7 @@ class Function:
 
     def lower(self):
         from coker.backends import get_backend_by_name
+
         backend = get_backend_by_name(self.backend)
         return backend.lower(self)
 
@@ -418,9 +419,6 @@ def function(
     return Function(tape, result, backend)
 
 
-
-
-
 def strip_symbols_from_array(array: np.ndarray, float_type=float):
 
     if not isinstance(array, np.ndarray):
@@ -428,7 +426,9 @@ def strip_symbols_from_array(array: np.ndarray, float_type=float):
 
     symbols = defaultdict(list)
 
-    with np.nditer(array, flags=["refs_ok", "multi_index"], op_flags=[["readwrite"]]) as it:
+    with np.nditer(
+        array, flags=["refs_ok", "multi_index"], op_flags=[["readwrite"]]
+    ) as it:
         for x in it:
             try:
                 x[...] = float_type(x)

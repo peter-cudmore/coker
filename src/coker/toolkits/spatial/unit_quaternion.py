@@ -80,7 +80,6 @@ class UnitQuaternion:
             result = qpq_inv.v
             return np.reshape(result, newshape=other.shape)
 
-
         raise NotImplementedError(
             f"Quaternion conjugation not implemented for {type(other)}"
         )

@@ -14,6 +14,7 @@ from coker.backends.backend import Backend, ArrayLike
 from coker.backends.evaluator import evaluate_inner
 import scipy as scp
 
+
 def to_array(value, shape):
 
     if isinstance(value, np.ndarray) and value.shape == shape:
@@ -22,7 +23,17 @@ def to_array(value, shape):
     raise NotImplementedError
 
 
-scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int, bool, np.bool_)
+scalar_types = (
+    np.float32,
+    np.float64,
+    np.int32,
+    np.int64,
+    float,
+    complex,
+    int,
+    bool,
+    np.bool_,
+)
 
 
 def is_scalar_symbol(v):
@@ -170,18 +181,25 @@ class NumpyBackend(Backend):
         raise NotImplementedError(f"{op} is not implemented")
 
     def evaluate_integrals(
-            self,
-            functions,
-            initial_conditions,
-            end_point: float,
-            inputs, solver_parameters=None):
+        self,
+        functions,
+        initial_conditions,
+        end_point: float,
+        inputs,
+        solver_parameters=None,
+    ):
 
         dxdt, constraint, dqdt = functions
         x0, z0, q0 = initial_conditions
         u, p = inputs
 
+        if end_point == 0.0:
+            return x0, z0, q0
+
         if constraint is not None:
-            raise NotImplementedError("Integrators with constraints are not implemented")
+            raise NotImplementedError(
+                "Integrators with constraints are not implemented"
+            )
 
         if not isinstance(x0, np.ndarray):
             x0 = np.array([x0])
@@ -191,17 +209,25 @@ class NumpyBackend(Backend):
             f = lambda t, x: dxdt(t, x, None, u(t), p)
 
         else:
-            y0=np.concatenate([x0, q0]),
-            f = lambda t, x: np.concatenate([dxdt(t, x, None, u(t), p), dqdt(t, x, None, u(t), p)])
+            y0 = (np.concatenate([x0, q0]),)
+            f = lambda t, x: np.concatenate(
+                [dxdt(t, x, None, u(t), p), dqdt(t, x, None, u(t), p)]
+            )
 
-        sol = scp.integrate.solve_ivp(f, (0, end_point), y0, method="RK45",t_eval=[end_point])
+        sol = scp.integrate.solve_ivp(
+            f, (0, end_point), y0, method="RK45", t_eval=[end_point]
+        )
 
         if dqdt is None:
-            return sol.y, None, None
+            x_out, z_out, q_out = sol.y[: x0.shape[0] :, 0], None, None
+        else:
+            x_out, z_out, q_out = (
+                sol.y[: x0.shape[0] :, 0],
+                None,
+                sol.y[x0.shape[0] :, 0],
+            )
 
-        return sol.y[x0.shape[0]:, 0], None, sol.y[x0.shape[0]:, 0]
-
-
+        return x_out, z_out, q_out
 
     def build_optimisation_problem(
         self,

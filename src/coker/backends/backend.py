@@ -49,28 +49,27 @@ class Backend(metaclass=ABCMeta):
         return evaluate_inner(function.tape, inputs, function.output, self, workspace)
 
     def evaluate_integrals(
-            self,
-            functions,
-            initial_conditions,
-            end_point: float,
-            inputs,
-            solver_parameters=None,
+        self,
+        functions,
+        initial_conditions,
+        end_point: float,
+        inputs,
+        solver_parameters=None,
     ):
 
         dxdt, constraint, dqdt = functions
         x0, z0, q0 = initial_conditions
         u, p = inputs
-        raise NotImplementedError(f"Integrator is not implemented for this backend: {self.__class__.__name__}")
-
+        raise NotImplementedError(
+            f"Integrator is not implemented for this backend: {self.__class__.__name__}"
+        )
 
     def lower(self, function: Function):
         raise NotImplementedError("lowering is not implemented for this backend")
 
 
-
-
-
 __known_backends = {}
+
 
 def instantiate_backend(name: str):
     if name == "numpy":

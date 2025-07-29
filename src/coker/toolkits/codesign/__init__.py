@@ -34,8 +34,10 @@ class MathematicalProgram:
     def __call__(self, *args):
         assert len(args) == len(self.input_shape)
 
-
-        return [np.reshape(o, dim.shape) for o, dim in zip(self.impl(args), self.output_shape)]
+        return [
+            np.reshape(o, dim.shape)
+            for o, dim in zip(self.impl(args), self.output_shape)
+        ]
 
 
 class ProblemBuilder:
@@ -48,7 +50,6 @@ class ProblemBuilder:
         self.outputs = []
         self.initial_conditions = {}
         self.warm_start = False
-
 
     def new_variable(self, name, shape=None, initial_value=None):
         assert self.tape is not None
@@ -88,7 +89,7 @@ class ProblemBuilder:
             self.constraints,
             self.arguments,
             self.outputs,
-            self.initial_conditions
+            self.initial_conditions,
         )
 
         return MathematicalProgram(self.input_shape, self.output_shape, impl)
@@ -100,7 +101,6 @@ class ProblemBuilder:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.tape = None
         pass
-
 
 
 class VariationalProblem:
@@ -135,14 +135,10 @@ class VariationalProblem:
 
     """
 
-    def __init__(self, intervals:List[float]):
+    def __init__(self, intervals: List[float]):
         self.intervals = intervals
         self.signals = []
         self.variables = []
-
-
-
-
 
 
 def norm(arg, order=2):

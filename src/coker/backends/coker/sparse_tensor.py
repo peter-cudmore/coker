@@ -77,7 +77,6 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             self.keys = data if data is not None else {}
         self.shape = shape
 
-
     def is_empty(self):
         return self.keys == {}
 
@@ -124,7 +123,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
         return m
 
-    def swap_indices(self,i, j):
+    def swap_indices(self, i, j):
         assert i != j and i < len(self.shape) and j < len(self.shape)
         if i > j:
             i, j = j, i
@@ -132,16 +131,17 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         data = {}
         for k, v in self.keys.items():
             k_i, k_j = k[i], k[j]
-            k_prime = (
-                *k[0:i], k_j, *k[i+j:j], k_i, *k[j + 1:]
-            )
+            k_prime = (*k[0:i], k_j, *k[i + j : j], k_i, *k[j + 1 :])
             data[k_prime] = v
         s_i, s_j = self.shape[i], self.shape[j]
         shape = (
-            *self.shape[0:i], s_j, *self.shape[i + j:j], s_j, *self.shape[j + 1:]
+            *self.shape[0:i],
+            s_j,
+            *self.shape[i + j : j],
+            s_j,
+            *self.shape[j + 1 :],
         )
 
-        
         return dok_ndarray(shape=shape, data=data)
 
     @staticmethod

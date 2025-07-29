@@ -31,7 +31,7 @@ scalar_types = (
     complex,
     int,
     bool,
-    jnp.bool_
+    jnp.bool_,
 )
 
 
@@ -66,7 +66,7 @@ impls = {
     OP.LESS_EQUAL: jnp.less_equal,
     OP.LESS_THAN: jnp.less,
     OP.EQUAL: jnp.equal,
-    OP.CASE: lambda c,t,f: t if c else f,
+    OP.CASE: lambda c, t, f: t if c else f,
     OP.EVALUATE: lambda op, *args: op(*args),
 }
 
@@ -147,6 +147,12 @@ class JaxBackend(Backend):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
 
-    def build_optimisation_problem(self, cost: Tracer, constraints: List[Tracer], arguments: List[Tracer],
-                                   outputs: List[Tracer], **kwargs):
+    def build_optimisation_problem(
+        self,
+        cost: Tracer,
+        constraints: List[Tracer],
+        arguments: List[Tracer],
+        outputs: List[Tracer],
+        **kwargs,
+    ):
         raise NotImplementedError

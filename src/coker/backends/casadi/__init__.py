@@ -95,7 +95,9 @@ class CasadiBackend(Backend):
         raise NotImplementedError
 
     def lower(self, function: Function):
-        assert not any(isinstance(shape, FunctionSpace) for shape in function.input_shape()), "Cannot lower a partially evaluated function."
+        assert not any(
+            isinstance(shape, FunctionSpace) for shape in function.input_shape()
+        ), "Cannot lower a partially evaluated function."
         return lower(function.tape, function.output)
 
     def evaluate(self, function: Function, inputs: ArrayLike):
@@ -111,20 +113,19 @@ class CasadiBackend(Backend):
                 x_symbol = ca.MX.sym(f"x_{idx}", *space.shape)
                 workspace[idx] = x_symbol
                 ins.append(x_symbol)
-                if  isinstance(arg, (ca.MX, ca.SX)):
+                if isinstance(arg, (ca.MX, ca.SX)):
                     values.append(arg)
                 else:
                     values.append(self.to_backend_array(arg))
 
-
         outs = substitute(function.output, workspace)
 
-        f = ca.Function('f', ins, outs)
+        f = ca.Function("f", ins, outs)
         y = f(*values)
         if len(function.output) > 1:
-            return [self.to_array(y_i) for y_i in y ]
+            return [self.to_array(y_i) for y_i in y]
         else:
-            return self.to_array(y),
+            return (self.to_array(y),)
 
     def to_array(self, arg: Union[ca.MX, ca.DM]):
         try:
@@ -132,6 +133,9 @@ class CasadiBackend(Backend):
         except RuntimeError:
             return arg
 
-
-    def build_optimisation_problem(self, cost, constraints, parameters, outputs, initial_conditions):
-        return build_optimisation_problem(cost, constraints, parameters, outputs, initial_conditions)
+    def build_optimisation_problem(
+        self, cost, constraints, parameters, outputs, initial_conditions
+    ):
+        return build_optimisation_problem(
+            cost, constraints, parameters, outputs, initial_conditions
+        )

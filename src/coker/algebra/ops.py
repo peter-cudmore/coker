@@ -83,7 +83,7 @@ class ConcatenateOP(Operator):
 
         out_dims = list(dims[0].dim)
         if all(d.is_scalar() or d.is_vector() for d in dims):
-            dim = Dimension((sum(d.flat() for d in dims), ))
+            dim = Dimension((sum(d.flat() for d in dims),))
             return dim
 
         for d in dims[1:]:
@@ -116,6 +116,7 @@ class NormOP(Operator):
     def is_linear(self):
         return False
 
+
 class ClipOP(Operator):
     def __init__(self, a=None, a_min=None, a_max=None):
         self.lower = a_min
@@ -130,7 +131,6 @@ class ClipOP(Operator):
         self.lower = a_min
         self.higher = a_max
         return a
-
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         assert all(d.is_scalar() for d in dims)
@@ -152,17 +152,24 @@ def register_shape(*ops: OP):
 
     return inner
 
+
 @register_shape(OP.EVALUATE)
 def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
 
     if len(args) != len(function_sig.arguments):
-        raise InvalidShape(f"Expected {len(function_sig.arguments)} arguments, got {len(args)}")
+        raise InvalidShape(
+            f"Expected {len(function_sig.arguments)} arguments, got {len(args)}"
+        )
 
-    for i, (arg_dim, input_dim) in enumerate(zip(args, function_sig.input_dimensions())):
-        if arg_dim != input_dim :
-            raise InvalidShape(f"Argument {i} has dimension {arg_dim.dim}, expected {input_dim.dim}")
+    for i, (arg_dim, input_dim) in enumerate(
+        zip(args, function_sig.input_dimensions())
+    ):
+        if arg_dim != input_dim:
+            raise InvalidShape(
+                f"Argument {i} has dimension {arg_dim.dim}, expected {input_dim.dim}"
+            )
     try:
-        out_dim, = function_sig.output_dimensions()
+        (out_dim,) = function_sig.output_dimensions()
         return out_dim
     except ValueError:
         return function_sig.output_dimensions()
@@ -174,6 +181,7 @@ def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
 def dimension_identity(dim: Dimension):
     return dim
 
+
 @register_shape(OP.EQUAL, OP.LESS_EQUAL, OP.LESS_THAN)
 def comparison_dimension(dim1: Dimension, dim2: Dimension):
     if dim1.dim != dim2.dim:
@@ -182,11 +190,13 @@ def comparison_dimension(dim1: Dimension, dim2: Dimension):
 
 
 @register_shape(OP.CASE)
-def case_dimension(condition: Dimension, false_branch: Dimension, true_branch: Dimension ):
+def case_dimension(
+    condition: Dimension, false_branch: Dimension, true_branch: Dimension
+):
     if not condition.is_scalar():
         raise InvalidShape("Condition must be a scalar")
 
-    if false_branch!= true_branch:
+    if false_branch != true_branch:
         raise InvalidShape("Arguments are of different dimensions")
 
     return true_branch

@@ -11,7 +11,6 @@ from coker.backends.coker.sparse_tensor import (
 import numpy as np
 
 
-
 def dense_array_cast(x):
     if isinstance(x, scalar):
         return np.array([x])
@@ -41,15 +40,15 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             quadratic, expected_shape=(*shape, memory.count, memory.count)
         )
 
-    def transpose(self) -> 'BilinearWeights':
+    def transpose(self) -> "BilinearWeights":
         if len(self.shape) == 1:
-            n, = self.shape
+            (n,) = self.shape
             return BilinearWeights(
                 self.memory,
-                shape= (1, n),
+                shape=(1, n),
                 constant=self.constant.T,
-                linear= self.linear.swap_indices(0, 1),
-                quadratic=self.quadratic.swap_indices(0, 1)
+                linear=self.linear.swap_indices(0, 1),
+                quadratic=self.quadratic.swap_indices(0, 1),
             )
         if len(self.shape) == 2:
             n, m = self.shape
@@ -57,13 +56,11 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 self.memory,
                 shape=(m, n),
                 constant=self.constant.T,
-                linear= self.linear.swap_indices(0, 1),
-                quadratic=self.quadratic.swap_indices(0, 1)
+                linear=self.linear.swap_indices(0, 1),
+                quadratic=self.quadratic.swap_indices(0, 1),
             )
 
         raise NotImplementedError(f"Cannot transpose {len(self.shape)} dimensions")
-
-
 
     def __call__(self, x):
         x_v = dense_array_cast(x)
@@ -96,7 +93,6 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     def is_scalar(self):
         return self.shape == (1,)
-
 
     def is_constant(self):
         return not self.linear.keys and not self.quadratic.keys
@@ -156,7 +152,6 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                     self.memory, other.shape, constants, linear, quadratic
                 )
 
-
         raise TypeError(f"Cannot multiply {self} by {type(other)}")
 
     def __rmul__(self, other):
@@ -191,7 +186,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                     self.shape,
                     self.constant + other.constant,
                     self.linear,
-                    self.quadratic
+                    self.quadratic,
                 )
 
             assert self.memory == other.memory, f"{self}, {other}"
@@ -259,13 +254,19 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __matmul__(self, other):
         assert isinstance(other, BilinearWeights) and other.memory is self.memory
-        assert (self.is_linear() and other.is_linear()) or self.is_constant() or other.is_constant()
+        assert (
+            (self.is_linear() and other.is_linear())
+            or self.is_constant()
+            or other.is_constant()
+        )
         constant = self.constant @ other.constant
         linear = self.constant @ other.linear + self.linear @ other.constant
-        quadratic = self.constant @ other.quadratic + self.quadratic @ other.quadratic + self.linear @ other.linear
+        quadratic = (
+            self.constant @ other.quadratic
+            + self.quadratic @ other.quadratic
+            + self.linear @ other.linear
+        )
         return BilinearWeights(self.memory, constant.shape, constant, linear, quadratic)
-
-
 
     def clone(self):
         return BilinearWeights(
@@ -333,7 +334,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
     @staticmethod
     def identity2(memory: MemorySpec):
 
-        shape = (memory.count, )
+        shape = (memory.count,)
         data = {}
         for i in range(memory.count):
             data[(i, i)] = 1

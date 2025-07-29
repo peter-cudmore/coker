@@ -6,6 +6,7 @@ from coker.toolkits.spatial import Isometry3
 
 from mpl_toolkits.mplot3d.art3d import Line3D
 from matplotlib.animation import FuncAnimation
+
 e_x = np.array([1, 0, 0])
 e_y = np.array([0, 1, 0])
 e_z = np.array([0, 0, 1])
@@ -13,20 +14,24 @@ e_z = np.array([0, 0, 1])
 
 class JointWidget:
     def __init__(self, transform: Isometry3, scale):
-        self.x_axis = Line3D([], [], [], color='blue')
-        self.y_axis = Line3D([], [], [], color='green')
-        self.z_axis = Line3D([], [], [], color='red')
-        self.point = Line3D([], [], [], marker='o', markersize=1, markerfacecolor='black')
+        self.x_axis = Line3D([], [], [], color="blue")
+        self.y_axis = Line3D([], [], [], color="green")
+        self.z_axis = Line3D([], [], [], color="red")
+        self.point = Line3D(
+            [], [], [], marker="o", markersize=1, markerfacecolor="black"
+        )
         self.scale = scale
         self.set_transform(transform)
 
-    def set_transform(self, transform:  Isometry3):
-        point = transform.apply(np.zeros(3,))
+    def set_transform(self, transform: Isometry3):
+        point = transform.apply(
+            np.zeros(
+                3,
+            )
+        )
 
         x, y, z = point.tolist()
-        self.point.set_data_3d(
-            [x], [y], [z]
-        )
+        self.point.set_data_3d([x], [y], [z])
 
         dx = transform.apply(e_x) - point
         dy = transform.apply(e_y) - point
@@ -49,7 +54,7 @@ class CenterOfMassWidget:
     def __init__(self, parent: int, transform: Isometry3):
         self.parent = parent
         self.transform = transform
-        self.artist = Line3D([], [], [], linestyle='', marker='o')
+        self.artist = Line3D([], [], [], linestyle="", marker="o")
 
     def set_transform(self, joint_transforms: List[Isometry3]):
         transform = joint_transforms[self.parent] @ self.transform
@@ -64,7 +69,7 @@ class CenterOfMassWidget:
 class LimbWidget:
     def __init__(self, path: List[int], effector_xform: Isometry3):
         self.path = path
-        self.line = Line3D([], [], [], color='black')
+        self.line = Line3D([], [], [], color="black")
         self.xform = effector_xform
         self.bounds = []
 
@@ -73,9 +78,7 @@ class LimbWidget:
 
     def set_transform(self, transforms: List[Isometry3]):
         xforms = [transforms[i] for i in self.path]
-        xforms.append(
-            xforms[-1] @ self.xform
-        )
+        xforms.append(xforms[-1] @ self.xform)
 
         x, y, z = zip(*(t.apply(np.zeros((3,))).tolist() for t in xforms))
 
@@ -88,11 +91,12 @@ class KinematicsVisualiser:
     def __init__(self, model: RigidBody, scale=0.25):
         self.model = model
         self.figure = plt.figure()
-        ax = self.figure.add_subplot(projection='3d', aspect='equal')
+        ax = self.figure.add_subplot(projection="3d", aspect="equal")
 
         rest_config = np.zeros(model.total_joints())
         self.masses = [
-            CenterOfMassWidget(i, inertia.centre_of_mass) for i, inertia in enumerate(model.inertia)
+            CenterOfMassWidget(i, inertia.centre_of_mass)
+            for i, inertia in enumerate(model.inertia)
         ]
 
         self.joints = [
@@ -110,12 +114,12 @@ class KinematicsVisualiser:
             [ax.add_artist(a) for a in joints.get_artists()]
 
         self.end_effectors = [
-            LimbWidget(
-            [*model.get_dependent_links(parent)], xform)
-            for i, (parent, xform) in enumerate(model.end_effectors)]
+            LimbWidget([*model.get_dependent_links(parent)], xform)
+            for i, (parent, xform) in enumerate(model.end_effectors)
+        ]
 
         for end_effectors in self.end_effector_coords:
-           [ax.add_artist(a) for a in end_effectors.get_artists()]
+            [ax.add_artist(a) for a in end_effectors.get_artists()]
 
         locations = model.joint_transforms(rest_config)
         for end_effectors in self.end_effectors:
@@ -124,9 +128,9 @@ class KinematicsVisualiser:
 
         self.ax = ax
         self.update_values(rest_config)
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
-        ax.set_zlabel('z')
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
 
     def update_values(self, angles):
         joint_locations = self.model.joint_transforms(angles)
@@ -145,15 +149,12 @@ class KinematicsVisualiser:
             mass.set_transform(joint_locations)
 
     def get_artists(self):
-        return [
-           j.get_artists() for j in self.joints
-        ] + [
-            e.get_artists() for e in self.end_effectors
-        ] + [
-            e.get_artists() for e in self.end_effector_coords
-        ] + [
-            m.get_artists() for m in self.masses
-        ]
+        return (
+            [j.get_artists() for j in self.joints]
+            + [e.get_artists() for e in self.end_effectors]
+            + [e.get_artists() for e in self.end_effector_coords]
+            + [m.get_artists() for m in self.masses]
+        )
 
     def set_view(self, x_lim=None, y_lim=None, z_lim=None):
         if x_lim is not None:
@@ -162,9 +163,7 @@ class KinematicsVisualiser:
             self.ax.set_ylim(*y_lim)
         if z_lim is not None:
             self.ax.set_zlim(*z_lim)
-        self.ax.set_aspect('equal')
-
-
+        self.ax.set_aspect("equal")
 
     def animate_sweep(self, angles_over_time, loop=False, interval=100):
         def update(frame):
@@ -173,9 +172,10 @@ class KinematicsVisualiser:
             return self.get_artists()
 
         ani = FuncAnimation(
-            fig=self.figure, func=update, frames=len(angles_over_time), interval=interval,
-            repeat=loop
+            fig=self.figure,
+            func=update,
+            frames=len(angles_over_time),
+            interval=interval,
+            repeat=loop,
         )
         plt.show()
-
-

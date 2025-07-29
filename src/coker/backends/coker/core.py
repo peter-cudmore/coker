@@ -58,6 +58,7 @@ class CokerBackend(Backend):
     ):
         raise NotImplementedError
 
+
 def create_opgraph(function: Function):
     function = rewrite_graph(function)
 

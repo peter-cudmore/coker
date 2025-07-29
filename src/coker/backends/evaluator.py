@@ -14,7 +14,6 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         else:
             workspace[index] = backend.to_backend_array(arg)
 
-
     work_list = [i for i in range(len(graph.nodes)) if i not in workspace]
 
     def cast_node(node):
@@ -39,7 +38,6 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         except KeyError as ex:
             raise NotImplementedError(f"Op {op} not implemented in python") from ex
 
-
         workspace[w] = backend.reshape(value, graph.dim[w])
 
     outputs = [
@@ -50,7 +48,6 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         )
         for o in outputs
     ]
-
 
     return outputs
 

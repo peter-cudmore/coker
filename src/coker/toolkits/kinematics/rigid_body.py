@@ -19,7 +19,7 @@ class Inertia:
     moments: np.ndarray
 
     @staticmethod
-    def zero() -> 'Inertia':
+    def zero() -> "Inertia":
         return Inertia(Isometry3.identity(), 0, np.zeros((6,)))
 
     def as_matrix(self):
@@ -29,10 +29,13 @@ class Inertia:
                 [self.moments[1], self.moments[3], self.moments[4]],
                 [self.moments[2], self.moments[4], self.moments[5]],
             ],
-
         )
-        mass_component = self.mass * np.eye(3, )
-        zeros = np.zeros((3, 3), )
+        mass_component = self.mass * np.eye(
+            3,
+        )
+        zeros = np.zeros(
+            (3, 3),
+        )
         return np.block([[inertial_component, zeros], [zeros, mass_component]])
 
     def as_matrix_origin(self):
@@ -123,11 +126,12 @@ class RigidBody:
         adjoint = SE3Adjoint(self._rest_transforms[joint_index])
         return [adjoint.apply(b) for b in bases]
 
-    def add_link(self, parent: int, at: Isometry3, joint: JointType, inertia: Inertia) -> int:
+    def add_link(
+        self, parent: int, at: Isometry3, joint: JointType, inertia: Inertia
+    ) -> int:
         idx = len(self.parents)
 
         assert 0 <= parent < idx or parent == self.WORLD
-
 
         self.parents.append(parent)
         self.transforms.append(at)
@@ -274,10 +278,12 @@ class RigidBody:
 
         joint_index = 0
         transforms = []
-        for parent, xform, bases in zip(self.parents, self.transforms, self.joint_bases):
+        for parent, xform, bases in zip(
+            self.parents, self.transforms, self.joint_bases
+        ):
             g = transforms[parent] @ xform if parent != self.WORLD else xform
             for basis in bases:
-                g =g @ basis.exp(angles[joint_index])
+                g = g @ basis.exp(angles[joint_index])
                 joint_index += 1
 
             transforms.append(g)
@@ -295,7 +301,7 @@ class RigidBody:
 
     def forward_kinematics(self, angles) -> List[Isometry3]:
         xforms = self.joint_transforms(angles)
-        return [ xforms[parent] @ xform for parent, xform in self.end_effectors]
+        return [xforms[parent] @ xform for parent, xform in self.end_effectors]
 
     def get_dependent_links(self, parent_link: int):
         result = list()
@@ -306,10 +312,9 @@ class RigidBody:
 
     def spatial_manipulator_jacobian(self, angles):
         return [
-                self.spatial_single_manipulator_jacobian(angles, i)
-                for i, _ in enumerate(self.end_effectors)
-            ]
-
+            self.spatial_single_manipulator_jacobian(angles, i)
+            for i, _ in enumerate(self.end_effectors)
+        ]
 
     def spatial_single_manipulator_jacobian(self, angles, end_effector):
         abs_xforms = self._get_absolute_joint_xform(angles)
@@ -483,7 +488,7 @@ class RigidBody:
 
         return mass_matrix
 
-    def add_body(self, body: 'RigidBody', at: Isometry3, parent: int):
+    def add_body(self, body: "RigidBody", at: Isometry3, parent: int):
         links = []
 
         iterator = zip(body.parents, body.joints, body.transforms, body.inertia)
@@ -502,7 +507,11 @@ class RigidBody:
 
             self.joints.append(joint)
 
-            rest_xform = self._rest_transforms[p_actual] @ body_xform if p_actual != self.WORLD else body_xform
+            rest_xform = (
+                self._rest_transforms[p_actual] @ body_xform
+                if p_actual != self.WORLD
+                else body_xform
+            )
             self.transforms.append(body_xform)
             self._rest_transforms.append(rest_xform)
 

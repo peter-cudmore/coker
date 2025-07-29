@@ -35,7 +35,6 @@ impls = {
 }
 
 
-
 def concat(*args: ca.MX, axis=0):
     if not axis:
         return ca.vertcat(*args)
@@ -82,7 +81,6 @@ def call_parameterised_op(op, *args):
     return result
 
 
-
 class CasadiTensor:
     def __init__(self, *shape):
         self.shape = shape
@@ -112,7 +110,6 @@ class CasadiTensor:
 
         return out
 
-
     def reshape(self, shape):
         assert self.shape == shape
         return self
@@ -124,10 +121,10 @@ def to_casadi(value):
             value = value.reshape(-1, 1)
 
         if len(value.shape) > 2:
-            v =  CasadiTensor(*value.shape)
+            v = CasadiTensor(*value.shape)
         else:
             v = ca.MX(*value.shape)
-        it = np.nditer(value, op_flags=['readonly'], flags=['multi_index'])
+        it = np.nditer(value, op_flags=["readonly"], flags=["multi_index"])
         for x in it:
             if x != 0:
                 k = it.multi_index
@@ -188,7 +185,9 @@ def lower(tape: Tape, output: List[Tracer], workspace=None):
             inputs.update({s_i.__hash__(): s_i for s_i in s})
             continue
 
-        assert not isinstance(tape.dim[i], FunctionSpace), "Cannot lower a partially evaluated function."
+        assert not isinstance(
+            tape.dim[i], FunctionSpace
+        ), "Cannot lower a partially evaluated function."
 
         v = ca.MX.sym(f"x_{i}", *tape.dim[i].shape)
         workspace[i] = v
