@@ -304,7 +304,7 @@ class Screw:
             if (rotation == 0.0).all():
                 return Screw(rotation, translation, 1)
             else:
-                mag = np.linalg.norm(rotation)[0]
+                mag = np.linalg.norm(rotation)
         except TypeError:
             mag = 1
 

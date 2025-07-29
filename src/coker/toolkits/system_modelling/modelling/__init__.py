@@ -2,7 +2,7 @@ from typing import List, Union, Optional, NewType, Dict, Tuple
 import inspect
 
 from coker import Scalar
-from coker.modelling.coker_abc import CokerListableSubclasses
+from coker.toolkits.system_modelling.modelling.coker_abc import CokerListableSubclasses
 
 
 def get_component_registry():

@@ -8,16 +8,16 @@ from dataclasses import dataclass
 from typing import List, Callable
 
 import numpy as np
-from google.protobuf.internal.containers import ScalarMap
 
 from coker import (
     VectorSpace,
+    FunctionSpace,
     Optional,
     function,
     Tuple,
     Scalar,
-    Signal,
     Function,
+    Dimension
 )
 from coker.backends import get_backend_by_name
 
@@ -40,7 +40,7 @@ from coker.backends import get_backend_by_name
 
 @dataclass
 class DynamicsSpec:
-    inputs: Signal
+    inputs: FunctionSpace
     parameters: Scalar | VectorSpace
 
     algebraic: Optional[VectorSpace]
@@ -75,7 +75,7 @@ class DynamicsSpec:
 class DynamicalSystem:
     def __init__(
         self,
-        inputs: VectorSpace | Scalar,
+        inputs: FunctionSpace,
         parameters: VectorSpace | Scalar,
         x0: Function,
         dxdt: Function,
@@ -122,7 +122,6 @@ class DynamicalSystem:
             raise NotImplementedError
         else:
             q0 = None
-        from coker.backends import get_backend_by_name
 
         backend = get_backend_by_name(self.dxdt.backend)
         x, z, q = backend.evaluate_integrals(
@@ -157,7 +156,6 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
         )
         for tracer in x0.output
     ]
-
     # Order: t, x, z, u, p
     arguments = [
         Scalar("t"),
@@ -203,7 +201,7 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
 
 
 def create_homogenous_ode(
-    inputs: Signal,
+    inputs: FunctionSpace,
     parameters=Scalar | VectorSpace,
     x0=Callable[[np.ndarray, List[np.ndarray]], np.ndarray],
     xdot=Callable[[np.ndarray, np.ndarray, List[np.ndarray]], np.ndarray],
@@ -215,10 +213,10 @@ def create_homogenous_ode(
         inputs,
         parameters,
         algebraic=None,
-        initial_conditions=lambda t, z, u, p: x0(u, p),
-        dynamics=lambda t, x, z, u, p: xdot(x, u, p),
+        initial_conditions=lambda t, z, u, p: x0(u(0), p),
+        dynamics=lambda t, x, z, u, p: xdot(x, u(t), p),
         constraints=None,
-        outputs=lambda t, x, z, u, p, q: output(x, u, p),
+        outputs=lambda t, x, z, u, p, q: output(x, u(t), p),
         quadratures=None,
     )
 

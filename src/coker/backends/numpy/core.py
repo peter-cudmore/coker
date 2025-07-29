@@ -195,9 +195,6 @@ class NumpyBackend(Backend):
         x0, z0, q0 = initial_conditions
         u, p = inputs
 
-        if end_point == 0.0:
-            return x0, z0, q0
-
         if constraint is not None:
             raise NotImplementedError(
                 "Integrators with constraints are not implemented"
@@ -205,6 +202,9 @@ class NumpyBackend(Backend):
 
         if not isinstance(x0, np.ndarray):
             x0 = np.array([x0])
+
+        if end_point == 0.0:
+            return x0, z0, q0
 
         if dqdt is None:
             y0 = x0
@@ -221,12 +221,12 @@ class NumpyBackend(Backend):
         )
 
         if dqdt is None:
-            x_out, z_out, q_out = sol.y[: x0.shape[0] :, 0], None, None
+            x_out, z_out, q_out = sol.y[: x0.shape[0], 0], None, None
         else:
             x_out, z_out, q_out = (
-                sol.y[: x0.shape[0] :, 0],
+                sol.y[: x0.shape[0], 0],
                 None,
-                sol.y[x0.shape[0] :, 0],
+                sol.y[x0.shape[0]:, 0],
             )
 
         return x_out, z_out, q_out
