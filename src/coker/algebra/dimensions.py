@@ -91,7 +91,7 @@ class FunctionSpace:
     def input_dimensions(self):
         return [
             (
-                Dimension((1,))
+                Dimension(None)
                 if isinstance(arg, Scalar)
                 else Dimension(arg.dimension)
             )
@@ -101,13 +101,15 @@ class FunctionSpace:
     def output_dimensions(self):
         return [
             (
-                Dimension((1,))
+                Dimension(None)
                 if isinstance(out, Scalar)
                 else Dimension(out.dimension)
             )
             for out in self.output
         ]
 
+    def is_scalar(self):
+        return len(self.output_dimensions()) == 1 and self.output_dimensions()[0].is_scalar()
 
 @dataclasses.dataclass
 class Element:

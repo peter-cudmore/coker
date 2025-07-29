@@ -204,15 +204,27 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __add__(self, other):
         if is_additive_identity(other, self):
             return self
-        index = self.tape.append(OP.ADD, self, other)
 
+        if not isinstance(other, Tracer):
+            other = self.tape.insert_value(other)
+
+        if self.dim.is_scalar() and not other.dim.is_scalar():
+            return self * np.ones(other.shape) + other
+        elif not self.dim.is_scalar() and other.dim.is_scalar():
+            return self + other * np.ones(self.shape)
+                
+        index = self.tape.append(OP.ADD, self, other)
         return Tracer(self.tape, index)
 
     def __radd__(self, other):
         if is_additive_identity(self.dim, other):
             return self
-        index = self.tape.append(OP.ADD, other, self)
-        return Tracer(self.tape, index)
+
+        if not isinstance(other, Tracer):
+            other = self.tape.insert_value(other)
+
+        return other + self
+
 
     def __sub__(self, other):
         index = self.tape.append(OP.SUB, self, other)
@@ -414,14 +426,28 @@ def function(
     args = [tape.input(v) for v in arguments]
     result = implementation(*args)
 
+
     if isinstance(result, np.ndarray):
         result = strip_symbols_from_array(result)
 
     if isinstance(result, SymbolicVector):
         result = result.collapse()
 
-    if not isinstance(result, Tracer):
-        assert all(isinstance(o, Tracer) for o in result)
+    def wrap(v):
+        if isinstance(v, np.ndarray):
+            v = strip_symbols_from_array(v)
+        if isinstance(v, SymbolicVector):
+            v = v.collapse()
+
+        if isinstance(v, Tracer):
+            return v
+
+        return tape.insert_value(v)
+
+    if isinstance(result, (list, tuple)):
+        result = [wrap(r) for r in result]
+    else:
+        result = wrap(result)
 
     return Function(tape, result, backend)
 

@@ -214,6 +214,9 @@ def case_dimension(
 
 @register_shape(OP.ADD, OP.SUB, OP.ARCTAN2)
 def same_dimension(d_1: Dimension, d_2: Dimension) -> Dimension:
+    if d_1.is_scalar() and d_2.is_scalar():
+        return d_1
+
     if d_1 != d_2:
         raise InvalidShape("Arguments are of different dimensions")
 

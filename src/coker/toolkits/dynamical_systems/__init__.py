@@ -110,7 +110,7 @@ class DynamicalSystem:
         else:
             z0 = None
 
-        x0 = self.x0(0, z0, u(0), p)
+        x0 = self.x0(0, z0, u, p)
 
         # solve ODE
         # x' = dxdt(...)
@@ -128,7 +128,7 @@ class DynamicalSystem:
             [self.dxdt, self.g, self.dqdt], [x0, z0, q0], t, [u, p]
         )
 
-        out = self.y(t, x, z, u(t), p, q)
+        out = self.y(t, x, z, u, p, q)
 
         return out
 
@@ -148,6 +148,9 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
         implementation=spec.initial_conditions,
         backend=backend,
     )
+
+    assert len(x0.output) == 1, ""
+
     (state_space,) = [
         (
             VectorSpace("x", tracer.shape[0])
@@ -164,11 +167,11 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
         spec.inputs,
         spec.parameters,
     ]
-    xdot = function(arguments, spec.dynamics, backend)
+    xdot = function(arguments,
+                    spec.dynamics,
+                    backend)
 
-    assert all(
-        x0.dim == dx.dim for x0, dx in zip(x0.output, xdot.output)
-    ), f"Initial conditions and dynamics have different output dimensions"
+    assert len(xdot.output) == len(x0.output) == 1
 
     constraint = (
         function(arguments, spec.constraints, backend)
@@ -213,7 +216,7 @@ def create_homogenous_ode(
         inputs,
         parameters,
         algebraic=None,
-        initial_conditions=lambda t, z, u, p: x0(u(0), p),
+        initial_conditions=lambda t, z, u, p: x0(u(t), p),
         dynamics=lambda t, x, z, u, p: xdot(x, u(t), p),
         constraints=None,
         outputs=lambda t, x, z, u, p, q: output(x, u(t), p),

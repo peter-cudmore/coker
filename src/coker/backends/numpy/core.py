@@ -164,7 +164,8 @@ class NumpyBackend(Backend):
             return reshape_sympy_matrix(arg, dim.dim)
         elif isinstance(arg, np.ndarray):
             return np.reshape(arg, dim.dim)
-
+        elif isinstance(arg, (float, int)):
+            return np.array([arg]).reshape(dim.dim)
         raise NotImplementedError(
             f"Don't know how to resize {arg.__class__.__name__}"
         )
@@ -208,12 +209,12 @@ class NumpyBackend(Backend):
 
         if dqdt is None:
             y0 = x0
-            f = lambda t, x: dxdt(t, x, None, u(t), p)
+            f = lambda t, x: dxdt(t, x, None, u, p)
 
         else:
             y0 = (np.concatenate([x0, q0]),)
             f = lambda t, x: np.concatenate(
-                [dxdt(t, x, None, u(t), p), dqdt(t, x, None, u(t), p)]
+                [dxdt(t, x, None, u, p), dqdt(t, x, None, u, p)]
             )
 
         sol = scp.integrate.solve_ivp(
