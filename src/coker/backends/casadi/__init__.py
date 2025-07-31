@@ -1,15 +1,15 @@
-import casadi as ca
-import numpy as np
+
 from typing import Tuple, Type, Union
 
-from sympy.core import symbol
 
 from coker import Dimension, Function
 
 from coker.backends.backend import Backend, ArrayLike
-from coker.backends.evaluator import evaluate_inner
+
 from coker.backends.casadi.casadi import *
 from coker.backends.casadi.optimiser import build_optimisation_problem
+from coker.dynamics import VariationalProblem
+from coker.backends.casadi.variational_solver import create_variational_solver
 
 scalar_types = (float, int)
 
@@ -17,13 +17,19 @@ scalar_types = (float, int)
 class CasadiBackend(Backend):
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         if isinstance(array, ca.MX):
-
-            return array.to_DM().toarray(simplify=True)
-
+            try:
+                return array.to_DM().toarray(simplify=True)
+            except RuntimeError:
+                pass
         elif isinstance(array, ca.DM):
             return array.toarray(simplify=True)
 
-        raise NotImplementedError(f"Cannot convert {array} to a numpy array")
+        try:
+            return ca.evalf(array).toarray(simplify=True)
+        except RuntimeError:
+            pass
+
+        raise ValueError(f"Cannot convert {array} to a numpy array")
 
     def to_backend_array(self, array):
         if isinstance(array, scalar_types):
@@ -105,40 +111,32 @@ class CasadiBackend(Backend):
 
     def evaluate(self, function: Function, inputs: ArrayLike):
         workspace = {}
-        values = []
-        ins = []
+
         for idx, (space, arg) in enumerate(
             zip(function.input_shape(), inputs)
         ):
-            if isinstance(space, FunctionSpace):
-                f_arg_ins, f_arg_outs = arg.lower()
-                workspace[idx] = ca.Function(
-                    f"fx_{idx}", f_arg_ins, f_arg_outs
-                )
-
+            index = function.tape.input_indicies[idx]
+            if isinstance(arg, np.ndarray):
+                workspace[index] = self.to_backend_array(arg)
             else:
-                x_symbol = ca.MX.sym(f"x_{idx}", *space.shape)
-                workspace[idx] = x_symbol
-                ins.append(x_symbol)
-                if isinstance(arg, (ca.MX, ca.SX)):
-                    values.append(arg)
-                else:
-                    values.append(self.to_backend_array(arg))
+                workspace[index] = arg
 
-        outs = substitute(function.output, workspace)
+        y = substitute(function.output, workspace)
+        outs = []
+        for y_i in y:
+            try:
+                outs.append(self.to_numpy_array(y_i))
+            except ValueError:
+                outs.append(y_i)
 
-        f = ca.Function("f", ins, outs)
-        y = f(*values)
-        if len(function.output) > 1:
-            return [self.to_array(y_i) for y_i in y]
-        else:
-            return (self.to_array(y),)
+        return outs
+
 
     def to_array(self, arg: Union[ca.MX, ca.DM]):
-        try:
-            return self.to_numpy_array(arg)
-        except RuntimeError:
-            return arg
+
+        return self.to_numpy_array(arg)
+
+
 
     def build_optimisation_problem(
         self, cost, constraints, parameters, outputs, initial_conditions
@@ -146,3 +144,6 @@ class CasadiBackend(Backend):
         return build_optimisation_problem(
             cost, constraints, parameters, outputs, initial_conditions
         )
+
+    def create_variational_solver(self, problem: VariationalProblem):
+        return create_variational_solver(problem)

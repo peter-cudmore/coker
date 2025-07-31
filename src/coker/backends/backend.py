@@ -4,6 +4,8 @@ from coker import Function
 from coker import Tracer
 from typing import List, Dict
 
+from coker.dynamics import VariationalProblem
+
 ArrayLike = Any
 
 
@@ -40,6 +42,9 @@ class Backend(metaclass=ABCMeta):
         outputs: List[Tracer],
         initial_conditions: Dict[int, ArrayLike],
     ):
+        raise NotImplementedError
+
+    def create_variational_solver(self, problem: VariationalProblem):
         raise NotImplementedError
 
     def evaluate(self, function: Function, inputs: ArrayLike):

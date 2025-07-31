@@ -41,12 +41,14 @@ Inferred = None
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
         return Dimension(None)
-    if isinstance(arg, np.ndarray):
+    try:
+
         d = Dimension(arg.shape)
         return d
+    except (AttributeError, ValueError):
+        pass
 
-    else:
-        raise NotImplementedError(f"Don't know the shape of {type(arg)}")
+    raise NotImplementedError(f"Don't know the shape of {type(arg)}")
 
 
 class Tape:
@@ -212,7 +214,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             return self * np.ones(other.shape) + other
         elif not self.dim.is_scalar() and other.dim.is_scalar():
             return self + other * np.ones(self.shape)
-                
+
         index = self.tape.append(OP.ADD, self, other)
         return Tracer(self.tape, index)
 
@@ -224,7 +226,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             other = self.tape.insert_value(other)
 
         return other + self
-
 
     def __sub__(self, other):
         index = self.tape.append(OP.SUB, self, other)
@@ -426,7 +427,6 @@ def function(
     args = [tape.input(v) for v in arguments]
     result = implementation(*args)
 
-
     if isinstance(result, np.ndarray):
         result = strip_symbols_from_array(result)
 
@@ -443,9 +443,9 @@ def function(
             return v
 
         return tape.insert_value(v)
-
     if isinstance(result, (list, tuple)):
         result = [wrap(r) for r in result]
+
     else:
         result = wrap(result)
 

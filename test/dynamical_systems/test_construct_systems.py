@@ -1,6 +1,6 @@
 import numpy as np
-from coker import FunctionSpace
-from coker.toolkits.dynamical_systems import *
+from coker import FunctionSpace, Scalar
+from coker.dynamics import *
 
 
 # Dynamics
@@ -95,7 +95,7 @@ def test_vector_linear_system():
     assert np.isfinite(soln).all()  # Todo: solve this analytically and test the result
 
 
-def test_fit():
+def test_loss_api():
     def x0(u0, p):
         return p[1]
 
@@ -129,12 +129,32 @@ def test_fit():
     n = 10
     samples = np.array([(t, solution(t, param)) for t in np.linspace(0, 1, n)])
 
-    def loss(f):
-        error = np.array([f(t, u, param) - y for t, y in samples]).reshape((n,))
+    def loss(f, *args):
+        error = np.array([f(t, *args) - y for t, y in samples]).reshape((n,))
         loss = np.dot(error, error) / n
 
         return loss
 
-    loss_value = loss(system)
+    loss_value = loss(system, u, param)
 
     assert loss_value < 1e-6
+
+    decision_variables = [
+        [PiecewiseConstantVariable('control', sample_rate=0.1)],
+        [BoundedVariable('rate', upper_bound=4, lower_bound=0.1 ), 2]
+    ]
+
+    problem = VariationalProblem(
+        loss=loss,
+        system=system,
+        arguments=decision_variables,
+        t_final=1,
+        constraints=[],
+    )
+
+#    soln = problem.lower('casadi')
+#    assert soln.keys() == {'control', 'rate'}
+#
+#    assert all(abs(soln['control'](t) < 1e-4) for t in np.linspace(0, 1, n))
+#    assert abs(soln['rate'] - 2) < 1e-4
+

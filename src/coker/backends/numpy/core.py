@@ -227,7 +227,7 @@ class NumpyBackend(Backend):
             x_out, z_out, q_out = (
                 sol.y[: x0.shape[0], 0],
                 None,
-                sol.y[x0.shape[0]:, 0],
+                sol.y[x0.shape[0] :, 0],
             )
 
         return x_out, z_out, q_out

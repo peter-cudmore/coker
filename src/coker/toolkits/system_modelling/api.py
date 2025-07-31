@@ -1,5 +1,7 @@
 from typing import List, Tuple
-from coker.toolkits.system_modelling.modelling.coker_abc import CokerListableSubclasses
+from coker.toolkits.system_modelling.modelling.coker_abc import (
+    CokerListableSubclasses,
+)
 
 
 class ComponentHint:

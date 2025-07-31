@@ -109,7 +109,11 @@ class FunctionSpace:
         ]
 
     def is_scalar(self):
-        return len(self.output_dimensions()) == 1 and self.output_dimensions()[0].is_scalar()
+        return (
+            len(self.output_dimensions()) == 1
+            and self.output_dimensions()[0].is_scalar()
+        )
+
 
 @dataclasses.dataclass
 class Element:

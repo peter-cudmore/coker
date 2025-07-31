@@ -125,7 +125,7 @@ def to_casadi(value):
         if len(value.shape) > 2:
             v = CasadiTensor(*value.shape)
         else:
-            v = ca.MX(*value.shape)
+            v = ca.DM.zeros(*value.shape)
         it = np.nditer(value, op_flags=["readonly"], flags=["multi_index"])
         for x in it:
             if x != 0:
