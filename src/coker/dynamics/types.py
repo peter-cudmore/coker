@@ -61,7 +61,16 @@ class DynamicalSystem:
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
-        if len(args) == 2:
+        if len(args) == 1:
+            if self.inputs is not None or self.parameters is not None:
+                raise ValueError(
+                    f"Invalid number of arguments: Expected 2 - 3, received: {len(args)}"
+                )
+            t, = args
+            u = lambda _: None  # No input so treat it as a noop
+            p = []
+
+        elif len(args) == 2:
             if self.inputs is not None:
                 raise ValueError(
                     f"Invalid number of arguments: Expected 3, received: {len(args)}"
@@ -174,6 +183,7 @@ class VariationalProblem:
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
     )
+    backend: Optional[str] = 'coker'
 
 #    def __post_init__(self):
 #        if self.constraints is None:
@@ -194,12 +204,11 @@ class VariationalProblem:
 #            self.loss = Function(loss_input_space, self.loss, backend=self.system.backend())
 
 
-    def lower(self, backend: Optional[str] = None):
-        from coker.backends import get_backend_by_name
 
-        backend = get_backend_by_name(backend or self.system.backend())
+
+
+    def __call__(self):
+        from coker.backends import get_backend_by_name
+        backend = get_backend_by_name(self.backend)
         return backend.create_variational_solver(self)
 
-    def call(self):
-        solver = self.lower()
-        return solver()

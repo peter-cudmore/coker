@@ -46,7 +46,7 @@ def test_poly_collection_vector():
     )
     x = poly_collection.symbols()
     assert x.shape == (30, 1)
-
+    assert poly_collection.size() == 30
     t_start, x_starts = zip(*list(poly_collection.interval_starts()))
     assert t_start == (0, 1)
 
@@ -65,3 +65,4 @@ def test_poly_collection_vector():
     for i, t_i in enumerate(t[:-1]):
         x_i = poly_collection(t_i)
         assert all(x_i[j] == x[i][j] for j in range(dimension))
+

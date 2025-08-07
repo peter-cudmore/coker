@@ -80,6 +80,17 @@ class Scalar:
     name: str
 
 
+class Noop:
+    __slots__ = ()
+
+    def __call__(self, *args, **kwargs):
+        return None
+
+    @staticmethod
+    def cast_to_function_space(arguments):
+        return FunctionSpace('noop', arguments, None)
+
+
 @dataclasses.dataclass
 class FunctionSpace:
     name: str
@@ -99,6 +110,8 @@ class FunctionSpace:
         ]
 
     def output_dimensions(self):
+        if self.output is None:
+            return (None, )
         return [
             (
                 Dimension(None)

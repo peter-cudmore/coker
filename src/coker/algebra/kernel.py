@@ -90,7 +90,8 @@ class Tape:
         return index
 
     def insert_value(self, arg):
-
+        if arg is None:
+            return None
         dim = get_dim_by_class(arg)
         idx = len(self.dim)
         self.nodes.append((OP.VALUE, arg))
@@ -114,7 +115,7 @@ class Tape:
         elif isinstance(v, FunctionSpace):
             self.dim.append(v)
         else:
-            assert False, f"Invalid input type: {type(v)}"
+            assert False, f"Invalid input type {v}: of {type(v)} at index {index}"
         tracer = Tracer(self, index)
         self.nodes.append(tracer)
         self.input_indicies.append(index)

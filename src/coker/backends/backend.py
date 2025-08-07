@@ -4,7 +4,7 @@ from coker import Function
 from coker import Tracer
 from typing import List, Dict
 
-from coker.dynamics import VariationalProblem
+from coker.dynamics import VariationalProblem, create_homogenous_ode, DynamicsSpec
 
 ArrayLike = Any
 
@@ -63,12 +63,8 @@ class Backend(metaclass=ABCMeta):
         inputs,
         solver_parameters=None,
     ):
-
-        dxdt, constraint, dqdt = functions
-        x0, z0, q0 = initial_conditions
-        u, p = inputs
         raise NotImplementedError(
-            f"Integrator is not implemented for this backend: {self.__class__.__name__}"
+            "Evaluating integrals is not implemented for this backend"
         )
 
     def lower(self, function: Function):

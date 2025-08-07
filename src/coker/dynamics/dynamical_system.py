@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Callable, List, Optional
 import numpy as np
 from coker import (
     VectorSpace,
@@ -15,11 +15,15 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
     if backend is None:
         backend = "casadi"
 
+    # just put a dummy value in here so that
+    # the shape calculation doesn't spew.
+    inputs = spec.inputs or FunctionSpace("u",[Scalar("t")], None)
+
     x0 = function(
         arguments=[
             Scalar("t"),
-            spec.constraints,
-            spec.inputs,
+            spec.algebraic,
+            inputs,
             spec.parameters,
         ],
         implementation=spec.initial_conditions,
@@ -41,9 +45,10 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
         Scalar("t"),
         state_space,
         spec.algebraic,
-        spec.inputs,
+        inputs,
         spec.parameters,
     ]
+
     xdot = function(arguments, spec.dynamics, backend)
 
     assert len(xdot.output) == len(x0.output) == 1
@@ -79,17 +84,18 @@ def create_dynamics_from_spec(spec: DynamicsSpec, backend=None):
 
 
 def create_homogenous_ode(
-    inputs: FunctionSpace,
-    parameters=Scalar | VectorSpace,
+    inputs: Optional[FunctionSpace],
+    parameters=Optional[Scalar | VectorSpace],
     x0=Callable[[np.ndarray, List[np.ndarray]], np.ndarray],
     xdot=Callable[[np.ndarray, np.ndarray, List[np.ndarray]], np.ndarray],
     output=Callable[[np.ndarray, np.ndarray, List[np.ndarray]], np.ndarray],
     backend="coker",
 ) -> "DynamicalSystem":
 
+
     spec = DynamicsSpec(
-        inputs,
-        parameters,
+        inputs=inputs,
+        parameters=parameters,
         algebraic=None,
         initial_conditions=lambda t, z, u, p: x0(u(t), p),
         dynamics=lambda t, x, z, u, p: xdot(x, u(t), p),

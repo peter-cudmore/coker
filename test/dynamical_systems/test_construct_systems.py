@@ -95,7 +95,35 @@ def test_vector_linear_system():
     assert np.isfinite(soln).all()  # Todo: solve this analytically and test the result
 
 
-def test_loss_api():
+def test_variational_integrator():
+    def x0(*args):
+        return 1
+
+    def xdot(x, *args):
+        return -x
+
+    def y(x, *args):
+        return x
+
+    def solution(t, _):
+        return np.exp(-t)
+
+    system = create_homogenous_ode(
+        inputs=None,
+        parameters=None,
+        x0=x0,
+        xdot=xdot,
+        output=y,
+        backend='casadi'
+    )
+
+    sol = system(1)
+    assert np.isclose(sol(0, None), solution(0, None))
+    for t in np.linspace(0, 1, 10):
+        assert np.isclose(sol(t, None), solution(t, None))
+
+
+def test_fitting():
     def x0(u0, p):
         return p[1]
 
@@ -131,18 +159,17 @@ def test_loss_api():
 
     def loss(f, *args):
         error = np.array([f(t, *args) - y for t, y in samples]).reshape((n,))
-        loss = np.dot(error, error) / n
+        return np.dot(error, error) / n
 
-        return loss
 
     loss_value = loss(system, u, param)
 
     assert loss_value < 1e-6
 
-    decision_variables = [
-        [PiecewiseConstantVariable('control', sample_rate=0.1)],
+    decision_variables = (
+        [ConstantControlVariable('control')],
         [BoundedVariable('rate', upper_bound=4, lower_bound=0.1 ), 2]
-    ]
+    )
 
     problem = VariationalProblem(
         loss=loss,
@@ -150,11 +177,9 @@ def test_loss_api():
         arguments=decision_variables,
         t_final=1,
         constraints=[],
+        backend='casadi'
     )
 
-#    soln = problem.lower('casadi')
-#    assert soln.keys() == {'control', 'rate'}
-#
-#    assert all(abs(soln['control'](t) < 1e-4) for t in np.linspace(0, 1, n))
-#    assert abs(soln['rate'] - 2) < 1e-4
-
+    min_cost, argmins = problem()
+    assert abs(argmins['control'] - 2) < 1e-4
+    assert abs(argmins['rate']  - 1) < 1e-4

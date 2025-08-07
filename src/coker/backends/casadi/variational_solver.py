@@ -144,9 +144,9 @@ def create_variational_solver(problem: VariationalProblem):
 
     cost = problem.loss(solution_proxy, u, p)
     g = ca.vertcat(*[e for e in equalities if e  is not None])
-
-    gub = ca.DM.zeros(g.shape)
-    glb = gub
+    equality_bounds = ca.DM.ones(g.shape)
+    ubg = 1e-9 * equality_bounds
+    lbg = -1e-9 * equality_bounds
 
     nlp_spec = {
         'f': cost,
@@ -155,24 +155,48 @@ def create_variational_solver(problem: VariationalProblem):
     }
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec)
 
+    u0_guess = ca.DM.zeros(u(0).shape) if u(0) is not None else 0
+
+#    x0_guess_initial = casadi.evaluate(problem.system.x0, [0, 0 ,u0_guess, p_guess])
+    x0_guess = ca.DM.zeros(poly_collection.size())
+
+    decision_variables_0 = ca.vertcat(
+                x0_guess,
+              ca.DM.ones(u_symbols.shape),
+              p_guess)
+
+    soln = nlp_solver(
+        x0=decision_variables_0,
+        lbx=lower_bound,
+        ubx=upper_bound,
+        lbg=lbg,
+        ubg=ubg
+    )
+
+    min_loss = float(soln['f'])
+    min_args = soln['x']
 
 
-    x0_guess = casadi.evaluate(problem.system.x0, [0, z0_symbol, u_guess, p_guess])
-
+    return min_loss, min_args
 
 
 
 class InterpolatingPoly:
     def __init__(self, name, dimension, interval, degree):
         op_values = generate_discritisation_operators(interval, degree)
-        self.s, self.s_to_interval, bases, self.derivatives, self.integrals =  op_values
+        self.s, self.s_to_interval, bases, derivatives, self.integrals =  op_values
         self.symbols = ca.MX.sym(name, len(self.s) * dimension)
         self.interval = interval
         self.dim = dimension
         self.bases = ca.vertcat(
-            *[ca.reshape(ca.DM(base), (1,5 )) for base in bases]
+            *[ca.reshape(ca.DM(base), (1, len(self.s))) for base in bases]
         )
+        self.derivatives = [
+            ca.reshape(ca.DM(d[:-1]), (1, len(self.s) - 1)) for d in derivatives
+        ]
 
+    def size(self):
+        return len(self.s) * self.dim
 
     def _interval_to_s(self ,t):
         width = (self.interval[1] - self.interval[0]) / 2
@@ -211,21 +235,24 @@ class InterpolatingPoly:
             self.symbols[i * self.dim: (i + 1) * self.dim]
             for i in range(n)
         ]
+        x_mat = ca.horzcat(*x_i).T
         dx_i = [
-            ca.repmat(d_basis, 1, self.dim) @ x_ij
-            for d_basis, x_ij in zip(self.derivatives, x_i)
+            (dbasis @ x_mat).T for dbasis in self.derivatives
         ]
+
+
+
         return t_i, x_i, dx_i
 
 
 class InterpolatingPolyCollection:
     def __init__(self, name, dimension, intervals, degrees):
         assert len(intervals) == len(degrees)
-        self._size = sum(degrees) * dimension
         self.polys = [
             InterpolatingPoly(f"{name}_{i}", dimension, interval, degree)
             for i, (interval, degree) in enumerate(zip(intervals, degrees))
         ]
+        self._size = sum(p.size() for p in self.polys)
         self.intervals = intervals
 
     def size(self):

@@ -2,15 +2,16 @@
 from typing import Tuple, Type, Union
 
 
-from coker import Dimension, Function
+from coker import Dimension, Function, VectorSpace
 
 from coker.backends.backend import Backend, ArrayLike
 
 from coker.backends.casadi.casadi import *
 from coker.backends.casadi.optimiser import build_optimisation_problem
-from coker.dynamics import VariationalProblem
-from coker.backends.casadi.variational_solver import create_variational_solver
 
+from coker.backends.casadi.variational_solver import create_variational_solver
+from coker.dynamics import VariationalProblem, create_homogenous_ode, DynamicsSpec, DynamicalSystem
+from coker.dynamics.dynamical_system import create_dynamics_from_spec
 scalar_types = (float, int)
 
 
@@ -32,6 +33,7 @@ class CasadiBackend(Backend):
         raise ValueError(f"Cannot convert {array} to a numpy array")
 
     def to_backend_array(self, array):
+
         if isinstance(array, scalar_types):
             return ca.DM(array)
         if array.shape == (1, 1):
@@ -56,7 +58,10 @@ class CasadiBackend(Backend):
                     result[i] = v
 
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"Don't know how to convert {array} to a casadi array")
+
+        assert not isinstance(result, Tracer)
+
         return result
 
     def call(self, op, *args) -> ArrayLike:
@@ -115,9 +120,11 @@ class CasadiBackend(Backend):
         for idx, (space, arg) in enumerate(
             zip(function.input_shape(), inputs)
         ):
+            assert not isinstance(arg, Tracer)
             index = function.tape.input_indicies[idx]
             if isinstance(arg, np.ndarray):
                 workspace[index] = self.to_backend_array(arg)
+
             else:
                 workspace[index] = arg
 
@@ -147,3 +154,41 @@ class CasadiBackend(Backend):
 
     def create_variational_solver(self, problem: VariationalProblem):
         return create_variational_solver(problem)
+
+    def evaluate_integrals(
+        self,
+        functions,
+        initial_conditions,
+        end_point: float,
+        inputs,
+        solver_parameters=None,
+    ):
+        dxdt, g, dqdt = functions
+        x0, z0, q0 = initial_conditions
+        t_final = end_point
+        u, p = inputs
+
+        loss = lambda *_ : 0
+
+        adapted_system = DynamicsSpec(
+            inputs=None,
+            parameters=None,
+            initial_conditions= lambda _t, z_0, _u, _p: x0,
+            dynamics=lambda t, x, z, *_: dxdt(t, x, z, u, p),
+            algebraic=VectorSpace('z', z0.shape) if z0 else None ,
+            quadratures=lambda t, x, z, *_: dqdt(t, x, z, u, p),
+            outputs=lambda t,x,z, _u, _p, q: (x,z,q),
+            constraints=lambda  t, x, z, *_: g(t, x, z, u, p),
+        )
+
+        system = create_dynamics_from_spec(adapted_system),
+
+        problem = VariationalProblem(
+            loss=loss,
+            system=system,
+            arguments=([],[]),
+            t_final=t_final,
+            constraints=[],
+        )
+        solver = create_variational_solver(problem)
+        return solver()
