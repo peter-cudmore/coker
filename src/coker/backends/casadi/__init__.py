@@ -1,6 +1,7 @@
 
 from typing import Tuple, Type, Union
 
+import casadi
 
 from coker import Dimension, Function, VectorSpace
 
@@ -33,7 +34,8 @@ class CasadiBackend(Backend):
         raise ValueError(f"Cannot convert {array} to a numpy array")
 
     def to_backend_array(self, array):
-
+        if array is None:
+            return ca.DM()
         if isinstance(array, scalar_types):
             return ca.DM(array)
         if array.shape == (1, 1):
@@ -164,31 +166,62 @@ class CasadiBackend(Backend):
         solver_parameters=None,
     ):
         dxdt, g, dqdt = functions
-        x0, z0, q0 = initial_conditions
+
+        is_dae = dqdt is not Noop()
+        has_quadrature = g is not Noop()
+        x0, z0, q0 = (self.to_backend_array(a) for a in initial_conditions)
+
+
+        if end_point  == 0:
+            return x0, z0, q0
         t_final = end_point
         u, p = inputs
 
-        loss = lambda *_ : 0
+        t = ca.MX.sym('t')
+        x = ca.MX.sym('x', x0.shape)
+        z = ca.MX.sym('z', z0.shape)
 
-        adapted_system = DynamicsSpec(
-            inputs=None,
-            parameters=None,
-            initial_conditions= lambda _t, z_0, _u, _p: x0,
-            dynamics=lambda t, x, z, *_: dxdt(t, x, z, u, p),
-            algebraic=VectorSpace('z', z0.shape) if z0 else None ,
-            quadratures=lambda t, x, z, *_: dqdt(t, x, z, u, p),
-            outputs=lambda t,x,z, _u, _p, q: (x,z,q),
-            constraints=lambda  t, x, z, *_: g(t, x, z, u, p),
-        )
+        dx_sym = dxdt(t, x, z, u, p)
+        if is_dae:
+            q = ca.MX.sym('q', q0.shape)
+            q0 = ca.DM.zeros(q.shape)
+            dq_sym = dqdt(t, x, z, u, p)
+            xq = ca.vertcat(t, x, q)
+            xq0 = ca.vertcat(0, x0, q0)
+            xq_to_x_q = ca.Function('xq_to_x_q', [xq], [t, x, q])
+            dxq = t_final * ca.vertcat(ca.MX(1), dx_sym, dq_sym)
+        else:
+            xq = ca.vertcat(t, x)
+            xq0 = ca.vertcat(0, x0)
+            xq_to_x_q = ca.Function('xq_to_x_q', [xq], [t, x])
+            dxq = t_final * ca.vertcat(ca.MX(1), dx_sym)
 
-        system = create_dynamics_from_spec(adapted_system),
+        initial_conditions = {
+            'x0': x0,
+        }
+        dae = {
+            'x': xq,
+            'ode':dxq,
+        }
+        if is_dae:
+            dae['z'] = g(t, x, z, u, p)
+            initial_conditions['z0'] = z0
 
-        problem = VariationalProblem(
-            loss=loss,
-            system=system,
-            arguments=([],[]),
-            t_final=t_final,
-            constraints=[],
-        )
-        solver = create_variational_solver(problem)
-        return solver()
+        solver = ca.integrator('solver', 'idas', dae)
+        xq_final = solver(x0=xq0, z0=z0)
+
+        if has_quadrature:
+            _, x_final, q_final = xq_to_x_q(xq_final['xf'])
+        else:
+            _, x_final = xq_to_x_q(xq_final['xf'])
+            q_final = None
+        if is_dae:
+            z_final = xq_final['zf']
+        else:
+            z_final = None
+
+        return x_final, z_final, q_final
+
+
+
+

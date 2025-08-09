@@ -1,20 +1,14 @@
+import weakref
+
 import numpy as np
 from typing import Callable, Union
 from collections import defaultdict
 
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.dimensions import *
-from coker.algebra.ops import OP, numpy_atomics, numpy_composites
+from coker.algebra.ops import OP, numpy_atomics, numpy_composites, Noop
 
-scalar_types = (
-    np.float32,
-    np.float64,
-    np.int32,
-    np.int64,
-    float,
-    complex,
-    int,
-)
+scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int,)
 
 
 def get_basis(dimension: Dimension, i: int):
@@ -52,6 +46,9 @@ def get_dim_by_class(arg):
 
 
 class Tape:
+    NONE = -1
+    MAP_TO_NONE = -2
+
     def __init__(self):
         self.nodes = []
         self.constants = []
@@ -70,6 +67,10 @@ class Tape:
     def _compute_shape(self, op: OP, *args) -> Dimension:
         dims = []
         for arg in args:
+            if arg is None:
+                dims.append(None)
+                continue
+
             assert isinstance(arg, Tracer)
             assert arg.tape is self, "Tracer belongs to another tape"
             dims.append(arg.dim)
@@ -79,10 +80,7 @@ class Tape:
     def append(self, op: OP, *args) -> int:
         args = [strip_symbols_from_array(a) for a in args]
 
-        args = [
-            self.insert_value(a) if not isinstance(a, Tracer) else a
-            for a in args
-        ]
+        args = [self.insert_value(a) if not isinstance(a, Tracer) else a for a in args]
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
         self.nodes.append((op, *args))
@@ -99,16 +97,17 @@ class Tape:
         return Tracer(self, idx)
 
     def input(self, v: VectorSpace | Scalar):
-        index = len(self.nodes)
         if v is None:
-            self.dim.append(None)
-            self.nodes.append((OP.VALUE, None))
-            self.input_indicies.append(index)
-            return Tracer(self, index)
+            self.input_indicies.append(Tape.NONE)
+            return None
 
+        if isinstance(v, Noop):
+            self.input_indicies.append(Tape.MAP_TO_NONE)
+            return v
+
+        index = len(self.dim)
         if isinstance(v, VectorSpace):
             self.dim.append(Dimension(v.dimension))
-
         elif isinstance(v, Scalar):
             self.dim.append(Dimension(None))
 
@@ -129,7 +128,6 @@ class Tape:
 
 
 def is_additive_identity(space: Dimension, arg) -> bool:
-
     if isinstance(arg, scalar_types) and arg == 0:
         return True
     try:
@@ -142,8 +140,12 @@ def is_additive_identity(space: Dimension, arg) -> bool:
 
 class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __init__(self, tape: Tape, index: int):
-        self.tape = tape
+        self._tape = weakref.ref(tape)
         self.index = index
+
+    @property
+    def tape(self):
+        return self._tape()
 
     def is_input(self):
         return self.index in self.tape.input_indicies
@@ -159,11 +161,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
     def as_halfplane_bound(self) -> Tuple["Tracer", float, float]:
         op, lhs, rhs = self.tape.nodes[self.index]
-        bounds = {
-            OP.EQUAL: (-1e-9, 1e-9),
-            OP.LESS_THAN: (0, np.inf),
-            OP.LESS_EQUAL: (-1e-9, np.inf),
-        }
+        bounds = {OP.EQUAL: (-1e-9, 1e-9), OP.LESS_THAN: (0, np.inf), OP.LESS_EQUAL: (-1e-9, np.inf), }
         return rhs - lhs, *bounds[op]
 
     def value(self):
@@ -346,9 +344,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         raise NotImplementedError(f"{func} with {kwargs} is not implemented")
 
     def norm(self):
-        assert (len(self.shape) == 1 and self.shape[0] > 1) or (
-            len(self.shape) == 2 and self.shape[1] == 1
-        )
+        assert (len(self.shape) == 1 and self.shape[0] > 1) or (len(self.shape) == 2 and self.shape[1] == 1)
         return np.sqrt(self.T @ self)
 
     def normalise(self):
@@ -380,21 +376,27 @@ class Function:
         return f"Function:{self.input_shape()} -> {self.output_shape()}"
 
     def input_shape(self) -> Tuple[Dimension, ...]:
-        return tuple(self.tape.dim[i] for i in self.tape.input_indicies)
+        special_inputs = {Tape.NONE: None, Tape.MAP_TO_NONE: Noop().cast_to_function_space(None)}
+
+        return tuple(self.tape.dim[i] if i >= 0 else special_inputs[i]
+                     for i in self.tape.input_indicies
+        )
 
     def output_shape(self) -> Tuple[Dimension, ...]:
         return tuple(o.dim for o in self.output)
 
+    def _prepare_argument(self, arg, index):
+        if index == Tape.MAP_TO_NONE:
+            return Noop()
+        elif index == Tape.NONE:
+            return None
+        elif isinstance(self.tape.dim[index], FunctionSpace):
+            return function(self.tape.dim[index].arguments, arg, self.backend)
+        return arg
+
     def __call__(self, *args):
-        assert len(args) == len(self.tape.input_indicies)
-        args = [
-            (
-                arg
-                if not isinstance(self.tape.dim[idx], FunctionSpace)
-                else function(self.tape.dim[idx].arguments, arg, self.backend)
-            )
-            for idx, arg in zip(self.tape.input_indicies, args)
-        ]
+        assert len(args) == len(self.tape.input_indicies), f"Expected {len(self.tape.input_indicies)} arguments but got {len(args)}"
+        args = [(self._prepare_argument(arg, idx)) for idx, arg in zip(self.tape.input_indicies, args)]
 
         from coker.backends import get_backend_by_name
 
@@ -415,11 +417,8 @@ class Function:
         raise NotImplementedError("Not yet implemented")
 
 
-def function(
-    arguments: List[Scalar | VectorSpace | FunctionSpace],
-    implementation: Callable[[Element, ...], Element],
-    backend: str = "coker",
-) -> Function:
+def function(arguments: List[Scalar | VectorSpace | FunctionSpace], implementation: Callable[[Element, ...], Element],
+        backend: str = "coker", ) -> Function:
     # create symbols
     # call function to construct expression graph
 
@@ -444,34 +443,33 @@ def function(
             return v
 
         return tape.insert_value(v)
+
     if isinstance(result, (list, tuple)):
         result = [wrap(r) for r in result]
 
     else:
         result = wrap(result)
 
+    if result is None or result is [None]:
+        return Noop()
+
     return Function(tape, result, backend)
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):
-
     if not isinstance(array, np.ndarray):
         return array
 
     symbols = defaultdict(list)
 
-    with np.nditer(
-        array, flags=["refs_ok", "multi_index"], op_flags=[["readwrite"]]
-    ) as it:
+    with np.nditer(array, flags=["refs_ok", "multi_index"], op_flags=[["readwrite"]]) as it:
         for x in it:
             try:
                 x[...] = float_type(x)
             except TypeError as e:
 
                 value = x.tolist()
-                assert isinstance(
-                    value, Tracer
-                ), "Unexpected object in array: {}".format(value)
+                assert isinstance(value, Tracer), "Unexpected object in array: {}".format(value)
                 symbols[value].append(it.multi_index)
                 x[...] = 0.0
 

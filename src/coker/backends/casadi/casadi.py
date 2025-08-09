@@ -2,7 +2,7 @@ import casadi as ca
 import numpy as np
 
 import coker
-from coker import OP, Tape, Tracer, FunctionSpace
+from coker import OP, Tape, Tracer, FunctionSpace, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 from typing import List
 
@@ -150,6 +150,10 @@ def extract_symbols(arg: ca.MX):
 
 def substitute(output: List[Tracer], workspace):
     def get_node(node: Tracer):
+        if node is None:
+            return None
+        if node is Noop():
+            return node
         if node.index in workspace:
             return workspace[node.index]
 

@@ -4,7 +4,7 @@ import numpy as np
 from typing import Dict, Callable
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
 from coker.algebra.dimensions import *
-
+from typing_extensions import final
 
 class OP(enum.Enum):
     VALUE = 0
@@ -47,6 +47,21 @@ class OP(enum.Enum):
     def is_nonlinear(self):
         return not self.is_linear() and not self.is_bilinear()
 
+
+
+@final
+class Noop:
+    def __call__(self, *args, **kwargs):
+        return None
+
+    def __new__(cls, *args, **kwargs):
+        if not hasattr(cls, 'instance'):
+            cls.instance = super().__new__(cls)
+        return cls.instance
+
+    @staticmethod
+    def cast_to_function_space(arguments=None):
+        return FunctionSpace('noop', arguments, None)
 
 class Operator:
     def pre_process(self, *args):

@@ -176,8 +176,11 @@ def create_variational_solver(problem: VariationalProblem):
     min_loss = float(soln['f'])
     min_args = soln['x']
 
-
-    return min_loss, min_args
+    f_out = ca.Function(
+        "Output",
+        [decision_variables], [u_symbols, p_symbols], {})
+    u_out, p_out = f_out(min_args)
+    return min_loss, (u_out, p_out)
 
 
 
@@ -219,7 +222,6 @@ class InterpolatingPoly:
         value = ca.repmat(projection, 1, self.dim) @ self.symbols
         return value
 
-
     def start_point(self):
         return self.s_to_interval(self.s[0]), self.symbols[:self.dim]
 
@@ -239,8 +241,6 @@ class InterpolatingPoly:
         dx_i = [
             (dbasis @ x_mat).T for dbasis in self.derivatives
         ]
-
-
 
         return t_i, x_i, dx_i
 
@@ -284,7 +284,6 @@ class InterpolatingPolyCollection:
 
 
 
-
 class ParameterOutputMap:
     def __init__(self, names):
         self.names = names
@@ -293,8 +292,6 @@ class ParameterOutputMap:
         return {
             name: value[i, 0] for i, name in enumerate(self.names)
         }
-
-
 
 
 def construct_parameters(parameters: List[ParameterVariable]):

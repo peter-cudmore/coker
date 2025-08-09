@@ -80,16 +80,6 @@ class Scalar:
     name: str
 
 
-class Noop:
-    __slots__ = ()
-
-    def __call__(self, *args, **kwargs):
-        return None
-
-    @staticmethod
-    def cast_to_function_space(arguments):
-        return FunctionSpace('noop', arguments, None)
-
 
 @dataclasses.dataclass
 class FunctionSpace:
@@ -131,3 +121,4 @@ class FunctionSpace:
 @dataclasses.dataclass
 class Element:
     parent: VectorSpace
+

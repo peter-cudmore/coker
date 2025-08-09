@@ -4,10 +4,9 @@ from operator import mul
 import numpy as np
 import sympy as sp
 import scipy as sy
-from toolz.functoolz import return_none
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Tracer, VectorSpace
+from coker.algebra.kernel import Tracer, VectorSpace, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike
@@ -196,7 +195,7 @@ class NumpyBackend(Backend):
         x0, z0, q0 = initial_conditions
         u, p = inputs
 
-        if constraint is not None:
+        if constraint is not Noop():
             raise NotImplementedError(
                 "Integrators with constraints are not implemented"
             )
@@ -207,7 +206,7 @@ class NumpyBackend(Backend):
         if end_point == 0.0:
             return x0, z0, q0
 
-        if dqdt is None:
+        if dqdt is Noop():
             y0 = x0
             f = lambda t, x: dxdt(t, x, None, u, p)
 

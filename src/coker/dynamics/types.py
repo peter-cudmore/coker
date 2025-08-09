@@ -3,7 +3,7 @@ from typing import List, Callable, Optional, Tuple, Union
 from dataclasses import dataclass, field
 
 from coker import Dimension
-from coker.algebra.kernel import FunctionSpace, Scalar, VectorSpace, Function
+from coker.algebra.kernel import FunctionSpace, Scalar, VectorSpace, Function, Noop
 import numpy as np
 
 
@@ -11,11 +11,11 @@ import numpy as np
 class DynamicsSpec:
     inputs: FunctionSpace
     parameters: Scalar | VectorSpace
-
     algebraic: Optional[VectorSpace]
 
+
     initial_conditions: Callable[
-        [float, VectorSpace, VectorSpace], Tuple[np.ndarray, np.ndarray]
+        [VectorSpace, VectorSpace], Tuple[np.ndarray, np.ndarray]
     ]
     """ [x, z] = initial_conditions(t_0, p) """
 
@@ -35,9 +35,7 @@ class DynamicsSpec:
     ]
     """ y(t) = outputs(t, x, z, u, p, q) """
 
-    quadratures: Optional[
-        Callable[[float, np.ndarray, np.ndarray, np.ndarray], np.ndarray]
-    ] = None
+    quadratures: Callable[[float, np.ndarray, np.ndarray, np.ndarray], np.ndarray]
     """ dq/dt = quadratures(t, x, u, p) """
 
 
@@ -58,44 +56,33 @@ class DynamicalSystem:
     def backend(self):
         return self.dxdt.backend
 
+    def _map_arguments(self, *args):
+        arg_stack = list(reversed(args))
+        t = arg_stack.pop()
+        try:
+            u = arg_stack.pop() if self.inputs is not Noop() else None
+            p = arg_stack.pop() if self.parameters is not None else None
+        except IndexError as ex:
+            raise ValueError(
+                f"Invalid number of arguments: Expected 2 - 3, received: {len(args)}"
+            ) from ex
+
+        return t, u, p
+
+
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
-        if len(args) == 1:
-            if self.inputs is not None or self.parameters is not None:
-                raise ValueError(
-                    f"Invalid number of arguments: Expected 2 - 3, received: {len(args)}"
-                )
-            t, = args
-            u = lambda _: None  # No input so treat it as a noop
-            p = []
+        t, u, p = self._map_arguments(*args)
 
-        elif len(args) == 2:
-            if self.inputs is not None:
-                raise ValueError(
-                    f"Invalid number of arguments: Expected 3, received: {len(args)}"
-                )
-            t, p = args
-            u = lambda _: None  # No input so treat it as a noop
-        elif len(args) == 3:
-            t, u, p = args
-        else:
-            raise ValueError(f"Invalid number of arguments: {len(args)}")
-
-        if self.g is not None:
-            # solve z s.t. 0 = g(0, x0, z, u(0), p)
-            raise NotImplementedError
-        else:
-            z0 = None
-
-        x0 = self.x0(0, z0, u, p)
+        x0, z0 = self.x0(0, u, p)
 
         # solve ODE
         # x' = dxdt(...)
         # 0  = g(...)
         # to get x,z over the interval
 
-        if self.dqdt is not None:
+        if self.dqdt is not Noop():
             # zeros, the same size a q
             raise NotImplementedError
         else:
