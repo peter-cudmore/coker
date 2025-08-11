@@ -3,8 +3,15 @@ from typing import List, Callable, Optional, Tuple, Union
 from dataclasses import dataclass, field
 
 from coker import Dimension
-from coker.algebra.kernel import FunctionSpace, Scalar, VectorSpace, Function, Noop
+from coker.algebra.kernel import (
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+    Function,
+    Noop,
+)
 import numpy as np
+from typing import Dict
 
 
 @dataclass
@@ -12,7 +19,6 @@ class DynamicsSpec:
     inputs: FunctionSpace
     parameters: Scalar | VectorSpace
     algebraic: Optional[VectorSpace]
-
 
     initial_conditions: Callable[
         [VectorSpace, VectorSpace], Tuple[np.ndarray, np.ndarray]
@@ -35,7 +41,9 @@ class DynamicsSpec:
     ]
     """ y(t) = outputs(t, x, z, u, p, q) """
 
-    quadratures: Callable[[float, np.ndarray, np.ndarray, np.ndarray], np.ndarray]
+    quadratures: Callable[
+        [float, np.ndarray, np.ndarray, np.ndarray], np.ndarray
+    ]
     """ dq/dt = quadratures(t, x, u, p) """
 
 
@@ -69,7 +77,6 @@ class DynamicalSystem:
 
         return t, u, p
 
-
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
@@ -97,19 +104,23 @@ class DynamicalSystem:
 
         return out
 
+
 class ParameterMixin(abc.ABC):
     @abc.abstractmethod
     def degrees_of_freedom(self, *interval) -> int:
         pass
+
 
 @dataclass
 class BoundedVariable(ParameterMixin):
     name: str
     lower_bound: float
     upper_bound: float
+    guess: float = 0
 
     def degrees_of_freedom(self, *interval):
         return 1
+
 
 @dataclass
 class PiecewiseConstantVariable(ParameterMixin):
@@ -122,6 +133,9 @@ class PiecewiseConstantVariable(ParameterMixin):
         start, end = interval
         return int(np.ceil((end - start) * self.sample_rate))
 
+    def to_solution(self, value):
+        return PiecewiseControlSolution(self.name, self.sample_rate, value)
+
 
 @dataclass
 class SpikeVariable(ParameterMixin):
@@ -133,6 +147,10 @@ class SpikeVariable(ParameterMixin):
     def degrees_of_freedom(self, *interval):
         return 1
 
+    def to_solution(self, value):
+        return SpikeControlSolution(self.name, self.time, value)
+
+
 @dataclass
 class ConstantControlVariable(ParameterMixin):
     name: str
@@ -142,6 +160,9 @@ class ConstantControlVariable(ParameterMixin):
     def degrees_of_freedom(self, *interval):
         return 1
 
+    def to_solution(self, value):
+        return ConstantControlSolution(self.name, value)
+
 
 Constant = Union[float, int]
 ValueType = Scalar | VectorSpace
@@ -150,7 +171,9 @@ ControlVariable = (
     ConstantControlVariable | PiecewiseConstantVariable | SpikeVariable
 )
 ParameterVariable = BoundedVariable | Constant
-Solution = Union[DynamicalSystem, Callable[[Scalar, ControlLaw, ValueType], Scalar]]
+Solution = Union[
+    DynamicalSystem, Callable[[Scalar, ControlLaw, ValueType], Scalar]
+]
 LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
 
 
@@ -164,38 +187,132 @@ class TranscriptionOptions:
 class VariationalProblem:
     loss: LossFunction
     system: DynamicalSystem
-    arguments: Tuple[List[ControlVariable], List[ParameterVariable]]
     t_final: float
+    control: Optional[List[ControlVariable]] = None
+    parameters: Optional[List[ParameterVariable]] = None
     constraints: Optional[List] = None
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
     )
-    backend: Optional[str] = 'coker'
-
-#    def __post_init__(self):
-#        if self.constraints is None:
-#            self.constraints = []
-#
-#        if not isinstance(self.loss, Function):
-#            output_space, = self.system.y.output_shape()
-#
-#            parameter_space = VectorSpace('p', len(self.arguments[1]))
-#
-#            control_space = FunctionSpace('u', [Scalar('t')], [VectorSpace('u', len(self.arguments[0]))]),
-#            solution_space = FunctionSpace('x', [Scalar('t'), control_space, parameter_space], [output_space])
-#            loss_input_space = [
-#                solution_space,
-#                control_space,
-#                parameter_space
-#            ]
-#            self.loss = Function(loss_input_space, self.loss, backend=self.system.backend())
-
-
-
-
+    backend: Optional[str] = "coker"
 
     def __call__(self):
         from coker.backends import get_backend_by_name
+
         backend = get_backend_by_name(self.backend)
         return backend.create_variational_solver(self)
 
+
+@dataclass
+class ConstantControlSolution:
+    name: str
+    value: float
+
+    def __call__(self, t):
+        return self.value
+
+
+@dataclass
+class SpikeControlSolution:
+    name: str
+    time: float
+    value: float
+    tolerance: float = 1e-9
+
+    def __call__(self, t):
+        return self.value if abs(t - self.time) < self.tolerance else 0.0
+
+
+@dataclass
+class PiecewiseControlSolution:
+    name: str
+    sample_rate: float
+    value: np.ndarray
+
+    def __call__(self, t):
+        idx = int(t * self.sample_rate)
+        assert idx < len(self.value), f"Time {t} is outside of the interval"
+        return self.value[idx]
+
+
+ControlSolution = Union[
+    SpikeControlSolution, PiecewiseControlSolution, ConstantControlSolution
+]
+
+
+class InterpolatingPolyCollection:
+    def __init__(self, polys):
+        self.polys = polys
+        self._size = sum(p.size() for p in polys)
+        self.intervals = [p.interval for p in polys]
+
+    def size(self):
+        return self._size
+
+    def __call__(self, t):
+        for i, (start, end) in enumerate(self.intervals):
+            if start <= t <= end:
+                return self.polys[i](t)
+        raise ValueError(f"Value {t} is not in any interval")
+
+    def interval_starts(self):
+        for p in self.polys:
+            yield p.start_point()
+
+    def interval_ends(self):
+        for p in self.polys:
+            yield p.end_point()
+
+    def knot_points(self):
+        for p in self.polys:
+            t, x, dx = p.knot_points()
+            for t_i, x_i, dx_i in zip(t, x, dx):
+                yield t_i, x_i, dx_i
+
+
+@dataclass
+class VariationalSolution:
+    cost: float
+    path: InterpolatingPolyCollection
+    projectors: Tuple[np.ndarray, np.ndarray, np.ndarray]
+    control_solutions: List[ControlSolution]
+    parameters: Dict[str, float]
+    output: Callable[
+        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+        np.ndarray,
+    ]
+
+    def as_raw(self) -> np.ndarray:
+        points = [
+            np.vstack([np.array([t]), x])
+            for t, x, _ in self.path.knot_points()
+        ]
+        return np.hstack(points)
+
+    def state(self, t):
+        v = self.path(t)
+        proj = self.projectors[0]
+        return proj @ v
+
+    def algebraic(self, t):
+        if self.projectors[1] is None:
+            return None
+        return self.projectors[1] @ self.path(t)
+
+    def quadratures(self, t):
+        if self.projectors[2] is None:
+            return None
+        return self.projectors[2] @ self.path(t)
+
+    def control_law(self, t):
+        if not self.control_solutions:
+            return None
+        return np.array([c(t) for c in self.control_solutions])
+
+    def __call__(self, t):
+        x = self.state(t)
+        q = self.quadratures(t)
+        u = self.control_law(t)
+        z = self.algebraic(t)
+
+        return self.output(t, x, z, u, q)

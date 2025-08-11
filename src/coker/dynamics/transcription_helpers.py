@@ -4,12 +4,12 @@ from typing import List, Tuple, Callable, Optional
 
 import numpy as np
 
+
 from coker.dynamics.types import (
     TranscriptionOptions,
     ControlVariable,
     PiecewiseConstantVariable,
     SpikeVariable,
-    LossFunction
 )
 
 
@@ -75,8 +75,7 @@ def evaluate_legendre_polynomial(x, n):
 
 
 def generate_discritisation_operators(
-        interval: Tuple[float, float],
-        n: int
+    interval: Tuple[float, float], n: int
 ) -> Tuple[
     List[float],
     Callable[[float], float],
@@ -127,7 +126,7 @@ def generate_discritisation_operators(
 
         continuity_coeff[i] = basis_i(1)
         colocation_coeff[i, :] = [
-            dbasis_i(tau_j) / time_scaling_factor  for tau_j in colocation_times
+            dbasis_i(tau_j) / time_scaling_factor for tau_j in colocation_times
         ]
         quad_coeff[i] = np.polyint(basis_i)(1.0) * time_scaling_factor
     # see https://mathworld.wolfram.com/RadauQuadrature.html
@@ -154,15 +153,19 @@ def split_at_non_differentiable_points(
     control_variables: List[ControlVariable],
     t_final: float,
     transcription_options: TranscriptionOptions,
-    additional_points: Optional[List[float]] = None
+    additional_points: Optional[List[float]] = None,
 ) -> List[Tuple[float, float]]:
 
-    interval_boundaries = set(additional_points) if additional_points else set()
+    interval_boundaries = (
+        set(additional_points) if additional_points else set()
+    )
     for d in control_variables:
         if isinstance(d, PiecewiseConstantVariable):
             assert d.sample_rate > 0, "Sample rate must be positive"
             steps = t_final * d.sample_rate
-            interval_boundaries |= {i* t_final / steps for i in range(int(steps))}
+            interval_boundaries |= {
+                i * t_final / steps for i in range(int(steps))
+            }
 
         if isinstance(d, SpikeVariable):
             assert (
@@ -200,7 +203,84 @@ def split_at_non_differentiable_points(
 
     return [
         (start, stop)
-        for start, stop in zip(
-            sorted_boundaries[:-1], sorted_boundaries[1:]
-        )
+        for start, stop in zip(sorted_boundaries[:-1], sorted_boundaries[1:])
     ]
+
+
+class InterpolatingPoly:
+    def __init__(self, dimension, interval, degree, values):
+        self.interval = interval
+        self.dimension = dimension
+        self.degree = degree
+        self.values = values
+
+        op_values = generate_discritisation_operators(interval, degree)
+
+        self.s, self.s_to_interval, bases, derivatives, self.integrals = (
+            op_values
+        )
+        size = len(self.s) * dimension
+
+        assert values.shape[0] == size and (
+            len(values.shape) == 1
+            or (len(values.shape) == 2 and values.shape[1] == 1)
+        ), f"Expected shape ({len(self.s) * dimension},), got {values.shape}"
+
+        self.bases = np.vstack(
+            [np.reshape(np.array(base), (1, len(self.s))) for base in bases]
+        )
+        self.derivatives = [
+            np.reshape(np.array(d[:-1]), (1, len(self.s) - 1))
+            for d in derivatives
+        ]
+
+    def size(self):
+        return len(self.s) * self.dimension
+
+    def _interval_to_s(self, t):
+        width = (self.interval[1] - self.interval[0]) / 2
+        mean = (self.interval[1] + self.interval[0]) / 2
+        return (t - mean) / width
+
+    def knot_times(self):
+        # we skip the end point
+        return [self.s_to_interval(s_i) for s_i in self.s]
+
+    def start_point(self):
+        return self.s_to_interval(self.s[0]), self.values[: self.dimension]
+
+    def end_point(self):
+        return self.s_to_interval(self.s[-1]), self.values[-self.dimension :]
+
+    def knot_points(self):
+        # we skip the end point
+        t_i = self.knot_times()[:-1]
+        n = len(t_i)
+        x_i = [
+            self.values[i * self.dimension : (i + 1) * self.dimension]
+            for i in range(n)
+        ]
+        x_mat = np.hstack(x_i).T
+        dx_i = [(dbasis @ x_mat).T for dbasis in self.derivatives]
+
+        return t_i, x_i, dx_i
+
+    def __call__(self, t):
+
+        assert (
+            self.interval[0] <= t <= self.interval[1]
+        ), f"Value {t} is not in interval {self.interval}"
+
+        s = self._interval_to_s(t)
+        try:
+            i = next(i for i, s_i in enumerate(self.s) if abs(s_i - s) < 1e-9)
+            return self.values[i * self.dimension : (i + 1) * self.dimension]
+        except StopIteration:
+            pass
+        n = len(self.s)
+        s_vector = np.vstack(*[s**i for i in range(n)]).reshape((1, n))
+
+        projection = s_vector @ self.bases
+
+        value = np.tile(projection, (1, self.dimension))[0] @ self.values
+        return value

@@ -80,7 +80,6 @@ class Scalar:
     name: str
 
 
-
 @dataclasses.dataclass
 class FunctionSpace:
     name: str
@@ -101,7 +100,7 @@ class FunctionSpace:
 
     def output_dimensions(self):
         if self.output is None:
-            return (None, )
+            return (None,)
         return [
             (
                 Dimension(None)
@@ -121,4 +120,3 @@ class FunctionSpace:
 @dataclasses.dataclass
 class Element:
     parent: VectorSpace
-

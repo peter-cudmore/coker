@@ -46,7 +46,9 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         if o is None:
             return None
         if not o.dim.is_scalar():
-            return np.reshape(backend.to_numpy_array(workspace[o.index]), o.shape)
+            return np.reshape(
+                backend.to_numpy_array(workspace[o.index]), o.shape
+            )
         return backend.to_numpy_array(workspace[o.index])
 
     outputs = [cast_output(o) for o in outputs]

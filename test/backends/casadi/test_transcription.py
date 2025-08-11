@@ -4,7 +4,8 @@ from coker.dynamics import SpikeVariable, PiecewiseConstantVariable, ConstantCon
     split_at_non_differentiable_points
 from coker.dynamics.transcription_helpers import (generate_discritisation_operators)
 
-from coker.backends.casadi.variational_solver import (InterpolatingPoly, InterpolatingPolyCollection)
+from coker.backends.casadi.variational_solver import (InterpolatingPoly, InterpolatingPolyCollection,
+                                                      SymbolicPolyCollection)
 
 
 def test_poly_collection_scalar():
@@ -13,7 +14,7 @@ def test_poly_collection_scalar():
 
     dimension = 1
 
-    poly_collection = InterpolatingPolyCollection(
+    poly_collection = SymbolicPolyCollection(
         'x', dimension, intervals, collocation_degree,
     )
     x = poly_collection.symbols()
@@ -41,7 +42,7 @@ def test_poly_collection_vector():
 
     dimension = 3
 
-    poly_collection = InterpolatingPolyCollection(
+    poly_collection = SymbolicPolyCollection(
         'x', dimension, intervals, collocation_degree,
     )
     x = poly_collection.symbols()

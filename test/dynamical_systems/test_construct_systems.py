@@ -22,13 +22,13 @@ def test_homogenous_integrator(variational_backend):
 
     x0 = np.array([1])
 
-    def xdot(x, *args):
+    def xdot(x, _):
         return -x
 
     def solution(t):
         return np.exp(-t)
 
-    system = create_homogenous_ode(
+    system = create_autonomous_ode(
         x0=x0,
         xdot=xdot,
         backend=variational_backend
@@ -120,63 +120,48 @@ def test_vector_linear_system(variational_backend):
     assert np.isfinite(soln).all()  # Todo: solve this analytically and test the result
 
 
-def test_fitting():
-    def x0(u0, p):
-        return p[1]
+def test_fitting_constant():
+    def x0(p):
+        return p[0]
 
-    def xdot(x, u, p):
-        return p[0] * x + u
-
-    def y(x, u, p):
-        return x
-
-    def u(t):
+    def xdot(x, p):
         return 0
 
-    param = np.array([-1, 2])
+    param = np.array([2])
 
     def solution(t, p):
-        x_0 = x0(u(0), p)
-        a = p[0]
-        x_t = x_0 * np.exp(a * t)
+        return x0(p)
 
-        y = x_t
-        return y
-
-    system = create_homogenous_ode(
-        inputs=Signal('u'),
-        parameters=VectorSpace('p', 2),
+    system = create_autonomous_ode(
+        parameters=VectorSpace('p', 1),
         x0=x0,
         xdot=xdot,
-        output=y,
         backend='numpy')
 
-    n = 10
-    samples = np.array([(t, solution(t, param)) for t in np.linspace(0, 1, n)])
 
-    def loss(f, *args):
-        error = np.array([f(t, *args) - y for t, y in samples]).reshape((n,))
-        return np.dot(error, error) / n
+    def loss(f, p_inner):
+        total_error = 0.0
+        for t_i in np.arange(0, 1, 0.1):
+            truth = solution(t_i, param)
+            test = f(t_i, p_inner)
+            total_error += (truth - test) **2
 
+        return total_error
 
-    loss_value = loss(system, u, param)
+    loss_value = loss(system, param)
 
     assert loss_value < 1e-6
-
-    decision_variables = (
-        [ConstantControlVariable('control', upper_bound=4, lower_bound=0)],
-        [BoundedVariable('rate', upper_bound=4, lower_bound=0.1 ), 2]
-    )
 
     problem = VariationalProblem(
         loss=loss,
         system=system,
-        arguments=decision_variables,
+        parameters=[BoundedVariable('value', upper_bound=3, lower_bound=0.5, guess=2)],
         t_final=1,
         constraints=[],
         backend='casadi'
     )
 
-    min_cost, argmins = problem()
-    assert abs(argmins['control'] - 2) < 1e-4
-    assert abs(argmins['rate']  - 1) < 1e-4
+    sol = problem()
+    assert sol.cost < 1e-6
+    assert abs(sol.parameters['value'] - 2) < 1e-4
+

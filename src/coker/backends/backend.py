@@ -4,7 +4,11 @@ from coker import Function
 from coker import Tracer
 from typing import List, Dict
 
-from coker.dynamics import VariationalProblem, create_homogenous_ode, DynamicsSpec
+from coker.dynamics import (
+    VariationalProblem,
+    create_autonomous_ode,
+    DynamicsSpec,
+)
 
 ArrayLike = Any
 
