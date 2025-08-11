@@ -1,10 +1,9 @@
 from typing import Tuple, Type, List, Dict
 
-import numpy as np
 
 from coker import Tracer, Function, OP
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
-from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
+from coker.backends.coker.sparse_tensor import is_constant
 from coker.backends.coker.ast_preprocessing import (
     SparseNet,
     label_layers,

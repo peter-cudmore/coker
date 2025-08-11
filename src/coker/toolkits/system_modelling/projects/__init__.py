@@ -1,5 +1,4 @@
-import pathlib
-from typing import Type, Callable, Tuple, Dict
+from typing import Callable, Dict, Tuple
 from coker.modelling import Block
 from coker.algebra.kernel import Function
 from coker.helpers import get_all_subclasses

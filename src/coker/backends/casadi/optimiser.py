@@ -3,7 +3,6 @@ from typing import List
 from coker import Tracer
 
 import casadi as ca
-import numpy as np
 
 
 def build_optimisation_problem(

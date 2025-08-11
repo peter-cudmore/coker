@@ -6,8 +6,6 @@ from typing import List, Dict
 
 from coker.dynamics import (
     VariationalProblem,
-    create_autonomous_ode,
-    DynamicsSpec,
 )
 
 ArrayLike = Any
@@ -22,12 +20,10 @@ class Backend(metaclass=ABCMeta):
     @abstractmethod
     def to_numpy_array(self, array) -> ArrayLike:
         """Cast array from backend to numpy type."""
-        pass
 
     @abstractmethod
     def to_backend_array(self, array: ArrayLike):
         """Cast array from native python (numpy) to backend type."""
-        pass
 
     @abstractmethod
     def reshape(self, array: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:

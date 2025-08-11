@@ -8,7 +8,6 @@ from coker.toolkits.spatial import (
     SE3Adjoint,
     SE3CoAdjoint,
     hat,
-    se3Adjoint,
 )
 
 
@@ -95,16 +94,16 @@ class RigidBody:
 
     def __init__(self):
         """
-        - g_i(q) is the position of the ith link
-        - lam(i) is the parent of the ith link
+        - $g_i(q)$ is the position of the ith link
+        - $lam(i)$ is the parent of the ith link
 
         transforms:
-            transform X_{lam(i), i} is the location of the origin of the ith
-            link in lam(i) coordinates, so that at rest
-            g_i(0) = prod_{j=0, i}(X_{lam(j), j} = X_{-1, 0} @ X_{0, 1} @ X_{lam(1), 1}) @ ...
+            transform $X_{lam(i), i}$ is the location of the origin of the ith
+            link in $lam(i)$ coordinates, so that at rest
+            $$g_i(0) = prod_{j=0, i}(X_{lam(j), j} = X_{-1, 0} @ X_{0, 1} @ X_{lam(1), 1}) @ ...$$
 
         rest transforms:
-            the rest transform is g_i(0) s.t. g_i(q) = exp(zeta q) g_i(0)
+            the rest transform is $g_i(0)$ s.t. $g_i(q) = exp(zeta q) g_i(0)$
 
 
         """
@@ -231,7 +230,7 @@ class RigidBody:
         return sorted(joints)
 
     def _get_joint_transforms(self, angles) -> List[Isometry3]:
-        """Computes `g_si = Prod_j(exp(zeta_i q_i))`
+        """Computes $g_si = Prod_j(exp(zeta_i q_i))$
         For each of the j angles.
         Zeta is the joint basis with respect to the joint origin.
 
@@ -250,22 +249,22 @@ class RigidBody:
         return transforms
 
     def _get_absolute_joint_xform(self, angles):
-        """Express each g_j = Prod_i exp(theta_i zeta_i)
+        """Express each $g_j = Prod_i exp(theta_i zeta_i)$
         in coordinates w.r.t the world
 
         The position of each joint $i$ is given by
-        \prod_{j <= i} g_{j-1; j} exp(zeta_jq_j)
+            $\prod_{j <= i} g_{j-1; j} exp(zeta_jq_j)$
 
-        where g_{i-1; j} is the transfrom of the joint origin to the parent frame
-        zeta_j is the joint basis in the joint frame
-        q_j is the joint angle
+        where $g_{i-1; j}$ is the transfrom of the joint origin to the parent frame
+        $zeta_j$ is the joint basis in the joint frame
+        $q_j$ is the joint angle
 
-        want to move this to \Prod [exp(z_jq_j] g_i(0)
+        want to move this to $\Prod [exp(z_jq_j] g_i(0)$
 
-        # g_{j-1; j} = g_{j-1; 0} g_{0; j} = g_{j-1}^{-1} g_j
+        $g_{j-1; j} = g_{j-1; 0} g_{0; j} = g_{j-1}^{-1} g_j$
         so
-            prod = g_0 exp(zeta_0) g^{-1}_0 * g_1 exp(zeta_1) g_1^{-1} ...
-            i.e. z_j = Adj_{g_j}[zeta_j]
+            $prod = g_0 exp(zeta_0) g^{-1}_0 * g_1 exp(zeta_1) g_1^{-1}$ ...
+            i.e. $z_j = Adj_{g_j}[zeta_j]$
 
         """
         joint_idx = 0

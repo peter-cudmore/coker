@@ -6,7 +6,6 @@ from itertools import accumulate
 
 
 from coker.backends.backend import get_backend_by_name
-from coker.backends.casadi import substitute
 
 from coker.dynamics import (
     VariationalProblem,
@@ -15,7 +14,6 @@ from coker.dynamics import (
     ParameterVariable,
     ConstantControlVariable,
     SpikeVariable,
-    ParameterMixin,
     BoundedVariable,
     PiecewiseConstantVariable,
     InterpolatingPoly,

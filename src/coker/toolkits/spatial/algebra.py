@@ -1,4 +1,3 @@
-from types import NotImplementedType
 from typing import Optional
 import numpy as np
 from coker.toolkits.spatial.types import Vec3, Scalar
