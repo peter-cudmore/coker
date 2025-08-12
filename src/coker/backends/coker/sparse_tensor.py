@@ -4,6 +4,7 @@ from functools import reduce
 import numpy as np
 from typing import Optional, Dict, Tuple, Union, NewType
 
+from jax._src.lax import other
 
 MultiIndex = NewType("MultiIndex", Union[Tuple[int, ...], int])
 

@@ -2,8 +2,10 @@ import numpy as np
 import pytest
 
 import coker
-from coker.toolkits.spatial import Isometry3, Rotation3, Screw
+from coker.toolkits.spatial import Isometry3, Rotation3, SE3Adjoint, Screw
+from mpl_toolkits.mplot3d.proj3d import rot_x
 
+from test.conftest import backends
 from test.util import is_close, validate_symbolic_call
 from coker import VectorSpace, function, Scalar
 

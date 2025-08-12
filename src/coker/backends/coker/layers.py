@@ -1,4 +1,5 @@
 from coker import Dimension, OP, scalar_types
+from coker.algebra.ops import scalar_binary
 from coker.backends import get_backend_by_name
 from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.memory import MemorySpec

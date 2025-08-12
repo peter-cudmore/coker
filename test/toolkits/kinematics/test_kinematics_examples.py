@@ -1,16 +1,14 @@
 import numpy as np
+import pytest
 
 from coker.algebra.kernel import function, VectorSpace
-from coker.toolkits.kinematics import RigidBody, Revolute, Inertia
-from coker.toolkits.spatial import (
-    Rotation3, Isometry3, SE3Adjoint, Screw)
+from coker.toolkits.kinematics import *
+from coker.toolkits.spatial import Rotation3
 # Test based on 3-link open-chain manipulator
 # from Murry Et. Al
 
 from test.util import is_close, validate_symbolic_call
-e_x = np.array([1, 0, 0])
-e_y = np.array([0, 1, 0])
-e_z = np.array([0, 0, 1])
+
 g = - 9.8
 # Parameters from the book, r being center of mass, l being next joint
 l_0 = 0.5

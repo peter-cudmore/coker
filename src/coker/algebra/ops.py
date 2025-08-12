@@ -1,3 +1,4 @@
+import dataclasses
 import enum
 import numpy as np
 from typing import Dict, Callable

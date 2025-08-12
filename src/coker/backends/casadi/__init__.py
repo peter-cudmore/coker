@@ -1,7 +1,8 @@
 from typing import Tuple, Type, Union
 
+import casadi
 
-from coker import Dimension, Function
+from coker import Dimension, Function, VectorSpace
 
 from coker.backends.backend import Backend, ArrayLike
 
@@ -11,7 +12,11 @@ from coker.backends.casadi.optimiser import build_optimisation_problem
 from coker.backends.casadi.variational_solver import create_variational_solver
 from coker.dynamics import (
     VariationalProblem,
+    create_autonomous_ode,
+    DynamicsSpec,
+    DynamicalSystem,
 )
+from coker.dynamics.dynamical_system import create_dynamics_from_spec
 
 scalar_types = (float, int)
 

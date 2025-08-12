@@ -1,9 +1,12 @@
 from typing import Tuple
+from functools import reduce
+from coker import Dimension
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.sparse_tensor import (
     dok_ndarray,
     scalar,
     tensor_vector_product,
+    cast_vector,
 )
 import numpy as np
 

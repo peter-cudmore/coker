@@ -1,7 +1,8 @@
+from typing import List
 import numpy as np
 
 import coker
-from coker.backends.backend import Backend
+from coker.backends.backend import ArrayLike, Backend
 from coker.algebra.kernel import Tracer, OP
 
 

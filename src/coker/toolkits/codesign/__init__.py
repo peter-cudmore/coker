@@ -1,4 +1,5 @@
 import dataclasses
+import enum
 from typing import Optional, List, Tuple, Callable
 
 import numpy as np
@@ -103,6 +104,7 @@ class ProblemBuilder:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.tape = None
+        pass
 
 
 class VariationalProblem:

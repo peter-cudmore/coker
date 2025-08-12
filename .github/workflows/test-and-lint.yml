@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: pip install pytest pytest-md flake8 black
       - name: Install package
-        run: pip install -e .[casadi]
+        run: pip install -e .
       - uses: pavelzw/pytest-action@v2
         with:
           emoji: false
@@ -37,7 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: pip install black
-      - name: Run black
-        run: black src --check
+      - uses: rickstaa/action-black@v1
+        with:
+          black_args: "src --check"

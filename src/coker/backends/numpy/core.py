@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Type, Tuple, List, Any
 from functools import reduce
 from operator import mul
 import numpy as np
@@ -6,7 +6,7 @@ import sympy as sp
 import scipy as sy
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Noop, Tracer
+from coker.algebra.kernel import Tracer, VectorSpace, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike

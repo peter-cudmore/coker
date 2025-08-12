@@ -1,5 +1,7 @@
 from coker import OP
 from coker.backends.coker.sparse_tensor import (
+    dok_ndarray,
+    tensor_vector_product,
     is_constant,
 )
 from coker.backends.coker.tensor_contants import hat, levi_civita_3_tensor
