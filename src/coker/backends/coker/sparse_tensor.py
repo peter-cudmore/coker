@@ -4,8 +4,6 @@ from functools import reduce
 import numpy as np
 from typing import Optional, Dict, Tuple, Union, NewType
 
-from jax._src.lax import other
-
 MultiIndex = NewType("MultiIndex", Union[Tuple[int, ...], int])
 
 scalar = (float, int, np.int32, np.int64, np.float32, np.float64)
@@ -393,7 +391,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         if ufunc == np.multiply and method == "__call__":
             if args == 1.0:
                 return self
-            if self.is_scalar() or isinstance(other, scalar):
+            if self.is_scalar() or isinstance(args, scalar):
                 return args * self
 
         raise NotImplementedError

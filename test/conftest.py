@@ -1,29 +1,31 @@
 import warnings
 
 backends = [
-    'numpy',
+    "numpy",
 ]
 variational_backends = [
-    'numpy',
+    "numpy",
 ]
 
 try:
     import jax
-    backends.append('jax')
+
+    backends.append("jax")
 except ImportError:
-    warnings.warn('jax is not installed')
+    warnings.warn("jax is not installed")
 
 try:
     import casadi
-    backends.append('casadi')
-    variational_backends.append('casadi')
+
+    backends.append("casadi")
+    variational_backends.append("casadi")
 except ImportError:
-    warnings.warn('casadi is not installed')
+    warnings.warn("casadi is not installed")
 
 
 def pytest_generate_tests(metafunc):
     if "backend" in metafunc.fixturenames:
         metafunc.parametrize("backend", backends)
 
-    if 'variational_backend' in metafunc.fixturenames:
+    if "variational_backend" in metafunc.fixturenames:
         metafunc.parametrize("variational_backend", variational_backends)

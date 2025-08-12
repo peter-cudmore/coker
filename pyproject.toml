@@ -45,14 +45,14 @@ test = [
 ]
 
 lint = [
-   "black",
+   "black == 25.1.0",
    "flake8"
 ]
 
 ci = [
     "pytest < 5.0.0",
     "pytest-cov[all]",
-    "black",
+    "black == 25.1.0",
     "flake8",
     "setuptools"
 ]

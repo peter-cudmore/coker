@@ -1,11 +1,21 @@
 from functools import reduce
 from operator import mul
-from coker.dynamics import SpikeVariable, PiecewiseConstantVariable, ConstantControlVariable, TranscriptionOptions, \
-    split_at_non_differentiable_points
-from coker.dynamics.transcription_helpers import (generate_discritisation_operators)
+from coker.dynamics import (
+    SpikeVariable,
+    PiecewiseConstantVariable,
+    ConstantControlVariable,
+    TranscriptionOptions,
+    split_at_non_differentiable_points,
+)
+from coker.dynamics.transcription_helpers import (
+    generate_discritisation_operators,
+)
 
-from coker.backends.casadi.variational_solver import (InterpolatingPoly, InterpolatingPolyCollection,
-                                                      SymbolicPolyCollection)
+from coker.backends.casadi.variational_solver import (
+    InterpolatingPoly,
+    InterpolatingPolyCollection,
+    SymbolicPolyCollection,
+)
 
 
 def test_poly_collection_scalar():
@@ -15,7 +25,10 @@ def test_poly_collection_scalar():
     dimension = 1
 
     poly_collection = SymbolicPolyCollection(
-        'x', dimension, intervals, collocation_degree,
+        "x",
+        dimension,
+        intervals,
+        collocation_degree,
     )
     x = poly_collection.symbols()
     assert x.shape == (10, 1)
@@ -43,7 +56,10 @@ def test_poly_collection_vector():
     dimension = 3
 
     poly_collection = SymbolicPolyCollection(
-        'x', dimension, intervals, collocation_degree,
+        "x",
+        dimension,
+        intervals,
+        collocation_degree,
     )
     x = poly_collection.symbols()
     assert x.shape == (30, 1)
@@ -53,7 +69,6 @@ def test_poly_collection_vector():
 
     assert all(x_starts[0][i] == x[i] for i in range(3))
     assert all(x_starts[1][i] == x[i + 15] for i in range(3))
-
 
     t_end, x_ends = zip(*list(poly_collection.interval_ends()))
     assert t_end == (1, 2)
@@ -66,4 +81,3 @@ def test_poly_collection_vector():
     for i, t_i in enumerate(t[:-1]):
         x_i = poly_collection(t_i)
         assert all(x_i[j] == x[i][j] for j in range(dimension))
-

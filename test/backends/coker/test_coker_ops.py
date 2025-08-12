@@ -7,9 +7,7 @@ from coker.backends.coker.weights import MemorySpec, BilinearWeights
 from coker import function, VectorSpace
 
 x_symbol = BilinearWeights(
-    MemorySpec(0, 3),
-    linear=dok_ndarray.eye(3),
-    shape=(3,)
+    MemorySpec(0, 3), linear=dok_ndarray.eye(3), shape=(3,)
 )
 
 
@@ -24,6 +22,3 @@ def test_dot():
     a, b = [dok_ndarray.fromarray(o) for o in [a_np, b_np]]
 
     assert dot(a, b) == dot_np
-
-
-
