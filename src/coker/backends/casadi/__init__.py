@@ -1,7 +1,4 @@
 from typing import Tuple, Type, Union
-
-import casadi
-
 from coker import Dimension, Function, VectorSpace
 
 from coker.backends.backend import Backend, ArrayLike
@@ -10,13 +7,8 @@ from coker.backends.casadi.casadi import *
 from coker.backends.casadi.optimiser import build_optimisation_problem
 
 from coker.backends.casadi.variational_solver import create_variational_solver
-from coker.dynamics import (
-    VariationalProblem,
-    create_autonomous_ode,
-    DynamicsSpec,
-    DynamicalSystem,
-)
-from coker.dynamics.dynamical_system import create_dynamics_from_spec
+from coker.dynamics import VariationalProblem
+
 
 scalar_types = (float, int)
 
@@ -30,7 +22,6 @@ class CasadiBackend(Backend):
                 pass
         elif isinstance(array, ca.DM):
             return array.toarray(simplify=True)
-
         try:
             return ca.evalf(array).toarray(simplify=True)
         except RuntimeError:

@@ -33,6 +33,7 @@ dependencies = [
     "numpy",
     "sympy",
     "scipy",
+    "typing-extensions"
 ]
 
 

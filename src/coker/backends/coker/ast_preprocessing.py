@@ -92,7 +92,7 @@ def label_layers(function: Function, sink_nodes: Dict):
 
         if op == OP.VALUE:
             edges[node].add(sink)
-            return {}
+            return
 
         for a in args:
             idx = a.index

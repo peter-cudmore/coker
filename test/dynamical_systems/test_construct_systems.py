@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
-from coker import FunctionSpace, Scalar
-from coker.dynamics import *
+from coker import FunctionSpace, Scalar, VectorSpace
+from coker.dynamics import create_autonomous_ode, VariationalProblem, BoundedVariable
 from coker.dynamics.dynamical_system import create_control_system
 
 # Dynamics

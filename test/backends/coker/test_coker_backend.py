@@ -3,6 +3,7 @@ import pytest
 from coker.backends.coker import *
 from coker.backends.coker.core import create_opgraph
 from coker import function, VectorSpace, Scalar, Dimension
+from coker.backends.coker.sparse_tensor import dok_ndarray
 
 A = np.array([
     [1, 2],

@@ -1,9 +1,8 @@
-import dataclasses
 import enum
 import numpy as np
 from typing import Dict, Callable
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
-from coker.algebra.dimensions import *
+from coker.algebra.dimensions import Dimension, FunctionSpace
 from typing_extensions import final
 
 

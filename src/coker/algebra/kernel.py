@@ -1,12 +1,21 @@
 import weakref
 
 import numpy as np
-from typing import Callable, Union
+from typing import Callable, Union, Tuple, List
 from collections import defaultdict
 
+from coker.algebra.dimensions import (
+    Dimension,
+    VectorSpace,
+    Scalar,
+    FunctionSpace,
+    Element,
+)
 from coker.algebra.tensor import SymbolicVector
-from coker.algebra.dimensions import *
-from coker.algebra.ops import OP, numpy_atomics, numpy_composites, Noop
+from coker.algebra.ops import OP, Noop
+
+
+from coker.algebra.ops import numpy_atomics, numpy_composites
 
 scalar_types = (
     np.float32,

@@ -1,7 +1,6 @@
 import numpy as np
-import pytest
 
-from coker import *
+from coker import function, Scalar, VectorSpace, FunctionSpace, Dimension, get_projection, SymbolicVector
 from .util import is_close
 
 
