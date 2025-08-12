@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from coker.algebra.kernel import function, VectorSpace
-from coker.toolkits.kinematics import *
-from coker.toolkits.spatial import Rotation3
+from coker.toolkits.kinematics import RigidBody, Revolute, Inertia
+from coker.toolkits.spatial import Rotation3, Isometry3, SE3Adjoint, Screw
 
 # Test based on 3-link open-chain manipulator
 # from Murry Et. Al
@@ -18,10 +18,12 @@ l_2 = 0.5
 r_0 = l_0 / 2
 r_1 = l_1 / 2
 r_2 = l_2 / 2
+
 m_0 = 1
 m_1 = 1
 m_2 = 1
 m_3 = 1
+
 Ix_0 = 1
 Ix_1 = 1
 Ix_2 = 1
@@ -36,7 +38,10 @@ Iz_0 = 1
 Iz_1 = 1
 Iz_2 = 1
 Iz_3 = 1
-from coker.backends.casadi import lower
+
+e_x = np.array([1, 0, 0])
+e_y = np.array([0, 1, 0])
+e_z = np.array([0, 0, 1])
 
 
 class Sampler:

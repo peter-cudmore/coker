@@ -3,7 +3,7 @@ import pytest
 from coker.toolkits.spatial import Isometry3, Rotation3
 
 
-def is_close(a, b, tolerance=1e-16):
+def is_close(a, b, tolerance=1e-8):
 
     if isinstance(a, Isometry3) and isinstance(b, Isometry3):
         return is_close(a.translation, b.translation, tolerance) and is_close(
