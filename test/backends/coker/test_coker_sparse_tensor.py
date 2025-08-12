@@ -10,18 +10,8 @@ def test_convert():
     assert sparse_eye.keys == {(0, 0): 1.0, (1, 1): 1.0, (2, 2): 1.0}
     assert np.allclose(sparse_eye.toarray(), eye)
 
-    test = np.array(
-        [[0, 1, 2],
-         [0, 0, 3],
-         [4, 0, 0]
-         ]
-    )
-    test_keys = {
-        (0, 1): 1,
-        (0, 2): 2,
-        (1, 2): 3,
-        (2, 0): 4
-    }
+    test = np.array([[0, 1, 2], [0, 0, 3], [4, 0, 0]])
+    test_keys = {(0, 1): 1, (0, 2): 2, (1, 2): 3, (2, 0): 4}
     test_sparse = dok_ndarray((3, 3), test_keys)
     assert np.allclose(test_sparse.toarray(), test)
 
@@ -32,7 +22,6 @@ def test_matmul_array():
     assert np.allclose(t.toarray(), t_test)
 
     b = np.array([1, 2, 3])
-
 
     y_expected = t_test @ b
 
@@ -55,15 +44,19 @@ def test_matmul_array():
     z_test = bt @ t_test
     assert np.allclose(z, z_test)
 
+
 def test_matmul_tensor():
     ex = np.array([[1, 0, 0]])
-    f = dok_ndarray(shape=(3, 3, 3), data={
-        (0, 0, 0): 1,
-        (0, 1, 1): 1,
-        (0, 2, 2): 1,
-        (1, 1, 1): 1,
-        (2, 2, 2): 1,
-    })
+    f = dok_ndarray(
+        shape=(3, 3, 3),
+        data={
+            (0, 0, 0): 1,
+            (0, 1, 1): 1,
+            (0, 2, 2): 1,
+            (1, 1, 1): 1,
+            (2, 2, 2): 1,
+        },
+    )
     eye_tensor = ex @ f
     eye_array = eye_tensor
     eye = np.eye(3, dtype=float)
@@ -72,11 +65,7 @@ def test_matmul_tensor():
 
 def test_cross():
     a = np.array([1, 2, 3])
-    a_hat = np.array([
-        [0, -3, 2],
-        [3, 0, -1],
-        [-2, 1, 0]
-    ])
+    a_hat = np.array([[0, -3, 2], [3, 0, -1], [-2, 1, 0]])
     tensor = hat(a).toarray()
     assert np.allclose(tensor, a_hat)
 
@@ -90,7 +79,6 @@ def test_cross():
     axa = np.cross(a, a)
     axa_test = hat(a) @ a
     assert np.allclose(axa_test.toarray(), axa)
-
 
 
 def test_outer_product():
@@ -109,4 +97,3 @@ def test_outer_product():
     ba = b @ a_dok
     ba_array = ba.toarray()
     assert np.allclose(ba_array, actual)
-

@@ -1,4 +1,7 @@
-from coker.backends.coker.sparse_tensor import dok_ndarray, tensor_vector_product
+from coker.backends.coker.sparse_tensor import (
+    dok_ndarray,
+    tensor_vector_product,
+)
 
 
 def hat(a):

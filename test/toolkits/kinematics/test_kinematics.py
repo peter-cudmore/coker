@@ -12,9 +12,10 @@ block_1m = Inertia(
     mass=1,
     moments=np.array([0.1, 0, 0, 0.1, 0, 0.1]),
 )
-e_x = np.array([1,0,0])
-e_y = np.array([0,1,0])
-e_z = np.array([0,0,1])
+e_x = np.array([1, 0, 0])
+e_y = np.array([0, 1, 0])
+e_z = np.array([0, 0, 1])
+
 
 def test_free_joint():
     model = RigidBody()
@@ -22,35 +23,43 @@ def test_free_joint():
         parent=model.WORLD,
         joint=Free(),
         at=Isometry3.identity(),
-        inertia=block_1m
+        inertia=block_1m,
     )
 
-    tip = model.add_effector(parent=block, at=Isometry3(translation=np.array([1, 0, 0])))
+    tip = model.add_effector(
+        parent=block, at=Isometry3(translation=np.array([1, 0, 0]))
+    )
 
     # 0 ----- x
 
     # at rest, tip is at (1, 0, 0)
     q = np.zeros((6,))
 
-    free_joint, = model.joint_transforms(q, tip)
+    (free_joint,) = model.joint_transforms(q, tip)
     assert np.allclose(free_joint.translation, np.array([0, 0, 0]))
 
 
 def mod_pi(x):
     while x > np.pi:
         x -= 2 * np.pi
-    while x < - np.pi:
+    while x < -np.pi:
         x += 2 * np.pi
     return x
 
 
 def is_close(lhs, rhs):
     if isinstance(lhs, Isometry3) and isinstance(rhs, Isometry3):
-        return np.allclose(lhs.translation, rhs.translation) and np.allclose(
-            lhs.rotation.axis, rhs.rotation.axis
-        ) and np.allclose(mod_pi(lhs.rotation.angle), mod_pi(rhs.rotation.angle))
+        return (
+            np.allclose(lhs.translation, rhs.translation)
+            and np.allclose(lhs.rotation.axis, rhs.rotation.axis)
+            and np.allclose(
+                mod_pi(lhs.rotation.angle), mod_pi(rhs.rotation.angle)
+            )
+        )
     if isinstance(lhs, Screw) and isinstance(rhs, Screw):
-        return np.allclose(lhs.rotation, rhs.rotation) and np.allclose(lhs.translation, rhs.translation)
+        return np.allclose(lhs.rotation, rhs.rotation) and np.allclose(
+            lhs.translation, rhs.translation
+        )
 
     raise NotImplementedError
 
@@ -71,35 +80,41 @@ def test_rotated_base_frame():
         parent=base_model.WORLD,
         at=Isometry3(rotation=rotation),
         joint=Revolute(Screw.w_z()),
-        inertia=block_1m
+        inertia=block_1m,
     )
 
     end_arm = base_model.add_link(
         parent=arm,
         at=Isometry3(translation=np.array([1, 0, 0])),
         joint=Revolute(Screw.w_y()),
-        inertia=block_1m
+        inertia=block_1m,
     )
-    effector = base_model.add_effector(end_arm, at=Isometry3(translation=np.array([1, 0, 0])))
+    effector = base_model.add_effector(
+        end_arm, at=Isometry3(translation=np.array([1, 0, 0]))
+    )
 
     q0 = np.zeros((2,))
     pivot, elbow = base_model.joint_transforms(q0)
-    tool, = base_model.forward_kinematics(q0)
+    (tool,) = base_model.forward_kinematics(q0)
 
     pivot_expected = Isometry3(rotation=rotation)
     assert is_close(pivot, pivot_expected)
 
-    elbow_expected = Isometry3(translation=np.array([-1, 0, 0]), rotation=rotation)
+    elbow_expected = Isometry3(
+        translation=np.array([-1, 0, 0]), rotation=rotation
+    )
     assert is_close(elbow, elbow_expected)
 
-    tool_expected = Isometry3(translation=np.array([-2, 0, 0]), rotation=rotation)
+    tool_expected = Isometry3(
+        translation=np.array([-2, 0, 0]), rotation=rotation
+    )
 
     assert is_close(tool, tool_expected)
 
     q1 = np.array([1, 0]) * np.pi
 
-    origin = np.array([0, 0, 0],dtype=float)
-    tool, = base_model.forward_kinematics(q1)
+    origin = np.array([0, 0, 0], dtype=float)
+    (tool,) = base_model.forward_kinematics(q1)
     pivot, elbow = base_model.joint_transforms(q1)
     pivot_expected = Isometry3.identity()
     assert is_close(pivot, pivot_expected)
@@ -109,16 +124,20 @@ def test_rotated_base_frame():
     tool_expected = Isometry3(translation=np.array([2, 0, 0]))
     assert is_close(tool, tool_expected)
 
-
     q2 = np.array([-np.pi, -np.pi / 2])
-    tool, = base_model.forward_kinematics(q2)
-    tool_expected = Isometry3(translation=np.array([1, 0, 1]), rotation=Rotation3(axis=np.array([0, 1, 0]), angle=np.pi/2))
-    tool, tool_expected =  tool.apply(origin), tool_expected.apply(origin)
+    (tool,) = base_model.forward_kinematics(q2)
+    tool_expected = Isometry3(
+        translation=np.array([1, 0, 1]),
+        rotation=Rotation3(axis=np.array([0, 1, 0]), angle=np.pi / 2),
+    )
+    tool, tool_expected = tool.apply(origin), tool_expected.apply(origin)
     assert np.allclose(tool, tool_expected)
 
     q3 = np.array([0, np.pi / 2])
-    tool, = base_model.forward_kinematics(q3)
-    rot = Rotation3(axis=np.array([0, 0, 1]), angle=np.pi) * Rotation3(axis=np.array([0, 1, 0]), angle=-np.pi/2)
+    (tool,) = base_model.forward_kinematics(q3)
+    rot = Rotation3(axis=np.array([0, 0, 1]), angle=np.pi) * Rotation3(
+        axis=np.array([0, 1, 0]), angle=-np.pi / 2
+    )
     tool_expected = Isometry3(translation=np.array([-1, 0, -1]), rotation=rot)
     assert is_close(tool, tool_expected)
 
@@ -132,26 +151,26 @@ def test_rotated_base_frame_symbolic():
         parent=base_model.WORLD,
         at=Isometry3(rotation=rotation),
         joint=Revolute(Screw.w_z()),
-        inertia=block_1m
+        inertia=block_1m,
     )
 
     end_arm = base_model.add_link(
         parent=arm,
         at=Isometry3(translation=np.array([1, 0, 0])),
         joint=Revolute(Screw.w_y()),
-        inertia=block_1m
+        inertia=block_1m,
     )
-    effector = base_model.add_effector(end_arm, at=Isometry3(translation=np.array([1, 0, 0])))
+    effector = base_model.add_effector(
+        end_arm, at=Isometry3(translation=np.array([1, 0, 0]))
+    )
 
     q0 = np.zeros((2,))
+
     def joint_transform(q):
 
         pivot, elbow = base_model.joint_transforms(q)
-        tool, = base_model.forward_kinematics(q)
-        return np.concatenate([pivot.as_vector() ], axis=1)
-
-
-
+        (tool,) = base_model.forward_kinematics(q)
+        return np.concatenate([pivot.as_vector()], axis=1)
 
 
 #    validate_symbolic_call('joint_transform', joint_transform, [VectorSpace('q', 2)], [[q0]], 'numpy')
@@ -198,19 +217,24 @@ def test_rotated_shifted_base_frame():
 
     configuations = [
         (0, Screw(rotation=e_y, translation=-np.cross(e_y, e_x))),
-        (np.pi/2, Screw(rotation=-e_x, translation=np.cross(e_x, e_y))),
-        (np.pi, Screw(rotation=-e_y, translation=-np.cross(e_y, e_x)))
+        (np.pi / 2, Screw(rotation=-e_x, translation=np.cross(e_x, e_y))),
+        (np.pi, Screw(rotation=-e_y, translation=-np.cross(e_y, e_x))),
     ]
 
     for angle, global_screw in configuations:
 
         rotation = Rotation3(axis=np.array([0, 0, 1]), angle=angle)
-        join_xform = Isometry3(rotation=rotation) @ Isometry3(translation=np.array([1, 0, 0]))
+        join_xform = Isometry3(rotation=rotation) @ Isometry3(
+            translation=np.array([1, 0, 0])
+        )
 
-        joint_origin = join_xform.apply(np.zeros(3,))
+        joint_origin = join_xform.apply(
+            np.zeros(
+                3,
+            )
+        )
         joint_origin_expected = np.array([np.cos(angle), np.sin(angle), 0])
         assert np.allclose(joint_origin, joint_origin_expected)
-
 
         base_model = RigidBody()
         screw = Screw.w_y()
@@ -218,45 +242,55 @@ def test_rotated_shifted_base_frame():
             parent=base_model.WORLD,
             at=join_xform,
             joint=Revolute(screw),
-            inertia=block_1m
+            inertia=block_1m,
         )
 
-        effector = base_model.add_effector(arm, at=Isometry3(translation=np.array([0, 0, -1])))
+        effector = base_model.add_effector(
+            arm, at=Isometry3(translation=np.array([0, 0, -1]))
+        )
 
-        p_0, = base_model.forward_kinematics(np.zeros((1,)))
-        p_0_expected =Isometry3(translation=np.array([np.cos(angle), np.sin(angle), -1]), rotation=Rotation3(axis=np.array([0, 0, 1]), angle=angle))
+        (p_0,) = base_model.forward_kinematics(np.zeros((1,)))
+        p_0_expected = Isometry3(
+            translation=np.array([np.cos(angle), np.sin(angle), -1]),
+            rotation=Rotation3(axis=np.array([0, 0, 1]), angle=angle),
+        )
 
-        assert is_close(p_0, p_0_expected), f"Failed to rotate base with angle {angle}.\n Expected {p_0_expected}\n Result: {p_0}"
+        assert is_close(
+            p_0, p_0_expected
+        ), f"Failed to rotate base with angle {angle}.\n Expected {p_0_expected}\n Result: {p_0}"
 
-        screw, = base_model._get_joint_global_bases()
+        (screw,) = base_model._get_joint_global_bases()
 
-        assert np.allclose(global_screw.to_array(), screw.to_array()), f"Failed on rotation of {angle}\n Expected {global_screw}\nGot {screw} "
+        assert np.allclose(
+            global_screw.to_array(), screw.to_array()
+        ), f"Failed on rotation of {angle}\n Expected {global_screw}\nGot {screw} "
 
-        joint_angle = np.pi/2
+        joint_angle = np.pi / 2
 
-        joint_xform, =  base_model.joint_transforms(np.array([joint_angle]))
+        (joint_xform,) = base_model.joint_transforms(np.array([joint_angle]))
         joint_xform_expected = (
             Isometry3(rotation=rotation)
-            @ Isometry3(translation=np.array([1, 0 ,0]))
-            @ Isometry3(rotation=Rotation3(axis=np.array([0, 1, 0]), angle=joint_angle))
-
-         )
+            @ Isometry3(translation=np.array([1, 0, 0]))
+            @ Isometry3(
+                rotation=Rotation3(axis=np.array([0, 1, 0]), angle=joint_angle)
+            )
+        )
         assert is_close(joint_xform, joint_xform_expected)
 
-
-        p_1, = base_model.forward_kinematics(np.array([joint_angle]))
+        (p_1,) = base_model.forward_kinematics(np.array([joint_angle]))
 
         p_1_expected = (
             Isometry3(rotation=rotation)
-            @ Isometry3(translation=np.array([1, 0 ,0]))
-            @ Isometry3(rotation=Rotation3(axis=np.array([0, 1, 0]), angle=joint_angle))
+            @ Isometry3(translation=np.array([1, 0, 0]))
+            @ Isometry3(
+                rotation=Rotation3(axis=np.array([0, 1, 0]), angle=joint_angle)
+            )
             @ Isometry3(translation=np.array([0, 0, -1]))
         )
 
-        assert is_close(p_1, p_1_expected), f"Failed for base angle {angle}.\n Expected {p_1_expected}\nGot {p_1}\n"
-
-
-
+        assert is_close(
+            p_1, p_1_expected
+        ), f"Failed for base angle {angle}.\n Expected {p_1_expected}\nGot {p_1}\n"
 
 
 def test_add_body():
@@ -278,41 +312,43 @@ def test_add_body():
         parent=base_model.WORLD,
         at=Isometry3.identity(),
         joint=Revolute(Screw.w_z()),
-        inertia=block_1m
+        inertia=block_1m,
     )
 
     end_arm = base_model.add_link(
         parent=arm,
         at=Isometry3(translation=np.array([1, 0, 0])),
         joint=Revolute(Screw.w_y()),
-        inertia=block_1m
+        inertia=block_1m,
     )
 
-    effector = base_model.add_effector(end_arm, at=Isometry3(translation=np.array([1, 0, 0])))
+    effector = base_model.add_effector(
+        end_arm, at=Isometry3(translation=np.array([1, 0, 0]))
+    )
 
     rot_offset = np.pi / 2
 
     variant = RigidBody()
     rotation = Rotation3(axis=np.array([0, 0, 1]), angle=rot_offset)
     variant.add_body(
-        body=base_model,
-        parent=variant.WORLD,
-        at=Isometry3(rotation=rotation)
+        body=base_model, parent=variant.WORLD, at=Isometry3(rotation=rotation)
     )
     explicit = RigidBody()
     upper_arm = explicit.add_link(
         parent=explicit.WORLD,
         at=Isometry3(rotation=rotation),
         inertia=block_1m,
-        joint=Revolute(Screw.w_z())
+        joint=Revolute(Screw.w_z()),
     )
     forearm = explicit.add_link(
         parent=arm,
         at=Isometry3(translation=np.array([1, 0, 0])),
         inertia=block_1m,
-        joint=Revolute(Screw.w_y())
+        joint=Revolute(Screw.w_y()),
     )
-    tip = explicit.add_effector(forearm, at=Isometry3(translation=np.array([1, 0, 0])))
+    tip = explicit.add_effector(
+        forearm, at=Isometry3(translation=np.array([1, 0, 0]))
+    )
 
     for t_v, t_e in zip(variant.transforms, explicit.transforms):
         assert is_close(t_v, t_e)
@@ -321,18 +357,35 @@ def test_add_body():
         assert is_close(r_v, r_e)
 
     for i in range(len(variant.joint_bases)):
-        for b_v_i, b_e_i in zip(variant.joint_global_basis(i), explicit.joint_global_basis(i)):
+        for b_v_i, b_e_i in zip(
+            variant.joint_global_basis(i), explicit.joint_global_basis(i)
+        ):
             assert is_close(b_v_i, b_e_i), f"Basis {i} not aligned"
 
     test_set = [
-        (np.array([-np.pi/2, 0]), Isometry3(translation=np.array([2, 0, 0]))),
-        (np.array([0, 0]), Isometry3(translation=np.array([0, 2, 0]), rotation=Rotation3(e_z, np.pi/2))),
-        (np.array([-np.pi/2, np.pi/2]), Isometry3(translation=np.array([1, 0, -1]), rotation=Rotation3(e_y, np.pi / 2))),
+        (
+            np.array([-np.pi / 2, 0]),
+            Isometry3(translation=np.array([2, 0, 0])),
+        ),
+        (
+            np.array([0, 0]),
+            Isometry3(
+                translation=np.array([0, 2, 0]),
+                rotation=Rotation3(e_z, np.pi / 2),
+            ),
+        ),
+        (
+            np.array([-np.pi / 2, np.pi / 2]),
+            Isometry3(
+                translation=np.array([1, 0, -1]),
+                rotation=Rotation3(e_y, np.pi / 2),
+            ),
+        ),
     ]
 
-    for (q, toolhead) in test_set:
-        f_variant, = variant.forward_kinematics(q)
-        f_explicit, = explicit.forward_kinematics(q)
+    for q, toolhead in test_set:
+        (f_variant,) = variant.forward_kinematics(q)
+        (f_explicit,) = explicit.forward_kinematics(q)
 
         assert is_close(f_explicit, f_variant)
         assert is_close(f_explicit, toolhead)
@@ -341,7 +394,6 @@ def test_add_body():
 
 def test_add_multiple():
 
-
     #          Rotator
     #          V
     #  --o--|--+--|--o--
@@ -349,37 +401,61 @@ def test_add_multiple():
     #             ^
     #             Arm
 
-
     # two link model
     base_model = RigidBody()
     arm = base_model.add_link(
         parent=base_model.WORLD,
         at=Isometry3.identity(),
         joint=Revolute(Screw.w_z()),
-        inertia=block_1m
+        inertia=block_1m,
     )
 
     end_arm = base_model.add_link(
         parent=arm,
         at=Isometry3(translation=np.array([1, 0, 0])),
         joint=Revolute(Screw.w_y()),
-        inertia=block_1m
+        inertia=block_1m,
     )
 
-    effector = base_model.add_effector(end_arm, at=Isometry3(translation=np.array([1, 0, 0])))
+    effector = base_model.add_effector(
+        end_arm, at=Isometry3(translation=np.array([1, 0, 0]))
+    )
 
     rotator_model = RigidBody()
-    base_intertia = Inertia(centre_of_mass=Isometry3.identity(), mass=1, moments=np.array([1, 0, 0, 1, 0, 1]))
-    base = rotator_model.add_link(parent=rotator_model.WORLD, at=Isometry3.identity(), joint=Revolute(Screw.w_z()), inertia=base_intertia)
+    base_intertia = Inertia(
+        centre_of_mass=Isometry3.identity(),
+        mass=1,
+        moments=np.array([1, 0, 0, 1, 0, 1]),
+    )
+    base = rotator_model.add_link(
+        parent=rotator_model.WORLD,
+        at=Isometry3.identity(),
+        joint=Revolute(Screw.w_z()),
+        inertia=base_intertia,
+    )
 
-    rotator_model.add_body(base_model, parent=base, at=Isometry3(translation=np.array([0.5, 0, 0])))
-    rotator_model.add_body(base_model, parent=base, at=Isometry3(translation=np.array([-0.5, 0, 0]), rotation=Rotation3(e_z, np.pi)))
+    rotator_model.add_body(
+        base_model,
+        parent=base,
+        at=Isometry3(translation=np.array([0.5, 0, 0])),
+    )
+    rotator_model.add_body(
+        base_model,
+        parent=base,
+        at=Isometry3(
+            translation=np.array([-0.5, 0, 0]), rotation=Rotation3(e_z, np.pi)
+        ),
+    )
     rest_transforms = [
         Isometry3.identity(),
         Isometry3(translation=np.array([0.5, 0, 0])),
         Isometry3(translation=np.array([1.5, 0, 0])),
-        Isometry3(translation=np.array([-0.5, 0, 0]), rotation=Rotation3(e_z, np.pi)),
-        Isometry3(translation=np.array([-1.5, 0, 0]),  rotation=Rotation3(e_z, np.pi))
+        Isometry3(
+            translation=np.array([-0.5, 0, 0]), rotation=Rotation3(e_z, np.pi)
+        ),
+        Isometry3(
+            translation=np.array([-1.5, 0, 0]), rotation=Rotation3(e_z, np.pi)
+        ),
     ]
 
     for t, rt in zip(rest_transforms, rotator_model._rest_transforms):
@@ -397,12 +473,12 @@ def test_add_multiple():
     ]
 
     for i, basis in enumerate(absolute_screw_bases):
-        test_basis, = rotator_model.joint_global_basis(i)
-        local_basis, = rotator_model.joint_bases[i]
+        (test_basis,) = rotator_model.joint_global_basis(i)
+        (local_basis,) = rotator_model.joint_bases[i]
 
         if i in {0, 1, 3}:
             assert is_close(local_basis, Screw.w_z())
-        elif i in {2,4}:
+        elif i in {2, 4}:
             assert is_close(local_basis, Screw.w_y())
 
         assert is_close(test_basis, basis), f"Basis {i} is incorrect"
@@ -411,31 +487,51 @@ def test_add_multiple():
     basis_1 = np.array([0, 1, 0, 1, 0])
     basis_2 = np.array([0, 0, 1, 0, 1])
 
-    t1, t2 = rotator_model.forward_kinematics(np.zeros(5,))
+    t1, t2 = rotator_model.forward_kinematics(
+        np.zeros(
+            5,
+        )
+    )
 
     t1_expected = Isometry3(translation=np.array([2.5, 0, 0]))
-    t2_expected = Isometry3(translation=np.array([-2.5, 0, 0]), rotation=Rotation3(e_z, np.pi))
+    t2_expected = Isometry3(
+        translation=np.array([-2.5, 0, 0]), rotation=Rotation3(e_z, np.pi)
+    )
     assert is_close(t1, t1_expected)
     assert is_close(t2, t2_expected)
 
     t1, t2 = rotator_model.forward_kinematics(basis_0 * np.pi)
 
-    t1_expected = Isometry3(translation=np.array([-2.5, 0, 0]), rotation=Rotation3(e_z, np.pi))
+    t1_expected = Isometry3(
+        translation=np.array([-2.5, 0, 0]), rotation=Rotation3(e_z, np.pi)
+    )
     t2_expected = Isometry3(translation=np.array([2.5, 0, 0]))
 
     assert is_close(t1, t1_expected)
     assert is_close(t2, t2_expected)
 
     t1, t2 = rotator_model.forward_kinematics(basis_2 * np.pi / 2)
-    t1_expected = Isometry3(translation=np.array([1.5, 0, -1]), rotation=Rotation3(e_y, np.pi / 2))
-    t2_expected = Isometry3(translation=np.array([-1.5, 0, -1]), rotation=Rotation3(e_z, np.pi) * Rotation3(e_y,- np.pi / 2))
+    t1_expected = Isometry3(
+        translation=np.array([1.5, 0, -1]), rotation=Rotation3(e_y, np.pi / 2)
+    )
+    t2_expected = Isometry3(
+        translation=np.array([-1.5, 0, -1]),
+        rotation=Rotation3(e_z, np.pi) * Rotation3(e_y, -np.pi / 2),
+    )
 
-    _, r1, r2, l1, l2 = rotator_model.joint_transforms(basis_2 * np.pi/2)
+    _, r1, r2, l1, l2 = rotator_model.joint_transforms(basis_2 * np.pi / 2)
 
     r1_expected = Isometry3(translation=np.array([0.5, 0, 0]))
-    r2_expected = Isometry3(translation=np.array([1.5, 0, 0]), rotation=Rotation3(e_y, np.pi / 2))
-    l1_expected = Isometry3(translation=np.array([-0.5, 0, 0]), rotation=Rotation3(e_z, np.pi))
-    l2_expected = Isometry3(translation=np.array([-1.5, 0, 0]), rotation=Rotation3(e_z, np.pi) * Rotation3(e_y, -np.pi / 2))
+    r2_expected = Isometry3(
+        translation=np.array([1.5, 0, 0]), rotation=Rotation3(e_y, np.pi / 2)
+    )
+    l1_expected = Isometry3(
+        translation=np.array([-0.5, 0, 0]), rotation=Rotation3(e_z, np.pi)
+    )
+    l2_expected = Isometry3(
+        translation=np.array([-1.5, 0, 0]),
+        rotation=Rotation3(e_z, np.pi) * Rotation3(e_y, -np.pi / 2),
+    )
 
     assert is_close(r1, r1_expected)
     assert is_close(r2, r2_expected)
@@ -447,11 +543,13 @@ def test_add_multiple():
 
     jacobians = rotator_model.spatial_manipulator_jacobian(np.zeros((5,)))
     for i in range(2):
-        jac_1 = rotator_model.spatial_single_manipulator_jacobian(np.zeros((5,)), i)
+        jac_1 = rotator_model.spatial_single_manipulator_jacobian(
+            np.zeros((5,)), i
+        )
         jac_2 = jacobians[i]
         assert np.allclose(jac_1, jac_2)
 
-    dscrews_0 = [
-        jac @ basis_0 for jac in jacobians
-    ]
-    assert np.linalg.norm(dscrews_0[0] - dscrews_0[1]) < 1e-4, f"{dscrews_0[0]} != {dscrews_0[1]}"
+    dscrews_0 = [jac @ basis_0 for jac in jacobians]
+    assert (
+        np.linalg.norm(dscrews_0[0] - dscrews_0[1]) < 1e-4
+    ), f"{dscrews_0[0]} != {dscrews_0[1]}"

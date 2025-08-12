@@ -1,7 +1,8 @@
 import casadi as ca
 import numpy as np
 
-from coker import OP, Tape, Tracer
+import coker
+from coker import OP, Tape, Tracer, FunctionSpace, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 from typing import List
 
@@ -29,9 +30,9 @@ impls = {
     OP.EQUAL: ca.eq,
     OP.LESS_EQUAL: ca.le,
     OP.LESS_THAN: ca.lt,
-    OP.CASE: lambda c, t, f: ca.if_else(c, t, f)
+    OP.CASE: lambda c, t, f: ca.if_else(c, t, f),
+    OP.EVALUATE: lambda op, *args: op(*args),
 }
-
 
 
 def concat(*args: ca.MX, axis=0):
@@ -80,7 +81,6 @@ def call_parameterised_op(op, *args):
     return result
 
 
-
 class CasadiTensor:
     def __init__(self, *shape):
         self.shape = shape
@@ -98,7 +98,9 @@ class CasadiTensor:
         self.data = {k: d * other for k, d in self.data.items()}
 
     def __matmul__(self, other):
-        assert len(self.shape) == 3, f"Higher order tensors not yet implemented"
+        assert (
+            len(self.shape) == 3
+        ), f"Higher order tensors not yet implemented"
         assert len(other.shape) == 2
         assert other.shape[0] == self.shape[-1]
         assert other.shape[1] == 1
@@ -109,7 +111,6 @@ class CasadiTensor:
             out[i, j] += v * other[k, 0]
 
         return out
-
 
     def reshape(self, shape):
         assert self.shape == shape
@@ -122,10 +123,10 @@ def to_casadi(value):
             value = value.reshape(-1, 1)
 
         if len(value.shape) > 2:
-            v =  CasadiTensor(*value.shape)
+            v = CasadiTensor(*value.shape)
         else:
-            v = ca.MX(*value.shape)
-        it = np.nditer(value, op_flags=['readonly'], flags=['multi_index'])
+            v = ca.DM.zeros(*value.shape)
+        it = np.nditer(value, op_flags=["readonly"], flags=["multi_index"])
         for x in it:
             if x != 0:
                 k = it.multi_index
@@ -141,12 +142,18 @@ def to_casadi(value):
 
 
 def extract_symbols(arg: ca.MX):
+    if isinstance(arg, (ca.Function, coker.Function)):
+        return set()
     v = {arg.dep(i) for i in range(arg.n_dep()) if arg.dep(i).is_symbolic()}
     return v
 
 
 def substitute(output: List[Tracer], workspace):
     def get_node(node: Tracer):
+        if node is None:
+            return None
+        if node is Noop():
+            return node
         if node.index in workspace:
             return workspace[node.index]
 
@@ -154,7 +161,11 @@ def substitute(output: List[Tracer], workspace):
             v = to_casadi(node.value())
 
             if not node.dim.is_scalar():
-                shape = node.shape if not node.dim.is_vector() else (*node.dim.shape, 1)
+                shape = (
+                    node.shape
+                    if not node.dim.is_vector()
+                    else (*node.dim.shape, 1)
+                )
 
                 v = v.reshape(shape)
         else:
@@ -179,13 +190,18 @@ def lower(tape: Tape, output: List[Tracer], workspace=None):
     workspace = {} if not workspace else workspace
     inputs = dict()
     for i in tape.input_indicies:
-        if i not in workspace:
-            v = ca.MX.sym(f"x_{i}", *tape.dim[i].shape)
-            workspace[i] = v
-            inputs[v.__hash__()] = v
-        else:
+        if i in workspace:
             s = extract_symbols(workspace[i])
             inputs.update({s_i.__hash__(): s_i for s_i in s})
+            continue
+
+        assert not isinstance(
+            tape.dim[i], FunctionSpace
+        ), "Cannot lower a partially evaluated function."
+
+        v = ca.MX.sym(f"x_{i}", *tape.dim[i].shape)
+        workspace[i] = v
+        inputs[v.__hash__()] = v
 
     result = substitute(output, workspace)
     return list(inputs.values()), result

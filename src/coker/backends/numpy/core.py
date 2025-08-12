@@ -4,15 +4,15 @@ from operator import mul
 import numpy as np
 import sympy as sp
 import scipy as sy
-from toolz.functoolz import return_none
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Tracer, VectorSpace
+from coker.algebra.kernel import Tracer, VectorSpace, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike
 from coker.backends.evaluator import evaluate_inner
 import scipy as scp
+
 
 def to_array(value, shape):
 
@@ -22,7 +22,17 @@ def to_array(value, shape):
     raise NotImplementedError
 
 
-scalar_types = (np.float32, np.float64, np.int32, np.int64, float, complex, int, bool, np.bool_)
+scalar_types = (
+    np.float32,
+    np.float64,
+    np.int32,
+    np.int64,
+    float,
+    complex,
+    int,
+    bool,
+    np.bool_,
+)
 
 
 def is_scalar_symbol(v):
@@ -68,6 +78,7 @@ impls = {
     OP.LESS_EQUAL: np.less_equal,
     OP.LESS_THAN: np.less,
     OP.CASE: lambda cond, t, f: t if cond else f,
+    OP.EVALUATE: lambda op, *args: op(*args),
 }
 
 parameterised_impls = {
@@ -152,8 +163,11 @@ class NumpyBackend(Backend):
             return reshape_sympy_matrix(arg, dim.dim)
         elif isinstance(arg, np.ndarray):
             return np.reshape(arg, dim.dim)
-
-        raise NotImplementedError(f"Don't know how to resize {arg.__class__.__name__}")
+        elif isinstance(arg, (float, int)):
+            return np.array([arg]).reshape(dim.dim)
+        raise NotImplementedError(
+            f"Don't know how to resize {arg.__class__.__name__}"
+        )
 
     def call(self, op, *args) -> ArrayLike:
 
@@ -165,41 +179,57 @@ class NumpyBackend(Backend):
 
         if isinstance(op, tuple(parameterised_impls.keys())):
             return call_parameterised_op(op, *args)
+
         raise NotImplementedError(f"{op} is not implemented")
 
     def evaluate_integrals(
-            self,
-            functions,
-            initial_conditions,
-            end_point: float,
-            inputs, solver_parameters=None):
+        self,
+        functions,
+        initial_conditions,
+        end_point: float,
+        inputs,
+        solver_parameters=None,
+    ):
 
         dxdt, constraint, dqdt = functions
         x0, z0, q0 = initial_conditions
         u, p = inputs
 
-        if constraint is not None:
-            raise NotImplementedError("Integrators with constraints are not implemented")
+        if constraint is not Noop():
+            raise NotImplementedError(
+                "Integrators with constraints are not implemented"
+            )
 
         if not isinstance(x0, np.ndarray):
             x0 = np.array([x0])
 
-        if dqdt is None:
+        if end_point == 0.0:
+            return x0, z0, q0
+
+        if dqdt is Noop():
             y0 = x0
-            f = lambda t, x: dxdt(t, x, None, u(t), p)
+            f = lambda t, x: dxdt(t, x, None, u, p)
 
         else:
-            y0=np.concatenate([x0, q0]),
-            f = lambda t, x: np.concatenate([dxdt(t, x, None, u(t), p), dqdt(t, x, None, u(t), p)])
+            y0 = (np.concatenate([x0, q0]),)
+            f = lambda t, x: np.concatenate(
+                [dxdt(t, x, None, u, p), dqdt(t, x, None, u, p)]
+            )
 
-        sol = scp.integrate.solve_ivp(f, (0, end_point), y0, method="RK45",t_eval=[end_point])
+        sol = scp.integrate.solve_ivp(
+            f, (0, end_point), y0, method="RK45", t_eval=[end_point]
+        )
 
         if dqdt is None:
-            return sol.y, None, None
+            x_out, z_out, q_out = sol.y[: x0.shape[0], 0], None, None
+        else:
+            x_out, z_out, q_out = (
+                sol.y[: x0.shape[0], 0],
+                None,
+                sol.y[x0.shape[0] :, 0],
+            )
 
-        return sol.y[x0.shape[0]:, 0], None, sol.y[x0.shape[0]:, 0]
-
-
+        return x_out, z_out, q_out
 
     def build_optimisation_problem(
         self,
@@ -226,7 +256,9 @@ class NumpyBackend(Backend):
         # c_i = X^T Q_i X + P_i X + R_i + N_i(Z)
 
         arg_indexes = {a.index for a in arguments}
-        decision_variables = [i for i in tape.input_indicies if i not in arg_indexes]
+        decision_variables = [
+            i for i in tape.input_indicies if i not in arg_indexes
+        ]
 
         arg_symbols = []
         for i, a in enumerate(arguments):
@@ -256,15 +288,19 @@ class NumpyBackend(Backend):
         problem_args = [x, *arg_symbols]
         cost_f = sp.lambdify(problem_args, cost)
 
-        cost_jac = lambda a: sp.lambdify(problem_args, jacobian(cost, x))(a).reshape(
-            x.shape
-        )
+        cost_jac = lambda a: sp.lambdify(problem_args, jacobian(cost, x))(
+            a
+        ).reshape(x.shape)
         cost_hess = sp.lambdify(problem_args, hessian(cost, x))
 
         out_constriants = []
         for i, constraint in enumerate(constraints):
             (c,) = evaluate_inner(
-                tape, arguments, [constraint.as_halfplane_bound()], self, workspace
+                tape,
+                arguments,
+                [constraint.as_halfplane_bound()],
+                self,
+                workspace,
             )
             c_func = sp.lambdify(problem_args, c)
             c_jac = jacobian(c, problem_args)

@@ -1,10 +1,9 @@
-import dataclasses
 import enum
 import numpy as np
 from typing import Dict, Callable
-
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
-from coker.algebra.dimensions import Dimension
+from coker.algebra.dimensions import Dimension, FunctionSpace
+from typing_extensions import final
 
 
 class OP(enum.Enum):
@@ -34,6 +33,7 @@ class OP(enum.Enum):
     ARCTAN2 = 23
     LESS_THAN = 24
     LESS_EQUAL = 25
+    EVALUATE = 26
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -46,6 +46,21 @@ class OP(enum.Enum):
 
     def is_nonlinear(self):
         return not self.is_linear() and not self.is_bilinear()
+
+
+@final
+class Noop:
+    def __call__(self, *args, **kwargs):
+        return None
+
+    def __new__(cls, *args, **kwargs):
+        if not hasattr(cls, "instance"):
+            cls.instance = super().__new__(cls)
+        return cls.instance
+
+    @staticmethod
+    def cast_to_function_space(arguments=None):
+        return FunctionSpace("noop", arguments, None)
 
 
 class Operator:
@@ -83,12 +98,14 @@ class ConcatenateOP(Operator):
 
         out_dims = list(dims[0].dim)
         if all(d.is_scalar() or d.is_vector() for d in dims):
-            dim = Dimension((sum(d.flat() for d in dims), ))
+            dim = Dimension((sum(d.flat() for d in dims),))
             return dim
 
         for d in dims[1:]:
             assert all(
-                d.dim[i] == out_dims[i] for i in range(len(out_dims)) if i != self.axis
+                d.dim[i] == out_dims[i]
+                for i in range(len(out_dims))
+                if i != self.axis
             )
             out_dims[self.axis] += d.dim[self.axis]
 
@@ -116,6 +133,7 @@ class NormOP(Operator):
     def is_linear(self):
         return False
 
+
 class ClipOP(Operator):
     def __init__(self, a=None, a_min=None, a_max=None):
         self.lower = a_min
@@ -130,7 +148,6 @@ class ClipOP(Operator):
         self.lower = a_min
         self.higher = a_max
         return a
-
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         assert all(d.is_scalar() for d in dims)
@@ -153,11 +170,42 @@ def register_shape(*ops: OP):
     return inner
 
 
+@register_shape(OP.EVALUATE)
+def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
+
+    if len(args) != len(function_sig.arguments):
+        raise InvalidShape(
+            f"Expected {len(function_sig.arguments)} arguments, got {len(args)}"
+        )
+
+    for i, (arg_dim, input_dim) in enumerate(
+        zip(args, function_sig.input_dimensions())
+    ):
+        if arg_dim != input_dim:
+            raise InvalidShape(
+                f"Argument {i} has dimension {arg_dim.dim}, expected {input_dim.dim}"
+            )
+    try:
+        (out_dim,) = function_sig.output_dimensions()
+        return out_dim
+    except ValueError:
+        return function_sig.output_dimensions()
+
+
 @register_shape(
-    OP.VALUE, OP.NEG, OP.ABS, OP.SIN, OP.COS, OP.TAN, OP.ARCSIN, OP.ARCCOS, OP.ARCTAN
+    OP.VALUE,
+    OP.NEG,
+    OP.ABS,
+    OP.SIN,
+    OP.COS,
+    OP.TAN,
+    OP.ARCSIN,
+    OP.ARCCOS,
+    OP.ARCTAN,
 )
 def dimension_identity(dim: Dimension):
     return dim
+
 
 @register_shape(OP.EQUAL, OP.LESS_EQUAL, OP.LESS_THAN)
 def comparison_dimension(dim1: Dimension, dim2: Dimension):
@@ -167,11 +215,13 @@ def comparison_dimension(dim1: Dimension, dim2: Dimension):
 
 
 @register_shape(OP.CASE)
-def case_dimension(condition: Dimension, false_branch: Dimension, true_branch: Dimension ):
+def case_dimension(
+    condition: Dimension, false_branch: Dimension, true_branch: Dimension
+):
     if not condition.is_scalar():
         raise InvalidShape("Condition must be a scalar")
 
-    if false_branch!= true_branch:
+    if false_branch != true_branch:
         raise InvalidShape("Arguments are of different dimensions")
 
     return true_branch
@@ -179,6 +229,9 @@ def case_dimension(condition: Dimension, false_branch: Dimension, true_branch: D
 
 @register_shape(OP.ADD, OP.SUB, OP.ARCTAN2)
 def same_dimension(d_1: Dimension, d_2: Dimension) -> Dimension:
+    if d_1.is_scalar() and d_2.is_scalar():
+        return d_1
+
     if d_1 != d_2:
         raise InvalidShape("Arguments are of different dimensions")
 
@@ -203,7 +256,9 @@ def shape_mul(d_1: Dimension, d_2: Dimension):
 def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     if d_1.is_scalar() or d_2.is_scalar():
-        raise InvalidArgument("Matrix multiplication is not defined for scalars")
+        raise InvalidArgument(
+            "Matrix multiplication is not defined for scalars"
+        )
 
     if d_1.is_vector():
         raise InvalidArgument("Cannot multiply vectors")
@@ -222,7 +277,9 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
         out_dims += [d for d in d_2.dim[1:]]
 
     if c != r:
-        raise InvalidArgument("Cannot multiply: product axis has different shape")
+        raise InvalidArgument(
+            "Cannot multiply: product axis has different shape"
+        )
 
     if out_dims:
         try:
@@ -252,7 +309,9 @@ def dot_shape(d_1: Dimension, d_2: Dimension):
     if d_1.dim == d_2.dim and (d_1.is_vector() or d_1.is_covector()):
         return Dimension(None)
 
-    raise InvalidArgument("Dot product only defined for vectors from the same space.")
+    raise InvalidArgument(
+        "Dot product only defined for vectors from the same space."
+    )
 
 
 @register_shape(OP.TRANSPOSE)

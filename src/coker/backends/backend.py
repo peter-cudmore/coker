@@ -4,6 +4,12 @@ from coker import Function
 from coker import Tracer
 from typing import List, Dict
 
+from coker.dynamics import (
+    VariationalProblem,
+    create_autonomous_ode,
+    DynamicsSpec,
+)
+
 ArrayLike = Any
 
 
@@ -42,35 +48,37 @@ class Backend(metaclass=ABCMeta):
     ):
         raise NotImplementedError
 
+    def create_variational_solver(self, problem: VariationalProblem):
+        raise NotImplementedError
+
     def evaluate(self, function: Function, inputs: ArrayLike):
         from coker.backends.evaluator import evaluate_inner
 
         workspace = {}
-        return evaluate_inner(function.tape, inputs, function.output, self, workspace)
+        return evaluate_inner(
+            function.tape, inputs, function.output, self, workspace
+        )
 
     def evaluate_integrals(
-            self,
-            functions,
-            initial_conditions,
-            end_point: float,
-            inputs,
-            solver_parameters=None,
+        self,
+        functions,
+        initial_conditions,
+        end_point: float,
+        inputs,
+        solver_parameters=None,
     ):
-
-        dxdt, constraint, dqdt = functions
-        x0, z0, q0 = initial_conditions
-        u, p = inputs
-        raise NotImplementedError(f"Integrator is not implemented for this backend: {self.__class__.__name__}")
-
+        raise NotImplementedError(
+            "Evaluating integrals is not implemented for this backend"
+        )
 
     def lower(self, function: Function):
-        raise NotImplementedError("lowering is not implemented for this backend")
-
-
-
+        raise NotImplementedError(
+            "lowering is not implemented for this backend"
+        )
 
 
 __known_backends = {}
+
 
 def instantiate_backend(name: str):
     if name == "numpy":

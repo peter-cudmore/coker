@@ -33,6 +33,7 @@ class InputLayer:
         self.dimension = 0
 
     def add_input(self, dim: Dimension) -> int:
+
         idx = len(self.vec_to_arg_maps)
         if dim.is_scalar():
             self.vec_to_arg_maps.append({(0, self.dimension)})

@@ -35,7 +35,7 @@ class Rotation3:
         self.angle = angle
 
     @staticmethod
-    def cast(other) -> 'Rotation3':
+    def cast(other) -> "Rotation3":
 
         if isinstance(other, Rotation3):
             return other
@@ -49,7 +49,6 @@ class Rotation3:
 
         raise NotImplementedError(f"Cannot cast {other} to a rotation matrix")
 
-
     def as_vector(self) -> np.ndarray:
         return self.axis * self.angle
 
@@ -58,11 +57,18 @@ class Rotation3:
 
     @staticmethod
     def zero():
-        return Rotation3(np.array(e_z.copy(), ), angle=0)
+        return Rotation3(
+            np.array(
+                e_z.copy(),
+            ),
+            angle=0,
+        )
 
     @staticmethod
     def from_vector(vector):
-        array = np.array(vector, )
+        array = np.array(
+            vector,
+        )
         angle = np.linalg.norm(array)
         if angle == 0:
             return Rotation3.zero()
@@ -78,7 +84,7 @@ class Rotation3:
     @staticmethod
     def from_quaterion(q: UnitQuaternion):
         try:
-            if isinstance(q.q_0, (float, int))  and q.q_0 == 1:
+            if isinstance(q.q_0, (float, int)) and q.q_0 == 1:
                 return Rotation3.zero()
         except NotImplementedError:
             pass
@@ -121,18 +127,29 @@ class Rotation3:
 
 class Isometry3:
     def __init__(
-        self, rotation: Optional[Rotation3] = None, translation: Optional[Vec3] = None
+        self,
+        rotation: Optional[Rotation3] = None,
+        translation: Optional[Vec3] = None,
     ):
 
-        self.rotation = Rotation3.zero() if rotation is None else (
-            Rotation3.cast(rotation))
+        self.rotation = (
+            Rotation3.zero()
+            if rotation is None
+            else (Rotation3.cast(rotation))
+        )
 
         self.translation = (
-            np.array([0, 0, 0], ) if translation is None else translation
+            np.array(
+                [0, 0, 0],
+            )
+            if translation is None
+            else translation
         )
 
     def __repr__(self):
-        return f"Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})"
+        return (
+            f"Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})"
+        )
 
     def __eq__(self, other):
         return (
@@ -143,7 +160,12 @@ class Isometry3:
 
     @staticmethod
     def identity():
-        return Isometry3(Rotation3.zero(), translation=np.array([0, 0, 0], ))
+        return Isometry3(
+            Rotation3.zero(),
+            translation=np.array(
+                [0, 0, 0],
+            ),
+        )
 
     def __matmul__(self, other):
         if isinstance(other, Isometry3):
@@ -154,7 +176,10 @@ class Isometry3:
             )
             return Isometry3(rotation, translation)
         elif isinstance(other, np.ndarray) and other.shape == (3,):
-            return self.rotation.as_quaternion().conjugate(other) + self.translation
+            return (
+                self.rotation.as_quaternion().conjugate(other)
+                + self.translation
+            )
         elif isinstance(other, np.ndarray) and other.shape == (4, 1):
             result = np.reshape(
                 self.rotation.as_quaternion().conjugate(other[0:3, 0])
@@ -167,7 +192,9 @@ class Isometry3:
 
     def apply(self, other):
         assert other.shape == (3,)
-        return self.rotation.as_quaternion().conjugate(other) + self.translation
+        return (
+            self.rotation.as_quaternion().conjugate(other) + self.translation
+        )
 
     def transpose(self):
         q = self.rotation.inverse()
@@ -176,7 +203,9 @@ class Isometry3:
     def as_matrix(self):
         r = self.rotation.as_matrix()
         p = np.reshape(self.translation, newshape=(3, 1))
-        o = np.array([[0, 0, 0, 1.0]], )
+        o = np.array(
+            [[0, 0, 0, 1.0]],
+        )
 
         result = np.concatenate((r, p), axis=1)
 
@@ -211,7 +240,9 @@ class Screw:
         translation: Optional[Vec3] = None,
         magnitude: float = 1,
     ):
-        self.rotation = rotation if rotation is not None else np.array([0, 0, 0])
+        self.rotation = (
+            rotation if rotation is not None else np.array([0, 0, 0])
+        )
         self.translation = (
             translation if translation is not None else np.array([0, 0, 0])
         )
@@ -260,7 +291,9 @@ class Screw:
         return Screw(rotation / mag, translation / mag, mag)
 
     def to_array(self) -> np.ndarray:
-        return np.concatenate([self.rotation, self.translation]) * self.magnitude
+        return (
+            np.concatenate([self.rotation, self.translation]) * self.magnitude
+        )
 
     @staticmethod
     def from_array(array):
@@ -271,8 +304,8 @@ class Screw:
             if (rotation == 0.0).all():
                 return Screw(rotation, translation, 1)
             else:
-                mag = np.linalg.norm(rotation)[0]
-        except:
+                mag = np.linalg.norm(rotation)
+        except TypeError:
             mag = 1
 
         return Screw(rotation / mag, translation / mag, mag)
@@ -280,8 +313,12 @@ class Screw:
     @staticmethod
     def zero():
         return Screw(
-            rotation=np.array([1, 0, 0], ),
-            translation=np.array([0, 0, 0], ),
+            rotation=np.array(
+                [1, 0, 0],
+            ),
+            translation=np.array(
+                [0, 0, 0],
+            ),
             magnitude=0,
         )
 
@@ -312,7 +349,10 @@ class Screw:
         else:
             alpha = angle
 
-        if isinstance (self.rotation, np.ndarray) and (self.rotation == 0).all():
+        if (
+            isinstance(self.rotation, np.ndarray)
+            and (self.rotation == 0).all()
+        ):
             return Isometry3(
                 rotation=Rotation3.zero(), translation=self.translation * alpha
             )
@@ -322,18 +362,21 @@ class Screw:
         rot_dot_t = np.dot(self.rotation, self.translation)
         rot_cross_t = np.cross(self.rotation, self.translation)
 
-        t1 = - rotation.apply(rot_cross_t)
+        t1 = -rotation.apply(rot_cross_t)
         t2 = alpha * self.rotation
         t3 = rot_dot_t * t2
 
         translation = rot_cross_t + t1 + t3
 
-
         return Isometry3(rotation=rotation, translation=translation)
 
     def as_matrix(self):
         w_hat = hat(self.rotation)
-        return np.concatenate(np.concatenate([w_hat, self.translation]), np.array([[0,0,0,1]]), axis=1)
+        return np.concatenate(
+            np.concatenate([w_hat, self.translation]),
+            np.array([[0, 0, 0, 1]]),
+            axis=1,
+        )
 
     def __eq__(self, other):
         return (
@@ -357,7 +400,9 @@ class SE3Adjoint:
         translation = hat(p) @ rotation + q.conjugate(zeta.translation)
 
         return Screw(
-            rotation=rotation, translation=translation, magnitude=zeta.magnitude
+            rotation=rotation,
+            translation=translation,
+            magnitude=zeta.magnitude,
         )
 
     def transpose(self):
@@ -372,7 +417,7 @@ class SE3Adjoint:
         if isinstance(other, np.ndarray):
             return self.as_matrix() @ other
 
-        raise NotImplemented(f"Can't matmul by {other.__class__}")
+        raise NotImplementedError(f"Can't matmul by {other.__class__}")
 
     def __repr__(self):
         return f"Adj[{repr(self.transform)}]"
@@ -381,7 +426,7 @@ class SE3Adjoint:
         if isinstance(other, SE3Adjoint):
             t = other.transform @ self.transform
             return SE3Adjoint(t)
-        raise NotImplemented(f"Can't rmatmul by {other.__class__}")
+        raise NotImplementedError(f"Can't rmatmul by {other.__class__}")
 
     def __call__(self, arg: Screw) -> Screw:
         assert isinstance(arg, Screw)
@@ -393,7 +438,15 @@ class SE3Adjoint:
     def as_matrix(self):
         r = self.transform.rotation.as_matrix()
         p_hat = hat(self.transform.translation)
-        row_1 = np.concatenate([r, np.zeros((3, 3), )], axis=1)
+        row_1 = np.concatenate(
+            [
+                r,
+                np.zeros(
+                    (3, 3),
+                ),
+            ],
+            axis=1,
+        )
         row_2 = np.concatenate([p_hat @ r, r], axis=1)
         return np.concatenate([row_1, row_2], axis=0)
 
@@ -406,7 +459,15 @@ class SE3CoAdjoint:
         r = self.transform.rotation.as_matrix().T
         p_hat = hat(self.transform.translation)
         row_1 = np.concatenate([r, -r @ p_hat], axis=1)
-        row_2 = np.concatenate([np.zeros((3, 3), ), r], axis=1)
+        row_2 = np.concatenate(
+            [
+                np.zeros(
+                    (3, 3),
+                ),
+                r,
+            ],
+            axis=1,
+        )
         return np.concatenate([row_1, row_2], axis=0)
 
     def __repr__(self):
@@ -417,18 +478,20 @@ class SE3CoAdjoint:
         p = self.transform.translation
 
         translation = q_inv.conjugate(zeta.translation)
-        rotation = -q_inv.conjugate(hat(p) @ zeta.translation) + q_inv.conjugate(
-            zeta.rotation
-        )
+        rotation = -q_inv.conjugate(
+            hat(p) @ zeta.translation
+        ) + q_inv.conjugate(zeta.rotation)
 
         return Screw(
-            rotation=rotation, translation=translation, magnitude=zeta.magnitude
+            rotation=rotation,
+            translation=translation,
+            magnitude=zeta.magnitude,
         )
 
     def __matmul__(self, other):
         if isinstance(other, Screw):
             return self.apply(other)
-        raise NotImplemented(f"Can't matmul by type {other.__class__}")
+        raise NotImplementedError(f"Can't matmul by type {other.__class__}")
 
     def __call__(self, arg: Screw) -> Screw:
         assert isinstance(arg, Screw)
@@ -491,4 +554,6 @@ def se3_bracket(left: Screw, right: Screw) -> Screw:
         right.rotation, left.translation
     )
 
-    return Screw(translation=v, rotation=w, angle=right.magnitude * left.magnitude)
+    return Screw(
+        translation=v, rotation=w, angle=right.magnitude * left.magnitude
+    )

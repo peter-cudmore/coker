@@ -1,11 +1,12 @@
-import dataclasses
 from typing import List, Tuple
-from coker.modelling import Block
-from coker.modelling.coker_abc import CokerListableSubclasses
+from coker.toolkits.system_modelling.modelling.coker_abc import (
+    CokerListableSubclasses,
+)
 
 
 class ComponentHint:
     pass
+
 
 def list_components() -> List[Tuple[str, str, ComponentHint]]:
     """List all components
@@ -19,10 +20,6 @@ def list_components() -> List[Tuple[str, str, ComponentHint]]:
         for component in baseclass.list_subclasses():
             path = component.__module__.replace(".", "/")
 
-
-            entries.append(
-                (component.__name__, path, None )
-
-            )
+            entries.append((component.__name__, path, None))
 
     return entries

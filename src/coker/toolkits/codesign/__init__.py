@@ -34,21 +34,24 @@ class MathematicalProgram:
     def __call__(self, *args):
         assert len(args) == len(self.input_shape)
 
-
-        return [np.reshape(o, dim.shape) for o, dim in zip(self.impl(args), self.output_shape)]
+        return [
+            np.reshape(o, dim.shape)
+            for o, dim in zip(self.impl(args), self.output_shape)
+        ]
 
 
 class ProblemBuilder:
     def __init__(self, arguments: Optional[List[VectorSpace | Scalar]] = None):
 
-        self.arguments = [self.tape.input(a) for a in arguments] if arguments else []
+        self.arguments = (
+            [self.tape.input(a) for a in arguments] if arguments else []
+        )
         self.objective = None
         self.tape: Optional[Tape] = None
         self.constraints = []
         self.outputs = []
         self.initial_conditions = {}
         self.warm_start = False
-
 
     def new_variable(self, name, shape=None, initial_value=None):
         assert self.tape is not None
@@ -58,7 +61,9 @@ class ProblemBuilder:
         else:
             v = self.tape.input(VectorSpace(name, shape))
             initial_value = (
-                np.zeros(shape=shape) if initial_value is None else initial_value
+                np.zeros(shape=shape)
+                if initial_value is None
+                else initial_value
             )
 
         self.initial_conditions[v.index] = initial_value
@@ -88,7 +93,7 @@ class ProblemBuilder:
             self.constraints,
             self.arguments,
             self.outputs,
-            self.initial_conditions
+            self.initial_conditions,
         )
 
         return MathematicalProgram(self.input_shape, self.output_shape, impl)
@@ -100,7 +105,6 @@ class ProblemBuilder:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.tape = None
         pass
-
 
 
 class VariationalProblem:
@@ -135,14 +139,10 @@ class VariationalProblem:
 
     """
 
-    def __init__(self, intervals:List[float]):
+    def __init__(self, intervals: List[float]):
         self.intervals = intervals
         self.signals = []
         self.variables = []
-
-
-
-
 
 
 def norm(arg, order=2):

@@ -19,7 +19,7 @@ class Inertia:
     moments: np.ndarray
 
     @staticmethod
-    def zero() -> 'Inertia':
+    def zero() -> "Inertia":
         return Inertia(Isometry3.identity(), 0, np.zeros((6,)))
 
     def as_matrix(self):
@@ -29,10 +29,13 @@ class Inertia:
                 [self.moments[1], self.moments[3], self.moments[4]],
                 [self.moments[2], self.moments[4], self.moments[5]],
             ],
-
         )
-        mass_component = self.mass * np.eye(3, )
-        zeros = np.zeros((3, 3), )
+        mass_component = self.mass * np.eye(
+            3,
+        )
+        zeros = np.zeros(
+            (3, 3),
+        )
         return np.block([[inertial_component, zeros], [zeros, mass_component]])
 
     def as_matrix_origin(self):
@@ -123,11 +126,12 @@ class RigidBody:
         adjoint = SE3Adjoint(self._rest_transforms[joint_index])
         return [adjoint.apply(b) for b in bases]
 
-    def add_link(self, parent: int, at: Isometry3, joint: JointType, inertia: Inertia) -> int:
+    def add_link(
+        self, parent: int, at: Isometry3, joint: JointType, inertia: Inertia
+    ) -> int:
         idx = len(self.parents)
 
         assert 0 <= parent < idx or parent == self.WORLD
-
 
         self.parents.append(parent)
         self.transforms.append(at)
@@ -164,7 +168,11 @@ class RigidBody:
         origin = np.array([0, 0, 0])
         total_energy = 0
         for i, inertia in enumerate(self.inertia):
-            xform = joint_xforms[i] @ self._rest_transforms[i] @ inertia.centre_of_mass
+            xform = (
+                joint_xforms[i]
+                @ self._rest_transforms[i]
+                @ inertia.centre_of_mass
+            )
             point = xform @ origin
 
             total_energy -= inertia.mass * np.dot(gravity_vector, point)
@@ -194,7 +202,9 @@ class RigidBody:
 
     def _get_joint_global_bases(self):
         result = []
-        for rest_transform, bases in zip(self._rest_transforms, self.joint_bases):
+        for rest_transform, bases in zip(
+            self._rest_transforms, self.joint_bases
+        ):
             for basis in bases:
                 result.append(SE3Adjoint(rest_transform).apply(basis))
         return result
@@ -274,10 +284,12 @@ class RigidBody:
 
         joint_index = 0
         transforms = []
-        for parent, xform, bases in zip(self.parents, self.transforms, self.joint_bases):
+        for parent, xform, bases in zip(
+            self.parents, self.transforms, self.joint_bases
+        ):
             g = transforms[parent] @ xform if parent != self.WORLD else xform
             for basis in bases:
-                g =g @ basis.exp(angles[joint_index])
+                g = g @ basis.exp(angles[joint_index])
                 joint_index += 1
 
             transforms.append(g)
@@ -295,7 +307,7 @@ class RigidBody:
 
     def forward_kinematics(self, angles) -> List[Isometry3]:
         xforms = self.joint_transforms(angles)
-        return [ xforms[parent] @ xform for parent, xform in self.end_effectors]
+        return [xforms[parent] @ xform for parent, xform in self.end_effectors]
 
     def get_dependent_links(self, parent_link: int):
         result = list()
@@ -306,10 +318,9 @@ class RigidBody:
 
     def spatial_manipulator_jacobian(self, angles):
         return [
-                self.spatial_single_manipulator_jacobian(angles, i)
-                for i, _ in enumerate(self.end_effectors)
-            ]
-
+            self.spatial_single_manipulator_jacobian(angles, i)
+            for i, _ in enumerate(self.end_effectors)
+        ]
 
     def spatial_single_manipulator_jacobian(self, angles, end_effector):
         abs_xforms = self._get_absolute_joint_xform(angles)
@@ -324,10 +335,16 @@ class RigidBody:
             if link_idx in dependent_link:
                 parent = self.parents[link_idx]
                 for zeta in bases:
-                    zeta_prime = SE3Adjoint(self._rest_transforms[link_idx]).apply(zeta)
+                    zeta_prime = SE3Adjoint(
+                        self._rest_transforms[link_idx]
+                    ).apply(zeta)
                     if parent != self.WORLD:
-                        zeta_prime = SE3Adjoint(xforms[parent]).apply(zeta_prime)
-                    columns.append(np.reshape(zeta_prime.to_array(), newshape=(6, 1)))
+                        zeta_prime = SE3Adjoint(xforms[parent]).apply(
+                            zeta_prime
+                        )
+                    columns.append(
+                        np.reshape(zeta_prime.to_array(), newshape=(6, 1))
+                    )
             else:
                 zeta_prime = np.zeros((6, len(bases)))
                 columns.append(zeta_prime)
@@ -446,7 +463,9 @@ class RigidBody:
         return result
 
     def _get_link_com_jacobians(self, angles):
-        joint_transforms = self._get_absolute_joint_xform(angles)  # exp(zeta_hat)
+        joint_transforms = self._get_absolute_joint_xform(
+            angles
+        )  # exp(zeta_hat)
         joint_map = self._get_joint_dependency_map()  # link: [joint idx]
         joint_bases = self._get_joint_global_bases()  # zeta_j
         total_angles = self.total_joints()
@@ -483,14 +502,18 @@ class RigidBody:
 
         return mass_matrix
 
-    def add_body(self, body: 'RigidBody', at: Isometry3, parent: int):
+    def add_body(self, body: "RigidBody", at: Isometry3, parent: int):
         links = []
 
-        iterator = zip(body.parents, body.joints, body.transforms, body.inertia)
+        iterator = zip(
+            body.parents, body.joints, body.transforms, body.inertia
+        )
         for i, (p_body, joint, xform, inertia) in enumerate(iterator):
             idx = len(self.parents)
 
-            self.parents.append(parent if p_body == self.WORLD else links[p_body])
+            self.parents.append(
+                parent if p_body == self.WORLD else links[p_body]
+            )
             self.inertia.append(inertia)
 
             p_actual = self.parents[idx]
@@ -502,7 +525,11 @@ class RigidBody:
 
             self.joints.append(joint)
 
-            rest_xform = self._rest_transforms[p_actual] @ body_xform if p_actual != self.WORLD else body_xform
+            rest_xform = (
+                self._rest_transforms[p_actual] @ body_xform
+                if p_actual != self.WORLD
+                else body_xform
+            )
             self.transforms.append(body_xform)
             self._rest_transforms.append(rest_xform)
 

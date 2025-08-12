@@ -1,10 +1,7 @@
 from typing import Tuple, Type, List, Dict
-
-import numpy as np
-
 from coker import Tracer, Function, OP
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
-from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
+from coker.backends.coker.sparse_tensor import is_constant
 from coker.backends.coker.ast_preprocessing import (
     SparseNet,
     label_layers,
@@ -58,6 +55,7 @@ class CokerBackend(Backend):
     ):
         raise NotImplementedError
 
+
 def create_opgraph(function: Function):
     function = rewrite_graph(function)
 
@@ -70,11 +68,13 @@ def create_opgraph(function: Function):
     # label edges
     #    for
 
-    actual_edges = {i: edges[i] | v for i, v in sources.items() if v and i not in sinks}
+    actual_edges = {
+        i: edges[i] | v for i, v in sources.items() if v and i not in sinks
+    }
 
-    assert set(actual_edges.keys()) | constants | set(tape.input_indicies) | set(
-        sinks
-    ) == set(range(len(function.tape)))
+    assert set(actual_edges.keys()) | constants | set(
+        tape.input_indicies
+    ) | set(sinks) == set(range(len(function.tape)))
 
     # for each input, we want to create a map from the argument into a general input stack
     # so that the input map takes (x_1, x_2, x_3, x_4) -> X
@@ -150,9 +150,15 @@ def create_opgraph(function: Function):
 
         op, *args = tape.nodes[sink]
         args = [get_recursive(a) for a in args]
-        if op in {OP.MUL, OP.ADD, OP.SUB, OP.MATMUL, OP.NEG, OP.DOT, OP.CROSS} and any(
-            is_constant(a) for a in args
-        ):
+        if op in {
+            OP.MUL,
+            OP.ADD,
+            OP.SUB,
+            OP.MATMUL,
+            OP.NEG,
+            OP.DOT,
+            OP.CROSS,
+        } and any(is_constant(a) for a in args):
             w = ops[op](*args)
             layers.append(IdentityLayer(memory[sink], w))
         else:

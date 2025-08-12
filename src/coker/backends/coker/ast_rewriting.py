@@ -52,7 +52,10 @@ def try_rewrite_mul(nodes: list, atoms, constants, i):
         _, pll, plr = nodes[lhs.index]
         _, prl, prr = nodes[rhs.index]
         if pll.index in constants and prl.index in constants:
-            nodes[lhs.index] = (OP.VALUE, constants[pll.index] * constants[prl.index])
+            nodes[lhs.index] = (
+                OP.VALUE,
+                constants[pll.index] * constants[prl.index],
+            )
             nodes[rhs.index] = (OP.MUL, plr, prr)
 
     #  *(?, x))     -> *(x, ?)      (polynomails)
@@ -75,9 +78,9 @@ def rewrite_graph(function: Function):
             continue
 
         if all([a.index in constants for a in args]):
-            constants[i] = get_backend_by_name("numpy", set_current=False).call(
-                op, *[constants[a.index] for a in args]
-            )
+            constants[i] = get_backend_by_name(
+                "numpy", set_current=False
+            ).call(op, *[constants[a.index] for a in args])
             continue
 
         if op == OP.MUL:

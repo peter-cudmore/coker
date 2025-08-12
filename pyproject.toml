@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coker"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dynamic = ["version"]
 authors = [
     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
@@ -33,17 +33,39 @@ dependencies = [
     "numpy",
     "sympy",
     "scipy",
-    "dataclass-wizard"
+    "typing-extensions"
 ]
 
 
-[project.scripts]
-coker = "coker.projects:coker"
-
 
 [project.optional-dependencies]
-dev = [
-    "pytest"
+test = [
+    "pytest < 5.0.0",
+    "pytest-cov[all]"
+]
+
+lint = [
+   "black == 25.1.0",
+   "flake8"
+]
+
+ci = [
+    "pytest < 5.0.0",
+    "pytest-cov[all]",
+    "black == 25.1.0",
+    "flake8",
+    "setuptools"
+]
+casadi = [
+   "casadi",
+]
+jax = [
+    "jax"
+]
+
+full = [
+    "casadi",
+    "jax"
 ]
 
 [tool.pytest.ini_options]
@@ -55,3 +77,7 @@ testpaths = [
 
 [tool.setuptools-git-versioning]
 enabled = true
+
+[tool.black]
+line-length = 79
+target-version = ["py310", "py311", "py312"]
