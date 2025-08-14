@@ -6,7 +6,9 @@ from .types import DynamicsSpec, DynamicalSystem
 from ..algebra import is_scalar
 
 
-def create_dynamics_from_spec(spec: DynamicsSpec, backend="numpy"):
+def create_dynamics_from_spec(
+    spec: DynamicsSpec, backend="numpy"
+) -> DynamicalSystem:
 
     # just put a dummy value in here so that
     # the shape calculation doesn't spew.
@@ -101,7 +103,7 @@ def create_control_system(
     backend: str = "numpy",
     p_init: np.ndarray = None,
     u_init: Callable[[float], np.ndarray] = None,
-):
+) -> DynamicalSystem:
 
     if isinstance(x0, (list, tuple, int, float)):
         x0 = np.array(x0)
@@ -174,7 +176,7 @@ def create_autonomous_ode(
     output: Callable[[np.ndarray, np.ndarray], np.ndarray] = None,
     backend: str = "numpy",
     p_init: np.ndarray = None,
-) -> "DynamicalSystem":
+) -> DynamicalSystem:
 
     # case 1,
     # - x0 is an array

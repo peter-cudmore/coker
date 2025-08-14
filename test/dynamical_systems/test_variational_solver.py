@@ -163,4 +163,50 @@ def test_fitting_constant():
 
     sol = problem()
     assert sol.cost < 1e-6
-    assert abs(sol.parameters["value"] - 2) < 1e-4
+    assert abs(sol.parameter_solutions["value"] - 2) < 1e-4
+
+
+def test_fitting_line():
+    def x0(p):
+        return p[0]
+
+    def xdot(x, p):
+        return p[1]
+
+    param = np.array([2, 1])
+
+    def solution(t, p):
+        return p[0] + p[1] * t
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 2), x0=x0, xdot=xdot, backend="numpy"
+    )
+
+    def loss(f, p_inner):
+        total_error = 0.0
+        for t_i in np.arange(0, 1, 0.4):
+            truth = solution(t_i, param)
+            test = f(t_i, p_inner)
+            total_error += (truth - test) ** 2
+
+        return total_error
+
+    loss_value = loss(system, param)
+
+    assert loss_value < 1e-6
+
+    problem = VariationalProblem(
+        loss=loss,
+        system=system,
+        parameters=[
+            BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2),
+            float(param[1]),
+        ],
+        t_final=1,
+        constraints=[],
+        backend="casadi",
+    )
+
+    sol = problem()
+    assert abs(sol.parameter_solutions["value"] - 2) < 1e-4
+    assert sol.cost < 1e-6

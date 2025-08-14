@@ -1,5 +1,16 @@
 import dataclasses
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
+
+
+@dataclasses.dataclass
+class VectorSpace:
+    name: str
+    dimension: Union[int, Tuple[int, ...]]
+
+
+@dataclasses.dataclass
+class Scalar:
+    name: str
 
 
 class Dimension:
@@ -17,6 +28,11 @@ class Dimension:
             for d_i in self.dim:
                 d *= d_i
         return d
+
+    def to_space(self, name) -> Union[Scalar, VectorSpace]:
+        if self.is_scalar():
+            return Scalar(name)
+        return VectorSpace(name, self.dim)
 
     def index_iterator(self, row_major=False):
 
@@ -67,17 +83,6 @@ class Dimension:
         if self.dim is None:
             return (1,)
         return self.dim
-
-
-@dataclasses.dataclass
-class VectorSpace:
-    name: str
-    dimension: int
-
-
-@dataclasses.dataclass
-class Scalar:
-    name: str
 
 
 @dataclasses.dataclass

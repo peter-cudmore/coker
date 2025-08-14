@@ -1,5 +1,8 @@
 from functools import reduce
 from operator import mul
+
+import numpy as np
+
 from coker.dynamics import (
     SpikeVariable,
     PiecewiseConstantVariable,
@@ -16,6 +19,7 @@ from coker.backends.casadi.variational_solver import (
     InterpolatingPolyCollection,
     SymbolicPolyCollection,
 )
+import casadi as ca
 
 
 def test_poly_collection_scalar():
@@ -81,3 +85,22 @@ def test_poly_collection_vector():
     for i, t_i in enumerate(t[:-1]):
         x_i = poly_collection(t_i)
         assert all(x_i[j] == x[i][j] for j in range(dimension))
+
+    t = ca.MX.sym("t")
+    x = poly_collection.symbols()
+    poly_as_func = ca.Function("poly_as_func", [t, x], [poly_collection(t)])
+
+    line = ca.DM.ones(x.shape)
+    fixed_poly: InterpolatingPolyCollection = poly_collection.to_fixed(line)
+
+    for poly in fixed_poly.polys:
+        assert (poly.values == 1).all()
+
+    fixed_result = fixed_poly(0.51)
+
+    assert fixed_result.shape == (3,)
+    assert np.isclose(fixed_result, np.ones((3,))).all()
+    result = poly_as_func(ca.DM(0.51), line)
+
+    assert result.shape == (3, 1)
+    assert np.isclose(result, fixed_result).all()
