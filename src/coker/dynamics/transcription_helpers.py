@@ -270,8 +270,7 @@ class InterpolatingPoly:
             ).reshape((1, n))
             projection = (ds @ self.bases).T
 
-            # self.values = [x0_0,x1_0, x2_0, ... x0_1,  ]
-            # dx matrix needs to be of shape (dim, len(self.values))
+            # this treats each column as the interpolation point.
             v = self.values.reshape((self.dimension, -1))
             value = v @ projection
             dx_i.append(value)
