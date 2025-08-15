@@ -304,20 +304,6 @@ class SymbolicPoly(InterpolatingPoly):
         return ca.reshape(value, (self.dimension, 1))
 
 
-#    def knot_points(self):
-#        # we skip the end point
-#        t_i = self.knot_times()[:-1]
-#        n = len(t_i)
-#        x_i = [
-#            self.values[i * self.dimension : (i + 1) * self.dimension]
-#            for i in range(n)
-#        ]
-#        x_mat = ca.horzcat(*x_i).T
-#        dx_i = [(ca.DM(dbasis) @ x_mat).T for dbasis in self.derivatives]
-#        for t, x, dx in zip(t_i, x_i, dx_i):
-#            yield t, x, dx
-
-
 class SymbolicPolyCollection(InterpolatingPolyCollection):
     def symbols(self):
         return ca.vertcat(*[p.values for p in self.polys])

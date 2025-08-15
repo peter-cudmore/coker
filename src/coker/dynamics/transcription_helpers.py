@@ -268,8 +268,12 @@ class InterpolatingPoly:
             ds = ds_dt * np.array(
                 [i * s ** (i - 1) if i > 0 else 0 for i in range(len(self.s))]
             ).reshape((1, n))
-            projection = ds @ self.bases
-            value = np.tile(projection, (1, self.dimension)) @ self.values
+            projection = (ds @ self.bases).T
+
+            # self.values = [x0_0,x1_0, x2_0, ... x0_1,  ]
+            # dx matrix needs to be of shape (dim, len(self.values))
+            v = self.values.reshape((self.dimension, -1))
+            value = v @ projection
             dx_i.append(value)
 
         for t, x, dx in zip(t_i, x_i, dx_i):
