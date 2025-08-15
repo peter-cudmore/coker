@@ -1,5 +1,5 @@
 from coker.dynamics.transcription_helpers import *
-from coker.dynamics import ConstantControlVariable
+from coker.dynamics import ConstantControlVariable, InterpolatingPolyCollection
 import numpy as np
 from functools import reduce
 from operator import mul
@@ -150,3 +150,27 @@ def test_interpolating_poly_collection():
             intervals[:-1], intervals[1:]
         )
     )
+
+
+def test_poly_collection_vector():
+    intervals = [(0, 1), (1, 2), (2, 3)]
+    collocation_degree = [3, 4, 5]
+
+    polys = [
+        InterpolatingPoly(1, interval, degree, np.ones((degree + 1,)))
+        for interval, degree in zip(intervals, collocation_degree)
+    ]
+
+    poly_collection = InterpolatingPolyCollection(polys)
+    points = []
+    for n_poly, poly in enumerate(poly_collection.polys):
+        for n_point, (t, x, dx) in enumerate(poly.knot_points()):
+            assert x == 1, f"Failed on poly {n_poly}, point {n_point}"
+            assert abs(dx) < 1e-8
+            points.append((t, x, dx))
+
+    assert list(poly_collection.knot_points()) == points
+
+    for t in np.linspace(0, 3, 10):
+        value = poly_collection(t)
+        assert abs(value - 1) < 1e-6

@@ -219,12 +219,14 @@ class InterpolatingPoly:
         self.s, self.s_to_interval, bases, derivatives, self.integrals = (
             op_values
         )
+        self.width = (self.interval[1] - self.interval[0]) / 2
         size = len(self.s) * dimension
-
-        assert values.shape[0] == size and (
-            len(values.shape) == 1
-            or (len(values.shape) == 2 and values.shape[1] == 1)
-        ), f"Expected shape ({len(self.s) * dimension},), got {values.shape}"
+        if len(values.shape) == 1:
+            values = values.reshape(size, 1)
+        assert values.shape == (
+            size,
+            1,
+        ), f"Expected shape ({len(self.s) * dimension}, 1), got {values.shape}"
 
         self.bases = np.vstack(
             [np.reshape(np.array(base), (1, len(self.s))) for base in bases]
@@ -238,9 +240,8 @@ class InterpolatingPoly:
         return len(self.s) * self.dimension
 
     def _interval_to_s(self, t):
-        width = (self.interval[1] - self.interval[0]) / 2
         mean = (self.interval[1] + self.interval[0]) / 2
-        return (t - mean) / width
+        return (t - mean) / self.width
 
     def knot_times(self):
         # we skip the end point
@@ -255,15 +256,24 @@ class InterpolatingPoly:
     def knot_points(self):
         # we skip the end point
         t_i = self.knot_times()[:-1]
-        n = len(t_i)
+        n = len(self.s)
         x_i = [
             self.values[i * self.dimension : (i + 1) * self.dimension]
-            for i in range(n)
+            for i in range(n - 1)
         ]
-        x_mat = np.hstack(x_i).T
-        dx_i = [(dbasis @ x_mat).T for dbasis in self.derivatives]
+        dx_i = []
+        ds_dt = 1 / self.width
+        for s in self.s:
 
-        return t_i, x_i, dx_i
+            ds = ds_dt * np.array(
+                [i * s ** (i - 1) if i > 0 else 0 for i in range(len(self.s))]
+            ).reshape((1, n))
+            projection = ds @ self.bases
+            value = np.tile(projection, (1, self.dimension)) @ self.values
+            dx_i.append(value)
+
+        for t, x, dx in zip(t_i, x_i, dx_i):
+            yield t, x, dx
 
     def __call__(self, t):
 
@@ -278,9 +288,10 @@ class InterpolatingPoly:
         except StopIteration:
             pass
         n = len(self.s)
-        s_vector = np.vstack(*[s**i for i in range(n)]).reshape((1, n))
+        s_vector = np.vstack([s**i for i in range(n)])
 
-        projection = s_vector @ self.bases
+        projection = self.bases.T @ s_vector
 
-        value = np.tile(projection, (1, self.dimension))[0] @ self.values
-        return value
+        value = np.reshape(self.values, (self.dimension, -1)) @ projection
+
+        return np.reshape(value, (self.dimension,))

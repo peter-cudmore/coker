@@ -62,6 +62,7 @@ def create_variational_solver(problem: VariationalProblem):
         problem.t_final,
         problem.transcription_options,
     )
+
     colocation_points = [problem.transcription_options.minimum_degree] * len(
         intervals
     )
@@ -88,9 +89,7 @@ def create_variational_solver(problem: VariationalProblem):
         ]
     )
 
-    # parameters & control - need to know how big they are
-    # to construct our decision variables
-    control_variables, parameters = problem.control, problem.parameters
+    # Set up functions
 
     constraints = []
     equalities = []
@@ -105,7 +104,11 @@ def create_variational_solver(problem: VariationalProblem):
         else noop
     )
 
-    p, p_symbols, p0, (p_lower, p_guess, p_upper), p_output_map = (
+    # parameters & control - need to know how big they are
+    # to construct our decision variables
+    control_variables, parameters = problem.control, problem.parameters
+
+    p, p_symbols, p0_guess, (p_lower, p_guess, p_upper), p_output_map = (
         construct_parameters(parameters)
     )
 
@@ -114,45 +117,6 @@ def create_variational_solver(problem: VariationalProblem):
         if control_variables
         else noop
     )
-
-    (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
-
-    x_end = list(poly_collection.interval_ends())[:-1]
-
-    x0_val, z0_val = casadi.evaluate(
-        problem.system.x0, [0, control_factory, p]
-    )
-
-    equalities += [
-        proj_x @ x0_symbol,
-    ]
-    if z_size > 0:
-        equalities.append(proj_z @ z0_val)
-
-    equalities += [
-        xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
-    ]
-
-    for t, v, dv in poly_collection.knot_points():
-        x = proj_x @ v + x0_val
-        z = proj_z @ v
-        if z_size > 0:
-            z += z0_val
-
-        dx = proj_x @ dv
-        (dynamics_ij,) = dynamics(t, x, z, control_factory, p)
-        equalities.append(dx - dynamics_ij)
-
-        if q_size > 0:
-            dq = proj_q @ dv
-            (quadrature_ij,) = quadrature(t, x, z, control_factory, p)
-            equalities.append(dq - quadrature_ij)
-
-        if z_size > 0:
-            (alg,) = algebraic(t, x, z, control_factory, p)
-            equalities.append(alg)
-
-    path_symbols = poly_collection.symbols()
 
     if problem.control:
         u_symbols = control_factory.symbols()
@@ -165,6 +129,59 @@ def create_variational_solver(problem: VariationalProblem):
         u_symbols = ca.MX.zeros(0)
         u_lower, u_upper = [], []
         u_guess = noop
+
+    (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
+    x_end = list(poly_collection.interval_ends())[:-1]
+
+    x0_guess, z0_guess = casadi.evaluate(
+        problem.system.x0, [0, u_guess, p0_guess]
+    )
+    x0_val, z0_val = casadi.evaluate(
+        problem.system.x0, [0, control_factory, p]
+    )
+
+    equalities += [
+        proj_x @ x0_symbol - x0_val,
+    ]
+    if z_size > 0:
+        equalities.append(proj_z @ z0_val)
+
+    equalities += [
+        xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
+    ]
+    for poly in poly_collection.polys:
+        #       dynamics_values = []
+        for t, v, dv in poly.knot_points():
+            x = proj_x @ v
+            z = proj_z @ v
+            if z_size > 0:
+                z += z0_val
+
+            dx = proj_x @ dv
+
+            (dynamics_ij,) = dynamics(t, x, z, control_factory, p)
+
+            #            dynamics_values.append(dynamics_ij)
+            equalities.append(dx - dynamics_ij)
+
+            if q_size > 0:
+                dq = proj_q @ dv
+                (quadrature_ij,) = quadrature(t, x, z, control_factory, p)
+                equalities.append(dq - quadrature_ij)
+
+            if z_size > 0:
+                (alg,) = algebraic(t, x, z, control_factory, p)
+                equalities.append(alg)
+
+    #        integral = sum(w * dx for w, dx in zip(poly.integrals[:-1], dynamics_values))
+    #        _, start_point = poly.start_point()
+    #        _, end_point = poly.end_point()
+    #        equalities.append(
+    #            end_point - start_point - integral
+    #        )
+
+    path_symbols = poly_collection.symbols()
+
     decision_variables = ca.vertcat(path_symbols, u_symbols, p_symbols)
 
     lower_bound = ca.vertcat(
@@ -184,33 +201,30 @@ def create_variational_solver(problem: VariationalProblem):
             tau, p_val = args
             u_val = ca.MX.zeros(u_symbols.shape)
         inner = poly_collection(tau)
-        x_tau = proj_x @ inner + x0_val
-        if z_size > 0:
-            z_tau = proj_z @ inner + z0_val
-        else:
-            z_tau = proj_z @ inner
+        x_tau = proj_x @ inner
+        z_tau = proj_z @ inner
         q_tau = proj_q @ inner
-
-        return casadi.evaluate(
+        (y_val,) = casadi.evaluate(
             problem.system.y, [tau, x_tau, z_tau, u_val, p_val, q_tau]
-        )[0]
+        )
+        return y_val
 
     if problem.control:
         cost = problem.loss(solution_proxy, control_factory, p)
     else:
         cost = problem.loss(solution_proxy, p)
+
     g = ca.vertcat(*[e for e in equalities if e is not None])
     equality_bounds = ca.DM.ones(g.shape)
     ubg = 0 * equality_bounds
     lbg = 0 * equality_bounds
 
-    solver_options = {}
+    solver_options = {"ipopt.least_square_init_duals": "yes"}
     nlp_spec = {"f": cost, "x": decision_variables, "g": g}
-    nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec)
+    nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, solver_options)
 
     u0_guess = ca.DM.zeros(u_symbols.shape)
 
-    x0_guess, z0_guess = casadi.evaluate(problem.system.x0, [0, u_guess, p0])
     state_guess = ca.vertcat(
         x0_guess,
         z0_guess if z0_guess is not None else ca.DM.zeros(z_size),
@@ -232,21 +246,11 @@ def create_variational_solver(problem: VariationalProblem):
 
     min_loss = float(soln["f"])
     min_args = soln["x"]
-    offset = ca.vertcat(
-        ca.repmat(
-            ca.vertcat(
-                x0_val,
-                z0_val if z_size else ca.MX.zeros(z_size),
-                ca.MX.zeros(q_size),
-            ),
-            n_reps,
-        )
-    )
 
     f_out = ca.Function(
         "Output",
         [decision_variables],
-        [path_symbols + offset, u_symbols, p_symbols],
+        [path_symbols, u_symbols, p_symbols],
         {},
     )
     x_out, u_out, p_out = f_out(min_args)
@@ -268,7 +272,8 @@ def create_variational_solver(problem: VariationalProblem):
     solution = VariationalSolution(
         cost=min_loss,
         projectors=projectors,
-        parameters=parameter_out,
+        parameter_solutions=parameter_out,
+        parameters=p_out,
         path=path,
         control_solutions=control_out,
         output=lambda t, x, z, u, q: problem.system.y(t, x, z, u, p_out, q),
@@ -284,35 +289,33 @@ class SymbolicPoly(InterpolatingPoly):
         super().__init__(dimension, interval, degree, values)
 
     def __call__(self, t):
-        assert (
-            self.interval[0] <= t <= self.interval[1]
-        ), f"Value {t} is not in interval {self.interval}"
         s = self._interval_to_s(t)
         try:
             i = next(i for i, s_i in enumerate(self.s) if abs(s_i - s) < 1e-9)
             return self.values[i * self.dimension : (i + 1) * self.dimension]
-        except StopIteration:
+        except (StopIteration, TypeError):
             pass
         n = len(self.s)
-        s_vector = ca.vertcat(*[s**i for i in range(n)]).reshape((1, n))
+        s_vector = ca.vertcat(*[s**i for i in range(n)])
 
-        projection = s_vector @ ca.DM(self.bases)
+        projection = ca.DM(self.bases).T @ s_vector
 
-        value = ca.repmat(projection, 1, self.dimension) @ self.values
-        return value
+        value = ca.reshape(self.values, (self.dimension, -1)) @ projection
+        return ca.reshape(value, (self.dimension, 1))
 
-    def knot_points(self):
-        # we skip the end point
-        t_i = self.knot_times()[:-1]
-        n = len(t_i)
-        x_i = [
-            self.values[i * self.dimension : (i + 1) * self.dimension]
-            for i in range(n)
-        ]
-        x_mat = ca.horzcat(*x_i).T
-        dx_i = [(ca.DM(dbasis) @ x_mat).T for dbasis in self.derivatives]
 
-        return t_i, x_i, dx_i
+#    def knot_points(self):
+#        # we skip the end point
+#        t_i = self.knot_times()[:-1]
+#        n = len(t_i)
+#        x_i = [
+#            self.values[i * self.dimension : (i + 1) * self.dimension]
+#            for i in range(n)
+#        ]
+#        x_mat = ca.horzcat(*x_i).T
+#        dx_i = [(ca.DM(dbasis) @ x_mat).T for dbasis in self.derivatives]
+#        for t, x, dx in zip(t_i, x_i, dx_i):
+#            yield t, x, dx
 
 
 class SymbolicPolyCollection(InterpolatingPolyCollection):
@@ -345,6 +348,17 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
         ]
 
         return InterpolatingPolyCollection(polys)
+
+    def __call__(self, t):
+        if isinstance(t, (ca.SX, ca.MX)):
+            result = 0
+            for i, (start, end) in enumerate(self.intervals):
+                poly_eval = self.polys[i](t)
+                factor_1 = ca.if_else(t > start, poly_eval, 0)
+                factor_2 = ca.if_else(t < end, factor_1, 0)
+                result += factor_2
+            return result
+        return super().__call__(t)
 
 
 class ParameterOutputMap:

@@ -1,7 +1,7 @@
 import weakref
 
 import numpy as np
-from typing import Callable, Union, Tuple, List
+from typing import Callable, Union, Tuple, List, Optional
 from collections import defaultdict
 
 from coker.algebra.dimensions import (
@@ -390,7 +390,10 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
 
 class Function:
-    def __init__(self, tape: Tape, outputs: List[Tracer], backend="coker"):
+    def __init__(
+        self, tape: Tape, outputs: List[Tracer], backend="coker", name=None
+    ):
+        self.name = name
         self.tape = tape
         self.backend = backend
         if isinstance(outputs, Tracer):
@@ -401,7 +404,21 @@ class Function:
             self.is_single = False
 
     def __repr__(self):
-        return f"Function:{self.input_shape()} -> {self.output_shape()}"
+        name = self.name if self.name else "<unknown>"
+        return f"{name}:{self.input_shape()} -> {self.output_shape()}"
+
+    def to_space(self, name):
+        return FunctionSpace(
+            name,
+            arguments=[
+                dim.to_space("input_{i}") if dim else None
+                for i, dim in enumerate(self.input_shape())
+            ],
+            output=[
+                dim.to_space("output_{i}") if dim else None
+                for i, dim in enumerate(self.input_shape())
+            ],
+        )
 
     def input_shape(self) -> Tuple[Dimension, ...]:
         special_inputs = {
@@ -458,6 +475,7 @@ def function(
     arguments: List[Scalar | VectorSpace | FunctionSpace],
     implementation: Callable[[Element, ...], Element],
     backend: str = "coker",
+    name: Optional[str] = None,
 ) -> Function:
     # create symbols
     # call function to construct expression graph
@@ -493,7 +511,7 @@ def function(
     if result is None or result is [None]:
         return Noop()
 
-    return Function(tape, result, backend)
+    return Function(tape, result, backend, name)
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):

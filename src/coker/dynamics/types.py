@@ -1,5 +1,5 @@
 import abc
-from typing import List, Callable, Optional, Tuple, Union
+from typing import List, Callable, Optional, Tuple, Union, Iterator
 from dataclasses import dataclass, field
 
 from coker import Dimension
@@ -196,8 +196,17 @@ class VariationalProblem:
     )
     backend: Optional[str] = "coker"
 
-    def __call__(self):
+    def __call__(self) -> "VariationalSolution":
         from coker.backends import get_backend_by_name
+
+        if self.system.parameters is not None:
+            n = self.system.parameters.dimension
+            assert len(self.parameters) == n
+        if self.control is not None:
+            assert self.system.inputs is not Noop()
+            assert len(self.control) == len(
+                self.system.inputs.input_dimensions()
+            )
 
         backend = get_backend_by_name(self.backend)
         return backend.create_variational_solver(self)
@@ -241,7 +250,7 @@ ControlSolution = Union[
 
 
 class InterpolatingPolyCollection:
-    def __init__(self, polys):
+    def __init__(self, polys: List["InterpolatingPoly"]):
         self.polys = polys
         self._size = sum(p.size() for p in polys)
         self.intervals = [p.interval for p in polys]
@@ -263,20 +272,22 @@ class InterpolatingPolyCollection:
         for p in self.polys:
             yield p.end_point()
 
-    def knot_points(self):
+    def knot_points(self) -> Iterator[Tuple[float, np.ndarray, np.ndarray]]:
         for p in self.polys:
-            t, x, dx = p.knot_points()
-            for t_i, x_i, dx_i in zip(t, x, dx):
-                yield t_i, x_i, dx_i
+            for point in p.knot_points():
+                yield point
 
 
 @dataclass
 class VariationalSolution:
     cost: float
     path: InterpolatingPolyCollection
-    projectors: Tuple[np.ndarray, np.ndarray, np.ndarray]
+    projectors: Tuple[
+        Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
+    ]
     control_solutions: List[ControlSolution]
-    parameters: Dict[str, float]
+    parameter_solutions: Dict[str, float]
+    parameters: np.ndarray
     output: Callable[
         [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         np.ndarray,
@@ -309,10 +320,9 @@ class VariationalSolution:
             return None
         return np.array([c(t) for c in self.control_solutions])
 
-    def __call__(self, t):
+    def __call__(self, t) -> np.ndarray:
         x = self.state(t)
         q = self.quadratures(t)
         u = self.control_law(t)
         z = self.algebraic(t)
-
         return self.output(t, x, z, u, q)
