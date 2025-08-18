@@ -150,7 +150,8 @@ def create_variational_solver(problem: VariationalProblem):
         xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
     ]
     for poly in poly_collection.polys:
-        #       dynamics_values = []
+        interval_dynamics = []
+        interval_quadratures = []
         for t, v, dv in poly.knot_points():
             x = proj_x @ v
             z = proj_z @ v
@@ -160,25 +161,32 @@ def create_variational_solver(problem: VariationalProblem):
             dx = proj_x @ dv
 
             (dynamics_ij,) = dynamics(t, x, z, control_factory, p)
-
-            #            dynamics_values.append(dynamics_ij)
+            interval_dynamics.append(dynamics_ij)
             equalities.append(dx - dynamics_ij)
 
             if q_size > 0:
                 dq = proj_q @ dv
                 (quadrature_ij,) = quadrature(t, x, z, control_factory, p)
                 equalities.append(dq - quadrature_ij)
+                interval_quadratures.append(quadrature_ij)
 
             if z_size > 0:
                 (alg,) = algebraic(t, x, z, control_factory, p)
                 equalities.append(alg)
 
-    #        integral = sum(w * dx for w, dx in zip(poly.integrals[:-1], dynamics_values))
-    #        _, start_point = poly.start_point()
-    #        _, end_point = poly.end_point()
-    #        equalities.append(
-    #            end_point - start_point - integral
-    #        )
+            # xend = x_start + int_tstart^t_end f(x)dt
+            # ->  0 = xend - xstart - w^T @ [dx_0 | dx_1 | dx_2 | ...]^T
+        _, xstart = poly.start_point()
+        _, xend = poly.end_point()
+
+        dX = ca.hcat(interval_dynamics).T
+        assert poly.weights[0, poly.degree] == 0
+        w = ca.DM(poly.weights[0, :-1])
+
+        equalities.append(proj_x @ xend - proj_x @ xstart - w.T @ dX)
+        if q_size > 0:
+            dQ = ca.hcat(interval_quadratures).T
+            equalities.append(proj_q @ xend - proj_q @ xstart - w.T @ dQ)
 
     path_symbols = poly_collection.symbols()
 
@@ -216,8 +224,8 @@ def create_variational_solver(problem: VariationalProblem):
 
     g = ca.vertcat(*[e for e in equalities if e is not None])
     equality_bounds = ca.DM.ones(g.shape)
-    ubg = 0 * equality_bounds
-    lbg = 0 * equality_bounds
+    ubg = 1e-9 * equality_bounds
+    lbg = -1e-9 * equality_bounds
 
     solver_options = {
         "ipopt.least_square_init_duals": "yes",
@@ -303,9 +311,9 @@ class SymbolicPoly(InterpolatingPoly):
         n = len(self.s)
         s_vector = ca.vertcat(*[s**i for i in range(n)])
 
-        projection = ca.DM(self.bases).T @ s_vector
+        projection = s_vector.T @ ca.DM(self.bases)
 
-        value = ca.reshape(self.values, (self.dimension, -1)) @ projection
+        value = projection @ ca.reshape(self.values, (-1, self.dimension))
         return ca.reshape(value, (self.dimension, 1))
 
 

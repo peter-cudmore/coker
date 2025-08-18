@@ -287,7 +287,7 @@ class InterpolatingPoly:
 
         op_values = generate_discritisation_operators(interval, degree)
 
-        self.s, self.s_to_interval, bases, derivatives, self.integrals = (
+        self.s, self.s_to_interval, bases, derivatives, self.weights = (
             op_values
         )
         self.width = (self.interval[1] - self.interval[0]) / 2
