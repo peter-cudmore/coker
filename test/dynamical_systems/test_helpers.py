@@ -152,7 +152,7 @@ def test_interpolating_poly_collection():
     )
 
 
-def test_poly_collection_vector():
+def test_poly_collection_vector_constant():
     intervals = [(0, 1), (1, 2), (2, 3)]
     collocation_degree = [3, 4, 5]
 
@@ -174,3 +174,30 @@ def test_poly_collection_vector():
     for t in np.linspace(0, 3, 10):
         value = poly_collection(t)
         assert abs(value - 1) < 1e-6
+
+def test_poly_collection_vector_quadratic():
+    def f(x):
+        return [x, 2 + x**2]
+
+    intervals = [(0, 1), (1, 2), (2, 3)]
+    collocation_degree = [3, 4, 5]
+
+    polys = [
+        InterpolatingPoly(2, interval, degree, np.ones((2*(degree + 1),)))
+        for interval, degree in zip(intervals, collocation_degree)
+    ]
+
+    for poly in polys:
+        for i, t in enumerate(poly.knot_times()):
+            poly.values[2 * i: 2*(i + 1)] = f(t)
+    collection = InterpolatingPolyCollection(polys)
+    t_eval = np.linspace(0, 3, 100)
+
+    for t in t_eval:
+        expected = np.array(f(t))
+        actual = collection(t)
+        error = np.linalg.norm(expected - actual)
+        assert error < 1e-4, f"Error at t={t}: {error}"
+
+
+

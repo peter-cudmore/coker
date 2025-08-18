@@ -219,7 +219,7 @@ def create_variational_solver(problem: VariationalProblem):
     ubg = 0 * equality_bounds
     lbg = 0 * equality_bounds
 
-    solver_options = {"ipopt.least_square_init_duals": "yes"}
+    solver_options = {"ipopt.least_square_init_duals": "yes","ipopt.print_level": 0, "print_time": False,"ipopt.sb":"yes"}
     nlp_spec = {"f": cost, "x": decision_variables, "g": g}
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, solver_options)
 
