@@ -1,6 +1,6 @@
 from functools import reduce
 from operator import mul
-from typing import List, Tuple, Callable, Optional
+from typing import List, Tuple, Callable, Optional, Iterator
 
 import numpy as np
 
@@ -14,6 +14,7 @@ from coker.dynamics.types import (
 
 
 def legendre_coefficient(n, k):
+    """Compute the coefficient of the kth Legendre polynomial of degree n."""
     if k > n:
         return 0
     if (n, k) == (0, 0):
@@ -31,6 +32,7 @@ def legendre_coefficient(n, k):
 
 
 def expand_coefficients(roots: List[float]):
+    """Expand polynomials from root form to coefficient form."""
     # p(x) = (x - x_0) (x - x_1) ...  (x  - x_n)
     #
     # final case:
@@ -52,6 +54,7 @@ def expand_coefficients(roots: List[float]):
 
 
 def lgr_points(n: int) -> List[float]:
+    """Compute LGR collocation points for a given order n."""
     assert n > 0
     # Points are roots of P_n(x) + P_{n-1}(x)
     # Where P_n(x) is the nth Legendre Polynomial
@@ -144,9 +147,10 @@ def generate_discritisation_operators(
 
     t = lambda tau: (interval[0] + interval[1]) / 2 + tau * time_scaling_factor
 
-    derivative = [row for row in colocation_coeff.T]
-    bases = [row for row in bases]
-    return colocation_times, t, bases, derivative, weights.reshape(1, n + 1)
+    derivative: List[np.ndarray] = [row for row in colocation_coeff.T]
+    bases: List[np.ndarray] = [row for row in bases]
+    integral_weights: np.ndarray = weights.reshape(1, n + 1)
+    return colocation_times, t, bases, derivative, integral_weights
 
 
 def split_at_non_differentiable_points(
@@ -155,7 +159,29 @@ def split_at_non_differentiable_points(
     transcription_options: TranscriptionOptions,
     additional_points: Optional[List[float]] = None,
 ) -> List[Tuple[float, float]]:
+    """
+    Splits the time domain into intervals taking into account control variables, additional
+    integration points, and transcription requirements.
 
+    The function determines interval boundaries based on the characteristics and constraints
+    of the provided control variables. It also considers any additional points passed, ensuring
+    subdivision complies with the transcription options. The intervals are adjusted to guarantee
+    a minimum required number and their lengths are subdivided iteratively when necessary.
+
+    Args:
+        control_variables (List[ControlVariable]): A list of control variables, which define
+            parameters affecting the differentiation process. This may include variables
+            such as piecewise constants or spike events.
+        t_final (float): The total duration of the time domain or integration window.
+        transcription_options (TranscriptionOptions): Configuration options specifying
+            transcription constraints, such as the minimum number of intervals.
+        additional_points (Optional[List[float]]): Additional time points that should be
+            included as interval boundaries, if provided.
+
+    Returns:
+        List[Tuple[float, float]]: A list of tuples representing the sorted interval boundaries.
+            Each tuple contains the start and end of an interval.
+    """
     interval_boundaries = (
         set(additional_points) if additional_points else set()
     )
@@ -208,7 +234,52 @@ def split_at_non_differentiable_points(
 
 
 class InterpolatingPoly:
+    """Represents a multidimensional polynomial interpolation over a specified
+    interval.
+
+    This class facilitates the computation and evaluation of an interpolating
+    polynomial given a set of values, the polynomial degree, and its interval.
+    It provides functionality to obtain knot points, start and end points, and
+    evaluate the polynomial at a given point in the interval, while maintaining
+    information about discrete operators and transformations.
+
+    Legendre-Gauss-Radau collocation points are used as the discritisation
+    scheme.
+
+    Attributes:
+        interval (Tuple[float, float]): The interval [a, b] over which the
+            polynomial is defined.
+        dimension (int): Dimensionality of the interpolated values.
+        degree (int): Degree of the interpolating polynomial.
+        values (np.ndarray): The values to interpolate, corresponding to knot
+            points of the polynomial.
+        s (np.ndarray): Array of discrete points in polynomial parameter space.
+        s_to_interval (Callable[[float], float]): Function to map points from
+            parameter space to the original interval.
+        integrals (np.ndarray): Integration operator for the interpolating
+            polynomial.
+        width (float): Half-width of the interval, used for transformations
+            between parameter space and interval.
+        bases (np.ndarray): Basis functions of the interpolating polynomial.
+        derivatives (List[np.ndarray]): Derivative basis functions of the
+            polynomial.
+    """
+
     def __init__(self, dimension, interval, degree, values):
+        """
+        Initializes an instance of the class with given parameters and specific configurations
+        required for discretization and calculations.
+
+        Args:
+            dimension: The dimension of the problem that defines the size of matrices and reshaping.
+            interval: The interval [lower_bound, upper_bound] over which discretization is computed.
+            degree: The degree of the polynomial basis used for computation.
+            values: A numpy array representing the knot points, stacked in order.
+
+        Raises:
+            AssertionError: If the shape of the `values` input does not match the expected shape
+                calculated from the interval, dimension, and degree parameters.
+        """
         self.interval = interval
         self.dimension = dimension
         self.degree = degree
@@ -236,24 +307,30 @@ class InterpolatingPoly:
             for d in derivatives
         ]
 
-    def size(self):
+    def size(self) -> int:
         return len(self.s) * self.dimension
 
     def _interval_to_s(self, t):
         mean = (self.interval[1] + self.interval[0]) / 2
         return (t - mean) / self.width
 
-    def knot_times(self):
+    def knot_times(self) -> List[float]:
         # we skip the end point
         return [self.s_to_interval(s_i) for s_i in self.s]
 
-    def start_point(self):
+    def start_point(self) -> Tuple[float, np.ndarray]:
         return self.s_to_interval(self.s[0]), self.values[: self.dimension]
 
-    def end_point(self):
+    def end_point(self) -> Tuple[float, np.ndarray]:
         return self.s_to_interval(self.s[-1]), self.values[-self.dimension :]
 
-    def knot_points(self):
+    def as_raw(self) -> np.ndarray:
+        t = np.reshape(np.array(self.knot_times()), (-1, 1))
+        x = np.reshape(self.values, (-1, self.dimension))
+        return np.hstack([t, x]).T
+
+    def knot_points(self) -> Iterator[Tuple[float, np.ndarray, np.ndarray]]:
+        """Get the knot points of the interpolating polynomial, not including the end point."""
         # we skip the end point
         t_i = self.knot_times()[:-1]
         n = len(self.s)
@@ -268,14 +345,18 @@ class InterpolatingPoly:
             ds = ds_dt * np.array(
                 [i * s ** (i - 1) if i > 0 else 0 for i in range(len(self.s))]
             ).reshape((1, n))
-            projection = ds @ self.bases
-            value = np.tile(projection, (1, self.dimension)) @ self.values
+            projection = (ds @ self.bases).T
+
+            # this treats each column as the interpolation point.
+            v = self.values.reshape((self.dimension, -1))
+            value = v @ projection
             dx_i.append(value)
 
         for t, x, dx in zip(t_i, x_i, dx_i):
             yield t, x, dx
 
-    def __call__(self, t):
+    def __call__(self, t) -> np.ndarray:
+        """Evaluate the interpolating polynomial at time t."""
 
         assert (
             self.interval[0] <= t <= self.interval[1]
@@ -290,8 +371,23 @@ class InterpolatingPoly:
         n = len(self.s)
         s_vector = np.vstack([s**i for i in range(n)])
 
-        projection = self.bases.T @ s_vector
+        projection = s_vector.T @ self.bases
 
-        value = np.reshape(self.values, (self.dimension, -1)) @ projection
+        value = projection @ np.reshape(self.values, (-1, self.dimension))
 
         return np.reshape(value, (self.dimension,))
+
+    def map(self, func):
+        values = np.concatenate(
+            [
+                func(
+                    self.s_to_interval(s),
+                    self.values[i * self.dimension : (i + 1) * self.dimension],
+                )
+                for i, s in enumerate(self.s)
+            ]
+        )
+        (size,) = values.shape
+        dimension = size // len(self.s)
+
+        return InterpolatingPoly(dimension, self.interval, self.degree, values)

@@ -219,7 +219,12 @@ def create_variational_solver(problem: VariationalProblem):
     ubg = 0 * equality_bounds
     lbg = 0 * equality_bounds
 
-    solver_options = {"ipopt.least_square_init_duals": "yes"}
+    solver_options = {
+        "ipopt.least_square_init_duals": "yes",
+        "ipopt.print_level": 0,
+        "print_time": False,
+        "ipopt.sb": "yes",
+    }
     nlp_spec = {"f": cost, "x": decision_variables, "g": g}
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, solver_options)
 
@@ -302,20 +307,6 @@ class SymbolicPoly(InterpolatingPoly):
 
         value = ca.reshape(self.values, (self.dimension, -1)) @ projection
         return ca.reshape(value, (self.dimension, 1))
-
-
-#    def knot_points(self):
-#        # we skip the end point
-#        t_i = self.knot_times()[:-1]
-#        n = len(t_i)
-#        x_i = [
-#            self.values[i * self.dimension : (i + 1) * self.dimension]
-#            for i in range(n)
-#        ]
-#        x_mat = ca.horzcat(*x_i).T
-#        dx_i = [(ca.DM(dbasis) @ x_mat).T for dbasis in self.derivatives]
-#        for t, x, dx in zip(t_i, x_i, dx_i):
-#            yield t, x, dx
 
 
 class SymbolicPolyCollection(InterpolatingPolyCollection):

@@ -77,6 +77,30 @@ class DynamicalSystem:
 
         return t, u, p
 
+    def to_explicit(self, *args):
+        t, u, p = self._map_arguments(*args)
+
+        # solve ODE
+        # x' = dxdt(...)
+        # 0  = g(...)
+        # to get x,z over the interval
+
+        assert isinstance(t, np.ndarray)
+        assert t.ndim == 1, "Only 1D time points are supported"
+        t_final = t[-1]
+
+        problem = VariationalProblem(
+            loss=lambda x, u, p: 0,
+            system=self,
+            t_final=t_final,
+            control=u,
+            parameters=p,
+            constraints=None,
+            backend=self.backend(),
+        )
+        sol = problem()
+        poly = sol.path.map()
+
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
@@ -194,7 +218,7 @@ class VariationalProblem:
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
     )
-    backend: Optional[str] = "coker"
+    backend: Optional[str] = "casadi"
 
     def __call__(self) -> "VariationalSolution":
         from coker.backends import get_backend_by_name
@@ -277,6 +301,10 @@ class InterpolatingPolyCollection:
             for point in p.knot_points():
                 yield point
 
+    def map(self, func: Callable[[float, np.ndarray], np.ndarray]):
+        new_polys = [p.map(func) for p in self.polys]
+        return InterpolatingPolyCollection(new_polys)
+
 
 @dataclass
 class VariationalSolution:
@@ -289,7 +317,7 @@ class VariationalSolution:
     parameter_solutions: Dict[str, float]
     parameters: np.ndarray
     output: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         np.ndarray,
     ]
 
@@ -326,3 +354,22 @@ class VariationalSolution:
         u = self.control_law(t)
         z = self.algebraic(t)
         return self.output(t, x, z, u, q)
+
+    def to_poly(self) -> InterpolatingPolyCollection:
+
+        def f(t, v):
+            x = self.projectors[0] @ v
+            z = (
+                self.projectors[1] @ v
+                if self.projectors[1] is not None
+                else None
+            )
+            q = (
+                self.projectors[2] @ v
+                if self.projectors[2] is not None
+                else None
+            )
+            u = self.control_law(t)
+            return self.output(t, x, z, u, q)
+
+        return self.path.map(f)
