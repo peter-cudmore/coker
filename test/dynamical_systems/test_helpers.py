@@ -175,6 +175,7 @@ def test_poly_collection_vector_constant():
         value = poly_collection(t)
         assert abs(value - 1) < 1e-6
 
+
 def test_poly_collection_vector_quadratic():
     def f(x):
         return [x, 2 + x**2]
@@ -183,13 +184,13 @@ def test_poly_collection_vector_quadratic():
     collocation_degree = [3, 4, 5]
 
     polys = [
-        InterpolatingPoly(2, interval, degree, np.ones((2*(degree + 1),)))
+        InterpolatingPoly(2, interval, degree, np.ones((2 * (degree + 1),)))
         for interval, degree in zip(intervals, collocation_degree)
     ]
 
     for poly in polys:
         for i, t in enumerate(poly.knot_times()):
-            poly.values[2 * i: 2*(i + 1)] = f(t)
+            poly.values[2 * i : 2 * (i + 1)] = f(t)
     collection = InterpolatingPolyCollection(polys)
     t_eval = np.linspace(0, 3, 100)
 
@@ -198,6 +199,3 @@ def test_poly_collection_vector_quadratic():
         actual = collection(t)
         error = np.linalg.norm(expected - actual)
         assert error < 1e-4, f"Error at t={t}: {error}"
-
-
-

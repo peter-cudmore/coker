@@ -80,7 +80,6 @@ class DynamicalSystem:
     def to_explicit(self, *args):
         t, u, p = self._map_arguments(*args)
 
-
         # solve ODE
         # x' = dxdt(...)
         # 0  = g(...)
@@ -90,7 +89,7 @@ class DynamicalSystem:
         assert t.ndim == 1, "Only 1D time points are supported"
         t_final = t[-1]
 
-        problem =  VariationalProblem(
+        problem = VariationalProblem(
             loss=lambda x, u, p: 0,
             system=self,
             t_final=t_final,
@@ -100,11 +99,7 @@ class DynamicalSystem:
             backend=self.backend(),
         )
         sol = problem()
-        poly = sol.path.map(
-
-        )
-
-
+        poly = sol.path.map()
 
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
@@ -307,10 +302,9 @@ class InterpolatingPolyCollection:
                 yield point
 
     def map(self, func: Callable[[float, np.ndarray], np.ndarray]):
-        new_polys = [
-            p.map(func) for p in self.polys
-        ]
+        new_polys = [p.map(func) for p in self.polys]
         return InterpolatingPolyCollection(new_polys)
+
 
 @dataclass
 class VariationalSolution:
@@ -365,10 +359,17 @@ class VariationalSolution:
 
         def f(t, v):
             x = self.projectors[0] @ v
-            z = self.projectors[1] @ v if self.projectors[1] is not None else None
-            q = self.projectors[2] @ v if self.projectors[2] is not None else None
+            z = (
+                self.projectors[1] @ v
+                if self.projectors[1] is not None
+                else None
+            )
+            q = (
+                self.projectors[2] @ v
+                if self.projectors[2] is not None
+                else None
+            )
             u = self.control_law(t)
             return self.output(t, x, z, u, q)
 
         return self.path.map(f)
-

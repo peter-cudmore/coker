@@ -264,6 +264,7 @@ class InterpolatingPoly:
         derivatives (List[np.ndarray]): Derivative basis functions of the
             polynomial.
     """
+
     def __init__(self, dimension, interval, degree, values):
         """
         Initializes an instance of the class with given parameters and specific configurations
@@ -317,7 +318,7 @@ class InterpolatingPoly:
         # we skip the end point
         return [self.s_to_interval(s_i) for s_i in self.s]
 
-    def start_point(self) -> Tuple[float, np.ndarray] :
+    def start_point(self) -> Tuple[float, np.ndarray]:
         return self.s_to_interval(self.s[0]), self.values[: self.dimension]
 
     def end_point(self) -> Tuple[float, np.ndarray]:
@@ -377,11 +378,16 @@ class InterpolatingPoly:
         return np.reshape(value, (self.dimension,))
 
     def map(self, func):
-        values = np.concatenate([
-            func(self.s_to_interval(s), self.values[i * self.dimension : (i + 1) * self.dimension])
-            for i, s in enumerate(self.s)
-        ])
-        size, = values.shape
+        values = np.concatenate(
+            [
+                func(
+                    self.s_to_interval(s),
+                    self.values[i * self.dimension : (i + 1) * self.dimension],
+                )
+                for i, s in enumerate(self.s)
+            ]
+        )
+        (size,) = values.shape
         dimension = size // len(self.s)
 
         return InterpolatingPoly(dimension, self.interval, self.degree, values)
