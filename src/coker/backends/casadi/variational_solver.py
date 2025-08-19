@@ -56,6 +56,8 @@ def create_variational_solver(problem: VariationalProblem):
     z_size = z_dim.flat() if z_dim else 0
     q_size = q_dim.flat() if q_dim else 0
 
+    tolerance = problem.transcription_options.absolute_tolerance
+
     # initial intervals
     intervals = split_at_non_differentiable_points(
         problem.control if problem.control else [],
@@ -225,8 +227,8 @@ def create_variational_solver(problem: VariationalProblem):
 
     g = ca.vertcat(*[e for e in equalities if e is not None])
     equality_bounds = ca.DM.ones(g.shape)
-    ubg = 1e-9 * equality_bounds
-    lbg = -1e-9 * equality_bounds
+    ubg = tolerance * equality_bounds
+    lbg = -tolerance * equality_bounds
 
     solver_options = {
         "ipopt.least_square_init_duals": "yes",

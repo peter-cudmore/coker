@@ -205,6 +205,7 @@ LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
 class TranscriptionOptions:
     minimum_n_intervals: int = 4
     minimum_degree: int = 4
+    absolute_tolerance: float = 1e-10
 
 
 @dataclass
