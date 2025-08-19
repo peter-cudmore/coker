@@ -175,18 +175,19 @@ def create_variational_solver(problem: VariationalProblem):
                 equalities.append(alg)
 
             # xend = x_start + int_tstart^t_end f(x)dt
-            # ->  0 = xend - xstart - w^T @ [dx_0 | dx_1 | dx_2 | ...]^T
+            # ->  0 = xend - xstart - [dx_0 | dx_1 | dx_2 | ...] @ w
+
         _, xstart = poly.start_point()
         _, xend = poly.end_point()
 
-        dX = ca.hcat(interval_dynamics).T
+        dX = ca.hcat(interval_dynamics)
         assert poly.weights[0, poly.degree] == 0
         w = ca.DM(poly.weights[0, :-1])
 
-        equalities.append(proj_x @ xend - proj_x @ xstart - w.T @ dX)
+        equalities.append(proj_x @ xend - proj_x @ xstart - (dX @ w))
         if q_size > 0:
-            dQ = ca.hcat(interval_quadratures).T
-            equalities.append(proj_q @ xend - proj_q @ xstart - w.T @ dQ)
+            dQ = ca.hcat(interval_quadratures)
+            equalities.append(proj_q @ xend - proj_q @ xstart - dQ @ w)
 
     path_symbols = poly_collection.symbols()
 
