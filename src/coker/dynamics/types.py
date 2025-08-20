@@ -77,30 +77,6 @@ class DynamicalSystem:
 
         return t, u, p
 
-    def to_explicit(self, *args):
-        t, u, p = self._map_arguments(*args)
-
-        # solve ODE
-        # x' = dxdt(...)
-        # 0  = g(...)
-        # to get x,z over the interval
-
-        assert isinstance(t, np.ndarray)
-        assert t.ndim == 1, "Only 1D time points are supported"
-        t_final = t[-1]
-
-        problem = VariationalProblem(
-            loss=lambda x, u, p: 0,
-            system=self,
-            t_final=t_final,
-            control=u,
-            parameters=p,
-            constraints=None,
-            backend=self.backend(),
-        )
-        sol = problem()
-        poly = sol.path.map()
-
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
@@ -204,8 +180,11 @@ LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
 @dataclass
 class TranscriptionOptions:
     minimum_n_intervals: int = 4
-    minimum_degree: int = 4
-    absolute_tolerance: float = 1e-10
+    minimum_degree: int = 7
+    absolute_tolerance: float = 1e-12
+    verbose: bool = False
+    optimiser_options: dict = field(default_factory=dict)
+    initialise_near_guess: bool = False
 
 
 @dataclass
@@ -318,7 +297,7 @@ class VariationalSolution:
     parameter_solutions: Dict[str, float]
     parameters: np.ndarray
     output: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         np.ndarray,
     ]
 
@@ -354,7 +333,7 @@ class VariationalSolution:
         q = self.quadratures(t)
         u = self.control_law(t)
         z = self.algebraic(t)
-        return self.output(t, x, z, u, q)
+        return self.output(t, x, z, u, self.parameters, q)
 
     def to_poly(self) -> InterpolatingPolyCollection:
 
@@ -371,6 +350,6 @@ class VariationalSolution:
                 else None
             )
             u = self.control_law(t)
-            return self.output(t, x, z, u, q)
+            return self.output(t, x, z, u, self.parameters, q)
 
         return self.path.map(f)

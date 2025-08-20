@@ -365,7 +365,10 @@ class InterpolatingPoly:
         s = self._interval_to_s(t)
         try:
             i = next(i for i, s_i in enumerate(self.s) if abs(s_i - s) < 1e-9)
-            return self.values[i * self.dimension : (i + 1) * self.dimension]
+            return np.reshape(
+                self.values[i * self.dimension : (i + 1) * self.dimension],
+                (self.dimension,),
+            )
         except StopIteration:
             pass
         n = len(self.s)
