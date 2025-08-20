@@ -1,25 +1,30 @@
-from functools import reduce
-from operator import mul
-
 import numpy as np
 
-from coker.dynamics import (
-    SpikeVariable,
-    PiecewiseConstantVariable,
-    ConstantControlVariable,
-    TranscriptionOptions,
-    split_at_non_differentiable_points,
-)
-from coker.dynamics.transcription_helpers import (
-    generate_discritisation_operators,
-)
 
 from coker.backends.casadi.variational_solver import (
-    InterpolatingPoly,
     InterpolatingPolyCollection,
     SymbolicPolyCollection,
+    SymbolicPoly,
 )
 import casadi as ca
+
+
+def test_symbolic_poly():
+    t = ca.MX.sym("t")
+    poly = SymbolicPoly("x", 3, (0, 1), 5)
+    x = poly.symbols()
+    poly_as_func = ca.Function("poly_as_func", [t, x], [poly(t)])
+
+    def f(t):
+        return np.array([1 + 2 * t, -3 * t, t])
+
+    line = ca.vertcat(*[ca.DM(f(t_i)) for t_i in poly.knot_times()])
+    assert line.shape == x.shape
+
+    for t_i in np.linspace(0, 1, 100):
+        result = np.array(poly_as_func(t_i, line)).flatten()
+
+        assert np.allclose(result, f(t_i))
 
 
 def test_poly_collection_scalar():

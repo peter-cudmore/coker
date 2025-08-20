@@ -74,6 +74,7 @@ def create_variational_solver(problem: VariationalProblem):
         intervals=intervals,
         degrees=colocation_points,
     )
+    time_points, _, _ = zip(*list(poly_collection.knot_points()))
 
     proj_x = ca.hcat([ca.MX.eye(x_size), ca.MX.zeros(q_size, z_size)])
     proj_z = ca.hcat(
@@ -226,19 +227,18 @@ def create_variational_solver(problem: VariationalProblem):
         cost = problem.loss(solution_proxy, p)
 
     g = ca.vertcat(*[e for e in equalities if e is not None])
-    equality_bounds = ca.DM.ones(g.shape)
-    ubg = tolerance * equality_bounds
-    lbg = -tolerance * equality_bounds
+    ubg = tolerance
+    lbg = -tolerance
+    solver_options = problem.transcription_options.optimiser_options
 
-    solver_options = {
-        "ipopt.least_square_init_duals": "yes",
-        "ipopt.print_level": 0,
-        "print_time": False,
-        "ipopt.sb": "yes",
-    }
-    nlp_spec = {"f": cost, "x": decision_variables, "g": g}
-    nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, solver_options)
-
+    if not problem.transcription_options.verbose:
+        solver_options.update(
+            {
+                "ipopt.print_level": 0,
+                "print_time": False,
+                "ipopt.sb": "yes",
+            }
+        )
     u0_guess = ca.DM.zeros(u_symbols.shape)
 
     state_guess = ca.vertcat(
@@ -246,12 +246,39 @@ def create_variational_solver(problem: VariationalProblem):
         z0_guess if z0_guess is not None else ca.DM.zeros(z_size),
         ca.DM.zeros(q_size),
     )
+
     n_reps = int(path_symbols.shape[0] / state_guess.shape[0])
 
     decision_variables_0 = ca.vertcat(
         ca.repmat(state_guess, n_reps), u0_guess, p_guess
     )
 
+    if problem.transcription_options.initialise_near_guess:
+        init_spec = {
+            "f": cost,
+            "x": decision_variables,
+            "g": ca.vertcat(g, p_symbols - p_guess, u_symbols),
+        }
+        init_solver = ca.nlpsol(
+            "initialiser", "ipopt", init_spec, solver_options
+        )
+        init_soln = init_solver(
+            x0=decision_variables_0,
+            lbx=lower_bound,
+            ubx=upper_bound,
+            lbg=lbg,
+            ubg=ubg,
+        )
+        decision_variables_0 = init_soln["x"]
+        initial_cost = float(init_soln["f"])
+        assert (
+            initial_cost <= ca.inf
+        ), f"Cost at guess {initial_cost} is not finite"
+    else:
+        initial_cost = ca.inf
+
+    nlp_spec = {"f": cost, "x": decision_variables, "g": g}
+    nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, solver_options)
     soln = nlp_solver(
         x0=decision_variables_0,
         lbx=lower_bound,
@@ -261,12 +288,13 @@ def create_variational_solver(problem: VariationalProblem):
     )
 
     min_loss = float(soln["f"])
+    assert min_loss <= initial_cost
     min_args = soln["x"]
 
     f_out = ca.Function(
         "Output",
         [decision_variables],
-        [path_symbols, u_symbols, p_symbols],
+        [path_symbols, u_symbols, p],
         {},
     )
     x_out, u_out, p_out = f_out(min_args)
@@ -280,7 +308,9 @@ def create_variational_solver(problem: VariationalProblem):
         )
         for proj in (proj_x, proj_z, proj_q)
     )
-    parameter_out = p_output_map(np.array(p_out))
+    p_out = np.array(p_out)
+    parameter_out = p_output_map(p_out)
+
     control_out = (
         control_factory.to_output_array(u_out) if problem.control else None
     )
@@ -289,10 +319,10 @@ def create_variational_solver(problem: VariationalProblem):
         cost=min_loss,
         projectors=projectors,
         parameter_solutions=parameter_out,
-        parameters=p_out,
+        parameters=p_out.flatten(),
         path=path,
         control_solutions=control_out,
-        output=lambda t, x, z, u, q: problem.system.y(t, x, z, u, p_out, q),
+        output=problem.system.y,
     )
 
     return solution
@@ -303,6 +333,9 @@ class SymbolicPoly(InterpolatingPoly):
         size = (degree + 1) * dimension
         values = ca.MX.sym(name, size)
         super().__init__(dimension, interval, degree, values)
+
+    def symbols(self):
+        return self.values
 
     def __call__(self, t):
         s = self._interval_to_s(t)
@@ -316,7 +349,10 @@ class SymbolicPoly(InterpolatingPoly):
 
         projection = s_vector.T @ ca.DM(self.bases)
 
-        value = projection @ ca.reshape(self.values, (-1, self.dimension))
+        # Casadi's reshape follows fortran convention (unlike numpy),
+        # so we need to transpose the operation
+        value = ca.reshape(self.values, (self.dimension, -1)) @ projection.T
+
         return ca.reshape(value, (self.dimension, 1))
 
 

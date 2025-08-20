@@ -210,3 +210,59 @@ def test_fitting_line():
     sol = problem()
     assert abs(sol.parameter_solutions["value"] - 2) < 1e-4
     assert sol.cost < 1e-6
+
+
+def test_fitting_exp():
+
+    def x0(p):
+        return p[0:2]
+
+    def xdot(x, p):
+        A = np.array([[p[2], 0], [0, p[3]]])
+        return A @ x
+
+    param = np.array([1, 1, 4, 3])
+
+    def solution(t, p):
+        exp_at = np.array([[np.exp(p[2] * t), 0], [0, np.exp(p[3] * t)]])
+        return exp_at @ x0(p)
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 4), x0=x0, xdot=xdot, backend="numpy"
+    )
+
+    def loss(f, p_inner):
+        total_error = 0.0
+        for t_i in [0.4, 0.6, 1]:
+            truth = solution(t_i, param)
+            test = f(t_i, p_inner)
+            error = truth - test
+            total_error += error.T @ error
+        return total_error
+
+    loss_value = loss(system, param)
+
+    assert loss_value < 1e-4
+
+    problem = VariationalProblem(
+        loss=loss,
+        system=system,
+        parameters=[
+            BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2),
+            float(param[1]),
+            float(param[2]),
+            float(param[3]),
+        ],
+        t_final=1,
+        constraints=[],
+        backend="casadi",
+    )
+
+    sol = problem()
+    assert abs(sol.parameter_solutions["value"] - param[0]) < 1e-4
+    assert sol.cost < 1e-6
+
+    for t in np.linspace(0, 1, 10):
+        sol_t = sol(t)
+        sol_t_expected = solution(t, param)
+        assert np.allclose(sol_t, sol_t_expected)
