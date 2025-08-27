@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 import casadi as ca
 import numpy as np
@@ -6,7 +6,7 @@ from itertools import accumulate
 
 
 from coker.backends.backend import get_backend_by_name
-from coker.backends.casadi import substitute
+
 
 from coker.dynamics import (
     VariationalProblem,
@@ -15,7 +15,6 @@ from coker.dynamics import (
     ParameterVariable,
     ConstantControlVariable,
     SpikeVariable,
-    ParameterMixin,
     BoundedVariable,
     PiecewiseConstantVariable,
     InterpolatingPoly,
@@ -400,11 +399,11 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
 
 
 class ParameterOutputMap:
-    def __init__(self, names):
-        self.names = names
+    def __init__(self, indices: Dict[str, int]):
+        self.indices = indices
 
     def __call__(self, value: ca.DM):
-        return {name: float(value[i, 0]) for i, name in enumerate(self.names)}
+        return {name: float(value[i, 0]) for name, i in self.indices.items()}
 
 
 def construct_parameters(parameters: List[ParameterVariable]):
@@ -415,9 +414,11 @@ def construct_parameters(parameters: List[ParameterVariable]):
     lower_bounds = []
     symbols = {}
     p0 = []
+    output_map = {}
     for i, p in enumerate(parameters):
         if isinstance(p, BoundedVariable):
             symbol = ca.MX.sym(f"{p.name}")
+            output_map[p.name] = len(params)
             params.append(symbol)
             symbols[p.name] = symbol
             upper_bounds.append(
@@ -435,7 +436,6 @@ def construct_parameters(parameters: List[ParameterVariable]):
             raise ValueError(f"Parameter {p} is not a valid parameter")
 
     params = ca.vertcat(*params)
-    output_map = ParameterOutputMap(list(symbols.keys()))
 
     symbols = ca.vertcat(*symbols.values())
     return (
@@ -443,7 +443,7 @@ def construct_parameters(parameters: List[ParameterVariable]):
         symbols,
         ca.DM(p0),
         (ca.DM(lower_bounds), ca.DM(guess), ca.DM(upper_bounds)),
-        output_map,
+        ParameterOutputMap(output_map),
     )
 
 
