@@ -62,14 +62,13 @@ class Free(JointType):
     @property
     def axes(self) -> List[Screw]:
         return [
-            Screw.e_x(),
-            Screw.e_y(),
-            Screw.e_z(),
             Screw.w_x(),
             Screw.w_y(),
             Screw.w_z(),
+            Screw.e_x(),
+            Screw.e_y(),
+            Screw.e_z(),
         ]
-
 
 class Revolute(JointType):
     def __init__(self, axis: Screw):
@@ -289,7 +288,8 @@ class RigidBody:
         ):
             g = transforms[parent] @ xform if parent != self.WORLD else xform
             for basis in bases:
-                g = g @ basis.exp(angles[joint_index])
+                if angles[joint_index] != 0:
+                    g = g @ basis.exp(angles[joint_index])
                 joint_index += 1
 
             transforms.append(g)

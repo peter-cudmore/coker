@@ -38,6 +38,11 @@ def test_free_joint():
     (free_joint,) = model.joint_transforms(q, tip)
     assert np.allclose(free_joint.translation, np.array([0, 0, 0]))
 
+    for i, row in enumerate(np.eye(6)):
+        isometry = Isometry3.from_vector(row) @ Isometry3(translation=np.array([1, 0, 0]))
+        transform, = model.forward_kinematics(row)
+        assert is_close(transform, isometry), f"Failed on basis {i}"
+
 
 def mod_pi(x):
     while x > np.pi:
@@ -553,3 +558,6 @@ def test_add_multiple():
     assert (
         np.linalg.norm(dscrews_0[0] - dscrews_0[1]) < 1e-4
     ), f"{dscrews_0[0]} != {dscrews_0[1]}"
+
+
+
