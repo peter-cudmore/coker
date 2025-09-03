@@ -222,7 +222,7 @@ def case_dimension(
         raise InvalidShape("Condition must be a scalar")
 
     if false_branch != true_branch:
-        raise InvalidShape("Arguments are of different dimensions")
+        raise InvalidShape("Arguments are of different dimensions", false_branch, true_branch)
 
     return true_branch
 
@@ -233,7 +233,7 @@ def same_dimension(d_1: Dimension, d_2: Dimension) -> Dimension:
         return d_1
 
     if d_1 != d_2:
-        raise InvalidShape("Arguments are of different dimensions")
+        raise InvalidShape("Arguments are of different dimensions", d_1, d_2)
 
     return d_1
 
@@ -248,7 +248,9 @@ def shape_mul(d_1: Dimension, d_2: Dimension):
 
     raise InvalidArgument(
         "Multiplication is not define between two non-scalars. "
-        "Consider using other operations"
+        "Consider using other operations",
+        d_1,
+        d_2,
     )
 
 

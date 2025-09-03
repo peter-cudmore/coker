@@ -98,7 +98,7 @@ class Tape:
         args = [strip_symbols_from_array(a) for a in args]
 
         args = [
-            self.insert_value(a) if not isinstance(a, Tracer) else a
+            self.insert_value(a) if not isinstance(a, Tracer) else a.copy()
             for a in args
         ]
         out_dim = self._compute_shape(op, *args)
@@ -168,6 +168,9 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     @property
     def tape(self):
         return self._tape()
+
+    def copy(self):
+        return Tracer(self.tape, self.index)
 
     def is_input(self):
         return self.index in self.tape.input_indicies
@@ -306,6 +309,10 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         raise NotImplementedError("Cannot get item {}", item)
 
+    def __iter__(self):
+        for i in range(self.shape[0]):
+            yield self[i]
+
     def __le__(self, other):
         idx = self.tape.append(OP.LESS_EQUAL, self, other)
         return Tracer(self.tape, idx)
@@ -351,7 +358,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         raise NotImplementedError(f"{ufunc} is not implemented")
 
     def __array_function__(self, func, types, args, kwargs):
-
         try:
             op = numpy_atomics[func]
             index = self.tape.append(op, *args)
@@ -387,6 +393,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __call__(self, *args):
         index = self.tape.append(OP.EVALUATE, self, *args)
         return Tracer(self.tape, index)
+
+    def __setitem__(self, key, value):
+        if len(key) != len(self.shape):
+            raise ValueError(
+                f"Cannot set item {key} = {value} on {self} with shape {self.shape}"
+            )
+        raise NotImplementedError("Cannot set item")
 
 
 class Function:
