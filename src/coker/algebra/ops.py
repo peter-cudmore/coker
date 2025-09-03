@@ -96,11 +96,11 @@ class ConcatenateOP(Operator):
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
 
-        out_dims = list(dims[0].dim)
         if all(d.is_scalar() or d.is_vector() for d in dims):
             dim = Dimension((sum(d.flat() for d in dims),))
             return dim
 
+        out_dims = list(dims[0].dim)
         for d in dims[1:]:
             assert all(
                 d.dim[i] == out_dims[i]
@@ -113,14 +113,21 @@ class ConcatenateOP(Operator):
 
 
 class ReshapeOP(Operator):
-    def __init__(self, newshape):
+    def __init__(self, newshape, order="C"):
         self.newshape = newshape
+        self.order = order
 
     def compute_shape(self, dim: Dimension) -> Dimension:
         return Dimension(self.newshape)
 
     def is_linear(self):
         return True
+
+    def pre_process(self, value, *args):
+        if self.order == "C":
+            return value, *args
+        else:
+            return value.T, *args
 
 
 class NormOP(Operator):
@@ -222,7 +229,9 @@ def case_dimension(
         raise InvalidShape("Condition must be a scalar")
 
     if false_branch != true_branch:
-        raise InvalidShape("Arguments are of different dimensions", false_branch, true_branch)
+        raise InvalidShape(
+            "Arguments are of different dimensions", false_branch, true_branch
+        )
 
     return true_branch
 
@@ -265,8 +274,6 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
     if d_1.is_vector():
         raise InvalidArgument("Cannot multiply vectors")
 
-    if d_2.is_covector():
-        raise InvalidArgument("Cannot right-multiply covectors")
 
     c = d_1.dim[-1]
     out_dims = []
@@ -280,7 +287,7 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     if c != r:
         raise InvalidArgument(
-            "Cannot multiply: product axis has different shape"
+            "Cannot multiply: product axis has different shape",d_1.shape,d_2.shape
         )
 
     if out_dims:

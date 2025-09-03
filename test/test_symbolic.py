@@ -241,3 +241,15 @@ def test_functional(backend):
 
     f_coker_result = f_coker(f_inner, np.array([2, 3], dtype=float))
     assert is_close(f_coker_result, np.array([3, 2], dtype=float))
+
+
+def test_zeros():
+    from coker.algebra import zeros
+    from coker.algebra.kernel import TraceContext
+
+    with TraceContext():
+        x = zeros((3, 3))
+
+        assert x.shape == (3, 3)
+        x[:, 0] = np.array([1, 2, 3])
+        assert x[0, 0] == 1
