@@ -385,10 +385,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         try:
             op = numpy_atomics[ufunc]
 
-            if op == OP.DIV:
-                assert inputs[1] > 0
-                if isinstance(inputs[1], Tracer):
-                    pass
+
 
             index = self.tape.append(op, *inputs)
             return Tracer(self.tape, index)

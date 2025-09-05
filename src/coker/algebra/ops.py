@@ -247,12 +247,14 @@ def same_dimension(d_1: Dimension, d_2: Dimension) -> Dimension:
     return d_1
 
 
-@register_shape(OP.MUL)
+@register_shape(OP.MUL, OP.DIV)
 def shape_mul(d_1: Dimension, d_2: Dimension):
-    if d_1.is_scalar() or d_1.dim == 1:
+    if d_1.is_scalar():
         return d_2
 
-    if d_2.is_scalar() or d_2.dim == 1:
+    if d_2.is_scalar():
+        return d_1
+    if d_1 == d_2:
         return d_1
 
     raise InvalidArgument(
@@ -340,12 +342,6 @@ def transpose_shape(d: Dimension):
         return Dimension((d.dim[1],))
 
     return Dimension(tuple(reversed(d.dim)))
-
-
-@register_shape(OP.DIV)
-def scalar_binary(d1: Dimension, d2: Dimension):
-    assert d2.is_scalar()
-    return d1
 
 
 numpy_atomics = {

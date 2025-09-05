@@ -64,6 +64,33 @@ def test_symbolic_vector_matrix_product(backend):
 
     assert is_close(y_test, y_eval)
 
+def test_componentwise_operations(backend):
+
+    v = np.array([1, 2, 3])
+
+    def f_divide_impl(x):
+        return x / v
+
+    def f_mul_impl(x):
+        return x * v
+
+    f_divide = function([VectorSpace(name="x", dimension=3)], f_divide_impl, backend)
+    f_mul = function([VectorSpace(name="x", dimension=3)], f_mul_impl, backend)
+
+    x_test = np.array([2, 3, 5], dtype=float)
+
+    y_divide = f_divide(x_test)
+    y_divide_expected = f_divide_impl(x_test)
+    y_mul = f_mul(x_test)
+    y_mul_expected = f_mul_impl(x_test)
+
+    assert is_close(y_divide, y_divide_expected, 1e-6)
+    assert is_close(y_mul, y_mul_expected, 1e-6)
+
+
+
+
+
 
 def test_slicing_symbolic_vector(backend):
 

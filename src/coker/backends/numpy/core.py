@@ -42,15 +42,18 @@ def is_scalar_symbol(v):
 
 
 def div(num, den):
-    if den == 0:
-        if isinstance(num, np.ndarray) and (num == 0).all():
-            return num
-        elif num == 0:
-            return num
-        else:
-            raise ZeroDivisionError
-    else:
-        return np.divide(num, den)
+    try:
+        if den == 0:
+            if isinstance(num, np.ndarray) and (num == 0).all():
+                return num
+            elif num == 0:
+                return num
+            else:
+                raise ZeroDivisionError
+    except ValueError:
+        pass
+
+    return np.divide(num, den)
 
 
 impls = {
