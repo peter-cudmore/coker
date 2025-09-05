@@ -17,13 +17,13 @@ class CasadiBackend(Backend):
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         if isinstance(array, ca.MX):
             try:
-                return array.to_DM().toarray(simplify=True)
+                return array.to_DM().toarray()
             except RuntimeError:
                 pass
         elif isinstance(array, ca.DM):
-            return array.toarray(simplify=True)
+            return array.toarray()
         try:
-            return ca.evalf(array).toarray(simplify=True)
+            return ca.evalf(array).toarray()
         except RuntimeError:
             pass
 
@@ -130,9 +130,14 @@ class CasadiBackend(Backend):
 
         y = substitute(function.output, workspace)
         outs = []
-        for y_i in y:
+        for y_i, output_tracer in zip(y, function.output):
             try:
-                outs.append(self.to_numpy_array(y_i))
+                y_result = self.to_numpy_array(y_i)
+                if output_tracer.dim.is_scalar():
+                    outs.append(float(y_result))
+                else:
+                    outs.append(y_result.reshape(output_tracer.shape))
+
             except ValueError:
                 outs.append(y_i)
 

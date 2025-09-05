@@ -25,8 +25,25 @@ def test_symbolic_scalar(backend):
 
     assert f(1) == 4
 
+def test_symbolic_vector_projection(backend):
+    A = np.array([[0, 1,0]], dtype=float)
 
-def test_symbolic_vector(backend):
+
+    def f_impl(x):
+        ax = A @ x
+        return ax
+
+    f = function([VectorSpace("x", 3)], f_impl, backend=backend)
+    assert f.output[0].shape == (1,)
+
+    x_test = np.array([2, 3, 5], dtype=float)
+    y_test = f_impl(x_test)
+    y_result = f(x_test)
+    assert y_result.shape == y_test.shape
+    assert is_close(y_result, y_test)
+
+
+def test_symbolic_vector_matrix_product(backend):
 
     A = np.array([[0, 1], [-1, 0]], dtype=float)
     b = np.array([-1, 1], dtype=float)

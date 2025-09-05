@@ -277,13 +277,19 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     c = d_1.dim[-1]
     out_dims = []
-    if d_1.is_matrix() or d_1.is_multilinear_map():
+    #if d_1.is_matrix() or d_1.is_multilinear_map():
+    try:
         out_dims += [d for d in d_1.dim[:-1]]
+    except IndexError:
+        pass
 
     r = d_2.dim[0]
 
-    if d_2.is_matrix() or d_2.is_multilinear_map():
+#    if d_2.is_matrix() or d_2.is_multilinear_map():
+    try:
         out_dims += [d for d in d_2.dim[1:]]
+    except IndexError:
+        pass
 
     if c != r:
         raise InvalidArgument(

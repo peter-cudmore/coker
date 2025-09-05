@@ -427,7 +427,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         assert (len(self.shape) == 1 and self.shape[0] > 1) or (
             len(self.shape) == 2 and self.shape[1] == 1
         )
-        return np.sqrt(self.T @ self)
+        return np.sqrt(np.dot(self, self))
 
     def normalise(self):
         norm = self.norm()
