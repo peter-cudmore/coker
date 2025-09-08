@@ -181,6 +181,7 @@ class CasadiBackend(Backend):
         z = ca.MX.sym("z", z0.shape)
 
         dx_sym = dxdt(t, x, z, u, p)
+
         if is_dae:
             q = ca.MX.sym("q", q0.shape)
             q0 = ca.DM.zeros(q.shape)

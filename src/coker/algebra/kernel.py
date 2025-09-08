@@ -456,7 +456,11 @@ class Function:
 
     def __repr__(self):
         name = self.name if self.name else "<unknown>"
-        return f"{name}:{self.input_shape()} -> {self.output_shape()}"
+        try:
+            out_shape = f"{self.output_shape()}"
+        except AttributeError:
+            out_shape = f"{self.output}"
+        return f"{name}:{self.input_shape()} -> {out_shape}"
 
     def to_space(self, name):
         return FunctionSpace(

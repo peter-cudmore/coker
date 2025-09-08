@@ -113,8 +113,8 @@ class ConcatenateOP(Operator):
 
 
 class ReshapeOP(Operator):
-    def __init__(self, newshape, order="C"):
-        self.newshape = newshape
+    def __init__(self, shape, order="C"):
+        self.newshape = shape
         self.order = order
 
     def compute_shape(self, dim: Dimension) -> Dimension:
