@@ -206,8 +206,15 @@ class NumpyBackend(Backend):
         if not isinstance(x0, np.ndarray):
             x0 = np.array([x0])
 
-        if end_point == 0.0:
-            return x0, z0, q0
+        if isinstance(end_point, (float, int)):
+            if end_point == 0.0:
+                return x0, z0, q0
+            else:
+                t_eval = [end_point]
+                t_span = (0, end_point)
+        else:
+            t_eval = end_point
+            t_span = (0, end_point[-1])
 
         if dqdt is Noop():
             y0 = x0
@@ -220,19 +227,25 @@ class NumpyBackend(Backend):
             )
 
         sol = scp.integrate.solve_ivp(
-            f, (0, end_point), y0, method="RK45", t_eval=[end_point]
+            f, t_span, y0, method="RK45", t_eval=t_eval
+        )
+
+        x_out = (
+            sol.y[: x0.shape[0], -1]
+            if not isinstance(end_point, np.ndarray)
+            else sol.y[: x0.shape[0], :]
         )
 
         if dqdt is None:
-            x_out, z_out, q_out = sol.y[: x0.shape[0], 0], None, None
+            q_out = None
         else:
-            x_out, z_out, q_out = (
-                sol.y[: x0.shape[0], 0],
-                None,
-                sol.y[x0.shape[0] :, 0],
+            q_out = (
+                sol.y[x0.shape[0] :, -1]
+                if not isinstance(end_point, np.ndarray)
+                else sol.y[x0.shape[0] :, :]
             )
 
-        return x_out, z_out, q_out
+        return x_out, None, q_out
 
     def build_optimisation_problem(
         self,

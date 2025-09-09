@@ -170,12 +170,16 @@ class CasadiBackend(Backend):
         is_dae = dqdt is not Noop()
         has_quadrature = g is not Noop()
         x0, z0, q0 = (self.to_backend_array(a) for a in initial_conditions)
+        if isinstance(end_point, (int, float)):
+            if end_point == 0:
+                return x0, z0, q0
 
-        if end_point == 0:
-            return x0, z0, q0
-        t_final = end_point
+            t_eval = [end_point]
+        else:
+            t_eval = end_point
+
         u, p = inputs
-
+        p = self.to_backend_array(p)
         t = ca.MX.sym("t")
         x = ca.MX.sym("x", x0.shape)
         z = ca.MX.sym("z", z0.shape)
@@ -186,15 +190,15 @@ class CasadiBackend(Backend):
             q = ca.MX.sym("q", q0.shape)
             q0 = ca.DM.zeros(q.shape)
             dq_sym = dqdt(t, x, z, u, p)
-            xq = ca.vertcat(t, x, q)
-            xq0 = ca.vertcat(0, x0, q0)
-            xq_to_x_q = ca.Function("xq_to_x_q", [xq], [t, x, q])
-            dxq = t_final * ca.vertcat(ca.MX(1), dx_sym, dq_sym)
+            xq = ca.vertcat(x, q)
+            xq0 = ca.vertcat(x0, q0)
+            xq_to_x_q = ca.Function("xq_to_x_q", [xq], [x, q])
+            dxq = ca.vertcat(dx_sym, dq_sym)
         else:
-            xq = ca.vertcat(t, x)
-            xq0 = ca.vertcat(0, x0)
-            xq_to_x_q = ca.Function("xq_to_x_q", [xq], [t, x])
-            dxq = t_final * ca.vertcat(ca.MX(1), dx_sym)
+            xq = x
+            xq0 = x0
+            xq_to_x_q = ca.Function("xq_to_x_q", [xq], [x])
+            dxq = ca.vertcat(dx_sym)
 
         initial_conditions = {
             "x0": x0,
@@ -207,13 +211,13 @@ class CasadiBackend(Backend):
             dae["z"] = g(t, x, z, u, p)
             initial_conditions["z0"] = z0
 
-        solver = ca.integrator("solver", "idas", dae)
+        solver = ca.integrator("solver", "idas", dae, 0, t_eval, {})
         xq_final = solver(x0=xq0, z0=z0)
 
         if has_quadrature:
-            _, x_final, q_final = xq_to_x_q(xq_final["xf"])
+            x_final, q_final = xq_to_x_q(xq_final["xf"])
         else:
-            _, x_final = xq_to_x_q(xq_final["xf"])
+            x_final = xq_to_x_q(xq_final["xf"])
             q_final = None
         if is_dae:
             z_final = xq_final["zf"]

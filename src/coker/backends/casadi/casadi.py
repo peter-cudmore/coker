@@ -31,8 +31,13 @@ impls = {
     OP.LESS_EQUAL: ca.le,
     OP.LESS_THAN: ca.lt,
     OP.CASE: lambda c, t, f: ca.if_else(c, t, f),
-    OP.EVALUATE: lambda op, *args: op(*args),
+    OP.EVALUATE: lambda op, *args: casadi_eval(op, *args),
 }
+
+
+def casadi_eval(op, *args):
+    result = op(*args)
+    return to_casadi(result)
 
 
 def concat(*args: ca.MX, axis=0):
@@ -159,15 +164,6 @@ def substitute(output: List[Tracer], workspace):
 
         if node.is_constant():
             v = to_casadi(node.value())
-
-            if not node.dim.is_scalar():
-                shape = (
-                    node.shape
-                    if not node.dim.is_vector()
-                    else (*node.dim.shape, 1)
-                )
-
-                v = v.reshape(shape)
         else:
             op, *args = node.value()
             args = [get_node(a) for a in args]
@@ -179,6 +175,16 @@ def substitute(output: List[Tracer], workspace):
                     raise e
             else:
                 v = call_parameterised_op(op, *args)
+        try:
+            if not node.dim.is_scalar():
+                shape = (
+                    node.shape
+                    if not node.dim.is_vector()
+                    else (*node.dim.shape, 1)
+                )
+                v = v.reshape(shape)
+        except AttributeError:
+            pass
 
         workspace[node.index] = v
         return v

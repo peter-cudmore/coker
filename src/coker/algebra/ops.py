@@ -276,10 +276,9 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
     if d_1.is_vector():
         raise InvalidArgument("Cannot multiply vectors")
 
-
     c = d_1.dim[-1]
     out_dims = []
-    #if d_1.is_matrix() or d_1.is_multilinear_map():
+    # if d_1.is_matrix() or d_1.is_multilinear_map():
     try:
         out_dims += [d for d in d_1.dim[:-1]]
     except IndexError:
@@ -287,7 +286,7 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     r = d_2.dim[0]
 
-#    if d_2.is_matrix() or d_2.is_multilinear_map():
+    #    if d_2.is_matrix() or d_2.is_multilinear_map():
     try:
         out_dims += [d for d in d_2.dim[1:]]
     except IndexError:
@@ -295,7 +294,9 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     if c != r:
         raise InvalidArgument(
-            "Cannot multiply: product axis has different shape",d_1.shape,d_2.shape
+            "Cannot multiply: product axis has different shape",
+            d_1.shape,
+            d_2.shape,
         )
 
     if out_dims:

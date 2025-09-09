@@ -200,6 +200,14 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             return False
         return True
 
+    def is_functional(self):
+        if self.is_input():
+            return False
+        op, *args = self.tape.nodes[self.index]
+        if op not in {OP.EVALUATE}:
+            return False
+        return True
+
     def as_halfplane_bound(self) -> Tuple["Tracer", float, float]:
         op, lhs, rhs = self.tape.nodes[self.index]
         bounds = {
@@ -339,14 +347,22 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         # when we set an item, we need to do 2 things.
         # 1. Store the operation in the tape
         # 2. Mutate this object so that it points to the new tracer
-        assert self[key].shape == value.shape, f"Expected shape {self[key].shape } but got {value.shape} for {key} = {value} on {self} with shape {self.shape}"
+        assert (
+            self[key].shape == value.shape
+        ), f"Expected shape {self[key].shape } but got {value.shape} for {key} = {value} on {self} with shape {self.shape}"
 
         # if the value here is a constant that is not referenced by any other
         # tracers, we can just go ahead and mutate it.
         op, old_value = self.tape.nodes[self.index]
-        if op == OP.VALUE and not self.tape.find_dependents(self) and (
+        if (
+            op == OP.VALUE
+            and not self.tape.find_dependents(self)
+            and (
                 (isinstance(value, Tracer) and value.is_constant())
-                or isinstance(value, scalar_types) or isinstance(value, np.ndarray)):
+                or isinstance(value, scalar_types)
+                or isinstance(value, np.ndarray)
+            )
+        ):
             old_value.__setitem__(key, value)
             return
 
@@ -384,8 +400,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         try:
             op = numpy_atomics[ufunc]
-
-
 
             index = self.tape.append(op, *inputs)
             return Tracer(self.tape, index)
