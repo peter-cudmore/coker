@@ -25,9 +25,9 @@ def test_symbolic_scalar(backend):
 
     assert f(1) == 4
 
-def test_symbolic_vector_projection(backend):
-    A = np.array([[0, 1,0]], dtype=float)
 
+def test_symbolic_vector_projection(backend):
+    A = np.array([[0, 1, 0]], dtype=float)
 
     def f_impl(x):
         ax = A @ x
@@ -64,6 +64,7 @@ def test_symbolic_vector_matrix_product(backend):
 
     assert is_close(y_test, y_eval)
 
+
 def test_componentwise_operations(backend):
 
     v = np.array([1, 2, 3])
@@ -74,7 +75,9 @@ def test_componentwise_operations(backend):
     def f_mul_impl(x):
         return x * v
 
-    f_divide = function([VectorSpace(name="x", dimension=3)], f_divide_impl, backend)
+    f_divide = function(
+        [VectorSpace(name="x", dimension=3)], f_divide_impl, backend
+    )
     f_mul = function([VectorSpace(name="x", dimension=3)], f_mul_impl, backend)
 
     x_test = np.array([2, 3, 5], dtype=float)
@@ -86,10 +89,6 @@ def test_componentwise_operations(backend):
 
     assert is_close(y_divide, y_divide_expected, 1e-6)
     assert is_close(y_mul, y_mul_expected, 1e-6)
-
-
-
-
 
 
 def test_slicing_symbolic_vector(backend):
