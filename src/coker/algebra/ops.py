@@ -96,11 +96,11 @@ class ConcatenateOP(Operator):
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
 
-        out_dims = list(dims[0].dim)
         if all(d.is_scalar() or d.is_vector() for d in dims):
             dim = Dimension((sum(d.flat() for d in dims),))
             return dim
 
+        out_dims = list(dims[0].dim)
         for d in dims[1:]:
             assert all(
                 d.dim[i] == out_dims[i]
@@ -113,14 +113,21 @@ class ConcatenateOP(Operator):
 
 
 class ReshapeOP(Operator):
-    def __init__(self, newshape):
-        self.newshape = newshape
+    def __init__(self, shape, order="C"):
+        self.newshape = shape
+        self.order = order
 
     def compute_shape(self, dim: Dimension) -> Dimension:
         return Dimension(self.newshape)
 
     def is_linear(self):
         return True
+
+    def pre_process(self, value, *args):
+        if self.order == "C":
+            return value, *args
+        else:
+            return value.T, *args
 
 
 class NormOP(Operator):
@@ -222,7 +229,9 @@ def case_dimension(
         raise InvalidShape("Condition must be a scalar")
 
     if false_branch != true_branch:
-        raise InvalidShape("Arguments are of different dimensions")
+        raise InvalidShape(
+            "Arguments are of different dimensions", false_branch, true_branch
+        )
 
     return true_branch
 
@@ -233,22 +242,26 @@ def same_dimension(d_1: Dimension, d_2: Dimension) -> Dimension:
         return d_1
 
     if d_1 != d_2:
-        raise InvalidShape("Arguments are of different dimensions")
+        raise InvalidShape("Arguments are of different dimensions", d_1, d_2)
 
     return d_1
 
 
-@register_shape(OP.MUL)
+@register_shape(OP.MUL, OP.DIV)
 def shape_mul(d_1: Dimension, d_2: Dimension):
-    if d_1.is_scalar() or d_1.dim == 1:
+    if d_1.is_scalar():
         return d_2
 
-    if d_2.is_scalar() or d_2.dim == 1:
+    if d_2.is_scalar():
+        return d_1
+    if d_1 == d_2:
         return d_1
 
     raise InvalidArgument(
         "Multiplication is not define between two non-scalars. "
-        "Consider using other operations"
+        "Consider using other operations",
+        d_1,
+        d_2,
     )
 
 
@@ -263,22 +276,27 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
     if d_1.is_vector():
         raise InvalidArgument("Cannot multiply vectors")
 
-    if d_2.is_covector():
-        raise InvalidArgument("Cannot right-multiply covectors")
-
     c = d_1.dim[-1]
     out_dims = []
-    if d_1.is_matrix() or d_1.is_multilinear_map():
+    # if d_1.is_matrix() or d_1.is_multilinear_map():
+    try:
         out_dims += [d for d in d_1.dim[:-1]]
+    except IndexError:
+        pass
 
     r = d_2.dim[0]
 
-    if d_2.is_matrix() or d_2.is_multilinear_map():
+    #    if d_2.is_matrix() or d_2.is_multilinear_map():
+    try:
         out_dims += [d for d in d_2.dim[1:]]
+    except IndexError:
+        pass
 
     if c != r:
         raise InvalidArgument(
-            "Cannot multiply: product axis has different shape"
+            "Cannot multiply: product axis has different shape",
+            d_1.shape,
+            d_2.shape,
         )
 
     if out_dims:
@@ -325,12 +343,6 @@ def transpose_shape(d: Dimension):
         return Dimension((d.dim[1],))
 
     return Dimension(tuple(reversed(d.dim)))
-
-
-@register_shape(OP.DIV)
-def scalar_binary(d1: Dimension, d2: Dimension):
-    assert d2.is_scalar()
-    return d1
 
 
 numpy_atomics = {

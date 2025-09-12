@@ -1,7 +1,7 @@
 import weakref
 
 import numpy as np
-from typing import Callable, Union, Tuple, List, Optional
+from typing import Callable, Union, Tuple, List, Optional, Set
 from collections import defaultdict
 
 from coker.algebra.dimensions import (
@@ -14,8 +14,11 @@ from coker.algebra.dimensions import (
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.ops import OP, Noop
 
-
 from coker.algebra.ops import numpy_atomics, numpy_composites
+
+import threading
+import dataclasses
+
 
 scalar_types = (
     np.float32,
@@ -75,6 +78,18 @@ class Tape:
     def op(self, i):
         return self.nodes[i][0]
 
+    def find_dependents(self, tracer: "Tracer") -> Set[int]:
+        index = tracer.index
+        result = set()
+        for i, (op, *args) in enumerate(self.nodes[tracer.index :]):
+            if op == OP.VALUE:
+                continue
+            for arg in args:
+                if isinstance(arg, Tracer):
+                    if arg.index == index or arg.index in result:
+                        result.add(index + i)
+        return result
+
     def __len__(self):
         return len(self.nodes)
 
@@ -98,7 +113,7 @@ class Tape:
         args = [strip_symbols_from_array(a) for a in args]
 
         args = [
-            self.insert_value(a) if not isinstance(a, Tracer) else a
+            self.insert_value(a) if not isinstance(a, Tracer) else a.copy()
             for a in args
         ]
         out_dim = self._compute_shape(op, *args)
@@ -110,6 +125,7 @@ class Tape:
     def insert_value(self, arg):
         if arg is None:
             return None
+        assert not isinstance(arg, Tracer)
         dim = get_dim_by_class(arg)
         idx = len(self.dim)
         self.nodes.append((OP.VALUE, arg))
@@ -169,6 +185,9 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def tape(self):
         return self._tape()
 
+    def copy(self):
+        return Tracer(self.tape, self.index)
+
     def is_input(self):
         return self.index in self.tape.input_indicies
 
@@ -178,6 +197,14 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             return False
         op, *args = self.tape.nodes[self.index]
         if op != OP.VALUE:
+            return False
+        return True
+
+    def is_functional(self):
+        if self.is_input():
+            return False
+        op, *args = self.tape.nodes[self.index]
+        if op not in {OP.EVALUATE}:
             return False
         return True
 
@@ -289,22 +316,66 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         return result
 
-    def __getitem__(self, item):
-        if isinstance(item, slice):
+    def __getitem__(self, key):
+        if self.is_constant():
+            return self.value()[key]
+
+        if isinstance(key, slice):
             dimension = self.tape.dim[self.index]
-            assert not dimension.is_scalar()
-            p = get_projection(dimension, item)
+            assert dimension.is_vector(), f"Tried to index a vector"
+            p = get_projection(dimension, key)
             index = self.tape.append(OP.MATMUL, p, self)
             return Tracer(self.tape, index)
 
-        elif isinstance(item, int):
+        elif isinstance(key, int):
             dimension = self.tape.dim[self.index]
-            assert not dimension.is_scalar(), f"Tried to index a scalar"
-            p = get_basis(dimension, item)
+            assert dimension.is_vector(), f"Tried to index a vector"
+            p = get_basis(dimension, key)
             index = self.tape.append(OP.DOT, p, self)
             return Tracer(self.tape, index)
 
-        raise NotImplementedError("Cannot get item {}", item)
+        raise NotImplementedError(
+            "Cannot get key {}, not yet implemented", key
+        )
+
+    def __setitem__(self, key, value):
+        if len(key) != len(self.shape):
+            raise ValueError(
+                f"Cannot set item {key} = {value} on {self} with shape {self.shape}"
+            )
+
+        # when we set an item, we need to do 2 things.
+        # 1. Store the operation in the tape
+        # 2. Mutate this object so that it points to the new tracer
+        assert (
+            self[key].shape == value.shape
+        ), f"Expected shape {self[key].shape } but got {value.shape} for {key} = {value} on {self} with shape {self.shape}"
+
+        # if the value here is a constant that is not referenced by any other
+        # tracers, we can just go ahead and mutate it.
+        op, old_value = self.tape.nodes[self.index]
+        if (
+            op == OP.VALUE
+            and not self.tape.find_dependents(self)
+            and (
+                (isinstance(value, Tracer) and value.is_constant())
+                or isinstance(value, scalar_types)
+                or isinstance(value, np.ndarray)
+            )
+        ):
+            old_value.__setitem__(key, value)
+            return
+
+        # otherwise, we need to add the "SET" operation to the tape
+        # and change this tracers index to point to that.
+
+        raise NotImplementedError(
+            f"Cannot set item. SET operation not implemented yet for {key} = {value} on {self} with shape {self.shape}"
+        )
+
+    def __iter__(self):
+        for i in range(self.shape[0]):
+            yield self[i]
 
     def __le__(self, other):
         idx = self.tape.append(OP.LESS_EQUAL, self, other)
@@ -330,11 +401,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         try:
             op = numpy_atomics[ufunc]
 
-            if op == OP.DIV:
-                assert inputs[1] > 0
-                if isinstance(inputs[1], Tracer):
-                    pass
-
             index = self.tape.append(op, *inputs)
             return Tracer(self.tape, index)
 
@@ -351,7 +417,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         raise NotImplementedError(f"{ufunc} is not implemented")
 
     def __array_function__(self, func, types, args, kwargs):
-
         try:
             op = numpy_atomics[func]
             index = self.tape.append(op, *args)
@@ -373,7 +438,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         assert (len(self.shape) == 1 and self.shape[0] > 1) or (
             len(self.shape) == 2 and self.shape[1] == 1
         )
-        return np.sqrt(self.T @ self)
+        return np.sqrt(np.dot(self, self))
 
     def normalise(self):
         norm = self.norm()
@@ -405,7 +470,11 @@ class Function:
 
     def __repr__(self):
         name = self.name if self.name else "<unknown>"
-        return f"{name}:{self.input_shape()} -> {self.output_shape()}"
+        try:
+            out_shape = f"{self.output_shape()}"
+        except AttributeError:
+            out_shape = f"{self.output}"
+        return f"{name}:{self.input_shape()} -> {out_shape}"
 
     def to_space(self, name):
         return FunctionSpace(
@@ -481,35 +550,35 @@ def function(
     # call function to construct expression graph
 
     tape = Tape()
+    with TraceContext() as tape:
+        args = [tape.input(v) for v in arguments]
+        result = implementation(*args)
 
-    args = [tape.input(v) for v in arguments]
-    result = implementation(*args)
+        if isinstance(result, np.ndarray):
+            result = strip_symbols_from_array(result)
 
-    if isinstance(result, np.ndarray):
-        result = strip_symbols_from_array(result)
+        if isinstance(result, SymbolicVector):
+            result = result.collapse()
 
-    if isinstance(result, SymbolicVector):
-        result = result.collapse()
+        def wrap(v):
+            if isinstance(v, np.ndarray):
+                v = strip_symbols_from_array(v)
+            if isinstance(v, SymbolicVector):
+                v = v.collapse()
 
-    def wrap(v):
-        if isinstance(v, np.ndarray):
-            v = strip_symbols_from_array(v)
-        if isinstance(v, SymbolicVector):
-            v = v.collapse()
+            if isinstance(v, Tracer):
+                return v
 
-        if isinstance(v, Tracer):
-            return v
+            return tape.insert_value(v)
 
-        return tape.insert_value(v)
+        if isinstance(result, (list, tuple)):
+            result = [wrap(r) for r in result]
 
-    if isinstance(result, (list, tuple)):
-        result = [wrap(r) for r in result]
+        else:
+            result = wrap(result)
 
-    else:
-        result = wrap(result)
-
-    if result is None or result is [None]:
-        return Noop()
+        if result is None or result is [None]:
+            return Noop()
 
     return Function(tape, result, backend, name)
 
@@ -560,3 +629,20 @@ def normalise(v: Union[np.ndarray, Tracer]):
     norm_v = v.norm()
 
     return unit_v, norm_v
+
+
+_local = threading.local()
+
+
+class TraceContext:
+    def __enter__(self):
+        tape = Tape()
+        _local.trace = tape
+        return tape
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _local.trace = None
+
+    @staticmethod
+    def get_local_tape() -> Tape | None:
+        return getattr(_local, "trace", None)

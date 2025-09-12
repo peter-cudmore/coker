@@ -24,12 +24,12 @@ def test_optimisation(backend):
         p = builder.new_variable(name="p", shape=(2,))
         z = builder.new_variable(name="z")
         builder.objective = Minimise(quadratic(x, p, z))
-        e_y = np.array([[0], [1], [0]], dtype=float)
+        e_y = np.array([0, 1, 0], dtype=float)
         builder.constraints = [
             1 < (z**2),
             # numpy implementation doesn't like nonlinear constraints
             x[0] > 1,
-            2 < e_y.T @ x,
+            2 < np.dot(e_y, x),
         ]
         builder.outputs = [x, p, z]
         builder.initial_conditions = [

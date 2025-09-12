@@ -324,3 +324,49 @@ def test_fitting_exp():
         sol_t = sol(t)
         sol_t_expected = solution(t, param)
         assert np.allclose(sol_t, sol_t_expected)
+
+
+def test_vector_solver(variational_backend):
+    def x0(p):
+        x0_val = p[1:2]
+
+        return x0_val
+
+    def xdot(t, x, u, p):
+        return p[0] * x + u
+
+    def u_func(t):
+        return 2
+
+    param = np.array([1, 2])
+
+    def solution(t, p):
+        x_0 = x0(p)
+        a = p[0]
+        x_t = x_0 * np.exp(a * t) + (np.exp(a * t) - 1) * 2 / a
+
+        y = x_t
+        return y
+
+    system = create_control_system(
+        x0=x0, xdot=xdot, parameters=VectorSpace("p", 2), control=Signal("u")
+    )
+
+    assert system.x0
+    assert system.x0(None, u_func, param)[0] == 2
+
+    arg_0 = (0, 1, None, u_func, param)  # t,  # x  # z,
+    dxdt = system.dxdt(*arg_0)
+    assert dxdt == 3
+
+    t_final = 4
+    soln = system(t_final, u_func, param)
+    expected = solution(t_final, param)
+
+    assert np.isclose(soln, expected)
+
+    t_line = np.linspace(0, 1, 10)
+    soln_line = system(t_line, u_func, param)
+    expected_line = solution(t_line, param)
+    assert soln_line.shape == expected_line.shape
+    assert np.allclose(soln_line, expected_line, atol=1e-3)

@@ -202,7 +202,7 @@ class Isometry3:
 
     def as_matrix(self):
         r = self.rotation.as_matrix()
-        p = np.reshape(self.translation, newshape=(3, 1))
+        p = np.reshape(self.translation, shape=(3, 1))
         o = np.array(
             [[0, 0, 0, 1.0]],
         )
@@ -218,8 +218,8 @@ class Isometry3:
 
     def as_vector(self) -> np.ndarray:
 
-        p = np.reshape(self.translation, newshape=(3, 1))
-        q = np.reshape(self.rotation.as_vector(), newshape=(3, 1))
+        p = np.reshape(self.translation, shape=(3, 1))
+        q = np.reshape(self.rotation.as_vector(), shape=(3, 1))
         return np.concatenate((q, p), axis=0)
 
     @staticmethod

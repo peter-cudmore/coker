@@ -82,7 +82,7 @@ class UnitQuaternion:
             assert other.shape[0] == 3
             qpq_inv = self * other * self.inverse()
             result = qpq_inv.v
-            return np.reshape(result, newshape=other.shape)
+            return np.reshape(result, shape=other.shape)
 
         raise NotImplementedError(
             f"Quaternion conjugation not implemented for {type(other)}"

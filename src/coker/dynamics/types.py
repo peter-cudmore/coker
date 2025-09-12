@@ -100,9 +100,17 @@ class DynamicalSystem:
             [self.dxdt, self.g, self.dqdt], [x0, z0, q0], t, [u, p]
         )
 
-        out = self.y(t, x, z, u, p, q)
+        if isinstance(t, (float, int)):
+            return self.y(t, x, z, u, p, q)
 
-        return out
+        def map_args(i):
+            t_i = t[i]
+            x_i = x[:, i]
+            z_i = z[:, i] if z is not None else None
+            q_i = q[:, i] if q is not None else None
+            return t_i, x_i, z_i, u, p, q_i
+
+        return np.concatenate([self.y(*map_args(i)) for i, _ in enumerate(t)])
 
 
 class ParameterMixin(abc.ABC):
@@ -208,9 +216,6 @@ class VariationalProblem:
             assert len(self.parameters) == n
         if self.control is not None:
             assert self.system.inputs is not Noop()
-            assert len(self.control) == len(
-                self.system.inputs.input_dimensions()
-            )
 
         backend = get_backend_by_name(self.backend)
         return backend.create_variational_solver(self)

@@ -16,3 +16,5 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.ops import OP, Noop
 from coker.algebra.tensor import SymbolicVector
+
+from coker.algebra.factories import zeros

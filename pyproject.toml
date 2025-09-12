@@ -30,7 +30,7 @@ classifiers = [
 description = "Coker Mathematical Programming Toolkit"
 readme = "README.md"
 dependencies = [
-    "numpy",
+    "numpy >= 2",
     "sympy",
     "scipy",
     "typing-extensions"

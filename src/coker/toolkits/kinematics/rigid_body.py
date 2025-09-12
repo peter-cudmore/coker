@@ -482,7 +482,7 @@ class RigidBody:
                     adj_inv = SE3Adjoint(g).inverse()
                     zeta_j_dagger = adj_inv.apply(zeta_j)
                     jacobian[joint_idx] = np.reshape(
-                        zeta_j_dagger.to_array(), newshape=(6, 1)
+                        zeta_j_dagger.to_array(), shape=(6, 1)
                     )
 
                 next_idx = self.parents[next_idx]
