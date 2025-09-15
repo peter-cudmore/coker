@@ -42,6 +42,8 @@ def is_scalar_symbol(v):
 
 
 def div(num, den):
+    if isinstance(den, Tracer):
+        return num / den
     try:
         if den == 0:
             if isinstance(num, np.ndarray) and (num == 0).all():
@@ -49,7 +51,7 @@ def div(num, den):
             elif num == 0:
                 return num
             else:
-                raise ZeroDivisionError
+                raise ZeroDivisionError(num, den)
     except ValueError:
         pass
 
@@ -86,7 +88,7 @@ impls = {
 
 parameterised_impls = {
     ConcatenateOP: lambda op, *x: np.concatenate(x, axis=op.axis),
-    ReshapeOP: lambda op, x: np.reshape(x, newshape=op.newshape),
+    ReshapeOP: lambda op, x: np.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
 }
 
@@ -174,11 +176,8 @@ class NumpyBackend(Backend):
 
     def call(self, op, *args) -> ArrayLike:
 
-        try:
-            result = impls[op](*args)
-            return result
-        except KeyError:
-            pass
+        if op in impls:
+            return impls[op](*args)
 
         if isinstance(op, tuple(parameterised_impls.keys())):
             return call_parameterised_op(op, *args)
