@@ -516,6 +516,7 @@ class Function:
         assert len(args) == len(
             self.tape.input_indicies
         ), f"Expected {len(self.tape.input_indicies)} arguments but got {len(args)}"
+
         args = [
             (self._prepare_argument(arg, idx))
             for idx, arg in zip(self.tape.input_indicies, args)
@@ -523,7 +524,11 @@ class Function:
 
         from coker.backends import get_backend_by_name
 
-        backend = get_backend_by_name(self.backend)
+        if any(isinstance(a, Tracer) for a in args):
+            backend = get_backend_by_name("numpy", set_current=False)
+        else:
+            backend = get_backend_by_name(self.backend)
+
         output = backend.evaluate(self, args)
 
         if self.is_single:

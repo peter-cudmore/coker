@@ -9,7 +9,7 @@ from coker import (
     get_projection,
     SymbolicVector,
 )
-from .util import is_close
+from ..util import is_close
 
 
 def test_symbolic_scalar(backend):

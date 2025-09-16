@@ -16,14 +16,14 @@ def is_close(a, b, tolerance=1e-8):
     if not isinstance(a, np.ndarray) and not isinstance(b, np.ndarray):
         return abs(a - b) < tolerance
 
-    if a.shape == (1,) or b.shape == (1,):
-        return float(a) == float(b)
     assert a.shape == b.shape, "shapes don't match"
 
     try:
         return np.linalg.norm(a - b, ord=np.inf) < tolerance
     except ValueError:
         pass
+
+    return abs(float(a) - float(b)) < tolerance
 
 
 def validate_symbolic_call(name, f, arguments, test_set, backend):

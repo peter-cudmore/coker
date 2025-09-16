@@ -19,7 +19,10 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     def cast_node(node):
 
         if isinstance(node, Tracer):
-            return workspace[node.index]
+            if node.tape == graph:
+                return workspace[node.index]
+            else:
+                return node
         elif isinstance(node, coker.Function):
             return node
 
@@ -28,26 +31,26 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     for w in work_list:
         op, *nodes = graph.nodes[w]
 
-        try:
-            args = [cast_node(n) for n in nodes]
-            if op == OP.VALUE:
-                (value,) = args
-            else:
-                value = backend.call(op, *[cast_node(n) for n in nodes])
+        args = [cast_node(n) for n in nodes]
+        if op == OP.VALUE:
+            (value,) = args
+        else:
+            value = backend.call(op, *[cast_node(n) for n in nodes])
 
-        except KeyError as ex:
-            raise NotImplementedError(
-                f"Op {op} not implemented in python"
-            ) from ex
-
-        workspace[w] = backend.reshape(value, graph.dim[w])
+        workspace[w] = (
+            backend.reshape(value, graph.dim[w])
+            if not isinstance(value, Tracer)
+            else value
+        )
 
     def cast_output(o):
         if o is None:
             return None
+        if o.tape != graph:
+            return o
         if not o.dim.is_scalar():
             return np.reshape(
-                backend.to_numpy_array(workspace[o.index]), o.shape
+                backend.to_numpy_array(workspace[o.index]), shape=o.shape
             )
         return backend.to_numpy_array(workspace[o.index])
 
