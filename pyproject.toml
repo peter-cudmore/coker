@@ -15,7 +15,7 @@ maintainers = [
      {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
 ]
 license="MPL-2.0"
-license-files=["LICENSE.txt"]
+license-files=["LICEN[CS]E.*"]
 classifiers = [
 
   "Development Status :: 3 - Alpha",
@@ -35,6 +35,13 @@ dependencies = [
     "sympy",
     "scipy",
     "typing-extensions",
+]
+[project.optional-dependencies]
+dev = [
+    "black",
+    "pytest",
+    "pytest-mypy",
+    "mypy"
 ]
 
 
