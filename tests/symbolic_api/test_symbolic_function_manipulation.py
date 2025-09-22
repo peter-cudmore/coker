@@ -1,7 +1,7 @@
 from coker import function, Scalar, VectorSpace
 import numpy as np
 
-from test.util import is_close
+from tests.util import is_close
 
 
 def test_function_composition(backend):

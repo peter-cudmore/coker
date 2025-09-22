@@ -4,8 +4,8 @@ import pytest
 from coker import VectorSpace
 from coker.toolkits.kinematics import RigidBody, Revolute, Free, Inertia, Weld
 from coker.toolkits.spatial import Isometry3, Screw, Rotation3, SE3Adjoint
-from test.toolkits.test_spatial_algebra import origin
-from test.util import validate_symbolic_call
+from tests.toolkits.test_spatial_algebra import origin
+from tests.util import validate_symbolic_call
 
 block_1m = Inertia(
     centre_of_mass=Isometry3(translation=np.array([0.5, 0, 0])),

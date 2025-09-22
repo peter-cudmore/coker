@@ -8,7 +8,7 @@ from coker.toolkits.spatial import Rotation3, Isometry3, SE3Adjoint, Screw
 # Test based on 3-link open-chain manipulator
 # from Murry Et. Al
 
-from test.util import is_close, validate_symbolic_call
+from tests.util import is_close, validate_symbolic_call
 
 g = -9.8
 # Parameters from the book, r being center of mass, l being next joint

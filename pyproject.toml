@@ -1,11 +1,12 @@
 [build-system]
-requires = [ "setuptools >= 61.0", "setuptools-git-versioning>=2.0,<3"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
 
 
 [project]
 name = "coker"
-requires-python = ">=3.10"
+requires-python = ">=3.10, <=3.12"
 dynamic = ["version"]
 authors = [
     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
@@ -33,46 +34,16 @@ dependencies = [
     "numpy >= 2",
     "sympy",
     "scipy",
-    "typing-extensions"
+    "typing-extensions",
 ]
 
 
-
-[project.optional-dependencies]
-test = [
-    "pytest < 5.0.0",
-    "pytest-cov[all]"
-]
-
-lint = [
-   "black == 25.1.0",
-   "flake8"
-]
-
-ci = [
-    "pytest < 5.0.0",
-    "pytest-cov[all]",
-    "black == 25.1.0",
-    "flake8",
-    "setuptools"
-]
-casadi = [
-   "casadi",
-]
-jax = [
-    "jax"
-]
-
-full = [
-    "casadi",
-    "jax"
-]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
 pythonpath = ["src"]
 testpaths = [
-	"test",
+	"tests",
 ]
 
 
@@ -82,3 +53,15 @@ target-version = ["py310", "py311", "py312"]
 
 [tool.poetry]
 version = "0.3.3"
+
+[tool.poetry.group.ci.dependencies]
+pytest ="^8.0.0"
+pytest-mypy = "*"
+black = "*"
+
+[tool.poetry.group.casadi.dependencies]
+casadi="^3.7.0"
+
+[tool.poetry.group.jax.dependencies]
+jax="^0.6"
+

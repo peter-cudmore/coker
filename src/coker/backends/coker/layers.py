@@ -71,7 +71,7 @@ class InputLayer:
         return x
 
     def forwards(self, *tangent_space, y=None):
-        """Reverse mode autodiff
+        r"""Reverse mode autodiff
 
         Here, :math:`y = \sum_j P_j x_j$`
 
@@ -85,6 +85,16 @@ class InputLayer:
         return np.concatenate([vec(dx_i) for dx_i in dx])
 
 
+def to_float(x):
+    if isinstance(x, (float, int)):
+        return float(x)
+
+    assert isinstance(x, np.ndarray)
+    x_out = x.flatten()
+    assert x_out.shape == (1,)
+    return x_out[0]
+
+
 class OutputLayer:
 
     def __init__(self):
@@ -96,7 +106,7 @@ class OutputLayer:
     def add_output(self, memory: MemorySpec, shape: Dimension):
         assert memory not in self.outputs
         if shape.dim is None:
-            self.outputs[memory] = float
+            self.outputs[memory] = to_float
             return
 
         def shape_fn(array):

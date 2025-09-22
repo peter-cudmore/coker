@@ -184,7 +184,7 @@ class Isometry3:
             result = np.reshape(
                 self.rotation.as_quaternion().conjugate(other[0:3, 0])
                 + self.translation,
-                newshape=(3, 1),
+                shape=(3, 1),
             )
             return np.concatenate([result, other[3:4, 0:1]], axis=0)
 
