@@ -159,7 +159,7 @@ class RigidBody:
 
         if len(angles.shape) != 1:
             assert angles.shape[0] == self.total_joints()
-            q = np.reshape(angles, newshape=(self.total_joints(),))
+            q = np.reshape(angles, shape=(self.total_joints(),))
         else:
             assert angles.shape == (self.total_joints(),)
             q = angles
@@ -250,7 +250,7 @@ class RigidBody:
         return transforms
 
     def _get_absolute_joint_xform(self, angles):
-        """Express each g_j = Prod_i exp(theta_i zeta_i)
+        r"""Express each g_j = Prod_i exp(theta_i zeta_i)
         in coordinates w.r.t the world
 
         The position of each joint $i$ is given by
@@ -343,7 +343,7 @@ class RigidBody:
                             zeta_prime
                         )
                     columns.append(
-                        np.reshape(zeta_prime.to_array(), newshape=(6, 1))
+                        np.reshape(zeta_prime.to_array(), shape=(6, 1))
                     )
             else:
                 zeta_prime = np.zeros((6, len(bases)))

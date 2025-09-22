@@ -1,14 +1,21 @@
 import numpy as np
+import pytest
+
+try:
+
+    from coker.backends.casadi.variational_solver import (
+        InterpolatingPolyCollection,
+        SymbolicPolyCollection,
+        SymbolicPoly,
+    )
+    import casadi as ca
+
+    casadi_available = True
+except ImportError:
+    casadi_available = False
 
 
-from coker.backends.casadi.variational_solver import (
-    InterpolatingPolyCollection,
-    SymbolicPolyCollection,
-    SymbolicPoly,
-)
-import casadi as ca
-
-
+@pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
 def test_symbolic_poly():
     t = ca.MX.sym("t")
     poly = SymbolicPoly("x", 3, (0, 1), 5)
@@ -27,6 +34,7 @@ def test_symbolic_poly():
         assert np.allclose(result, f(t_i))
 
 
+@pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
 def test_poly_collection_scalar():
     intervals = [(0, 1), (1, 2)]
     collocation_degree = [4, 4]
@@ -58,6 +66,7 @@ def test_poly_collection_scalar():
         assert x_i == x[i]
 
 
+@pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
 def test_poly_collection_vector():
     intervals = [(0, 1), (1, 2)]
     collocation_degree = [4, 4]

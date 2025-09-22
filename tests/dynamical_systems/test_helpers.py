@@ -5,6 +5,12 @@ from functools import reduce
 from operator import mul
 
 
+def to_float(x: np.ndarray) -> float:
+    assert x.ndim == 1
+    assert x.shape[0] == 1
+    return float(x[0])
+
+
 def test_legendre_coeffs():
     # increasing in powers of x
     truth = [[1], [0, 1], [-1 / 2, 0, 3 / 2], [0, -3 / 2, 0, 5 / 2]]
@@ -67,7 +73,7 @@ def test_generate_discritisation_operators():
     assert len(x) == n + 1
     assert deriv_op is not None
     y_i = np.array([f(t(x_i)) for x_i in x])
-    int_f = float(integral_op @ y_i)
+    int_f = to_float((integral_op @ y_i))
     assert abs(int_f) < 1e-4
     y_i = np.array(y_i)
 
@@ -100,7 +106,7 @@ def test_generate_discritisation_operators_with_scaling():
     assert len(x) == n + 1
     assert deriv_op is not None
     y_i = np.array([f(t(x_i)) for x_i in x])
-    int_f = float(integral_op @ y_i)
+    int_f = to_float(integral_op @ y_i)
     assert abs(int_f - 1 / 3) < 1e-4
     y_i = np.array(y_i)
     df_at_y = [(d_i @ y_i, df(t(x_i))) for d_i, x_i in zip(deriv_op, x)]

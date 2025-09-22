@@ -134,7 +134,12 @@ class CasadiBackend(Backend):
             try:
                 y_result = self.to_numpy_array(y_i)
                 if output_tracer.dim.is_scalar():
-                    outs.append(float(y_result))
+                    if y_result.shape == (1, 1):
+                        outs.append(float(y_result[0, 0]))
+                    elif y_result.shape == (1,):
+                        outs.append(float(y_result[0]))
+                    else:
+                        raise ValueError("Expected a scalar", y_result)
                 else:
                     outs.append(y_result.reshape(output_tracer.shape))
 

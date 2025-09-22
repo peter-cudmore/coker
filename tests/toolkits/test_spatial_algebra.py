@@ -4,7 +4,7 @@ import pytest
 import coker
 from coker.toolkits.spatial import Isometry3, Rotation3, Screw
 
-from test.util import is_close, validate_symbolic_call
+from tests.util import is_close, validate_symbolic_call
 from coker import VectorSpace, function, Scalar
 
 u_x = np.array([1, 0, 0], dtype=float)
