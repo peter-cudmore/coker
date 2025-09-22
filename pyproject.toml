@@ -75,8 +75,6 @@ testpaths = [
 	"test",
 ]
 
-[tool.setuptools-git-versioning]
-enabled = true
 
 [tool.black]
 line-length = 79
