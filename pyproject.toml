@@ -81,4 +81,4 @@ line-length = 79
 target-version = ["py310", "py311", "py312"]
 
 [tool.poetry]
-version = "0.3.1"
+version = "0.3.2"
