@@ -38,7 +38,7 @@ dependencies = [
 ]
 [project.optional-dependencies]
 dev = [
-    "black",
+    "black == 25.1.0",
     "pytest",
     "pytest-mypy",
     "mypy"
@@ -64,7 +64,7 @@ version = "0.3.3"
 [tool.poetry.group.ci.dependencies]
 pytest ="^8.0.0"
 pytest-mypy = "*"
-black = "*"
+black = "25.1.0"
 
 [tool.poetry.group.casadi.dependencies]
 casadi="^3.7.0"
