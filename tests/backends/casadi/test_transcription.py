@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 try:
 
     from coker.backends.casadi.variational_solver import (
@@ -8,9 +9,11 @@ try:
         SymbolicPoly,
     )
     import casadi as ca
+
     casadi_available = True
 except ImportError:
     casadi_available = False
+
 
 @pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
 def test_symbolic_poly():
@@ -29,6 +32,7 @@ def test_symbolic_poly():
         result = np.array(poly_as_func(t_i, line)).flatten()
 
         assert np.allclose(result, f(t_i))
+
 
 @pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
 def test_poly_collection_scalar():
@@ -60,6 +64,7 @@ def test_poly_collection_scalar():
     for i, t_i in enumerate(t[:-1]):
         x_i = poly_collection(t_i)
         assert x_i == x[i]
+
 
 @pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
 def test_poly_collection_vector():

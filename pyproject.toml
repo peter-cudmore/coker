@@ -6,7 +6,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "coker"
-requires-python = ">=3.10, <=3.12"
+requires-python = ">=3.10"
 dynamic = ["version"]
 authors = [
     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
@@ -56,7 +56,7 @@ testpaths = [
 
 [tool.black]
 line-length = 79
-target-version = ["py310", "py311", "py312"]
+target-version = ["py310", "py311", "py312", "py313"]
 
 [tool.poetry]
 version = "0.3.3"

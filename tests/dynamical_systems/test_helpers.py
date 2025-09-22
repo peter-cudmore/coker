@@ -4,11 +4,11 @@ import numpy as np
 from functools import reduce
 from operator import mul
 
-def to_float(x:np.ndarray) -> float:
+
+def to_float(x: np.ndarray) -> float:
     assert x.ndim == 1
     assert x.shape[0] == 1
     return float(x[0])
-
 
 
 def test_legendre_coeffs():
@@ -79,7 +79,6 @@ def test_generate_discritisation_operators():
 
     df_at_y = [d_i @ y_i for d_i in zip(deriv_op)]
     assert all(abs(val - 1) < 1e-4 for val in df_at_y), f"{df_at_y}"
-
 
 
 def test_generate_discritisation_operators_with_scaling():
