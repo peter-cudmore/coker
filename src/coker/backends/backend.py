@@ -97,6 +97,10 @@ def instantiate_backend(name: str):
         import coker.backends.casadi
 
         backend = coker.backends.casadi.CasadiBackend()
+    elif name == "sympy":
+        import coker.backends.sympy
+
+        backend = coker.backends.sympy.SympyBackend()
     else:
         raise ValueError(f"Unknown backend: {name}")
 
