@@ -1,8 +1,6 @@
 import warnings
 
-backends = [
-    "numpy",
-]
+backends = ["numpy", "sympy"]
 variational_backends = [
     "numpy",
 ]

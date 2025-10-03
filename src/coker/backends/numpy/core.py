@@ -112,11 +112,15 @@ def hessian(f: sp.Expr, x):
 
 
 def reshape_sympy_matrix(arg, shape):
+
     if len(shape) == 1:
         out_shape = (shape[0], 1)
     else:
         assert len(shape) == 2
         out_shape = shape
+
+    if arg.shape == (*out_shape, 1):
+        return arg[:, :, 0]
 
     old_cols = 1 if len(arg.shape) == 1 else arg.shape[1]
 
@@ -128,6 +132,31 @@ def reshape_sympy_matrix(arg, shape):
         return value
 
     return sp.Matrix(*out_shape, lookup)
+
+
+def reshape(arg, dim):
+    if dim.is_scalar():
+        if isinstance(arg, scalar_types) or is_scalar_symbol(arg):
+            return arg
+        else:
+            try:
+                (inner,) = arg
+            except ValueError as ex:
+                raise TypeError(f"Expecting a scalar, got {arg}") from ex
+            except TypeError as ex:
+                raise TypeError(f"Expecting a scalar, got {arg}") from ex
+            return reshape(inner, dim)
+    elif isinstance(
+        arg, (sp.Matrix, sp.Array, sp.MatrixSlice, sp.ImmutableMatrix)
+    ):
+        if arg.shape == dim.dim:
+            return arg
+        return reshape_sympy_matrix(arg, dim.dim)
+    elif isinstance(arg, np.ndarray):
+        return np.reshape(arg, dim.dim)
+    elif isinstance(arg, (float, int)):
+        return np.array([arg]).reshape(dim.dim)
+    raise NotImplementedError(f"Dont know how to reshape {arg}")
 
 
 class NumpyBackend(Backend):
@@ -153,23 +182,7 @@ class NumpyBackend(Backend):
         return array
 
     def reshape(self, arg, dim: Dimension):
-        if dim.is_scalar():
-            if isinstance(arg, scalar_types) or is_scalar_symbol(arg):
-                return arg
-            else:
-                try:
-                    (inner,) = arg
-                except ValueError as ex:
-                    raise TypeError(f"Expecting a scalar, got {arg}") from ex
-                return self.reshape(inner, dim)
-        elif isinstance(arg, (sp.Matrix, sp.Array, sp.MatrixSlice)):
-            if arg.shape == dim.dim:
-                return arg
-            return reshape_sympy_matrix(arg, dim.dim)
-        elif isinstance(arg, np.ndarray):
-            return np.reshape(arg, dim.dim)
-        elif isinstance(arg, (float, int)):
-            return np.array([arg]).reshape(dim.dim)
+        return reshape(arg, dim)
         raise NotImplementedError(
             f"Don't know how to resize {arg.__class__.__name__}"
         )

@@ -17,16 +17,19 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     work_list = [i for i in range(len(graph.nodes)) if i not in workspace]
 
     def cast_node(node):
-
-        if isinstance(node, Tracer):
-            if node.tape == graph:
-                return workspace[node.index]
-            else:
+        try:
+            if isinstance(node, Tracer):
+                if node.tape == graph:
+                    return workspace[node.index]
+                else:
+                    return node
+            elif isinstance(node, coker.Function):
                 return node
-        elif isinstance(node, coker.Function):
-            return node
 
-        return backend.to_backend_array(node)
+            return backend.to_backend_array(node)
+        except Exception as ex:
+            ex.add_note(f"Node index: {node.index}")
+            raise ex from ex
 
     for w in work_list:
         op, *nodes = graph.nodes[w]
@@ -35,7 +38,11 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         if op == OP.VALUE:
             (value,) = args
         else:
-            value = backend.call(op, *[cast_node(n) for n in nodes])
+            try:
+                value = backend.call(op, *args)
+            except Exception as ex:
+                ex.add_note(f"Node index: {w}")
+                raise ex from ex
 
         workspace[w] = (
             backend.reshape(value, graph.dim[w])
@@ -49,9 +56,14 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         if o.tape != graph:
             return o
         if not o.dim.is_scalar():
-            return np.reshape(
-                backend.to_numpy_array(workspace[o.index]), shape=o.shape
-            )
+            try:
+                output = backend.to_numpy_array(workspace[o.index])
+                if isinstance(output, np.ndarray):
+                    return np.reshape(output, shape=o.shape)
+            except ValueError:
+                output = workspace[o.index]
+            backend.reshape(output, shape=o.dim)
+            return output
         return backend.to_numpy_array(workspace[o.index])
 
     outputs = [cast_output(o) for o in outputs]

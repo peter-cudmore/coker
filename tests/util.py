@@ -33,7 +33,14 @@ def validate_symbolic_call(name, f, arguments, test_set, backend):
 
     for i, item in enumerate(test_set):
         expected = f(*item)
-        result = f_test(*item)
+        try:
+            result = f_test(*item)
+        except Exception as ex:
+            tape = "\n".join(
+                [f"{j} : {node}" for j, node in enumerate(f_test.tape.nodes)]
+            )
+            ex.add_note(f"Tape: {tape}")
+            raise ex
         try:
             are_equal = all(
                 is_close(e, r, 1e-6) for e, r in zip(expected, result)

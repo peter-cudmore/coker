@@ -74,6 +74,7 @@ class Tape:
         self.constants = []
         self.dim = []
         self.input_indicies = []
+        self.input_names = []
 
     def op(self, i):
         return self.nodes[i][0]
@@ -156,6 +157,7 @@ class Tape:
         tracer = Tracer(self, index)
         self.nodes.append(tracer)
         self.input_indicies.append(index)
+        self.input_names.append(v.name)
         return tracer
 
     def substitute(self, index, value):
@@ -467,6 +469,10 @@ class Function:
         else:
             self.output = outputs
             self.is_single = False
+
+    @property
+    def arguments(self):
+        return self.tape.input_names.copy()
 
     def __repr__(self):
         name = self.name if self.name else "<unknown>"
