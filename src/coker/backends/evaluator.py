@@ -62,7 +62,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
                     return np.reshape(output, shape=o.shape)
             except ValueError:
                 output = workspace[o.index]
-            backend.reshape(output, shape=o.dim)
+            backend.reshape(output, o.dim)
             return output
         return backend.to_numpy_array(workspace[o.index])
 
