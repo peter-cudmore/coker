@@ -275,6 +275,7 @@ def test_symbolic_isometry_product_rotation(backend):
 
     args = [VectorSpace("x", 3), VectorSpace("y", 3)]
     test_values = [[u_x, u_y], [u_y, u_x]]
+
     validate_symbolic_call(
         "test_symbolic_isometry_product", f_impl, args, test_values, backend
     )
