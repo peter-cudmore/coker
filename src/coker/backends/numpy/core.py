@@ -146,7 +146,9 @@ def reshape(arg, dim):
             except TypeError as ex:
                 raise TypeError(f"Expecting a scalar, got {arg}") from ex
             return reshape(inner, dim)
-    elif isinstance(arg, (sp.Matrix, sp.Array, sp.MatrixSlice)):
+    elif isinstance(
+        arg, (sp.Matrix, sp.Array, sp.MatrixSlice, sp.ImmutableMatrix)
+    ):
         if arg.shape == dim.dim:
             return arg
         return reshape_sympy_matrix(arg, dim.dim)
@@ -154,6 +156,7 @@ def reshape(arg, dim):
         return np.reshape(arg, dim.dim)
     elif isinstance(arg, (float, int)):
         return np.array([arg]).reshape(dim.dim)
+    raise NotImplementedError(f"Dont know how to reshape {arg}")
 
 
 class NumpyBackend(Backend):

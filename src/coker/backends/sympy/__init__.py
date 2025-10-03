@@ -6,44 +6,63 @@ from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP, NormOP
 from coker.algebra.dimensions import Dimension
 from coker.backends.numpy.core import reshape
 
+MatrixType = (sp.Matrix, sp.ImmutableMatrix)
+
 
 def sympy_mul(x, y):
 
-    if isinstance(x, sp.Matrix) and isinstance(y, sp.Matrix):
+    if isinstance(x, MatrixType) and isinstance(y, MatrixType):
         return x.multiply_elementwise(y)
+    result = x * y
+    return result
 
-    try:
-        return x * y
-    except ValueError as ex:
-        return x @ y
+
+def to_matrix(x):
+    if isinstance(x, sp.ImmutableMatrix):
+        return x
+    if isinstance(x, sp.Matrix):
+        return sp.ImmutableMatrix(x)
+    if isinstance(x, sp.Array):
+        return sp.ImmutableMatrix(x.tomatrix())
+    if isinstance(x, list):
+        array = sp.Array(x)
+        if len(array.shape) == 1:
+            array.reshape(*array.shape, 1)
+            return to_matrix(array)
+        if len(array.shape) == 2:
+            return to_matrix(array)
+        raise ValueError("Cannot convert tensor to matrix")
+
+    raise NotImplementedError(f"Unknown type: {x}")
 
 
 def sympy_div(x, y):
-    if isinstance(x, sp.Matrix) and isinstance(y, sp.Matrix):
+    if isinstance(x, MatrixType) and isinstance(y, MatrixType):
         y_inv = sp.zeros(*y.shape)
         for i in range(y.shape[0]):
             for j in range(y.shape[1]):
                 y_inv[i, j] = 1 / y[i, j]
-        return x.multiply_elementwise(y_inv)
+        return sp.ImmutableMatrix(x.multiply_elementwise(y_inv))
     return x / y
 
 
 def sympy_matmul(x, y):
     if isinstance(x, sp.Matrix) and isinstance(y, sp.Matrix):
-        return x @ y
+        return to_matrix(to_matrix(x) * to_matrix(y))
 
     idx = len(x.shape)
     assert x.shape[idx - 1] == y.shape[0]
     result = sp.tensorcontraction(sp.tensorproduct(x, y), (idx - 1, idx))
     assert result.shape == (*x.shape[0:-1], *y.shape[1:])
+
     if len(result.shape) == 2:
-        return result.tomatrix()
+        return to_matrix(result)
     return result
 
 
 def sympy_dot(x, y):
-    if isinstance(x, sp.Matrix) and isinstance(y, sp.Matrix):
-        return x.dot(y)
+    if isinstance(x, MatrixType) and isinstance(y, MatrixType):
+        return to_matrix(x).dot(to_matrix(y))
     try:
         return sp.tensorcontraction(sp.tensorproduct(x, y), (0, 1))
     except:
@@ -97,29 +116,47 @@ parameterised_impls = {
 class SympyBackend(Backend):
 
     def to_numpy_array(self, array):
-        if isinstance(array, (sp.Symbol, sp.Array, sp.Matrix, sp.Number)):
-            return np.array(array, dtype=np.float64)
 
-        return array
+        if isinstance(array, np.ndarray) and array.dtype in {
+            float,
+            np.float64,
+        }:
+            return array
+        if isinstance(array, (int, float, complex)):
+            return array
+
+        try:
+            if not array.is_constant():
+                return array
+        except AttributeError:
+            pass
+
+        try:
+            value = sp.nsimplify(array, tolerance=1e-10)
+            out = np.array(value, dtype=float)
+            return out
+        except (AttributeError, TypeError):
+            pass
+
+        raise ValueError(f"Cannot convert {array} to a numpy array")
 
     def to_backend_array(self, array):
         if isinstance(array, np.ndarray):
             if len(array.shape) == 1:
-                return sp.Array(
-                    array.tolist(), shape=(array.shape[0], 1)
-                ).tomatrix()
+                return to_matrix(
+                    sp.Array(array.tolist(), shape=(array.shape[0], 1))
+                )
             elif len(array.shape) == 2:
-                return sp.Array(array.tolist(), shape=array.shape).tomatrix()
+                return to_matrix(sp.Array(array.tolist(), shape=array.shape))
             return sp.Array(array.tolist(), shape=array.shape)
         if isinstance(array, list):
-            result = sp.Array(array)
-            if len(result.shape) == 1:
-                return result.reshape(len(result), 1).tomatrix()
-            if len(result.shape) == 2:
-                return result.tomatrix()
-            return result
+            try:
+                return to_matrix(array)
+            except ValueError:
+                return sp.Array(array)
         if isinstance(array, np.float64):
             return sp.Float(float(array))
+        assert array is not None
         return array
 
     def native_types(self):
@@ -127,17 +164,22 @@ class SympyBackend(Backend):
 
     def reshape(self, array, shape):
         result = reshape(array, shape)
+        try:
+            if len(result.shape) == 2:
+                return to_matrix(result)
+        except (AttributeError, ValueError):
+            pass
         return self.to_backend_array(result)
 
     def call(self, op, *args):
         if op in impls:
-            return impls[op](*args)
+            result = impls[op](*args)
+            return result
 
         if isinstance(op, tuple(parameterised_impls.keys())):
             kls = op.__class__
 
             result = parameterised_impls[kls](op, *args)
-
             return result
 
             return call_parameterised_op(op, *args)
@@ -148,16 +190,19 @@ class SympyBackend(Backend):
         results = super().evaluate(function, inputs)
 
         def eval(x):
-
-            if isinstance(x, (sp.Array, sp.Matrix, sp.Number)):
-                out = np.array(x)
-                return out
+            if isinstance(x, np.ndarray):
+                return x
             try:
-                if x.is_constant():
-                    return float(x)
-            except AttributeError:
+                return self.to_numpy_array(x)
+            except (AttributeError, ValueError):
                 pass
 
+            try:
+                return sp.nsimplify(x, tolerance=1e-10)
+            except (TypeError, ValueError):
+                pass
+            if isinstance(x, sp.ImmutableDenseNDimArray):
+                return x.applyfunc(eval)
             return x
 
         return [eval(result) for result in results]
@@ -168,3 +213,19 @@ class SympyBackend(Backend):
     def evaluate_integrals(*args):
 
         raise NotImplementedError("not supported on sympy backend")
+
+    def lower(self, function: Function):
+        arguments = []
+        for name, size in zip(function.arguments, function.input_shape()):
+            if size.is_scalar():
+                arguments.append(sp.Symbol(name))
+            elif size.is_vector():
+                symbol = sp.Array(
+                    [sp.Symbol(f"{name}_{i}") for i in range(size.flat())]
+                )
+                arguments.append(symbol)
+            else:
+                arguments.append(sp.MatrixSymbol(name, *size))
+
+        output = function(*arguments)
+        return arguments, output
