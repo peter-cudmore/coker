@@ -507,7 +507,7 @@ class Function:
         )
 
     def output_shape(self) -> Tuple[Dimension, ...]:
-        return tuple(o.dim for o in self.output)
+        return tuple(o.dim if o is not None else None for o in self.output)
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:

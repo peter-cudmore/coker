@@ -156,7 +156,16 @@ class SympyBackend(Backend):
                 return sp.Array(array)
         if isinstance(array, np.float64):
             return sp.Float(float(array))
+        if isinstance(
+            array, (sp.ImmutableDenseNDimArray, sp.MutableDenseNDimArray)
+        ):
+            if len(array.shape) == 1:
+                array = array.reshape(*array.shape, 1)
+            if len(array.shape) == 2:
+                return to_matrix(array)
+
         assert array is not None
+
         return array
 
     def native_types(self):
@@ -182,18 +191,20 @@ class SympyBackend(Backend):
             result = parameterised_impls[kls](op, *args)
             return result
 
-            return call_parameterised_op(op, *args)
-
         raise NotImplementedError(f"{op} is not implemented")
 
     def evaluate(self, function: Function, inputs: ArrayLike):
+
         results = super().evaluate(function, inputs)
 
         def eval(x):
+            if x is None:
+                return None
             if isinstance(x, np.ndarray):
                 return x
             try:
-                return self.to_numpy_array(x)
+                if x.is_constant():
+                    return self.to_numpy_array(x)
             except (AttributeError, ValueError):
                 pass
 
@@ -205,7 +216,25 @@ class SympyBackend(Backend):
                 return x.applyfunc(eval)
             return x
 
-        return [eval(result) for result in results]
+        output = []
+        for result, shape in zip(results, function.output_shape()):
+            if shape is None:
+                output.append(result)
+                continue
+            result = eval(result)
+            if (
+                not shape.is_scalar()
+                and result.shape != shape.shape
+                and isinstance(result, MatrixType)
+            ):
+                result = sp.Array(result)
+                result = result.reshape(*shape)
+                output.append(result)
+
+            else:
+                output.append(result)
+
+        return output
 
     def build_optimisation_problem(*args):
         raise NotImplementedError("not supported on sympy backend")
