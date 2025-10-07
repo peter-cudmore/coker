@@ -55,14 +55,17 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
             return None
         if o.tape != graph:
             return o
+        output = workspace[o.index]
+        if isinstance(output, Tracer):
+            return output
         if not o.dim.is_scalar():
             try:
-                output = backend.to_numpy_array(workspace[o.index])
+                output = backend.to_numpy_array(output)
                 if isinstance(output, np.ndarray):
                     return np.reshape(output, shape=o.shape)
             except ValueError:
-                output = workspace[o.index]
-            backend.reshape(output, shape=o.dim)
+                pass
+            backend.reshape(output, o.dim)
             return output
         return backend.to_numpy_array(workspace[o.index])
 
