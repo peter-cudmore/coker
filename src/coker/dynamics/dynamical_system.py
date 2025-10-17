@@ -238,36 +238,36 @@ def create_autonomous_ode(
 
 class CompositionOperator:
 
-    def __init__(self, a: Scalar | VectorSpace | None, b: Scalar | VectorSpace | None):
-        self.a = a
-        self.b = b
+    def __init__(self, *spaces: Scalar | VectorSpace | None):
+        self.spaces = spaces
 
     def dim(self) -> Scalar | VectorSpace | None:
-        if self.a is None:
-            return self.b
-        if self.b is None:
-            return self.a
 
-        dim = self.a.size + self.b.size
-        return VectorSpace(f"{self.a.name} + {self.b.name}", (dim,))
+        dim = sum(
+            space.size if space is not None else 0 for space in self.spaces
+        )
+        return VectorSpace(f"composition", (dim,)) if dim else None
 
-    def inverse(self, ab) -> Tuple:
-        if self.a is None:
-            return None, ab
-        if self.b is None:
-            return ab, None
-        dim_a = self.a.size
-        a = ab[:dim_a]
-        dim_b = self.b.size
-        b = ab[-dim_b:]
-        return a, b
+    def inverse(self, ab) -> List:
+        next_slice = ab
+        output = []
+        for space in self.spaces:
+            if space is None:
+                output.append(None)
+            else:
+                dim = space.size
+                output.append(next_slice[:dim])
+                next_slice = next_slice[dim:] if dim < next_slice.shape[0] else []
+        return output
 
-    def __call__(self, a, b):
-        if self.a is None:
-            return b
-        if self.b is None:
-            return a
-        return  np.concatenate([a, b])
+    def __call__(self, *args):
+        output = [
+            a for a, space in zip(args, self.spaces) if  space is not None
+        ]
+        if not output:
+            return None
+
+        return np.concatenate(output)
 
     @staticmethod
     def from_dimensions(name: str, dim_a, dim_b) -> 'CompositionOperator':
@@ -288,24 +288,27 @@ class ProjectionSet:
 
 
 
-def direct_sum(a: DynamicalSystem, b: DynamicalSystem) -> Tuple[DynamicalSystem, ProjectionSet]:
+def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem, ProjectionSet]:
 
-    proj_p = CompositionOperator(a.parameters, b.parameters)
-    a_x, a_z, a_q = a.get_state_dimensions()
-    b_x, b_z, b_q = b.get_state_dimensions()
+    backend = backend or systems[0].backend()
 
-    proj_x = CompositionOperator.from_dimensions('x', a_x, b_x)
-    proj_z = CompositionOperator.from_dimensions('z', a_z, b_z)
-    proj_q = CompositionOperator.from_dimensions('q', a_q, b_q)
-    y_a_range, = a.y.output_shape()
-    y_b_range, = b.y.output_shape()
-    proj_y = CompositionOperator.from_dimensions('y', y_a_range, y_b_range)
+    proj_p = CompositionOperator(*[system.parameters for system in systems])
+    x_dim, z_dim, q_dim = zip(*[system.get_state_dimensions() for system in systems])
+    y_dim = [system.y.output_shape() for system in systems]
+
+    proj_x = CompositionOperator.from_dimensions('x', *x_dim)
+    proj_z = CompositionOperator.from_dimensions('z', *z_dim)
+    proj_q = CompositionOperator.from_dimensions('q', *q_dim)
+
+    proj_y = CompositionOperator.from_dimensions('y', *y_dim)
 
 
-    u_a_range, = a.inputs.output_dimensions()[0] if a.inputs is not Noop() else None,
-    u_b_range, = b.inputs.output_dimensions()[0] if b.inputs is not Noop() else None,
+    u_range = [
+        system.inputs.output_dimensions()[0] if system.inputs is not Noop() else None
+        for system in systems
+    ]
 
-    proj_u = CompositionOperator.from_dimensions(f"u", u_a_range, u_b_range)
+    proj_u = CompositionOperator.from_dimensions(f"u", *u_range)
     if proj_u.dim() is None:
         u_space = Noop()
     else:
@@ -313,43 +316,54 @@ def direct_sum(a: DynamicalSystem, b: DynamicalSystem) -> Tuple[DynamicalSystem,
 
 
     def x0_impl(t, u_outer, p_outer):
-        p_a, p_b = proj_p.inverse(p_outer)
-
-        u_a = lambda t: proj_u.inverse(u_outer(t))[0]
-        u_b = lambda t: proj_u.inverse(u_outer(t))[1]
-
-        x0_a, z0_a = a.x0.call_inline(t, u_a, p_a)
-        x0_b, z0_b = b.x0.call_inline(t, u_b, p_b)
-        x0_ab = proj_x(x0_a, x0_b)
-        z0_ab = proj_z(z0_a, z0_b)
+        p_inner = proj_p.inverse(p_outer)
+        u_inner = [
+            lambda t: proj_u.inverse(u_outer(t))[i]
+            for i, _ in enumerate(proj_u.spaces)
+        ]
+        x0_inner, z0_inner = zip(
+            *[system.x0.call_inline(t, u_i, p_i)
+              for system, u_i, p_i in zip(systems, u_inner, p_inner)
+              ]
+        )
+        x0_ab = proj_x(*x0_inner)
+        z0_ab = proj_z(*z0_inner)
         return x0_ab, z0_ab
 
-    x0=function([Scalar('t'), u_space, proj_p.dim()], x0_impl, a.backend())
+    x0=function([Scalar('t'), u_space, proj_p.dim()], x0_impl, backend=backend)
+
+    a, b = systems
 
     def dxdt_impl(t, x_outer, z_outer, u_outer, p_outer):
-        p_a, p_b = proj_p.inverse(p_outer)
-        x_a, x_b = proj_x.inverse(x_outer)
-        z_a, z_b = proj_z.inverse(z_outer)
-        u_a = lambda t: proj_u.inverse(u_outer(t))[0]
-        u_b = lambda t: proj_u.inverse(u_outer(t))[1]
-        dx_a = a.dxdt.call_inline(t, x_a, z_a, u_a, p_a)
-        dx_b = b.dxdt.call_inline(t, x_b, z_b, u_b, p_b)
-        return proj_x(dx_a, dx_b)
+        p = proj_p.inverse(p_outer)
+        x = proj_x.inverse(x_outer)
+        z = proj_z.inverse(z_outer)
+
+        dx_inner = [
+            system.dxdt.call_inline(
+                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i]
+            )
+            for i, system in enumerate(systems)
+        ]
+
+        return proj_x(*dx_inner)
 
 
     args = [Scalar('t'), proj_x.dim(), proj_z.dim(), u_space, proj_p.dim()]
-    dx=function(args, dxdt_impl, a.backend())
+    dx=function(args, dxdt_impl, backend=backend)
     if proj_z.dim() is not None:
         def g_impl(t, x_outer, z_outer, u_outer, p_outer):
-            p_a, p_b = proj_p.inverse(p_outer)
-            x_a, x_b = proj_x.inverse(x_outer)
-            z_a, z_b = proj_z.inverse(z_outer)
-            u_a = lambda t: proj_u.inverse(u_outer(t))[0]
-            u_b = lambda t: proj_u.inverse(u_outer(t))[1]
-            g_a = a.g.call_inline(t, x_a, z_a, u_a, p_a)
-            g_b = b.g.call_inline(t, x_b, z_b, u_b, p_b)
-            return proj_z(g_a, g_b)
-        g=function(args, g_impl, a.backend())
+            p = proj_p.inverse(p_outer)
+            x = proj_x.inverse(x_outer)
+            z = proj_z.inverse(z_outer)
+            g_inner = [
+                system.g.call_inline(
+                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i]
+                )
+                for i, system in enumerate(systems)
+            ]
+            return proj_z(*g_inner)
+        g=function(args, g_impl, backend=backend)
     else:
         g = Noop()
 
@@ -357,33 +371,38 @@ def direct_sum(a: DynamicalSystem, b: DynamicalSystem) -> Tuple[DynamicalSystem,
 
 
         def dqdt_impl(t, x_outer, z_outer, u_outer, p_outer):
-            p_a, p_b = proj_p.inverse(p_outer)
-            x_a, x_b = proj_x.inverse(x_outer)
-            z_a, z_b = proj_z.inverse(z_outer)
-            u_a = lambda t: proj_u.inverse(u_outer(t))[0]
-            u_b = lambda t: proj_u.inverse(u_outer(t))[1]
-            dq_a = a.dqdt.call_inline(t, x_a, z_a, u_a, p_a) if a.dqdt is not None else None
-            dq_b = b.dqdt.call_inline(t, x_b, z_b, u_b, p_b) if b.dqdt is not None else None
-            return proj_q(dq_a, dq_b)
+            p = proj_p.inverse(p_outer)
+            x = proj_x.inverse(x_outer)
+            z = proj_z.inverse(z_outer)
+            dq_inner = [
+                system.dqdt.call_inline(
+                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i]
+                )
+                for i, system in enumerate(systems)
+            ]
+            return proj_q(*dq_inner)
 
-        dqdt=function(args, dqdt_impl, a.backend())
+        dqdt=function(args, dqdt_impl, backend=backend)
     else:
         dqdt = Noop()
 
     def y_impl(t, x_outer, z_outer, u_outer, p_outer, q_outer):
-        p_a, p_b = proj_p.inverse(p_outer)
-        x_a, x_b = proj_x.inverse(x_outer)
-        z_a, z_b = proj_z.inverse(z_outer)
-        q_a, q_b = proj_q.inverse(q_outer)
-        u_a = lambda t: proj_u.inverse(u_outer(t))[0]
-        u_b = lambda t: proj_u.inverse(u_outer(t))[1]
+        p = proj_p.inverse(p_outer)
+        x = proj_x.inverse(x_outer)
+        z = proj_z.inverse(z_outer)
+        q = proj_q.inverse(q_outer)
+        y_inner = [
+           system.y.call_inline(
+                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i], q[i]
+            )
+            for i, system in enumerate(systems)
+        ]
 
-        y_a = a.y.call_inline(t, x_a, z_a, u_a, p_a, q_a)
-        y_b = b.y.call_inline(t, x_b, z_b, u_b, p_b, q_b)
-        return proj_y(y_a, y_b)
+
+        return proj_y(*y_inner)
 
 
-    y=function(args + [proj_q.dim()], y_impl, a.backend())
+    y=function(args + [proj_q.dim()], y_impl, backend=backend)
 
     system =  DynamicalSystem(
         inputs=u_space,
@@ -404,22 +423,3 @@ def direct_sum(a: DynamicalSystem, b: DynamicalSystem) -> Tuple[DynamicalSystem,
     )
 
     return system, projections
-
-
-#
-#    return DynamicalSystem(
-#        inputs=a.inputs + b.inputs,
-#        parameters=a.parameters + b.parameters,
-#        algebraic=a.algebraic + b.algebraic,
-#        initial_conditions=lambda z, u, p: (
-#            np.concatenate([a.initial_conditions(z, u, p)[0], b.initial_conditions(z, u, p)[0]]),
-#            None,
-#        ),
-#        dynamics=lambda t, x, z, u, p: np.concatenate([a.dynamics(t, x, z, u, p), b.dynamics(t, x, z, u, p)]),
-#        constraints=lambda z, u, p: np.concatenate([a.constraints(z, u, p), b.constraints(z, u, p)]),
-#        outputs=lambda t, x, z, u, p: np.concatenate([a.outputs(t, x, z, u, p), b.outputs(t, x, z, u, p)]),
-#    )
-
-
-
-    raise NotImplementedError
