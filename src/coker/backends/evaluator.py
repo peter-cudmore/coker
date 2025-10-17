@@ -42,6 +42,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
                 value = backend.call(op, *args)
             except Exception as ex:
                 ex.add_note(f"Node index: {w}")
+                ex.add_note(f"Node: {op}({args})")
                 raise ex from ex
 
         workspace[w] = (

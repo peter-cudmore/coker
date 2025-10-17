@@ -4,6 +4,8 @@ import numpy as np
 from typing import Callable, Union, Tuple, List, Optional, Set
 from collections import defaultdict
 
+from tensorflow.python.keras.backend import print_tensor
+
 from coker.algebra.dimensions import (
     Dimension,
     VectorSpace,
@@ -105,7 +107,7 @@ class Tape:
                 continue
 
             assert isinstance(arg, Tracer)
-            assert arg.tape is self, "Tracer belongs to another tape"
+
             dims.append(arg.dim)
 
         return op.compute_shape(*dims)
@@ -324,8 +326,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         if isinstance(key, slice):
             dimension = self.tape.dim[self.index]
-            assert dimension.is_vector(), f"Tried to index a vector"
-            p = get_projection(dimension, key)
+            if isinstance(dimension, FunctionSpace):
+                assert len(dimension.output_dimensions()) == 1
+                assert dimension.output_dimensions()[0].is_vector()
+                p = get_projection(dimension.output_dimensions()[0], key)
+            else:
+                assert dimension.is_vector(), f"Tried to index a vector"
+                p = get_projection(dimension, key)
             index = self.tape.append(OP.MATMUL, p, self)
             return Tracer(self.tape, index)
 
@@ -452,11 +459,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return Tracer(self.tape, output)
 
     def __call__(self, *args):
+        print(args)
         index = self.tape.append(OP.EVALUATE, self, *args)
         return Tracer(self.tape, index)
 
 
 class Function:
+    INLINE_SIZE = 10
     def __init__(
         self, tape: Tape, outputs: List[Tracer], backend="coker", name=None
     ):
@@ -514,11 +523,27 @@ class Function:
             return Noop()
         elif index == Tape.NONE:
             return None
+
         elif isinstance(self.tape.dim[index], FunctionSpace):
+            if isinstance(arg, Function):
+                return arg
+
             return function(self.tape.dim[index].arguments, arg, self.backend)
+
         return arg
 
+
+    def call_inline(self, *args) -> Tuple[Tracer]:
+        from coker.backends import get_backend_by_name
+        backend = get_backend_by_name("numpy", set_current=False)
+        output = backend.evaluate(self, args)
+        if self.is_single:
+            return output[0]
+        return output
+
+
     def __call__(self, *args):
+
         assert len(args) == len(
             self.tape.input_indicies
         ), f"Expected {len(self.tape.input_indicies)} arguments but got {len(args)}"

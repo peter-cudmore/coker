@@ -283,7 +283,9 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
         out_dims += [d for d in d_1.dim[:-1]]
     except IndexError:
         pass
-
+    if isinstance(d_2, FunctionSpace):
+        assert len(d_2.output_dimensions()) == 1
+        d_2 = d_2.output_dimensions()[0]
     r = d_2.dim[0]
 
     #    if d_2.is_matrix() or d_2.is_multilinear_map():

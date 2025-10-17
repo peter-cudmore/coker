@@ -195,29 +195,29 @@ class CasadiBackend(Backend):
             q = ca.MX.sym("q", q0.shape)
             q0 = ca.DM.zeros(q.shape)
             dq_sym = dqdt(t, x, z, u, p)
-            xq = ca.vertcat(x, q)
-            xq0 = ca.vertcat(x0, q0)
-            xq_to_x_q = ca.Function("xq_to_x_q", [xq], [x, q])
-            dxq = ca.vertcat(dx_sym, dq_sym)
+            txq = ca.vertcat(t, x, q)
+            txq0 = ca.vertcat(ca.MX(0), x0, q0)
+            xq_to_x_q = ca.Function("txq_to_x_q", [txq], [x, q])
+            dtxq = ca.vertcat(ca.MX(1), dx_sym, dq_sym)
         else:
-            xq = x
-            xq0 = x0
-            xq_to_x_q = ca.Function("xq_to_x_q", [xq], [x])
-            dxq = ca.vertcat(dx_sym)
+            txq = ca.vertcat(t, x)
+            txq0 = ca.vertcat(ca.MX(0), x0)
+            xq_to_x_q = ca.Function("txq_to_x_q", [txq], [x])
+            dtxq = ca.vertcat(ca.MX(1), dx_sym)
 
         initial_conditions = {
-            "x0": x0,
+            "x0": txq0,
         }
         dae = {
-            "x": xq,
-            "ode": dxq,
+            "x": txq,
+            "ode": dtxq,
         }
         if is_dae:
             dae["z"] = g(t, x, z, u, p)
             initial_conditions["z0"] = z0
 
         solver = ca.integrator("solver", "idas", dae, 0, t_eval, {})
-        xq_final = solver(x0=xq0, z0=z0)
+        xq_final = solver(x0=txq0, z0=z0)
 
         if has_quadrature:
             x_final, q_final = xq_to_x_q(xq_final["xf"])
