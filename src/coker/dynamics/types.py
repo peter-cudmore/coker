@@ -9,6 +9,7 @@ from coker.algebra.kernel import (
     VectorSpace,
     Function,
     Noop,
+    InequalityExpression,
 )
 import numpy as np
 from typing import Dict
@@ -68,8 +69,8 @@ class DynamicalSystem:
         arg_stack = list(reversed(args))
         t = arg_stack.pop()
         try:
-            u = arg_stack.pop() if self.inputs is not Noop() else None
-            p = arg_stack.pop() if self.parameters is not None else None
+            u = arg_stack.pop() if self.inputs is not Noop() or len(args) == 3 else None
+            p = arg_stack.pop() if self.parameters is not None or len(args) == 3 else None
         except IndexError as ex:
             raise ValueError(
                 f"Invalid number of arguments: Expected 2 - 3, received: {len(args)}"
@@ -202,7 +203,8 @@ class VariationalProblem:
     t_final: float
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
-    constraints: Optional[List] = None
+    path_constraints: List[InequalityExpression] = field(default_factory=list)
+    terminal_constraints: List[InequalityExpression] = field(default_factory=list)
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
     )
@@ -212,13 +214,15 @@ class VariationalProblem:
         from coker.backends import get_backend_by_name
 
         if self.system.parameters is not None:
-            n = self.system.parameters.dimension
-            assert len(self.parameters) == n
+            n = self.system.parameters.size
+            assert len(self.parameters) == n, f"Number of parameters does not match: expected {n} but got {len(self.parameters)}"
         if self.control is not None:
             assert self.system.inputs is not Noop()
 
         backend = get_backend_by_name(self.backend)
         return backend.create_variational_solver(self)
+
+
 
 
 @dataclass

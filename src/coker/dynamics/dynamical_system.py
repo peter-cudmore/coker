@@ -241,11 +241,25 @@ class CompositionOperator:
     def __init__(self, *spaces: Scalar | VectorSpace | None):
         self.spaces = spaces
 
+    def offsets(self):
+        total = 0
+        for space in self.spaces:
+            if space is None:
+                yield total
+            else:
+                yield space.size
+                total += space.size
+
+    def sizes(self):
+        for space in self.spaces:
+            if space is None:
+                yield 0
+            else:
+                yield space.size
+
     def dim(self) -> Scalar | VectorSpace | None:
 
-        dim = sum(
-            space.size if space is not None else 0 for space in self.spaces
-        )
+        dim = sum(self.sizes())
         return VectorSpace(f"composition", (dim,)) if dim else None
 
     def inverse(self, ab) -> List:
@@ -270,11 +284,22 @@ class CompositionOperator:
         return np.concatenate(output)
 
     @staticmethod
-    def from_dimensions(name: str, dim_a, dim_b) -> 'CompositionOperator':
-        return CompositionOperator(
-            VectorSpace(f"{name}_a", dim_a) if dim_a else None,
-            VectorSpace(f"{name}_b", dim_b) if dim_b else None
-        )
+    def from_dimensions(name: str, *dims) -> 'CompositionOperator':
+        spaces = [
+            VectorSpace(f"{name}_{i}", dim) if dim else None
+            for i, dim in enumerate(dims)
+        ]
+        return CompositionOperator(*spaces)
+
+    def as_matrices(self):
+        offsets = list(self.offsets())
+        sizes = list(self.sizes())
+        matrices =[]
+        for i, (offset, size) in enumerate(zip(offsets, sizes)):
+            matrix = np.zeros((size, sum(self.sizes())), dtype=float)
+            matrix[:, offset: offset + size] = np.eye(size)
+            matrices.append(matrix)
+        return matrices
 
 
 @dataclasses.dataclass
@@ -294,7 +319,7 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
 
     proj_p = CompositionOperator(*[system.parameters for system in systems])
     x_dim, z_dim, q_dim = zip(*[system.get_state_dimensions() for system in systems])
-    y_dim = [system.y.output_shape() for system in systems]
+    y_dim = [system.y.output_shape()[0] for system in systems]
 
     proj_x = CompositionOperator.from_dimensions('x', *x_dim)
     proj_z = CompositionOperator.from_dimensions('z', *z_dim)
@@ -332,7 +357,6 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
 
     x0=function([Scalar('t'), u_space, proj_p.dim()], x0_impl, backend=backend)
 
-    a, b = systems
 
     def dxdt_impl(t, x_outer, z_outer, u_outer, p_outer):
         p = proj_p.inverse(p_outer)
