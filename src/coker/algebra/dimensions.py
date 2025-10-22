@@ -16,7 +16,6 @@ class VectorSpace:
         return reduce(mul, self.dimension)
 
 
-
 @dataclasses.dataclass
 class Scalar:
     name: str
@@ -24,6 +23,7 @@ class Scalar:
     @property
     def size(self) -> int:
         return 1
+
 
 class Dimension:
     def __init__(self, tuple_or_none):
@@ -112,6 +112,7 @@ class FunctionSpace:
             smooth (infinitely differentiable) functions.
 
     """
+
     name: str
     arguments: List[Scalar | VectorSpace]
     output: List[Scalar | VectorSpace]

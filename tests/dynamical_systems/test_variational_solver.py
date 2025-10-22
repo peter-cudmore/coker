@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from coker import FunctionSpace, Scalar, VectorSpace,function
+from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.dynamics import (
     create_autonomous_ode,
     VariationalProblem,
@@ -119,6 +119,10 @@ def test_vector_linear_system(variational_backend):
     assert np.isfinite(
         soln
     ).all()  # Todo: solve this analytically and test the result
+
+    t_line = np.linspace(0, 1, 10)
+    sol_line = system(t_line, u, param)
+    assert sol_line.shape == (10, 2)
 
 
 def test_fitting_constant():
@@ -400,9 +404,8 @@ def test_fitting_line_with_constraints(variational_backend):
     constraint = function(
         system.y.input_spaces(),
         lambda _t, _x, _z, _u, p, _q: 1.75 - p[0],
-        backend=variational_backend
+        backend=variational_backend,
     )
-
 
     problem = VariationalProblem(
         loss=loss,
@@ -417,6 +420,4 @@ def test_fitting_line_with_constraints(variational_backend):
     )
 
     sol = problem()
-    assert sol.parameter_solutions["value"]  <= 1.75 + 1e-4
-
-
+    assert sol.parameter_solutions["value"] <= 1.75 + 1e-4

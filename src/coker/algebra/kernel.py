@@ -85,7 +85,7 @@ class Tape:
 
         index = tracer.index
         result = set()
-        for i, inner in enumerate(self.nodes[tracer.index:]):
+        for i, inner in enumerate(self.nodes[tracer.index :]):
             if isinstance(inner, Tracer):
                 continue
             op, *args = inner
@@ -493,6 +493,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
 class Function:
     INLINE_SIZE = 10
+
     def __init__(
         self, tape: Tape, outputs: List[Tracer], backend="coker", name=None
     ):
@@ -562,15 +563,14 @@ class Function:
 
         return arg
 
-
     def call_inline(self, *args) -> Tuple[Tracer]:
         from coker.backends import get_backend_by_name
+
         backend = get_backend_by_name("numpy", set_current=False)
         output = backend.evaluate(self, args)
         if self.is_single:
             return output[0]
         return output
-
 
     def __call__(self, *args):
 
@@ -605,29 +605,37 @@ class Function:
     def compile(self, backend: str):
         raise NotImplementedError("Not yet implemented")
 
-    def __le__(self, other:np.ndarray):
+    def __le__(self, other: np.ndarray):
         # self < other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
         dim = self.output_shape()[0]
-        assert dim.shape == get_dim_by_class(other), "Arguments have different shapes"
+        assert dim.shape == get_dim_by_class(
+            other
+        ), "Arguments have different shapes"
         ones = np.ones_like(other)
-        return InequalityExpression(self, -np.inf *ones, other, is_equal=True)
+        return InequalityExpression(self, -np.inf * ones, other, is_equal=True)
 
     def __ge__(self, other):
         # self => other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
-        dim, = self.output_shape()
-        assert dim == get_dim_by_class(other), "Arguments have different shapes"
+        (dim,) = self.output_shape()
+        assert dim == get_dim_by_class(
+            other
+        ), "Arguments have different shapes"
         ones = np.ones_like(other)
-        return InequalityExpression(self, other, ones *np.inf, is_equal=True)
+        return InequalityExpression(self, other, ones * np.inf, is_equal=True)
 
     def __lt__(self, other):
         # self <= other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
-        dim, = self.output_shape()
-        assert dim == get_dim_by_class(other), "Arguments have different shapes"
+        (dim,) = self.output_shape()
+        assert dim == get_dim_by_class(
+            other
+        ), "Arguments have different shapes"
         ones = np.ones_like(other)
-        return InequalityExpression(self, -np.inf *ones, other, is_equal=False)
+        return InequalityExpression(
+            self, -np.inf * ones, other, is_equal=False
+        )
 
     def __gt__(self, other):
         # self > other
@@ -635,11 +643,17 @@ class Function:
         dim = self.output_shape()[0]
         assert dim.shape == other.shape, "Arguments have different shapes"
         ones = np.ones_like(other)
-        return InequalityExpression(self, other, ones *np.inf, is_equal=False)
+        return InequalityExpression(self, other, ones * np.inf, is_equal=False)
 
 
 class InequalityExpression:
-    def __init__(self, value: Function, lower: np.ndarray, upper : np.ndarray, is_equal:bool=False):
+    def __init__(
+        self,
+        value: Function,
+        lower: np.ndarray,
+        upper: np.ndarray,
+        is_equal: bool = False,
+    ):
         self.value = value
         self.lower = lower
         self.upper = upper

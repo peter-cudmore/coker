@@ -7,6 +7,7 @@ from .types import DynamicsSpec, DynamicalSystem
 from ..algebra import is_scalar
 from typing import Tuple
 
+
 def create_dynamics_from_spec(
     spec: DynamicsSpec, backend="numpy"
 ) -> DynamicalSystem:
@@ -235,7 +236,6 @@ def create_autonomous_ode(
     return create_dynamics_from_spec(spec, backend=backend)
 
 
-
 class CompositionOperator:
 
     def __init__(self, *spaces: Scalar | VectorSpace | None):
@@ -244,10 +244,8 @@ class CompositionOperator:
     def offsets(self):
         total = 0
         for space in self.spaces:
-            if space is None:
-                yield total
-            else:
-                yield space.size
+            yield total
+            if space is not None:
                 total += space.size
 
     def sizes(self):
@@ -271,12 +269,14 @@ class CompositionOperator:
             else:
                 dim = space.size
                 output.append(next_slice[:dim])
-                next_slice = next_slice[dim:] if dim < next_slice.shape[0] else []
+                next_slice = (
+                    next_slice[dim:] if dim < next_slice.shape[0] else []
+                )
         return output
 
     def __call__(self, *args):
         output = [
-            a for a, space in zip(args, self.spaces) if  space is not None
+            a for a, space in zip(args, self.spaces) if space is not None
         ]
         if not output:
             return None
@@ -284,7 +284,7 @@ class CompositionOperator:
         return np.concatenate(output)
 
     @staticmethod
-    def from_dimensions(name: str, *dims) -> 'CompositionOperator':
+    def from_dimensions(name: str, *dims) -> "CompositionOperator":
         spaces = [
             VectorSpace(f"{name}_{i}", dim) if dim else None
             for i, dim in enumerate(dims)
@@ -294,10 +294,12 @@ class CompositionOperator:
     def as_matrices(self):
         offsets = list(self.offsets())
         sizes = list(self.sizes())
-        matrices =[]
+
+        matrices = []
         for i, (offset, size) in enumerate(zip(offsets, sizes)):
             matrix = np.zeros((size, sum(self.sizes())), dtype=float)
-            matrix[:, offset: offset + size] = np.eye(size)
+
+            matrix[:, offset : offset + size] = np.eye(size)
             matrices.append(matrix)
         return matrices
 
@@ -312,24 +314,30 @@ class ProjectionSet:
     controls: CompositionOperator
 
 
-
-def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem, ProjectionSet]:
+def direct_sum(
+    *systems: DynamicalSystem, backend=None
+) -> Tuple[DynamicalSystem, ProjectionSet]:
 
     backend = backend or systems[0].backend()
 
     proj_p = CompositionOperator(*[system.parameters for system in systems])
-    x_dim, z_dim, q_dim = zip(*[system.get_state_dimensions() for system in systems])
+    x_dim, z_dim, q_dim = zip(
+        *[system.get_state_dimensions() for system in systems]
+    )
     y_dim = [system.y.output_shape()[0] for system in systems]
 
-    proj_x = CompositionOperator.from_dimensions('x', *x_dim)
-    proj_z = CompositionOperator.from_dimensions('z', *z_dim)
-    proj_q = CompositionOperator.from_dimensions('q', *q_dim)
+    proj_x = CompositionOperator.from_dimensions("x", *x_dim)
+    proj_z = CompositionOperator.from_dimensions("z", *z_dim)
+    proj_q = CompositionOperator.from_dimensions("q", *q_dim)
 
-    proj_y = CompositionOperator.from_dimensions('y', *y_dim)
-
+    proj_y = CompositionOperator.from_dimensions("y", *y_dim)
 
     u_range = [
-        system.inputs.output_dimensions()[0] if system.inputs is not Noop() else None
+        (
+            system.inputs.output_dimensions()[0]
+            if system.inputs is not Noop()
+            else None
+        )
         for system in systems
     ]
 
@@ -337,8 +345,9 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
     if proj_u.dim() is None:
         u_space = Noop()
     else:
-        u_space = FunctionSpace(proj_u.dim().name, [Scalar('t')], [proj_u.dim()])
-
+        u_space = FunctionSpace(
+            proj_u.dim().name, [Scalar("t")], [proj_u.dim()]
+        )
 
     def x0_impl(t, u_outer, p_outer):
         p_inner = proj_p.inverse(p_outer)
@@ -347,16 +356,18 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
             for i, _ in enumerate(proj_u.spaces)
         ]
         x0_inner, z0_inner = zip(
-            *[system.x0.call_inline(t, u_i, p_i)
-              for system, u_i, p_i in zip(systems, u_inner, p_inner)
-              ]
+            *[
+                system.x0.call_inline(t, u_i, p_i)
+                for system, u_i, p_i in zip(systems, u_inner, p_inner)
+            ]
         )
         x0_ab = proj_x(*x0_inner)
         z0_ab = proj_z(*z0_inner)
         return x0_ab, z0_ab
 
-    x0=function([Scalar('t'), u_space, proj_p.dim()], x0_impl, backend=backend)
-
+    x0 = function(
+        [Scalar("t"), u_space, proj_p.dim()], x0_impl, backend=backend
+    )
 
     def dxdt_impl(t, x_outer, z_outer, u_outer, p_outer):
         p = proj_p.inverse(p_outer)
@@ -365,34 +376,42 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
 
         dx_inner = [
             system.dxdt.call_inline(
-                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i]
+                t,
+                x[i],
+                z[i],
+                lambda t_i: proj_u.inverse(u_outer(t_i))[i],
+                p[i],
             )
             for i, system in enumerate(systems)
         ]
 
         return proj_x(*dx_inner)
 
-
-    args = [Scalar('t'), proj_x.dim(), proj_z.dim(), u_space, proj_p.dim()]
-    dx=function(args, dxdt_impl, backend=backend)
+    args = [Scalar("t"), proj_x.dim(), proj_z.dim(), u_space, proj_p.dim()]
+    dx = function(args, dxdt_impl, backend=backend)
     if proj_z.dim() is not None:
+
         def g_impl(t, x_outer, z_outer, u_outer, p_outer):
             p = proj_p.inverse(p_outer)
             x = proj_x.inverse(x_outer)
             z = proj_z.inverse(z_outer)
             g_inner = [
                 system.g.call_inline(
-                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i]
+                    t,
+                    x[i],
+                    z[i],
+                    lambda t_i: proj_u.inverse(u_outer(t_i))[i],
+                    p[i],
                 )
                 for i, system in enumerate(systems)
             ]
             return proj_z(*g_inner)
-        g=function(args, g_impl, backend=backend)
+
+        g = function(args, g_impl, backend=backend)
     else:
         g = Noop()
 
     if proj_q.dim() is not None:
-
 
         def dqdt_impl(t, x_outer, z_outer, u_outer, p_outer):
             p = proj_p.inverse(p_outer)
@@ -400,13 +419,17 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
             z = proj_z.inverse(z_outer)
             dq_inner = [
                 system.dqdt.call_inline(
-                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i]
+                    t,
+                    x[i],
+                    z[i],
+                    lambda t_i: proj_u.inverse(u_outer(t_i))[i],
+                    p[i],
                 )
                 for i, system in enumerate(systems)
             ]
             return proj_q(*dq_inner)
 
-        dqdt=function(args, dqdt_impl, backend=backend)
+        dqdt = function(args, dqdt_impl, backend=backend)
     else:
         dqdt = Noop()
 
@@ -416,26 +439,29 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
         z = proj_z.inverse(z_outer)
         q = proj_q.inverse(q_outer)
         y_inner = [
-           system.y.call_inline(
-                t, x[i], z[i], lambda t_i: proj_u.inverse(u_outer(t_i))[i], p[i], q[i]
+            system.y.call_inline(
+                t,
+                x[i],
+                z[i],
+                lambda t_i: proj_u.inverse(u_outer(t_i))[i],
+                p[i],
+                q[i],
             )
             for i, system in enumerate(systems)
         ]
 
-
         return proj_y(*y_inner)
 
+    y = function(args + [proj_q.dim()], y_impl, backend=backend)
 
-    y=function(args + [proj_q.dim()], y_impl, backend=backend)
-
-    system =  DynamicalSystem(
+    system = DynamicalSystem(
         inputs=u_space,
         parameters=proj_p.dim(),
         x0=x0,
         dxdt=dx,
         g=g,
         dqdt=dqdt,
-        y=y
+        y=y,
     )
     projections = ProjectionSet(
         state=proj_x,
@@ -443,7 +469,7 @@ def direct_sum(*systems: DynamicalSystem, backend=None) -> Tuple[DynamicalSystem
         quadratures=proj_q,
         outputs=proj_y,
         controls=proj_u,
-        parameters=proj_p
+        parameters=proj_p,
     )
 
     return system, projections

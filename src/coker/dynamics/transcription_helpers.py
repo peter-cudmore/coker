@@ -390,7 +390,18 @@ class InterpolatingPoly:
                 for i, s in enumerate(self.s)
             ]
         )
-        (size,) = values.shape
+        try:
+            (size,) = values.shape
+        except ValueError as ex:
+            if len(values.shape) == 2 and values.shape[1] == 1:
+                values = np.squeeze(values)
+                (size,) = values.shape
+            else:
+                ex.add_note(
+                    f"Cannot reshape values of shape {values.shape}, expected a vector"
+                )
+                raise ex
+
         dimension = size // len(self.s)
 
         return InterpolatingPoly(dimension, self.interval, self.degree, values)

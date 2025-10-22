@@ -234,14 +234,13 @@ def create_variational_solver(problem: VariationalProblem):
     end_args = (t_end, x_end, z_end, u_end, p, q_end)
 
     for constraint in problem.terminal_constraints:
-        g_inner, = casadi.evaluate(constraint.value, end_args)
+        (g_inner,) = casadi.evaluate(constraint.value, end_args)
         g_lower = casadi.to_backend_array(constraint.lower)
         g_upper = casadi.to_backend_array(constraint.upper)
         assert g_lower.shape == g_inner.shape == g_inner.shape
         g = ca.vertcat(g, g_inner)
         lbg = ca.vertcat(lbg, g_lower)
         ubg = ca.vertcat(ubg, g_upper)
-
 
     solver_options = problem.transcription_options.optimiser_options
 
@@ -432,8 +431,15 @@ def construct_parameters(parameters: List[ParameterVariable]):
     output_map = {}
     for i, p in enumerate(parameters):
         if isinstance(p, BoundedVariable):
+            try:
+                symbol = symbols[p.name]
+                params.append(symbol)
+                index = output_map[p.name]
+                p0.append(p0[index])
+                continue
+            except KeyError:
+                pass
             symbol = ca.MX.sym(f"{p.name}")
-            assert p.name not in output_map, "Parameter names must be unique."
             output_map[p.name] = len(params)
             params.append(symbol)
             symbols[p.name] = symbol
@@ -455,11 +461,15 @@ def construct_parameters(parameters: List[ParameterVariable]):
 
     symbols = ca.vertcat(*symbols.values())
     return (
-        params,
-        symbols,
-        ca.DM(p0),
-        (ca.DM(lower_bounds), ca.DM(guess), ca.DM(upper_bounds)),
-        ParameterOutputMap(output_map),
+        params,  # actual parameter vector
+        symbols,  # symbols
+        ca.DM(p0),  # actual parameter vector guess
+        (
+            ca.DM(lower_bounds),
+            ca.DM(guess),
+            ca.DM(upper_bounds),
+        ),  # symbols bounds and guess
+        ParameterOutputMap(output_map),  # map to symbols
     )
 
 
@@ -527,4 +537,3 @@ class ControlFactory:
                 self.variables, self.offsets, self.sizes
             )
         ]
-
