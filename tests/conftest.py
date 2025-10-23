@@ -1,9 +1,7 @@
 import warnings
 
 backends = ["numpy", "sympy"]
-variational_backends = [
-    "numpy",
-]
+variational_backends = []
 
 try:
     import jax

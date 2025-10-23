@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from coker import FunctionSpace, Scalar, VectorSpace
+from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.dynamics import (
     create_autonomous_ode,
     VariationalProblem,
@@ -120,6 +120,10 @@ def test_vector_linear_system(variational_backend):
         soln
     ).all()  # Todo: solve this analytically and test the result
 
+    t_line = np.linspace(0, 1, 10)
+    sol_line = system(t_line, u, param)
+    assert sol_line.shape == (10, 2)
+
 
 def test_fitting_constant():
     def x0(p):
@@ -157,7 +161,6 @@ def test_fitting_constant():
             BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2)
         ],
         t_final=1,
-        constraints=[],
         backend="casadi",
     )
 
@@ -203,7 +206,6 @@ def test_fitting_line():
             float(param[1]),
         ],
         t_final=1,
-        constraints=[],
         backend="casadi",
     )
 
@@ -254,7 +256,6 @@ def test_fitting_exp():
             float(param[3]),
         ],
         t_final=1,
-        constraints=[],
         backend="casadi",
     )
 
@@ -312,7 +313,6 @@ def test_fitting_exp():
             float(param[3]),
         ],
         t_final=1,
-        constraints=[],
         backend="casadi",
     )
 
@@ -370,3 +370,54 @@ def test_vector_solver(variational_backend):
     expected_line = solution(t_line, param)
     assert soln_line.shape == expected_line.shape
     assert np.allclose(soln_line, expected_line, atol=1e-3)
+
+
+def test_fitting_line_with_constraints(variational_backend):
+    def x0(p):
+        return p[0]
+
+    def xdot(x, p):
+        return p[1]
+
+    param = np.array([2, 1])
+
+    def solution(t, p):
+        return p[0] + p[1] * t
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 2), x0=x0, xdot=xdot, backend="numpy"
+    )
+
+    def loss(f, p_inner):
+        total_error = 0.0
+        for t_i in np.arange(0, 1, 0.4):
+            truth = solution(t_i, param)
+            test = f(t_i, p_inner)
+            total_error += (truth - test) ** 2
+
+        return total_error
+
+    loss_value = loss(system, param)
+
+    assert loss_value < 1e-6
+
+    constraint = function(
+        system.y.input_spaces(),
+        lambda _t, _x, _z, _u, p, _q: 1.75 - p[0],
+        backend=variational_backend,
+    )
+
+    problem = VariationalProblem(
+        loss=loss,
+        system=system,
+        parameters=[
+            BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2),
+            float(param[1]),
+        ],
+        t_final=1,
+        terminal_constraints=[constraint >= 0],
+        backend=variational_backend,
+    )
+
+    sol = problem()
+    assert sol.parameter_solutions["value"] <= 1.75 + 1e-4

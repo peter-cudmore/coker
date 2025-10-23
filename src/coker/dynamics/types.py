@@ -9,6 +9,7 @@ from coker.algebra.kernel import (
     VectorSpace,
     Function,
     Noop,
+    InequalityExpression,
 )
 import numpy as np
 from typing import Dict
@@ -68,8 +69,16 @@ class DynamicalSystem:
         arg_stack = list(reversed(args))
         t = arg_stack.pop()
         try:
-            u = arg_stack.pop() if self.inputs is not Noop() else None
-            p = arg_stack.pop() if self.parameters is not None else None
+            u = (
+                arg_stack.pop()
+                if self.inputs is not Noop() or len(args) == 3
+                else None
+            )
+            p = (
+                arg_stack.pop()
+                if self.parameters is not None or len(args) == 3
+                else None
+            )
         except IndexError as ex:
             raise ValueError(
                 f"Invalid number of arguments: Expected 2 - 3, received: {len(args)}"
@@ -104,13 +113,23 @@ class DynamicalSystem:
             return self.y(t, x, z, u, p, q)
 
         def map_args(i):
-            t_i = t[i]
             x_i = x[:, i]
             z_i = z[:, i] if z is not None else None
             q_i = q[:, i] if q is not None else None
-            return t_i, x_i, z_i, u, p, q_i
+            return x_i, z_i, u, p, q_i
 
-        return np.concatenate([self.y(*map_args(i)) for i, _ in enumerate(t)])
+        if self.y.output_shape()[0].is_scalar() or self.y.output_shape()[
+            0
+        ].dim == (1,):
+            y = np.concatenate(
+                [self.y(t_i, *map_args(i)) for i, t_i in enumerate(t)]
+            )
+        else:
+            y = np.vstack(
+                [self.y(t_i, *map_args(i)) for i, t_i in enumerate(t)]
+            )
+
+        return y
 
 
 class ParameterMixin(abc.ABC):
@@ -202,7 +221,10 @@ class VariationalProblem:
     t_final: float
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
-    constraints: Optional[List] = None
+    path_constraints: List[InequalityExpression] = field(default_factory=list)
+    terminal_constraints: List[InequalityExpression] = field(
+        default_factory=list
+    )
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
     )
@@ -212,8 +234,10 @@ class VariationalProblem:
         from coker.backends import get_backend_by_name
 
         if self.system.parameters is not None:
-            n = self.system.parameters.dimension
-            assert len(self.parameters) == n
+            n = self.system.parameters.size
+            assert (
+                len(self.parameters) == n
+            ), f"Number of parameters does not match: expected {n} but got {len(self.parameters)}"
         if self.control is not None:
             assert self.system.inputs is not Noop()
 

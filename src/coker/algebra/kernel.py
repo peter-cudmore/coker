@@ -1,8 +1,9 @@
 import weakref
 
 import numpy as np
-from typing import Callable, Union, Tuple, List, Optional, Set
+from typing import Callable, Union, Tuple, List, Optional, Set, Iterable
 from collections import defaultdict
+
 
 from coker.algebra.dimensions import (
     Dimension,
@@ -17,7 +18,6 @@ from coker.algebra.ops import OP, Noop
 from coker.algebra.ops import numpy_atomics, numpy_composites
 
 import threading
-import dataclasses
 
 
 scalar_types = (
@@ -80,9 +80,15 @@ class Tape:
         return self.nodes[i][0]
 
     def find_dependents(self, tracer: "Tracer") -> Set[int]:
+        if tracer is None or tracer is Noop():
+            return set()
+
         index = tracer.index
         result = set()
-        for i, (op, *args) in enumerate(self.nodes[tracer.index :]):
+        for i, inner in enumerate(self.nodes[tracer.index :]):
+            if isinstance(inner, Tracer):
+                continue
+            op, *args = inner
             if op == OP.VALUE:
                 continue
             for arg in args:
@@ -90,6 +96,15 @@ class Tape:
                     if arg.index == index or arg.index in result:
                         result.add(index + i)
         return result
+
+    def inputs(self):
+        for index in self.input_indicies:
+            if index == Tape.NONE:
+                yield None
+            elif index == Tape.MAP_TO_NONE:
+                yield Noop()
+            else:
+                yield Tracer(self, index)
 
     def __len__(self):
         return len(self.nodes)
@@ -105,7 +120,7 @@ class Tape:
                 continue
 
             assert isinstance(arg, Tracer)
-            assert arg.tape is self, "Tracer belongs to another tape"
+
             dims.append(arg.dim)
 
         return op.compute_shape(*dims)
@@ -136,10 +151,12 @@ class Tape:
     def input(self, v: VectorSpace | Scalar):
         if v is None:
             self.input_indicies.append(Tape.NONE)
+            self.input_names.append("None")
             return None
 
         if isinstance(v, Noop):
             self.input_indicies.append(Tape.MAP_TO_NONE)
+            self.input_names.append("Noop")
             return v
 
         index = len(self.dim)
@@ -159,6 +176,19 @@ class Tape:
         self.input_indicies.append(index)
         self.input_names.append(v.name)
         return tracer
+
+    def list_inputs(self) -> Iterable[None | Noop | Scalar | VectorSpace]:
+        for arg_idx, node_idx in enumerate(self.input_indicies):
+            if node_idx == Tape.NONE:
+                yield None
+            elif node_idx == Tape.MAP_TO_NONE:
+                yield Noop()
+            elif isinstance(self.dim[node_idx], FunctionSpace):
+                yield self.dim[node_idx]
+            else:
+                dim: Dimension = self.dim[node_idx]
+                name = self.input_names[arg_idx]
+                yield dim.to_space(name)
 
     def substitute(self, index, value):
         assert index in self.input_indicies
@@ -324,8 +354,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
         if isinstance(key, slice):
             dimension = self.tape.dim[self.index]
-            assert dimension.is_vector(), f"Tried to index a vector"
-            p = get_projection(dimension, key)
+            if isinstance(dimension, FunctionSpace):
+                assert len(dimension.output_dimensions()) == 1
+                assert dimension.output_dimensions()[0].is_vector()
+                p = get_projection(dimension.output_dimensions()[0], key)
+            else:
+                assert dimension.is_vector(), f"Tried to index a vector"
+                p = get_projection(dimension, key)
             index = self.tape.append(OP.MATMUL, p, self)
             return Tracer(self.tape, index)
 
@@ -457,6 +492,8 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
 
 class Function:
+    INLINE_SIZE = 10
+
     def __init__(
         self, tape: Tape, outputs: List[Tracer], backend="coker", name=None
     ):
@@ -495,6 +532,9 @@ class Function:
             ],
         )
 
+    def input_spaces(self):
+        return list(self.tape.list_inputs())
+
     def input_shape(self) -> Tuple[Dimension, ...]:
         special_inputs = {
             Tape.NONE: None,
@@ -514,11 +554,26 @@ class Function:
             return Noop()
         elif index == Tape.NONE:
             return None
+
         elif isinstance(self.tape.dim[index], FunctionSpace):
+            if isinstance(arg, Function):
+                return arg
+
             return function(self.tape.dim[index].arguments, arg, self.backend)
+
         return arg
 
+    def call_inline(self, *args) -> Tuple[Tracer]:
+        from coker.backends import get_backend_by_name
+
+        backend = get_backend_by_name("numpy", set_current=False)
+        output = backend.evaluate(self, args)
+        if self.is_single:
+            return output[0]
+        return output
+
     def __call__(self, *args):
+
         assert len(args) == len(
             self.tape.input_indicies
         ), f"Expected {len(self.tape.input_indicies)} arguments but got {len(args)}"
@@ -549,6 +604,59 @@ class Function:
 
     def compile(self, backend: str):
         raise NotImplementedError("Not yet implemented")
+
+    def __le__(self, other: np.ndarray):
+        # self < other
+        assert len(self.output_shape()) == 1, "Cannot compare tensors"
+        dim = self.output_shape()[0]
+        assert dim.shape == get_dim_by_class(
+            other
+        ), "Arguments have different shapes"
+        ones = np.ones_like(other)
+        return InequalityExpression(self, -np.inf * ones, other, is_equal=True)
+
+    def __ge__(self, other):
+        # self => other
+        assert len(self.output_shape()) == 1, "Cannot compare tensors"
+        (dim,) = self.output_shape()
+        assert dim == get_dim_by_class(
+            other
+        ), "Arguments have different shapes"
+        ones = np.ones_like(other)
+        return InequalityExpression(self, other, ones * np.inf, is_equal=True)
+
+    def __lt__(self, other):
+        # self <= other
+        assert len(self.output_shape()) == 1, "Cannot compare tensors"
+        (dim,) = self.output_shape()
+        assert dim == get_dim_by_class(
+            other
+        ), "Arguments have different shapes"
+        ones = np.ones_like(other)
+        return InequalityExpression(
+            self, -np.inf * ones, other, is_equal=False
+        )
+
+    def __gt__(self, other):
+        # self > other
+        assert len(self.output_shape()) == 1, "Cannot compare tensors"
+        dim = self.output_shape()[0]
+        assert dim.shape == other.shape, "Arguments have different shapes"
+        ones = np.ones_like(other)
+        return InequalityExpression(self, other, ones * np.inf, is_equal=False)
+
+
+class InequalityExpression:
+    def __init__(
+        self,
+        value: Function,
+        lower: np.ndarray,
+        upper: np.ndarray,
+        is_equal: bool = False,
+    ):
+        self.value = value
+        self.lower = lower
+        self.upper = upper
 
 
 def function(

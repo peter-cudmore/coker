@@ -137,11 +137,13 @@ def to_casadi(value):
                 k = it.multi_index
                 v[k] = x
         return v
-
-    if value == np.inf:
-        return ca.inf
-    if value == -np.inf:
-        return -ca.inf
+    try:
+        if value == np.inf:
+            return ca.inf
+        if value == -np.inf:
+            return -ca.inf
+    except RuntimeError:
+        pass
 
     return value
 

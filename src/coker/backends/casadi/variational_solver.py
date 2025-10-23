@@ -4,7 +4,6 @@ import casadi as ca
 import numpy as np
 from itertools import accumulate
 
-
 from coker.backends.backend import get_backend_by_name
 
 
@@ -92,8 +91,6 @@ def create_variational_solver(problem: VariationalProblem):
     )
 
     # Set up functions
-
-    constraints = []
     equalities = []
 
     dynamics = lambda *args: casadi.evaluate(problem.system.dxdt, args)
@@ -179,17 +176,17 @@ def create_variational_solver(problem: VariationalProblem):
             # xend = x_start + int_tstart^t_end f(x)dt
             # ->  0 = xend - xstart - [dx_0 | dx_1 | dx_2 | ...] @ w
 
-        _, xstart = poly.start_point()
-        _, xend = poly.end_point()
+        _, vstart = poly.start_point()
+        _, vend = poly.end_point()
 
         dX = ca.hcat(interval_dynamics)
         assert poly.weights[0, poly.degree] == 0
         w = ca.DM(poly.weights[0, :-1])
 
-        equalities.append(proj_x @ xend - proj_x @ xstart - (dX @ w))
+        equalities.append(proj_x @ vend - proj_x @ vstart - (dX @ w))
         if q_size > 0:
             dQ = ca.hcat(interval_quadratures)
-            equalities.append(proj_q @ xend - proj_q @ xstart - dQ @ w)
+            equalities.append(proj_q @ vend - proj_q @ vstart - dQ @ w)
 
     path_symbols = poly_collection.symbols()
 
@@ -226,8 +223,25 @@ def create_variational_solver(problem: VariationalProblem):
         cost = problem.loss(solution_proxy, p)
 
     g = ca.vertcat(*[e for e in equalities if e is not None])
-    ubg = tolerance
-    lbg = -tolerance
+    ubg = tolerance * ca.DM.ones(g.shape)
+    lbg = -tolerance * ca.DM.ones(g.shape)
+
+    t_end, v_end = poly_collection.polys[-1].end_point()
+    x_end = proj_x @ v_end
+    z_end = proj_z @ v_end
+    q_end = proj_q @ v_end
+    u_end = control_factory(t_end, x_end, z_end)
+    end_args = (t_end, x_end, z_end, u_end, p, q_end)
+
+    for constraint in problem.terminal_constraints:
+        (g_inner,) = casadi.evaluate(constraint.value, end_args)
+        g_lower = casadi.to_backend_array(constraint.lower)
+        g_upper = casadi.to_backend_array(constraint.upper)
+        assert g_lower.shape == g_inner.shape == g_inner.shape
+        g = ca.vertcat(g, g_inner)
+        lbg = ca.vertcat(lbg, g_lower)
+        ubg = ca.vertcat(ubg, g_upper)
+
     solver_options = problem.transcription_options.optimiser_options
 
     if not problem.transcription_options.verbose:
@@ -417,6 +431,14 @@ def construct_parameters(parameters: List[ParameterVariable]):
     output_map = {}
     for i, p in enumerate(parameters):
         if isinstance(p, BoundedVariable):
+            try:
+                symbol = symbols[p.name]
+                params.append(symbol)
+                index = output_map[p.name]
+                p0.append(p0[index])
+                continue
+            except KeyError:
+                pass
             symbol = ca.MX.sym(f"{p.name}")
             output_map[p.name] = len(params)
             params.append(symbol)
@@ -439,11 +461,15 @@ def construct_parameters(parameters: List[ParameterVariable]):
 
     symbols = ca.vertcat(*symbols.values())
     return (
-        params,
-        symbols,
-        ca.DM(p0),
-        (ca.DM(lower_bounds), ca.DM(guess), ca.DM(upper_bounds)),
-        ParameterOutputMap(output_map),
+        params,  # actual parameter vector
+        symbols,  # symbols
+        ca.DM(p0),  # actual parameter vector guess
+        (
+            ca.DM(lower_bounds),
+            ca.DM(guess),
+            ca.DM(upper_bounds),
+        ),  # symbols bounds and guess
+        ParameterOutputMap(output_map),  # map to symbols
     )
 
 

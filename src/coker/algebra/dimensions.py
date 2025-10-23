@@ -1,4 +1,6 @@
 import dataclasses
+from functools import reduce
+from operator import mul
 from typing import List, Optional, Tuple, Union
 
 
@@ -7,10 +9,20 @@ class VectorSpace:
     name: str
     dimension: Union[int, Tuple[int, ...]]
 
+    @property
+    def size(self) -> int:
+        if isinstance(self.dimension, int):
+            return self.dimension
+        return reduce(mul, self.dimension)
+
 
 @dataclasses.dataclass
 class Scalar:
     name: str
+
+    @property
+    def size(self) -> int:
+        return 1
 
 
 class Dimension:
@@ -87,6 +99,20 @@ class Dimension:
 
 @dataclasses.dataclass
 class FunctionSpace:
+    """Represents a function space, including its domain and codomain.
+
+    Attributes:
+        name (str): The name of the function space.
+        arguments (List[Scalar | VectorSpace]): A list specifying the input arguments of
+            the function, where each argument can be either a scalar or a vector space.
+        output (List[Scalar | VectorSpace]): A list specifying the output of the function,
+            where each element can be either a scalar or a vector space.
+        signature (Optional[Tuple[int]]): Optional list of integers denoting the degree
+            of differentiability for each argument. If not provided, the default is
+            smooth (infinitely differentiable) functions.
+
+    """
+
     name: str
     arguments: List[Scalar | VectorSpace]
     output: List[Scalar | VectorSpace]
