@@ -421,3 +421,57 @@ def test_fitting_line_with_constraints(variational_backend):
 
     sol = problem()
     assert sol.parameter_solutions["value"] <= 1.75 + 1e-4
+
+
+def test_fitting_line_with_constraints_and_regularisation(variational_backend):
+    def x0(p):
+        return p[0]
+
+    def xdot(x, p):
+        return p[1]
+
+    param = np.array([2, 1, 0])
+
+    def solution(t, p):
+        return p[0] + p[1] * t
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 2), x0=x0, xdot=xdot, backend="numpy"
+    )
+
+    def loss(f, p_inner):
+        total_error = 0.0
+        for t_i in np.arange(0, 1, 0.4):
+            truth = solution(t_i, param)
+            test = f(t_i, p_inner)
+            total_error += (truth - test) ** 2
+
+        return total_error + p_inner[2] ** 2
+
+    args = list(system.y.input_spaces())
+    args[-2].dimension = param.shape
+    constraint = function(
+        args,
+        lambda _t, _x, _z, _u, p, _q: 1.75 - p[0],
+        backend=variational_backend,
+    )
+
+    problem = VariationalProblem(
+        loss=loss,
+        system=system,
+        parameters=[
+            BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2),
+            float(param[1]),
+            BoundedVariable(
+                "regularisation", lower_bound=0, upper_bound=1, guess=0.1
+            ),
+        ],
+        t_final=1,
+        terminal_constraints=[constraint >= 0],
+        backend=variational_backend,
+        system_parameter_map=np.array([[1, 0, 0], [0, 1, 0]]),
+    )
+
+    sol = problem()
+    assert sol.parameter_solutions["value"] <= 1.75 + 1e-4
+    assert 0 < sol.parameter_solutions["regularisation"] < 1

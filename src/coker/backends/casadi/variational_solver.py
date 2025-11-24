@@ -110,6 +110,10 @@ def create_variational_solver(problem: VariationalProblem):
     p, p_symbols, p0_guess, (p_lower, p_guess, p_upper), p_output_map = (
         construct_parameters(parameters)
     )
+    if problem.system_parameter_map is not None:
+        proj_p = ca.DM(problem.system_parameter_map)
+    else:
+        proj_p = ca.DM.eye(p.shape[0])
 
     control_factory = (
         ControlFactory(control_variables, problem.t_final)
@@ -133,10 +137,10 @@ def create_variational_solver(problem: VariationalProblem):
     x_end = list(poly_collection.interval_ends())[:-1]
 
     x0_guess, z0_guess = casadi.evaluate(
-        problem.system.x0, [0, u_guess, p0_guess]
+        problem.system.x0, [0, u_guess, proj_p @ p0_guess]
     )
     x0_val, z0_val = casadi.evaluate(
-        problem.system.x0, [0, control_factory, p]
+        problem.system.x0, [0, control_factory, proj_p @ p]
     )
 
     equalities += [
@@ -159,18 +163,20 @@ def create_variational_solver(problem: VariationalProblem):
 
             dx = proj_x @ dv
 
-            (dynamics_ij,) = dynamics(t, x, z, control_factory, p)
+            (dynamics_ij,) = dynamics(t, x, z, control_factory, proj_p @ p)
             interval_dynamics.append(dynamics_ij)
             equalities.append(dx - dynamics_ij)
 
             if q_size > 0:
                 dq = proj_q @ dv
-                (quadrature_ij,) = quadrature(t, x, z, control_factory, p)
+                (quadrature_ij,) = quadrature(
+                    t, x, z, control_factory, proj_p @ p
+                )
                 equalities.append(dq - quadrature_ij)
                 interval_quadratures.append(quadrature_ij)
 
             if z_size > 0:
-                (alg,) = algebraic(t, x, z, control_factory, p)
+                (alg,) = algebraic(t, x, z, control_factory, proj_p @ p)
                 equalities.append(alg)
 
             # xend = x_start + int_tstart^t_end f(x)dt
@@ -213,7 +219,7 @@ def create_variational_solver(problem: VariationalProblem):
         z_tau = proj_z @ inner
         q_tau = proj_q @ inner
         (y_val,) = casadi.evaluate(
-            problem.system.y, [tau, x_tau, z_tau, u_val, p_val, q_tau]
+            problem.system.y, [tau, x_tau, z_tau, u_val, proj_p @ p_val, q_tau]
         )
         return y_val
 

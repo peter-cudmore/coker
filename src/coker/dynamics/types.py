@@ -221,6 +221,7 @@ class VariationalProblem:
     t_final: float
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
+    system_parameter_map: Optional[np.ndarray] = None
     path_constraints: List[InequalityExpression] = field(default_factory=list)
     terminal_constraints: List[InequalityExpression] = field(
         default_factory=list
@@ -230,16 +231,28 @@ class VariationalProblem:
     )
     backend: Optional[str] = "casadi"
 
-    def __call__(self) -> "VariationalSolution":
-        from coker.backends import get_backend_by_name
-
-        if self.system.parameters is not None:
-            n = self.system.parameters.size
+    def __post_init__(self):
+        if self.system_parameter_map is not None:
+            expected_shape = (
+                self.system.parameters.size,
+                len(self.parameters),
+            )
             assert (
-                len(self.parameters) == n
-            ), f"Number of parameters does not match: expected {n} but got {len(self.parameters)}"
+                expected_shape == self.system_parameter_map.shape
+            ), f"Parameter map is invalid. Expected an {expected_shape} matrix, but got {self.system_parameter_map.shape}."
+        elif (
+            self.parameters is not None
+            and self.system.parameters.size != len(self.parameters)
+        ):
+            raise ValueError(
+                f"Number of parameters does not match: expected {self.system.parameters.size} but got {len(self.parameters)}. Please provide a parameter map or specify the same number of parameters."
+            )
+
         if self.control is not None:
             assert self.system.inputs is not Noop()
+
+    def __call__(self) -> "VariationalSolution":
+        from coker.backends import get_backend_by_name
 
         backend = get_backend_by_name(self.backend)
         return backend.create_variational_solver(self)
