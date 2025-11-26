@@ -224,9 +224,11 @@ def create_variational_solver(problem: VariationalProblem):
         return y_val
 
     if problem.control:
-        cost = problem.loss(solution_proxy, control_factory, p)
+        (cost,) = casadi.evaluate(
+            problem.loss, [solution_proxy, control_factory, p]
+        )
     else:
-        cost = problem.loss(solution_proxy, p)
+        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
 
     g = ca.vertcat(*[e for e in equalities if e is not None])
     ubg = tolerance * ca.DM.ones(g.shape)

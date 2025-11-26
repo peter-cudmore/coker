@@ -183,9 +183,10 @@ def create_autonomous_ode(
     # case 1,
     # - x0 is an array
 
-    if isinstance(x0, (list, tuple, int, float)):
+    if isinstance(x0, (list, tuple)):
         x0 = np.array(x0)
-    if isinstance(x0, np.ndarray):
+
+    if isinstance(x0, (np.ndarray, int, float)):
         x0_func = lambda z, u, p: (x0, None)
     else:
         x0_func = lambda z, u, p: (x0(p), None)
@@ -214,7 +215,11 @@ def create_autonomous_ode(
     ) or x0_eval.shape == dot_x_eval.shape, f"x0 and xdot must have the same shape; x0 is {x0_eval} and xdot is {dot_x_eval}"
 
     if output is None:
-        output_func = lambda t, x, z, u, p, q: x
+        if is_scalar(x0_eval):
+            output_func = lambda t, x, z, u, p, q: x[0]
+        else:
+            output_func = lambda t, x, z, u, p, q: x
+
     else:
         y_eval = output(x0_eval, p_init)
         assert y_eval is not None, "Output function must return a value"

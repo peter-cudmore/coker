@@ -2,14 +2,15 @@ import abc
 from typing import List, Callable, Optional, Tuple, Union, Iterator
 from dataclasses import dataclass, field
 
-from coker import Dimension
 from coker.algebra.kernel import (
+    Dimension,
     FunctionSpace,
     Scalar,
     VectorSpace,
     Function,
     Noop,
     InequalityExpression,
+    function,
 )
 import numpy as np
 from typing import Dict
@@ -131,6 +132,16 @@ class DynamicalSystem:
 
         return y
 
+    def output_as_function_space(self) -> FunctionSpace:
+        t, _x_dim, _z_dim, u, p, _q_dim = self.y.input_shape()
+        (out,) = self.y.output_shape()
+        args = [t.to_space("t")]
+        if self.inputs is not Noop():
+            args.append(u.to_space("u"))
+        if p is not None:
+            args.append(p.to_space("p"))
+        return FunctionSpace("y", args, [out.to_space("y")])
+
 
 class ParameterMixin(abc.ABC):
     @abc.abstractmethod
@@ -250,6 +261,21 @@ class VariationalProblem:
 
         if self.control is not None:
             assert self.system.inputs is not Noop()
+
+        if not isinstance(self.loss, Function):
+            solution_space = self.system.output_as_function_space()
+            if self.parameters:
+                parameter_space = (
+                    VectorSpace("p", len(self.parameters))
+                    if self.parameters
+                    else None
+                )
+                solution_space.arguments[-1] = parameter_space
+            loss = function(
+                arguments=[solution_space, parameter_space],
+                implementation=self.loss,
+            )
+            self.loss = loss
 
     def __call__(self) -> "VariationalSolution":
         from coker.backends import get_backend_by_name
