@@ -165,8 +165,6 @@ class SympyBackend(Backend):
             if len(array.shape) == 2:
                 return to_matrix(array)
 
-        assert array is not None
-
         return array
 
     def native_types(self):
@@ -223,8 +221,10 @@ class SympyBackend(Backend):
                 output.append(result)
                 continue
             result = eval(result)
+
             if (
-                not shape.is_scalar()
+                result is not None
+                and not shape.is_scalar()
                 and result.shape != shape.shape
                 and isinstance(result, MatrixType)
             ):

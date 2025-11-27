@@ -157,6 +157,8 @@ def reshape(arg, dim):
         return np.reshape(arg, dim.dim)
     elif isinstance(arg, (float, int)):
         return np.array([arg]).reshape(dim.dim)
+    elif arg is None:
+        return arg
     raise NotImplementedError(f"Dont know how to reshape {arg}")
 
 

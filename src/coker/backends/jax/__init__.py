@@ -114,8 +114,10 @@ class JaxBackend(Backend):
         )
 
     def to_numpy_array(self, array) -> ArrayLike:
-
-        return np.array(array)
+        if array is not None:
+            return np.array(array)
+        else:
+            return array
 
     def to_backend_array(self, array):
         return jnp.array(array)
@@ -134,6 +136,8 @@ class JaxBackend(Backend):
             return jnp.reshape(arg, dim.dim)
         elif isinstance(arg, np.ndarray):
             return np.reshape(arg, dim.dim)
+        elif arg is None:
+            return arg
         raise NotImplementedError(
             f"Don't know how to resize {arg.__class__.__name__}"
         )

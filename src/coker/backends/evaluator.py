@@ -7,7 +7,7 @@ from coker.algebra.kernel import Tracer, OP
 
 
 def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
-
+    workspace[-1] = None
     for index, arg in zip(graph.input_indicies, args):
         if isinstance(arg, coker.Function):
             workspace[index] = arg

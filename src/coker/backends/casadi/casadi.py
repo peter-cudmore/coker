@@ -158,7 +158,7 @@ def extract_symbols(arg: ca.MX):
 
 def substitute(output: List[Tracer], workspace):
     def get_node(node: Tracer):
-        if node is None:
+        if node is None or node.index == Tape.NONE:
             return None
         if node is Noop():
             return node
