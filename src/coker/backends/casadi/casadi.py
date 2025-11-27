@@ -32,6 +32,7 @@ impls = {
     OP.LESS_THAN: ca.lt,
     OP.CASE: lambda c, t, f: ca.if_else(c, t, f),
     OP.EVALUATE: lambda op, *args: casadi_eval(op, *args),
+    OP.LOG: ca.log,
 }
 
 
