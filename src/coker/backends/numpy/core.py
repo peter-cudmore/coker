@@ -84,6 +84,7 @@ impls = {
     OP.LESS_THAN: np.less,
     OP.CASE: lambda cond, t, f: t if cond else f,
     OP.EVALUATE: lambda op, *args: op(*args),
+    OP.LOG: np.log,
 }
 
 parameterised_impls = {

@@ -34,6 +34,7 @@ class OP(enum.Enum):
     LESS_THAN = 24
     LESS_EQUAL = 25
     EVALUATE = 26
+    LOG = 27
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -199,8 +200,7 @@ def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
         return function_sig.output_dimensions()
 
 
-@register_shape(
-    OP.VALUE,
+__componentwise_ops = [
     OP.NEG,
     OP.ABS,
     OP.SIN,
@@ -209,7 +209,12 @@ def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
     OP.ARCSIN,
     OP.ARCCOS,
     OP.ARCTAN,
-)
+    OP.EXP,
+    OP.LOG,
+]
+
+
+@register_shape(OP.VALUE, *__componentwise_ops)
 def dimension_identity(dim: Dimension):
     return dim
 
@@ -367,6 +372,7 @@ numpy_atomics = {
     np.negative: OP.NEG,
     np.abs: OP.ABS,
     np.arctan2: OP.ARCTAN2,
+    np.log: OP.LOG,
 }
 
 

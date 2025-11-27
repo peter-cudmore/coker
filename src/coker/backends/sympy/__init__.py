@@ -94,6 +94,7 @@ impls = {
     OP.CASE: lambda cond, t, f: t if cond else f,
     OP.ARCTAN2: sp.atan2,
     OP.EVALUATE: lambda op, *args: op(*args),
+    OP.LOG: sp.log,
 }
 
 

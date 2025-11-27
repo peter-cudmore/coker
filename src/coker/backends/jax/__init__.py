@@ -68,6 +68,7 @@ impls = {
     OP.EQUAL: jnp.equal,
     OP.CASE: lambda c, t, f: t if c else f,
     OP.EVALUATE: lambda op, *args: op(*args),
+    OP.LOG: jnp.log,
 }
 
 parameterised_impls = {

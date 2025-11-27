@@ -296,3 +296,19 @@ def test_zeros():
         assert x.shape == (3, 3)
         x[:, 0] = np.array([1, 2, 3])
         assert x[0, 0] == 1
+
+
+def test_log(backend):
+    def f_impl(x):
+        return np.log(x)
+
+    x = 3
+    f = function(
+        arguments=[Scalar(name="x")],
+        implementation=f_impl,
+        backend=backend,
+    )
+    f_true = f_impl(x)
+    f_test = f(x)
+
+    assert is_close(f_true, f_test, 1e-5)
