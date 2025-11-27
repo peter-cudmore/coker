@@ -224,7 +224,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return self.index in self.tape.input_indicies
 
     def is_constant(self):
-
         if self.is_input():
             return False
         op, *args = self.tape.nodes[self.index]
@@ -435,6 +434,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return Tracer(self.tape, idx)
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        if (
+            ufunc == np.matmul
+            and isinstance(inputs[0], np.ndarray)
+            and inputs[0].shape[0] == 0
+        ):
+            return Tracer(self.tape, self.tape.NONE)
+
         try:
             op = numpy_atomics[ufunc]
 

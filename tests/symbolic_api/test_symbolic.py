@@ -312,3 +312,18 @@ def test_log(backend):
     f_test = f(x)
 
     assert is_close(f_true, f_test, 1e-5)
+
+
+def test_zero_projection(backend):
+
+    def f_impl(x):
+        return np.zeros(shape=(0, 3)) @ x
+
+    f = function(
+        arguments=[VectorSpace("x", 3)],
+        implementation=f_impl,
+        backend=backend,
+    )
+    expect_none = f(np.array([0, 0, 0]))
+
+    assert expect_none is None
