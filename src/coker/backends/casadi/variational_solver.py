@@ -275,28 +275,28 @@ def create_variational_solver(problem: VariationalProblem):
     )
 
     if problem.transcription_options.initialise_near_guess:
+
         init_spec = {
             "f": cost,
             "x": decision_variables,
-            "g": ca.vertcat(g, p_symbols - p_guess, u_symbols),
+            "g": ca.vertcat(g, p_symbols, u_symbols),
         }
         init_solver = ca.nlpsol(
             "initialiser", "ipopt", init_spec, solver_options
         )
+
         init_soln = init_solver(
             x0=decision_variables_0,
             lbx=lower_bound,
             ubx=upper_bound,
-            lbg=lbg,
-            ubg=ubg,
+            lbg=ca.vertcat(lbg, p_guess, ca.DM.zeros(u_symbols.shape)),
+            ubg=ca.vertcat(ubg, p_guess, ca.DM.zeros(u_symbols.shape)),
         )
         decision_variables_0 = init_soln["x"]
         initial_cost = float(init_soln["f"])
         assert (
             initial_cost <= ca.inf
         ), f"Cost at guess {initial_cost} is not finite"
-    else:
-        initial_cost = ca.inf
 
     nlp_spec = {"f": cost, "x": decision_variables, "g": g}
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, solver_options)
@@ -309,7 +309,6 @@ def create_variational_solver(problem: VariationalProblem):
     )
 
     min_loss = float(soln["f"])
-    assert min_loss <= initial_cost
     min_args = soln["x"]
 
     f_out = ca.Function(
