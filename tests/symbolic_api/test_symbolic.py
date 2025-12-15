@@ -300,7 +300,7 @@ def test_zeros():
 
 def test_log(backend):
     def f_impl(x):
-        return np.log(x)
+        return np.log(2 * x**2) + 1
 
     x = 3
     f = function(

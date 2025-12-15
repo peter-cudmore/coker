@@ -222,7 +222,7 @@ class TranscriptionOptions:
     absolute_tolerance: float = 1e-12
     verbose: bool = False
     optimiser_options: dict = field(default_factory=dict)
-    initialise_near_guess: bool = False
+    initialise_near_guess: bool = True
 
 
 @dataclass
