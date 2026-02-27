@@ -1,7 +1,8 @@
 import weakref
 
 import numpy as np
-from typing import Callable, Union, Tuple, List, Optional, Set, Iterable
+import scipy as sp
+from typing import Callable, Union, Tuple, List, Optional, Set, Iterable, Any
 from collections import defaultdict
 
 
@@ -13,7 +14,7 @@ from coker.algebra.dimensions import (
     Element,
 )
 from coker.algebra.tensor import SymbolicVector
-from coker.algebra.ops import OP, Noop
+from coker.algebra.ops import OP, Noop, Operator
 
 from coker.algebra.ops import numpy_atomics, numpy_composites
 
@@ -65,19 +66,107 @@ def get_dim_by_class(arg):
     raise NotImplementedError(f"Don't know the shape of {type(arg)}")
 
 
+class TapeInner:
+    INNER_REF = -1
+    CONSTANT_REF = -2
+
+    def __init__(self, tape_ref: 'Tape'):
+        self._nodes = []
+        self._constants = []
+        self._constant_hashmap = {}
+        self.tape_ref = weakref.ref(tape_ref)
+        assert self.INNER_REF not in OP.__members__.values()
+
+    @staticmethod
+    def constant_hash(value) -> int:
+        if isinstance(value, (int, float)):
+            return hash((0, 0, value))
+        elif isinstance(value, np.ndarray):
+            return hash((*value.shape, *value.flatten().tolist()))
+        else:
+            return hash(value)
+
+    @staticmethod
+    def try_sparsify(value: Any) -> Any:
+        if not isinstance(value, np.ndarray):
+            return value
+
+        n_entries: int = value.flatten().shape[0]
+
+        if len(value.shape) == 1 or n_entries <= 16:
+            return value
+
+        nnz: int = np.count_nonzero(value)
+        density = nnz / n_entries
+        threshold = 0.25
+
+        if density > threshold:
+            return value
+        try:
+            return sp.sparse.csc_array(value)
+        except ValueError:
+            return value
+
+
+    def push_op(self, op: OP, *args) -> int:
+        assert isinstance(op, OP) or isinstance(op, Operator)
+        idx = len(self._nodes)
+
+        if op == OP.VALUE:
+            value, = args
+
+            hsh = self.constant_hash(value)
+            if hsh in self._constant_hashmap:
+                value_idx = self._constant_hashmap[hsh]
+            else:
+                value_idx = len(self._constants)
+                self._constant_hashmap[hsh] = value_idx
+                value = self.try_sparsify(value)
+
+                self._constants.append(value)
+
+            self._nodes.append((self.CONSTANT_REF, value_idx))
+        else:
+            self._nodes.append((op, *args))
+        return idx
+
+    def define_input(self, size: int) -> int:
+        idx = len(self._nodes)
+        assert isinstance(size, int)
+        self._nodes.append((self.INNER_REF, idx, size))
+        return idx
+
+    def __getitem__(self, item):
+        op, *args = self._nodes[item]
+        if op == self.INNER_REF:
+            idx, size = args
+            return Tracer(self.tape_ref(), idx)
+        if op == self.CONSTANT_REF:
+            value_idx, = args
+            return OP.VALUE, self._constants[value_idx]
+        return op, *args
+
+    def __len__(self):
+        return len(self._nodes)
+
+
+
 class Tape:
     NONE = -1
     MAP_TO_NONE = -2
 
     def __init__(self):
-        self.nodes = []
-        self.constants = []
+        self._inner = TapeInner(self)
         self.dim = []
         self.input_indicies = []
         self.input_names = []
 
     def op(self, i):
         return self.nodes[i][0]
+
+    @property
+    def nodes(self):
+        return self._inner
 
     def find_dependents(self, tracer: "Tracer") -> Set[int]:
         if tracer is None or tracer is Noop():
@@ -134,7 +223,7 @@ class Tape:
         ]
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
-        self.nodes.append((op, *args))
+        self.nodes.push_op(op, *args)
         self.dim.append(out_dim)
         return index
 
@@ -144,7 +233,7 @@ class Tape:
         assert not isinstance(arg, Tracer)
         dim = get_dim_by_class(arg)
         idx = len(self.dim)
-        self.nodes.append((OP.VALUE, arg))
+        self.nodes.push_op(OP.VALUE, arg)
         self.dim.append(dim)
         return Tracer(self, idx)
 
@@ -159,20 +248,24 @@ class Tape:
             self.input_names.append("Noop")
             return v
 
-        index = len(self.dim)
         if isinstance(v, VectorSpace):
-            self.dim.append(Dimension(v.dimension))
+            dimension = Dimension(v.dimension)
+            self.dim.append(dimension)
+            size = dimension.flat()
         elif isinstance(v, Scalar):
             self.dim.append(Dimension(None))
-
+            size = 1
         elif isinstance(v, FunctionSpace):
             self.dim.append(v)
+            size = sum([d.flat() for d in v.output_dimensions()])
         else:
             assert (
                 False
-            ), f"Invalid input type {v}: of {type(v)} at index {index}"
+            ), f"Invalid input type {v}: of {type(v)} "
+
+        index = self.nodes.define_input(size)
         tracer = Tracer(self, index)
-        self.nodes.append(tracer)
+
         self.input_indicies.append(index)
         self.input_names.append(v.name)
         return tracer
@@ -316,6 +409,8 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __rmatmul__(self, other):
         index = self.tape.append(OP.MATMUL, other, self)
+
+        assert other.shape[0] > 0
         return Tracer(self.tape, index)
 
     def __matmul__(self, other):
@@ -507,7 +602,7 @@ class Function:
         self.tape = tape
         self.backend = backend
         self._compiled = None
-        if isinstance(outputs, Tracer):
+        if isinstance(outputs, Tracer) or outputs is None:
             self.output = [outputs]
             self.is_single = True
         else:
@@ -580,7 +675,6 @@ class Function:
         return output
 
     def __call__(self, *args):
-
         assert len(args) == len(
             self.tape.input_indicies
         ), f"Expected {len(self.tape.input_indicies)} arguments but got {len(args)}"
@@ -708,8 +802,9 @@ def function(
         else:
             result = wrap(result)
 
-        if result is None or result is [None]:
-            return Noop()
+
+        if (isinstance(result, Tracer) and result.index == tape.NONE):
+            result = None
 
     return Function(tape, result, backend, name)
 
