@@ -187,20 +187,20 @@ def test_dot_and_cross(backend):
 def test_build_array(backend):
 
     def f_impl(x):
-        result = SymbolicVector((2,))
-        result[0] = 1
-        result[1] = x[0] + x[1]
-        return result
+        r = SymbolicVector((2,))
+        r[0] = 1
+        r[1] = x[0] + x[1]
+        return r
 
     arg = np.array([1, 2], dtype=float)
-    result = np.array([1, 3], dtype=float)
+    expected = np.array([1, 3], dtype=float)
     # Should turn into
     # A = [0, 1][1, 0]^T  + [0, 1][0, 1]^T
     # ie (e_1 outer e_0) + (e_1 outer e_1)
     # A = [[0,0],[1, 1]], b = [1, 0]
 
-    expected = f_impl(arg)
-    assert is_close(expected, result)
+    result = f_impl(arg)
+    assert is_close(result, expected)
 
     f = function(
         arguments=[VectorSpace(name="x", dimension=2)],
@@ -210,7 +210,7 @@ def test_build_array(backend):
 
     output = f(arg)
     assert isinstance(output, np.ndarray)
-    assert is_close(output, result)
+    assert is_close(output, expected)
 
 
 def test_cos_and_sin(backend):
@@ -324,6 +324,7 @@ def test_zero_projection(backend):
         implementation=f_impl,
         backend=backend,
     )
+
     expect_none = f(np.array([0, 0, 0]))
 
     assert expect_none is None

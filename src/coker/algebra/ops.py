@@ -91,7 +91,7 @@ class ConcatenateOP(Operator):
         return True
 
     def pre_process(self, *args):
-
+        # Args should be a single argument containing a list of things to concatenate
         assert len(args) == 1
         return args[0]
 
