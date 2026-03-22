@@ -81,6 +81,33 @@ def test_cross():
     assert np.allclose(axa_test.toarray(), axa)
 
 
+def test_sub():
+    a = dok_ndarray((3, 3), {(0, 0): 3.0, (1, 1): 2.0, (2, 2): 1.0})
+    b = dok_ndarray((3, 3), {(0, 0): 1.0, (1, 1): 1.0})
+    result = (a - b).toarray()
+    expected = np.diag([2.0, 1.0, 1.0])
+    assert np.allclose(result, expected)
+
+
+def test_swap_indices_adjacent():
+    # Swapping axes 0 and 1 of a (2, 3) matrix should give its transpose
+    a = dok_ndarray((2, 3), {(0, 1): 1.0, (1, 2): 2.0})
+    swapped = a.swap_indices(0, 1)
+    assert swapped.shape == (3, 2)
+    assert np.allclose(swapped.toarray(), a.toarray().T)
+
+
+def test_swap_indices_non_adjacent():
+    # Swap axes 0 and 2 of a (2, 3, 4) tensor — middle axis must be preserved
+    data = {(i, j, k): float(i * 12 + j * 4 + k) for i in range(2) for j in range(3) for k in range(4)}
+    tensor = dok_ndarray((2, 3, 4), {k: v for k, v in data.items() if v != 0})
+    swapped = tensor.swap_indices(0, 2)
+    assert swapped.shape == (4, 3, 2)
+    original = tensor.toarray()
+    expected = np.transpose(original, (2, 1, 0))
+    assert np.allclose(swapped.toarray(), expected)
+
+
 def test_outer_product():
     a = np.array([[1, 2, 3]])
     b = dok_ndarray(shape=(3, 1), data={(0, 0): 1, (2, 0): 3})

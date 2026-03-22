@@ -131,14 +131,14 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         data = {}
         for k, v in self.keys.items():
             k_i, k_j = k[i], k[j]
-            k_prime = (*k[0:i], k_j, *k[i + j : j], k_i, *k[j + 1 :])
+            k_prime = (*k[0:i], k_j, *k[i + 1 : j], k_i, *k[j + 1 :])
             data[k_prime] = v
         s_i, s_j = self.shape[i], self.shape[j]
         shape = (
             *self.shape[0:i],
             s_j,
-            *self.shape[i + j : j],
-            s_j,
+            *self.shape[i + 1 : j],
+            s_i,
             *self.shape[j + 1 :],
         )
 
@@ -277,11 +277,11 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
     def __sub__(self, other):
         if isinstance(other, dok_ndarray):
             keys = self.keys.copy()
-            for k in other.keys.items():
+            for k, v in other.keys.items():
                 if k in keys:
-                    keys[k] -= other[k]
+                    keys[k] -= v
                 else:
-                    keys[k] = -other[k]
+                    keys[k] = -v
         else:
             raise NotImplementedError()
         return dok_ndarray(self.shape, keys)
@@ -348,8 +348,6 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             return tensor_ndarray_product(self, other)
         else:
             return tensor_sum(self, other, l_index=len(self.shape) - 1)
-
-        return dok_ndarray(shape, keys)
 
     def __rmatmul__(self, other):
         try:
@@ -453,13 +451,13 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 def tensor_vector_product(tensor: dok_ndarray, vector: np.ndarray, axis=1):
     assert isinstance(axis, int) and 0 <= axis < len(tensor.shape)
 
-    shape = tuple(s for i, s in enumerate(tensor.shape) if i is not axis)
+    shape = tuple(s for i, s in enumerate(tensor.shape) if i != axis)
 
     new_data = {}
     for k, v in tensor.keys.items():
         i = k[axis]
         entry = float(v * vector[i])
-        new_key = tuple(k_i for i, k_i in enumerate(k) if i is not axis)
+        new_key = tuple(k_i for idx, k_i in enumerate(k) if idx != axis)
         if new_key in new_data:
             new_data[new_key] += entry
         else:
@@ -511,8 +509,8 @@ def tensor_sum(lhs: dok_ndarray, rhs, l_index=0, r_index=0):
     assert lhs.shape[l_index] == rhs.shape[r_index]
 
     new_shape = (
-        *[s for i, s in enumerate(lhs.shape) if i is not l_index],
-        *[s for i, s in enumerate(rhs.shape) if i is not r_index],
+        *[s for i, s in enumerate(lhs.shape) if i != l_index],
+        *[s for i, s in enumerate(rhs.shape) if i != r_index],
     )
 
     new_data = {}
