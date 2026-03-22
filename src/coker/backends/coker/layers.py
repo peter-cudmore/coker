@@ -154,21 +154,33 @@ class GenericLayerOP:
         return backend.call(self.op, *evaluated)
 
     def push_forward(self, *tangent_space):
-        n = len(self.weights)
-        x, dx = tangent_space[0:n], tangent_space[n:]
-        y = self(*x)
+        n_bw = sum(1 for w in self.weights if isinstance(w, BilinearWeights))
+        x_bw_vals, dx_bw_vals = tangent_space[0:n_bw], tangent_space[n_bw:]
+        y = self(*x_bw_vals)
 
-        x, dx = zip(
-            *[
-                w_i.push_forwards(x_i, dx_i)
-                for w_i, x_i, dx_i in zip(self.weights, x, dx)
-            ]
-        )
-        df = differentials[self.op](*x)
+        bw_iter = iter(zip(x_bw_vals, dx_bw_vals))
+        x_eval = []
+        dx_eval = []
+        for weight in self.weights:
+            if isinstance(weight, BilinearWeights):
+                x_i, dx_i = next(bw_iter)
+                x_out, dx_out = weight.push_forwards(x_i, dx_i)
+                x_eval.append(x_out)
+                dx_eval.append(dx_out)
+            else:
+                constant = (
+                    weight
+                    if isinstance(weight, np.ndarray)
+                    else np.array([weight])
+                )
+                x_eval.append(constant)
+                dx_eval.append(np.zeros_like(constant))
+
+        df = differentials[self.op](*x_eval)
         if all(isinstance(df_i, (dok_ndarray, np.ndarray)) for df_i in df):
-            dy = sum(df_i @ dx_i for df_i, dx_i in zip(df, dx))
+            dy = sum(df_i @ dx_i for df_i, dx_i in zip(df, dx_eval))
         else:
-            dy = sum(df_i * dx_i for df_i, dx_i in zip(df, dx))
+            dy = sum(df_i * dx_i for df_i, dx_i in zip(df, dx_eval))
         return y, dy
 
 
