@@ -84,7 +84,7 @@ def label_layers(function: Function, sink_nodes: Dict):
     tape = function.tape
     distance = [0] * len(tape)
 
-    def recurse_node(sink, node):
+    def recurse_node(sink, node, depth):
         if node in tape.input_indicies:
             edges[sink].add(node)
             return
@@ -103,14 +103,13 @@ def label_layers(function: Function, sink_nodes: Dict):
             idx = a.index
             edges[node] |= {sink}
             if idx in sink_nodes:
-                distance[idx] = max(distance[idx], 1 + distance[node])
+                distance[idx] = max(distance[idx], depth + 1)
                 edges[sink].add(a.index)
             else:
-                distance[idx] = max(distance[idx], distance[node])
-                recurse_node(sink, a.index)
+                recurse_node(sink, a.index, depth)
 
-    for o in reversed(list(sink_nodes)):
-        recurse_node(o, o)
+    for o in sorted(sink_nodes, reverse=True):
+        recurse_node(o, o, distance[o])
 
     edges.update({i: {i} for i in tape.input_indicies})
     max_layers = max(distance)
@@ -169,7 +168,7 @@ class SparseNet:
             in_specs = layer.inputs()
             (out_spec,) = layer.outputs()
             out = layer(*[workspace[k] for k in in_specs])
-            workspace[out_spec] = out
+            workspace[out_spec] = np.asarray(out).flatten()
         return self.output_layer.call(workspace)
 
     def push_forward(self, *tangent_spaces):
