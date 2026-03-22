@@ -70,7 +70,7 @@ class TapeInner:
     INNER_REF = -1
     CONSTANT_REF = -2
 
-    def __init__(self, tape_ref: 'Tape'):
+    def __init__(self, tape_ref: "Tape"):
         self._nodes = []
         self._constants = []
         self._constant_hashmap = {}
@@ -108,13 +108,12 @@ class TapeInner:
         except ValueError:
             return value
 
-
     def push_op(self, op: OP, *args) -> int:
         assert isinstance(op, OP) or isinstance(op, Operator)
         idx = len(self._nodes)
 
         if op == OP.VALUE:
-            value, = args
+            (value,) = args
 
             hsh = self.constant_hash(value)
             if hsh in self._constant_hashmap:
@@ -142,13 +141,12 @@ class TapeInner:
             idx, size = args
             return Tracer(self.tape_ref(), idx)
         if op == self.CONSTANT_REF:
-            value_idx, = args
+            (value_idx,) = args
             return OP.VALUE, self._constants[value_idx]
         return op, *args
 
     def __len__(self):
         return len(self._nodes)
-
 
 
 class Tape:
@@ -259,9 +257,7 @@ class Tape:
             self.dim.append(v)
             size = sum([d.flat() for d in v.output_dimensions()])
         else:
-            assert (
-                False
-            ), f"Invalid input type {v}: of {type(v)} "
+            assert False, f"Invalid input type {v}: of {type(v)} "
 
         index = self.nodes.define_input(size)
         tracer = Tracer(self, index)
@@ -802,8 +798,7 @@ def function(
         else:
             result = wrap(result)
 
-
-        if (isinstance(result, Tracer) and result.index == tape.NONE):
+        if isinstance(result, Tracer) and result.index == tape.NONE:
             result = None
 
     return Function(tape, result, backend, name)

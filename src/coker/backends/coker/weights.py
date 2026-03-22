@@ -107,7 +107,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             inv = 1 / other
             return inv * self
         assert isinstance(other, (np.ndarray, dok_ndarray))
-        r, *c =  other.shape
+        r, *c = other.shape
         assert len(c) == 0
 
     def __mul__(self, other):
@@ -338,19 +338,44 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         )
 
     def dot(self, rhs: "BilinearWeights"):
+        """Matrix multiplication of two bilinear weights.
 
+        We assume that the total order of the result is 2.
+        So that either;
+        - self and RHS have order <= 1 (i.e. the quadratic terms are zero)
+        - or one has order 2 and the other has order 0.
+
+        If
+        math::
+            y_0 = c_0 + L_0x + Q_0(x,x)
+            y_1 = c_1 + L_1x + Q_1(x,x)
+
+            dot(y_0, y_1) = dot(c_0, c_1)
+                             + ((c_0.T @ L_1 + c_1.T @ L_0 x)
+                             + (c_0.T @ Q_1 + c_1.T @ Q_0 + L_0.T @ L_1) (x,x)
+
+
+        """
         assert self.memory == rhs.memory
+        assert (
+            (self.is_linear() and rhs.is_linear())
+            or (not self.is_linear() and rhs.is_constant())
+            or (self.is_constant() and not rhs.is_linear())
+        ), "dot requires both operands order<=1, or one order==2 and the other order==0"
         c = self.constant.T @ rhs.constant
-        l = self.linear.T @ rhs.constant + self.constant.T @ rhs.linear
+        l = self.constant.T @ rhs.linear + rhs.constant.T @ self.linear
+        m = self.memory.count
+        ll = self.linear.T @ rhs.linear  # (m, m)
+        ll_expanded = dok_ndarray(
+            (1, m, m), {(0, *k): v for k, v in ll.keys.items()}
+        )
         q = (
-            self.linear.T @ rhs.linear
+            ll_expanded
             + self.constant.T @ rhs.quadratic
-            + self.constant.T @ rhs.quadratic
+            + rhs.constant.T @ self.quadratic
         )
 
-        #        cubic = self.linear.T @ rhs.quadratic + rhs.linear.T @ self.quadratic
-
-        return BilinearWeights(self.memory, c.shape, c, l, q)
+        return BilinearWeights(self.memory, (1,), c, l, q)
 
     @staticmethod
     def identity2(memory: MemorySpec):
