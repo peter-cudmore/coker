@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Set, Dict, Tuple
 
-from coker import Function
+from coker import Function, Tracer
 import numpy as np
 from coker.backends.coker.layers import InputLayer, OutputLayer
 from coker.backends.coker.memory import MemorySpec
@@ -24,7 +24,10 @@ def label_sinks(function: Function) -> Tuple[Set[int], Set[int]]:
     constants = set()
     tape_outdegree = [0] * len(tape)
     sources = {}
-    sink_nodes = {o.index for o in function.output}
+    sink_nodes = {
+        o.index for o in function.output
+        if o is not None
+    }
     # output of these nodes are \considered 'new variables'
 
     for i, node in enumerate(tape.nodes):
@@ -90,6 +93,11 @@ def label_layers(function: Function, sink_nodes: Dict):
             return
         op, *args = tape.nodes[node]
 
+        if node is tape.NONE or node is tape.MAP_TO_NONE:
+            edges[sink].add(node)
+            return
+
+        assert not isinstance(op, Tracer)
         if op == OP.VALUE:
             edges[node].add(sink)
             return
@@ -133,7 +141,7 @@ def label_sources(
     workset = [i for i in range(len(function.tape)) if i not in arguments]
 
     for idx in workset:
-        _, *args = function.tape.nodes[idx]
+        op, *args = function.tape.nodes[idx]
 
         arguments[idx] = set.union(*(arguments[a.index] for a in args))
 

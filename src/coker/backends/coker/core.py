@@ -18,7 +18,7 @@ from coker.backends.coker.layers import (
 )
 from coker.backends.coker.weights import BilinearWeights
 from coker.backends.coker.op_impl import ops
-
+import numpy as np
 
 class CokerBackend(Backend):
     def __init__(self):
@@ -38,6 +38,8 @@ class CokerBackend(Backend):
 
     def evaluate(self, function, inputs: ArrayLike):
 
+        if all(o is None for o in function.output):
+            return function.output
         g = create_opgraph(function)
 
         return [g(*inputs)]
@@ -158,17 +160,43 @@ def create_opgraph(function: Function):
 
         op, *args = tape.nodes[sink]
         args = [get_recursive(a) for a in args]
+        has_constants = any(is_constant(a) for a in args)
         if op in {
-            OP.MUL,
             OP.ADD,
             OP.SUB,
             OP.MATMUL,
             OP.NEG,
             OP.DOT,
             OP.CROSS,
-        } and any(is_constant(a) for a in args):
+        } and has_constants:
             w = ops[op](*args)
+
             layers.append(IdentityLayer(memory[sink], w))
+        # possible componentwise operations:
+        elif op is op.MUL and has_constants:
+            if any(isinstance(a, (int, float)) for a in args):
+                w = ops[op](*args)
+                layers.append(IdentityLayer(memory[sink], w))
+            else:
+                first, second = args
+                if isinstance(first, BilinearWeights):
+                    diag_b = diag(second)
+                    a = first
+                else:
+                    diag_b = diag(first)
+                    a = second
+                w = ops[op.MATMUL](diag_b, a)
+                layers.append(IdentityLayer(memory[sink], w))
+
+        elif op is op.DIV and has_constants:
+            if any(isinstance(a,(int, float)) for a in args):
+                w = ops[op](*args)
+                layers.append(IdentityLayer(memory[sink], w))
+            else:
+                a, b = args
+                diag_b = diag(1 / b)
+                w = ops[op.MATMUL](diag_b, a)
+                layers.append(IdentityLayer(memory[sink], w))
         else:
             assert not isinstance(op, BilinearWeights)
             assert not isinstance(op, GenericLayerOP)
@@ -199,3 +227,8 @@ class BilinearMatrixGroup:
 
     def __call__(self, *args, **kwargs):
         raise NotImplementedError
+
+
+def diag(vector: np.ndarray) -> np.ndarray:
+    assert len(vector.shape) == 1 or len(vector.shape) == 2 and vector.shape[-1] == 1
+    return np.diag(vector)
