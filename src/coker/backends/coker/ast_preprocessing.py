@@ -24,10 +24,7 @@ def label_sinks(function: Function) -> Tuple[Set[int], Set[int]]:
     constants = set()
     tape_outdegree = [0] * len(tape)
     sources = {}
-    sink_nodes = {
-        o.index for o in function.output
-        if o is not None
-    }
+    sink_nodes = {o.index for o in function.output if o is not None}
     # output of these nodes are \considered 'new variables'
 
     for i, node in enumerate(tape.nodes):
