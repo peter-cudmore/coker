@@ -76,6 +76,7 @@ class TapeInner:
         self._constant_hashmap = {}
         self.tape_ref = weakref.ref(tape_ref)
         assert self.INNER_REF not in OP.__members__.values()
+        assert self.CONSTANT_REF not in OP.__members__.values()
 
     @staticmethod
     def constant_hash(value) -> int:
@@ -122,7 +123,6 @@ class TapeInner:
                 value_idx = len(self._constants)
                 self._constant_hashmap[hsh] = value_idx
                 value = self.try_sparsify(value)
-
                 self._constants.append(value)
 
             self._nodes.append((self.CONSTANT_REF, value_idx))
