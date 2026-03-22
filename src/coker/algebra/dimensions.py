@@ -51,17 +51,26 @@ class Dimension:
         if not self.dim:
             return (0,)
 
-        mods = []
-
         count = 1
-        iterator = reversed(self.dim) if row_major else iter(self.dim)
+        for d in self.dim:
+            count *= d
 
-        for d in iterator:
-            count = d * count
-            mods.insert(0, count)
+        # Compute per-dimension strides for mixed-radix decomposition.
+        # column-major (row_major=False): first index varies fastest → strides [1, d0, d0*d1, ...]
+        # row-major (row_major=True):    last  index varies fastest → strides [..., d1, 1]
+        strides = []
+        stride = 1
+        if row_major:
+            for d in reversed(self.dim):
+                strides.insert(0, stride)
+                stride *= d
+        else:
+            for d in self.dim:
+                strides.append(stride)
+                stride *= d
 
         for i in range(count):
-            yield tuple(i % m for m in mods)
+            yield tuple((i // s) % d for s, d in zip(strides, self.dim))
 
     def __eq__(self, other):
         return self.dim == other.dim
