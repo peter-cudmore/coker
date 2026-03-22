@@ -104,14 +104,6 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
     def is_linear(self):
         return not self.quadratic.keys
 
-    def __truediv__(self, other):
-        if isinstance(other, scalar):
-            inv = 1 / other
-            return inv * self
-        assert isinstance(other, (np.ndarray, dok_ndarray))
-        r, *c = other.shape
-        assert len(c) == 0
-
     def __mul__(self, other):
         if isinstance(other, scalar):
             constant = other * self.constant
