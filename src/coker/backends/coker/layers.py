@@ -11,6 +11,8 @@ import numpy as np
 
 
 def vec(item):
+    if isinstance(item, list):
+        item = np.array(item)
     if isinstance(item, np.ndarray):
         return item.flatten(order="F")
     if isinstance(item, scalar_types):

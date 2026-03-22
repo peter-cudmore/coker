@@ -299,7 +299,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             a_k = v * reduce(
                 operator.mul, (vec[j] for vec, j in zip(vectors, k_prod)), 1
             )
-            if (i,) not in data:
+            if (i, 0) not in data:
                 data[(i, 0)] = a_k
             else:
                 data[(i, 0)] += a_k
