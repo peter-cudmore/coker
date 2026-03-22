@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/ -x --tb=short -q)",
+      "Bash(python:*)",
+      "Bash(source venv/Scripts/activate)",
+      "Bash(git stash:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}

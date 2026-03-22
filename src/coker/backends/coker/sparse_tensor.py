@@ -57,24 +57,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
     """
 
     def __init__(self, shape, data: Optional[Dict[MultiIndex, float]] = None):
-
-        self.keys = {}
-        if len(shape) == 1:
-
-            shape = (shape[0], 1)
-            if data is not None:
-                for k in data.keys():
-                    if len(k) == 2:
-                        assert k[1] == 0
-                        self.keys[k] = data[k]
-                    elif len(k) == 1:
-                        self.keys[(*k, 0)] = data[k]
-                    else:
-                        raise TypeError("Failed to store data ")
-            else:
-                self.keys = {}
-        else:
-            self.keys = data if data is not None else {}
+        self.keys = data if data is not None else {}
         self.shape = shape
 
     def is_empty(self):
@@ -83,16 +66,9 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
     def is_scalar(self):
         return all(s == 1 for s in self.shape)
 
-    def is_vector(self):
-        return len(self.shape) == 2 and self.shape[1] == 1
-
     def __setitem__(self, key, value):
         if isinstance(key, int):
-            assert self.is_vector()
-            key = (key, 0)
-        if isinstance(key, tuple) and len(key) == 1:
-            key = (key[0], 0)
-
+            key = (key,)
         if value != 0:
             self.keys[key] = value
         else:
@@ -101,9 +77,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __getitem__(self, key):
         if isinstance(key, int):
-            assert self.is_vector()
-            key = (key, 0)
-
+            key = (key,)
         try:
             return self.keys[key]
         except KeyError:
@@ -114,13 +88,8 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def toarray(self):
         m = np.zeros(shape=self.shape)
-
         for k, v in self.keys.items():
             m[k] = v
-
-        if self.is_vector():
-            return m.flatten()
-
         return m
 
     def swap_indices(self, i, j):
@@ -146,12 +115,6 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
     @staticmethod
     def zeros(shape):
-        if isinstance(shape, int):
-            shape = (shape, 1)
-
-        if len(shape) == 1:
-            shape = (shape[0], 1)
-
         return dok_ndarray(shape)
 
     @staticmethod
@@ -163,9 +126,6 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
     @staticmethod
     def fromarray(other: np.ndarray):
-        if len(other.shape) == 1:
-            other = other.reshape((-1, 1))
-
         shape = other.shape
 
         keys = {}
@@ -356,26 +316,6 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             ), f"Can't multiple {other.shape} x {self.shape}"
         except AssertionError as ex:
             raise ex
-
-        if self.is_vector():
-            # Treat (n,1) column vector as (n,) to match numpy semantics:
-            # other.shape=(..., n) @ (n,) -> (...,)
-            shape = other.shape[:-1]
-            data = {}
-            with np.nditer(
-                other, flags=["multi_index"], op_flags=["readonly"]
-            ) as it:
-                for v in it:
-                    *key_1, i_1 = it.multi_index
-                    for (i_2, _), v_2 in self.keys.items():
-                        if i_1 != i_2:
-                            continue
-                        key = tuple(key_1)
-                        if key in data:
-                            data[key] += v_2 * float(v)
-                        else:
-                            data[key] = v_2 * float(v)
-            return dok_ndarray(shape, data)
 
         shape = (*other.shape[:-1], *self.shape[1:])
         data = {}
