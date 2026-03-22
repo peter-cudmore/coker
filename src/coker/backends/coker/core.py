@@ -67,7 +67,6 @@ class CokerBackend(Backend):
 
 
 def create_opgraph(function: Function):
-    function = rewrite_graph(function)
 
     sinks, constants = label_sinks(function)
     edges, distance = label_layers(function, sinks)
