@@ -75,7 +75,8 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         ax = (self.linear @ x_v).toarray()
 
         c = self.constant.toarray()
-        return c + ax + qxx
+        result = c + ax + qxx
+        return np.reshape(result, self.shape)
 
     def diff(self, x):
         dq = tensor_vector_product(
@@ -310,10 +311,22 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         linear = _contract(self.constant, other.linear) + _contract(
             self.linear, other.constant
         )
+        linear_linear_quadratic = tensor_sum(
+            self.linear, other.linear, l_index=col, r_index=0
+        )
+        # tensor_sum produces (out_l..., mem_l, out_r..., mem_r).
+        # BilinearWeights convention requires (out_l..., out_r..., mem_l, mem_r).
+        # Move mem_l (at position col) past the M-1 out_r axes.
+        mem_l_pos = col
+        for _ in range(len(other.shape) - 1):
+            linear_linear_quadratic = linear_linear_quadratic.swap_indices(
+                mem_l_pos, mem_l_pos + 1
+            )
+            mem_l_pos += 1
         quadratic = (
             _contract(self.constant, other.quadratic)
             + _contract(self.quadratic, other.constant)
-            + tensor_sum(self.linear, other.linear, l_index=col, r_index=0)
+            + linear_linear_quadratic
         )
         shape = (*self.shape[:-1], *other.shape[1:])
         return BilinearWeights(self.memory, shape, constant, linear, quadratic)
@@ -341,7 +354,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         if ufunc == np.subtract and method == "__call__":
             if self.is_scalar() and isinstance(args, scalar):
                 if self.constant.is_empty():
-                    constant = dok_ndarray((1, 1), {(0, 0): -args})
+                    constant = dok_ndarray((1, 1), {(0, 0): args})
                 else:
                     constant = self.constant.clone()
                     constant[(0, 0)] = args - constant[(0, 0)]
@@ -416,6 +429,17 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
         linear = dok_ndarray((memory.count, memory.count), data)
 
+        return BilinearWeights(memory, shape, linear=linear)
+
+    @staticmethod
+    def reshape_identity(memory: MemorySpec, shape: tuple):
+        """BilinearWeights that maps a flat vector of size memory.count to the given shape."""
+        n = memory.count
+        data = {}
+        for k in range(n):
+            multi_idx = np.unravel_index(k, shape, order="C")
+            data[(*multi_idx, k)] = 1
+        linear = dok_ndarray((*shape, n), data)
         return BilinearWeights(memory, shape, linear=linear)
 
 

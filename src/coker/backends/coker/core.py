@@ -134,9 +134,15 @@ def create_opgraph(function: Function):
 
         return backend.reshape(result, shape)
 
+    bridge_cache = {}
+    bridge_counter = [-1]  # negative locations for bridge sinks
+
     def get_recursive(arg: Tracer):
         if arg.index in sinks:
             return weights[arg.index]
+
+        if arg.index in bridge_cache:
+            return bridge_cache[arg.index]
 
         if arg.is_constant():
             return arg.value()
@@ -145,7 +151,24 @@ def create_opgraph(function: Function):
 
         args = [get_recursive(arg) for arg in args]
 
-        if any(isinstance(arg, BilinearWeights) for arg in args):
+        bw_args = [a for a in args if isinstance(a, BilinearWeights)]
+        if bw_args:
+            memories = {id(a.memory) for a in bw_args}
+            if len(memories) > 1 or op not in ops:
+                # Multiple memory sources or unsupported op: create an intermediate
+                # bridge layer evaluated at runtime by the numpy backend.
+                count = tape.dim[arg.index].flat()
+                bridge_mem = MemorySpec(
+                    location=bridge_counter[0], count=count
+                )
+                bridge_counter[0] -= count
+                layers.append(GenericLayerOP(bridge_mem, op, *args))
+                shape = tape.dim[arg.index].shape or (1,)
+                bw = BilinearWeights.reshape_identity(
+                    memory=bridge_mem, shape=shape
+                )
+                bridge_cache[arg.index] = bw
+                return bw
             result = ops[op](*args)
             return result
         v = eval_numeric(arg.shape, op, *args)
@@ -156,13 +179,14 @@ def create_opgraph(function: Function):
         key=lambda i: distance[i],
         reverse=True,
     )
-    memory_offsets = {l: 0 for l in range(1, max(distance) + 1)}
+    next_location = [
+        input_layer.dimension
+    ]  # global counter, starts after input
     while stack:
         sink = stack.pop()
         count = tape.dim[sink].flat()
-        layer_idx = distance[sink]
-        location = memory_offsets[layer_idx]
-        memory_offsets[layer_idx] += count
+        location = next_location[0]
+        next_location[0] += count
         memory[sink] = MemorySpec(location=location, count=count)
         dim = tape.dim[sink]
 
@@ -187,7 +211,7 @@ def create_opgraph(function: Function):
 
             layers.append(IdentityLayer(memory[sink], w))
         # possible componentwise operations:
-        elif op is op.MUL and has_constants:
+        elif op is OP.MUL and has_constants:
             if any(isinstance(a, (int, float)) for a in args):
                 w = ops[op](*args)
                 layers.append(IdentityLayer(memory[sink], w))
@@ -199,17 +223,17 @@ def create_opgraph(function: Function):
                 else:
                     diag_b = diag(first)
                     a = second
-                w = ops[op.MATMUL](diag_b, a)
+                w = ops[OP.MATMUL](diag_b, a)
                 layers.append(IdentityLayer(memory[sink], w))
 
-        elif op is op.DIV and has_constants:
+        elif op is OP.DIV and has_constants:
             if any(isinstance(a, (int, float)) for a in args):
                 w = ops[op](*args)
                 layers.append(IdentityLayer(memory[sink], w))
             else:
                 a, b = args
                 diag_b = diag(1 / b)
-                w = ops[op.MATMUL](diag_b, a)
+                w = ops[OP.MATMUL](diag_b, a)
                 layers.append(IdentityLayer(memory[sink], w))
         else:
             assert not isinstance(op, BilinearWeights)

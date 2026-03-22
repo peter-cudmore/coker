@@ -229,10 +229,10 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         if isinstance(other, (dok_ndarray, np.ndarray)):
             assert other.shape in {(1,), (1, 1)}
             other = float(other)
+        elif isinstance(other, scalar):
+            other = float(other)
         else:
-            assert isinstance(
-                other, (float, int)
-            ), f"Cannot multiply by {other}"
+            raise TypeError(f"Cannot multiply by {other}")
 
         if other == 0:
             return dok_ndarray(self.shape, {})
@@ -295,14 +295,15 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         ]
         data = {}
         for k, v in self.keys.items():
-            i, *k_prod = k
+            out_key = k[: -len(vectors)]
+            k_prod = k[-len(vectors) :]
             a_k = v * reduce(
                 operator.mul, (vec[j] for vec, j in zip(vectors, k_prod)), 1
             )
-            if (i, 0) not in data:
-                data[(i, 0)] = a_k
+            if out_key not in data:
+                data[out_key] = a_k
             else:
-                data[(i, 0)] += a_k
+                data[out_key] += a_k
 
         shape = self.shape[: -len(vectors)]
         return dok_ndarray(shape, data)
@@ -417,7 +418,7 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             if args == 1.0:
                 return self
             if self.is_scalar() or isinstance(args, scalar):
-                return args * self
+                return self.__mul__(args)
 
         raise NotImplementedError
 

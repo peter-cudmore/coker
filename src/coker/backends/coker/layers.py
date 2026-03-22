@@ -130,19 +130,28 @@ class GenericLayerOP:
         self.output = output
 
         assert all(
-            isinstance(w, BilinearWeights) for w in weights
+            isinstance(w, (BilinearWeights, np.ndarray, int, float, bool))
+            for w in weights
         ), f"Unkown type in {weights}"
 
     def inputs(self) -> List[MemorySpec]:
-        return [w.memory for w in self.weights]
+        return [
+            w.memory for w in self.weights if isinstance(w, BilinearWeights)
+        ]
 
     def outputs(self) -> List[MemorySpec]:
         return [self.output]
 
     def __call__(self, *x):
         backend = get_backend_by_name("numpy", set_current=False)
-        x = [w_i(x_i) for w_i, x_i in zip(self.weights, x)]
-        return backend.call(self.op, *x)
+        evaluated = []
+        xi = iter(x)
+        for w in self.weights:
+            if isinstance(w, BilinearWeights):
+                evaluated.append(w(next(xi)))
+            else:
+                evaluated.append(w)
+        return backend.call(self.op, *evaluated)
 
     def push_forward(self, *tangent_space):
         n = len(self.weights)
