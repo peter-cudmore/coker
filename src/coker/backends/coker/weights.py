@@ -59,10 +59,14 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
     def transpose(self) -> "BilinearWeights":
         if len(self.shape) == 1:
             (n,) = self.shape
+            # constant has shape (n,); build the (1, n) transpose explicitly
+            transposed_constant = dok_ndarray(
+                (1, n), {(0, k[0]): v for k, v in self.constant.keys.items()}
+            )
             return BilinearWeights(
                 self.memory,
                 shape=(1, n),
-                constant=self.constant.T,
+                constant=transposed_constant,
                 linear=self.linear.swap_indices(0, 1),
                 quadratic=self.quadratic.swap_indices(0, 1),
             )
@@ -313,18 +317,8 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         col = len(self.shape) - 1
 
         def _contract(lhs: dok_ndarray, rhs: dok_ndarray) -> dok_ndarray:
-            """tensor_sum contracting lhs axis col with rhs axis 0.
-
-            When rhs is a column vector (shape (n,1)) the trailing 1 is propagated
-            into higher-dimensional results; we drop it for rank >= 3 outputs.
-            """
-            result = tensor_sum(lhs, rhs, l_index=col, r_index=0)
-            if rhs.is_vector() and len(result.shape) > 2:
-                # Drop the spurious trailing 1: (a, b, ..., 1) -> (a, b, ...)
-                shape = result.shape[:-1]
-                data = {k[:-1]: v for k, v in result.keys.items()}
-                result = dok_ndarray(shape, data)
-            return result
+            """tensor_sum contracting lhs axis col with rhs axis 0."""
+            return tensor_sum(lhs, rhs, l_index=col, r_index=0)
 
         constant = _contract(self.constant, other.constant)
         linear = _contract(self.constant, other.linear) + _contract(
@@ -372,10 +366,10 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         if ufunc == np.subtract and method == "__call__":
             if self.is_scalar() and isinstance(args, scalar):
                 if self.constant.is_empty():
-                    constant = dok_ndarray((1, 1), {(0, 0): args})
+                    constant = dok_ndarray((1,), {(0,): args})
                 else:
                     constant = self.constant.clone()
-                    constant[(0, 0)] = args - constant[(0, 0)]
+                    constant[(0,)] = args - constant[(0,)]
                 linear = -self.linear
                 quadratic = -self.quadratic
 
@@ -427,17 +421,36 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             or (not self.is_linear() and rhs.is_constant())
             or (self.is_constant() and not rhs.is_linear())
         ), "dot requires both operands order<=1, or one order==2 and the other order==0"
-        c = self.constant.T @ rhs.constant
-        l = self.constant.T @ rhs.linear + rhs.constant.T @ self.linear
-        m = self.memory.count
-        ll = self.linear.T @ rhs.linear  # (m, m)
-        ll_expanded = dok_ndarray(
-            (1, m, m), {(0, *k): v for k, v in ll.keys.items()}
+        memory_count = self.memory.count
+        output_size = int(np.prod(self.shape))
+        c_self = self.constant.toarray().flatten()  # (output_size,)
+        c_rhs = rhs.constant.toarray().flatten()  # (output_size,)
+        l_self = self.linear.toarray().reshape(output_size, memory_count)
+        l_rhs = rhs.linear.toarray().reshape(output_size, memory_count)
+        q_self = self.quadratic.toarray().reshape(
+            output_size, memory_count, memory_count
         )
-        q = (
-            ll_expanded
-            + self.constant.T @ rhs.quadratic
-            + rhs.constant.T @ self.quadratic
+        q_rhs = rhs.quadratic.toarray().reshape(
+            output_size, memory_count, memory_count
+        )
+
+        constant_val = float(np.dot(c_self, c_rhs))
+        c = dok_ndarray.fromarray(np.array([constant_val]))
+
+        linear_val = (c_self @ l_rhs + c_rhs @ l_self).reshape(1, memory_count)
+        l = dok_ndarray.fromarray(linear_val)
+
+        linear_linear = (l_self.T @ l_rhs).reshape(
+            1, memory_count, memory_count
+        )
+        c_self_quadratic = np.einsum("i,ijk->jk", c_self, q_rhs).reshape(
+            1, memory_count, memory_count
+        )
+        c_rhs_quadratic = np.einsum("i,ijk->jk", c_rhs, q_self).reshape(
+            1, memory_count, memory_count
+        )
+        q = dok_ndarray.fromarray(
+            linear_linear + c_self_quadratic + c_rhs_quadratic
         )
 
         return BilinearWeights(self.memory, (1,), c, l, q)
@@ -468,15 +481,6 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
 def outer_product(lhs: dok_ndarray, rhs: dok_ndarray):
     assert rhs.shape[0] == 1
-    if lhs.is_vector():
-        # lhs has shape (n,1) — treat as (n,) so the result is (n, ...) not (n,1,...)
-        shape = (lhs.shape[0], *rhs.shape[1:])
-        data = {}
-        for k_l, v_l in lhs.keys.items():
-            for k_r, v_r in rhs.keys.items():
-                key = (k_l[0], *k_r[1:])
-                data[key] = v_l * v_r
-        return dok_ndarray(shape, data)
     shape = (*lhs.shape, *rhs.shape[1:])
     data = {}
     for k_l, v_l in lhs.keys.items():
