@@ -1,5 +1,6 @@
 from typing import Tuple, Type, List, Dict
 from coker import Tracer, Function, OP
+from coker.algebra.dimensions import FunctionSpace
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
 from coker.backends.coker.sparse_tensor import is_constant
 from coker.backends.coker.ast_preprocessing import (
@@ -41,6 +42,15 @@ class CokerBackend(Backend):
 
         if all(o is None for o in function.output):
             return function.output
+
+        # Fall back to numpy for higher-order functions with FunctionSpace inputs.
+        if any(
+            isinstance(function.tape.dim[i], FunctionSpace)
+            for i in function.tape.input_indicies
+        ):
+            numpy_backend = get_backend_by_name("numpy", set_current=False)
+            return numpy_backend.evaluate(function, inputs)
+
         g = create_opgraph(function)
 
         return [g(*inputs)]

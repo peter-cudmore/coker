@@ -318,14 +318,19 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
         elif isinstance(other, (dok_ndarray, np.ndarray)):
             if isinstance(other, np.ndarray) and len(other.shape) == 1:
-                other = other.reshape((-1, 1))
+                # Contract along the last axis with a 1D vector — use tensor_vector_product
+                # to avoid adding a spurious trailing dimension.
+                if self.shape[-1] != other.shape[0]:
+                    raise TypeError(
+                        f"Cannot multiply {self.shape} @ {other.shape}"
+                    )
+                if not self.keys:
+                    return dok_ndarray(self.shape[:-1], {})
+                return tensor_vector_product(
+                    self, other, axis=len(self.shape) - 1
+                )
 
             if self.shape[-1] != other.shape[0]:
-                #
-                # self.shape == (3,)
-                # other.shape == (1, 3)
-                # -> reinterpret self.shape as (3,1)
-
                 raise TypeError(
                     f"Cannot multiply {self.shape} @ {other.shape}"
                 )
@@ -352,6 +357,26 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             ), f"Can't multiple {other.shape} x {self.shape}"
         except AssertionError as ex:
             raise ex
+
+        if self.is_vector():
+            # Treat (n,1) column vector as (n,) to match numpy semantics:
+            # other.shape=(..., n) @ (n,) -> (...,)
+            shape = other.shape[:-1]
+            data = {}
+            with np.nditer(
+                other, flags=["multi_index"], op_flags=["readonly"]
+            ) as it:
+                for v in it:
+                    *key_1, i_1 = it.multi_index
+                    for (i_2, _), v_2 in self.keys.items():
+                        if i_1 != i_2:
+                            continue
+                        key = tuple(key_1)
+                        if key in data:
+                            data[key] += v_2 * float(v)
+                        else:
+                            data[key] = v_2 * float(v)
+            return dok_ndarray(shape, data)
 
         shape = (*other.shape[:-1], *self.shape[1:])
         data = {}

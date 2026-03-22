@@ -6,6 +6,7 @@ from coker.backends.coker.sparse_tensor import (
     dok_ndarray,
     scalar,
     tensor_vector_product,
+    tensor_sum,
     cast_vector,
 )
 import numpy as np
@@ -150,7 +151,13 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                     return result
 
             if isinstance(other, (np.ndarray, dok_ndarray)):
+                if isinstance(other, np.ndarray) and len(other.shape) == 1:
+                    result_shape = other.shape
+                else:
+                    result_shape = None
                 other = dok_ndarray.fromarray(other)
+                if result_shape is None:
+                    result_shape = other.shape
                 constants = float(self.constant) * other
 
                 # Other : (l, m)
@@ -160,7 +167,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 linear = outer_product(other, self.linear)
                 quadratic = outer_product(other, self.quadratic)
                 return BilinearWeights(
-                    self.memory, other.shape, constants, linear, quadratic
+                    self.memory, result_shape, constants, linear, quadratic
                 )
 
         raise TypeError(f"Cannot multiply {self} by {type(other)}")
@@ -278,16 +285,38 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             or self.is_constant()
             or other.is_constant()
         )
-        constant = self.constant @ other.constant
-        linear = self.constant @ other.linear + self.linear @ other.constant
+        # Contract self's last output axis with other's first output axis.
+        # self.shape = (..., n), other.shape = (n, ...)
+        # self.constant/linear/quadratic have shape (*self.shape, ...) — output axes first,
+        # memory axes last.  We must contract over axis len(self.shape)-1 of self's tensors
+        # and axis 0 of other's tensors, NOT the last (memory) axis.
+        col = len(self.shape) - 1
+
+        def _contract(lhs: dok_ndarray, rhs: dok_ndarray) -> dok_ndarray:
+            """tensor_sum contracting lhs axis col with rhs axis 0.
+
+            When rhs is a column vector (shape (n,1)) the trailing 1 is propagated
+            into higher-dimensional results; we drop it for rank >= 3 outputs.
+            """
+            result = tensor_sum(lhs, rhs, l_index=col, r_index=0)
+            if rhs.is_vector() and len(result.shape) > 2:
+                # Drop the spurious trailing 1: (a, b, ..., 1) -> (a, b, ...)
+                shape = result.shape[:-1]
+                data = {k[:-1]: v for k, v in result.keys.items()}
+                result = dok_ndarray(shape, data)
+            return result
+
+        constant = _contract(self.constant, other.constant)
+        linear = _contract(self.constant, other.linear) + _contract(
+            self.linear, other.constant
+        )
         quadratic = (
-            self.constant @ other.quadratic
-            + self.quadratic @ other.quadratic
-            + self.linear @ other.linear
+            _contract(self.constant, other.quadratic)
+            + _contract(self.quadratic, other.constant)
+            + tensor_sum(self.linear, other.linear, l_index=col, r_index=0)
         )
-        return BilinearWeights(
-            self.memory, constant.shape, constant, linear, quadratic
-        )
+        shape = (*self.shape[:-1], *other.shape[1:])
+        return BilinearWeights(self.memory, shape, constant, linear, quadratic)
 
     def clone(self):
         return BilinearWeights(
@@ -392,6 +421,15 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
 def outer_product(lhs: dok_ndarray, rhs: dok_ndarray):
     assert rhs.shape[0] == 1
+    if lhs.is_vector():
+        # lhs has shape (n,1) — treat as (n,) so the result is (n, ...) not (n,1,...)
+        shape = (lhs.shape[0], *rhs.shape[1:])
+        data = {}
+        for k_l, v_l in lhs.keys.items():
+            for k_r, v_r in rhs.keys.items():
+                key = (k_l[0], *k_r[1:])
+                data[key] = v_l * v_r
+        return dok_ndarray(shape, data)
     shape = (*lhs.shape, *rhs.shape[1:])
     data = {}
     for k_l, v_l in lhs.keys.items():

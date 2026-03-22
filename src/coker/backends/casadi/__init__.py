@@ -10,7 +10,6 @@ from coker.backends.casadi.optimiser import build_optimisation_problem
 from coker.backends.casadi.variational_solver import create_variational_solver
 from coker.dynamics import VariationalProblem
 
-
 scalar_types = (float, int)
 
 
