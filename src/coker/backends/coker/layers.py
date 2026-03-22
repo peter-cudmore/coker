@@ -184,25 +184,6 @@ class GenericLayerOP:
         return y, dy
 
 
-class IdentityLayer:
-    def __init__(self, memory: MemorySpec, weights: BilinearWeights):
-        self.memory = memory
-        self.weights = weights
-
-    def __call__(self, x):
-        y = self.weights(x)
-        return y
-
-    def push_forward(self, x, dx):
-        return self.weights.push_forwards(x, dx)
-
-    def inputs(self) -> List[MemorySpec]:
-        return [self.weights.memory]
-
-    def outputs(self) -> List[MemorySpec]:
-        return [self.memory]
-
-
 def d_dot(x, y) -> Tuple:
     # d = x.T @ y  = sum(x_iy_i)
     # dd_i = y.T @ dx_i
