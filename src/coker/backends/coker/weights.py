@@ -18,6 +18,21 @@ def dense_array_cast(x):
     return x
 
 
+def _scale_tensor_by_array(
+    tensor: dok_ndarray, scale: np.ndarray, n_output_dims: int
+) -> dok_ndarray:
+    """Return a copy of tensor where each entry is scaled by scale[output_indices].
+
+    tensor has shape (*output_shape, *memory_shape).  The first n_output_dims
+    index axes are the output axes; scale must have exactly that shape.
+    """
+    new_keys = {}
+    for k, v in tensor.keys.items():
+        factor = scale[k[:n_output_dims]]
+        new_keys[k] = v * float(factor)
+    return dok_ndarray(tensor.shape, new_keys)
+
+
 class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __init__(
@@ -125,6 +140,20 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         except (AttributeError, AssertionError):
             pass
 
+        if isinstance(other, np.ndarray) and other.shape == self.shape:
+            # Componentwise scaling: result[i...] = self[i...] * other[i...]
+            n_output_dims = len(self.shape)
+            constant = _scale_tensor_by_array(
+                self.constant, other, n_output_dims
+            )
+            linear = _scale_tensor_by_array(self.linear, other, n_output_dims)
+            quadratic = _scale_tensor_by_array(
+                self.quadratic, other, n_output_dims
+            )
+            return BilinearWeights(
+                self.memory, self.shape, constant, linear, quadratic
+            )
+
         if self.is_scalar():
             if isinstance(other, BilinearWeights):
                 assert (
@@ -156,7 +185,6 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 # Other : (l, m)
                 # self.linear: Array(1, n),         ->          (l, m, n)
                 # self.quadratic : Array(1, n, n)   ->          (l, m, n, n)
-                # linear =
                 linear = outer_product(other, self.linear)
                 quadratic = outer_product(other, self.quadratic)
                 return BilinearWeights(
@@ -166,7 +194,6 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         raise TypeError(f"Cannot multiply {self} by {type(other)}")
 
     def __rmul__(self, other):
-        assert isinstance(other, scalar)
         return self.__mul__(other)
 
     def __add__(self, other):
@@ -337,8 +364,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             return self.__rmatmul__(args)
 
         if ufunc == np.multiply and method == "__call__":
-            if self.is_scalar() or isinstance(args, scalar):
-                return self.__mul__(args)
+            return self.__mul__(args)
 
         if ufunc == np.add and method == "__call__":
             return self.__add__(args)
@@ -360,16 +386,21 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         raise NotImplementedError(f"{ufunc} not implemented")
 
     def __truediv__(self, other):
-        if not isinstance(other, scalar):
-            raise TypeError(f"Cannot divide {self} by {type(other)}")
+        if isinstance(other, scalar):
+            return BilinearWeights(
+                self.memory,
+                self.shape,
+                self.constant / other,
+                self.linear / other,
+                self.quadratic / other,
+            )
 
-        return BilinearWeights(
-            self.memory,
-            self.shape,
-            self.constant / other,
-            self.linear / other,
-            self.quadratic / other,
-        )
+        if isinstance(other, np.ndarray):
+            if other.size == 1:
+                return self / float(other)
+            return self * (1.0 / other)
+
+        raise TypeError(f"Cannot divide {self} by {type(other)}")
 
     def dot(self, rhs: "BilinearWeights"):
         """Matrix multiplication of two bilinear weights.

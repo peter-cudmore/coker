@@ -105,9 +105,17 @@ def is_scalar(x):
     raise NotImplementedError
 
 
+def mul(x, y):
+    return x * y
+
+
+def div(x, y):
+    return x / y
+
+
 ops = {
-    OP.MUL: lambda x, y: x * y,
-    OP.DIV: lambda x, y: x / y,
+    OP.MUL: mul,
+    OP.DIV: div,
     OP.ADD: lambda x, y: x + y,
     OP.SUB: lambda x, y: x - y,
     OP.NEG: lambda x: -x,
