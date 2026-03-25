@@ -9,7 +9,7 @@ N_OPS = 30  # produces ~100 tape nodes (matmul + add per iteration)
 def make_dynamics_fn():
     """Synthetic ODE rhs with ~100 tape nodes."""
     weights = [np.random.randn(N_STATES, N_STATES) * 0.1 for _ in range(N_OPS)]
-    biases  = [np.random.randn(N_STATES) * 0.1 for _ in range(N_OPS)]
+    biases = [np.random.randn(N_STATES) * 0.1 for _ in range(N_OPS)]
 
     def impl(x):
         for W, b in zip(weights, biases):
