@@ -1,17 +1,30 @@
 from typing import Type, Tuple, List, Any
 from functools import reduce
 from operator import mul
+from enum import Enum
 import numpy as np
 import sympy as sp
 import scipy as sy
+import scipy as scp
 
 from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer, VectorSpace, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
-from coker.backends.backend import Backend, ArrayLike
+from coker.backends.backend import Backend, ArrayLike, SolverParameters
 from coker.backends.evaluator import evaluate_inner
-import scipy as scp
+
+
+class Solver(Enum):
+    RK45 = "RK45"
+    LSODA = "LSODA"
+    Radau = "Radau"
+    BDF = "BDF"
+
+
+class NumpySolverParameters(SolverParameters):
+    def __init__(self, solver: Solver = Solver.RK45):
+        self.solver = solver
 
 
 def to_array(value, shape):
@@ -190,6 +203,44 @@ class NumpyBackend(Backend):
             f"Don't know how to resize {arg.__class__.__name__}"
         )
 
+    def lower(self, function):
+        from coker.backends.evaluator import _build_plan, _cast_outputs
+
+        plan = _build_plan(function.tape, self)
+        tape = function.tape
+        outputs = function.output
+        backend = self
+
+        def compiled(inputs):
+            workspace = plan.execute(inputs, backend)
+            return _cast_outputs(outputs, tape, workspace, backend)
+
+        return compiled
+
+    def resolve_fn(self, op):
+        if op in impls:
+            return impls[op]
+        if isinstance(op, tuple(parameterised_impls.keys())):
+            kls = op.__class__
+            _op = op
+            return lambda *args: parameterised_impls[kls](_op, *args)
+        raise NotImplementedError(f"{op} is not implemented")
+
+    def resolve_post_fn(self, dim):
+        # For scalar outputs, reshape extracts the Python scalar from the array.
+        # Tracers must pass through unchanged (they appear during function composition tracing).
+        # For non-scalar outputs, numpy ops already produce the correct shape.
+        if dim.is_scalar():
+            _dim = dim
+
+            def scalar_post(v):
+                if isinstance(v, Tracer):
+                    return v
+                return reshape(v, _dim)
+
+            return scalar_post
+        return lambda v: v
+
     def call(self, op, *args) -> ArrayLike:
 
         if op in impls:
@@ -241,8 +292,13 @@ class NumpyBackend(Backend):
                 [dxdt(t, x, None, u, p), dqdt(t, x, None, u, p)]
             )
 
+        if isinstance(solver_parameters, NumpySolverParameters):
+            method = solver_parameters.solver.value
+        else:
+            method = Solver.RK45.value
+
         sol = scp.integrate.solve_ivp(
-            f, t_span, y0, method="RK45", t_eval=t_eval
+            f, t_span, y0, method=method, t_eval=t_eval
         )
 
         x_out = (

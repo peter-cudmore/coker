@@ -13,6 +13,12 @@ from coker.dynamics import (
 ArrayLike = Any
 
 
+class SolverParameters(metaclass=ABCMeta):
+    """Interface for backend-specific ODE solver configuration."""
+
+    pass
+
+
 class Backend(metaclass=ABCMeta):
 
     @abstractmethod
@@ -51,6 +57,32 @@ class Backend(metaclass=ABCMeta):
     def create_variational_solver(self, problem: VariationalProblem):
         raise NotImplementedError
 
+    def resolve_fn(self, op):
+        """Return a callable for op, resolved at plan-build time.
+
+        The default wraps backend.call; backends can override to return the
+        underlying function directly and avoid the per-call dispatch overhead.
+        """
+        _op = op
+        return lambda *args: self.call(_op, *args)
+
+    def resolve_post_fn(self, dim):
+        """Return the post-processing function applied to a step's output.
+
+        The default handles the general case (Tracer passthrough + reshape).
+        Backends can override to return an identity function where safe, removing
+        the isinstance check and reshape call from the hot loop.
+        """
+        _dim = dim
+        _reshape = self.reshape
+
+        def post(value):
+            if not isinstance(value, Tracer):
+                return _reshape(value, _dim)
+            return value
+
+        return post
+
     def evaluate(self, function: Function, inputs: ArrayLike):
         from coker.backends.evaluator import evaluate_inner
 
@@ -72,9 +104,27 @@ class Backend(metaclass=ABCMeta):
         )
 
     def lower(self, function: Function):
-        raise NotImplementedError(
-            "lowering is not implemented for this backend"
-        )
+        """Compile function to a callable for repeated numerical evaluation.
+
+        Called once on the first concrete (non-Tracer) invocation of
+        Function.__call__. Returns a callable f(inputs) -> outputs where
+        inputs and outputs are lists matching the function's signature.
+
+        The default wraps evaluate_inner; backends override this to return an
+        optimised compiled callable (e.g. a plan-based closure for numpy, a
+        ca.Function for casadi).
+        """
+        backend = self
+        tape = function.tape
+        outputs = function.output
+
+        def compiled(inputs):
+            from coker.backends.evaluator import evaluate_inner
+
+            workspace = {}
+            return evaluate_inner(tape, inputs, outputs, backend, workspace)
+
+        return compiled
 
 
 __known_backends = {}

@@ -506,6 +506,7 @@ class Function:
         self.name = name
         self.tape = tape
         self.backend = backend
+        self._compiled = None
         if isinstance(outputs, Tracer):
             self.output = [outputs]
             self.is_single = True
@@ -592,11 +593,16 @@ class Function:
         from coker.backends import get_backend_by_name
 
         if any(isinstance(a, Tracer) for a in args):
+            # Tracing context: interpret through numpy so ops are recorded on
+            # the outer tape rather than evaluated numerically.
             backend = get_backend_by_name("numpy", set_current=False)
+            output = backend.evaluate(self, args)
         else:
-            backend = get_backend_by_name(self.backend)
-
-        output = backend.evaluate(self, args)
+            # Concrete evaluation: compile on first call, reuse thereafter.
+            if self._compiled is None:
+                backend = get_backend_by_name(self.backend)
+                self._compiled = backend.lower(self)
+            output = self._compiled(args)
 
         if self.is_single:
             return output[0]
