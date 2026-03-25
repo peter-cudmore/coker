@@ -13,6 +13,12 @@ from coker.dynamics import (
 ArrayLike = Any
 
 
+class SolverParameters(metaclass=ABCMeta):
+    """Interface for backend-specific ODE solver configuration."""
+
+    pass
+
+
 class Backend(metaclass=ABCMeta):
 
     @abstractmethod
@@ -79,8 +85,11 @@ class Backend(metaclass=ABCMeta):
 
     def evaluate(self, function: Function, inputs: ArrayLike):
         from coker.backends.evaluator import evaluate_inner
+
         workspace = {}
-        return evaluate_inner(function.tape, inputs, function.output, self, workspace)
+        return evaluate_inner(
+            function.tape, inputs, function.output, self, workspace
+        )
 
     def evaluate_integrals(
         self,
@@ -111,6 +120,7 @@ class Backend(metaclass=ABCMeta):
 
         def compiled(inputs):
             from coker.backends.evaluator import evaluate_inner
+
             workspace = {}
             return evaluate_inner(tape, inputs, outputs, backend, workspace)
 

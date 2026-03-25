@@ -111,18 +111,25 @@ class CasadiBackend(Backend):
     def _lower_with_evaluate(self, function):
         """Fallback: wraps CasadiBackend.evaluate for unsupported ca.Function cases."""
         backend = self
+
         def compiled(inputs):
             return backend.evaluate(function, inputs)
+
         return compiled
 
     def lower(self, function: Function):
         # Fall back to evaluate-based wrapper for cases that ca.Function cannot
         # handle: FunctionSpace inputs (partially evaluated functions) or None
         # outputs (e.g. from zero-row matmul).
-        if any(isinstance(shape, FunctionSpace) for shape in function.input_shape()):
+        if any(
+            isinstance(shape, FunctionSpace)
+            for shape in function.input_shape()
+        ):
             return self._lower_with_evaluate(function)
 
-        ca_inputs, ca_outputs = _lower_to_casadi(function.tape, function.output)
+        ca_inputs, ca_outputs = _lower_to_casadi(
+            function.tape, function.output
+        )
 
         if any(o is None for o in ca_outputs):
             return self._lower_with_evaluate(function)

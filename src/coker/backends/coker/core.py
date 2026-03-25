@@ -47,8 +47,10 @@ class CokerBackend(Backend):
 
     def lower(self, function: Function):
         backend = self
+
         def compiled(inputs):
             return backend.evaluate(function, inputs)
+
         return compiled
 
     def build_optimisation_problem(

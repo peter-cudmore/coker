@@ -1,17 +1,30 @@
 from typing import Type, Tuple, List, Any
 from functools import reduce
 from operator import mul
+from enum import Enum
 import numpy as np
 import sympy as sp
 import scipy as sy
+import scipy as scp
 
 from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer, VectorSpace, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
-from coker.backends.backend import Backend, ArrayLike
+from coker.backends.backend import Backend, ArrayLike, SolverParameters
 from coker.backends.evaluator import evaluate_inner
-import scipy as scp
+
+
+class Solver(Enum):
+    RK45 = "RK45"
+    LSODA = "LSODA"
+    Radau = "Radau"
+    BDF = "BDF"
+
+
+class NumpySolverParameters(SolverParameters):
+    def __init__(self, solver: Solver = Solver.RK45):
+        self.solver = solver
 
 
 def to_array(value, shape):
@@ -219,10 +232,12 @@ class NumpyBackend(Backend):
         # For non-scalar outputs, numpy ops already produce the correct shape.
         if dim.is_scalar():
             _dim = dim
+
             def scalar_post(v):
                 if isinstance(v, Tracer):
                     return v
                 return reshape(v, _dim)
+
             return scalar_post
         return lambda v: v
 
@@ -277,8 +292,13 @@ class NumpyBackend(Backend):
                 [dxdt(t, x, None, u, p), dqdt(t, x, None, u, p)]
             )
 
+        if isinstance(solver_parameters, NumpySolverParameters):
+            method = solver_parameters.solver.value
+        else:
+            method = Solver.RK45.value
+
         sol = scp.integrate.solve_ivp(
-            f, t_span, y0, method="RK45", t_eval=t_eval
+            f, t_span, y0, method=method, t_eval=t_eval
         )
 
         x_out = (

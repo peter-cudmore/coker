@@ -244,6 +244,7 @@ class SympyBackend(Backend):
         symbolically; it is separate from lower() which returns a callable.
         """
         from coker.backends.evaluator import evaluate_inner
+
         tape = function.tape
         args = []
         workspace = {}
@@ -257,11 +258,18 @@ class SympyBackend(Backend):
             else:
                 shape = dim.shape
                 if len(shape) == 1:
-                    sym = sp.Array([sp.Symbol(f"{name}_{i}") for i in range(shape[0])])
+                    sym = sp.Array(
+                        [sp.Symbol(f"{name}_{i}") for i in range(shape[0])]
+                    )
                 else:
                     sym = sp.Array(
-                        [[sp.Symbol(f"{name}_{i}_{j}") for j in range(shape[1])]
-                         for i in range(shape[0])]
+                        [
+                            [
+                                sp.Symbol(f"{name}_{i}_{j}")
+                                for j in range(shape[1])
+                            ]
+                            for i in range(shape[0])
+                        ]
                     )
             args.append(sym)
             workspace[idx] = sym
@@ -276,4 +284,3 @@ class SympyBackend(Backend):
     def evaluate_integrals(*args):
 
         raise NotImplementedError("not supported on sympy backend")
-

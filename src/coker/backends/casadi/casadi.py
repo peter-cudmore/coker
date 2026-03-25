@@ -43,9 +43,7 @@ def casadi_eval(op, *args):
     # coker.Function: evaluate symbolically via substitute, keeping CasADi
     # types (MX/DM) throughout rather than converting to Python scalars.
     workspace = {
-        idx: arg
-        for idx, arg in zip(op.tape.input_indicies, args)
-        if idx >= 0
+        idx: arg for idx, arg in zip(op.tape.input_indicies, args) if idx >= 0
     }
     result = substitute(op.output, workspace)
     if op.is_single:

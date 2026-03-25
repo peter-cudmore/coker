@@ -10,6 +10,7 @@ from coker.algebra.kernel import Tracer, OP
 # Compiled execution plan
 # ---------------------------------------------------------------------------
 
+
 class _PlanStep(NamedTuple):
     fn: Callable
     arg_indices: list
@@ -28,7 +29,7 @@ class CompiledPlan:
 
     def __init__(self, steps, workspace, input_indices):
         self._steps = steps
-        self._workspace = workspace   # constants pre-filled; reused each call
+        self._workspace = workspace  # constants pre-filled; reused each call
         self._input_indices = input_indices
 
     def execute(self, inputs, backend):
@@ -37,10 +38,16 @@ class CompiledPlan:
 
         for ws_idx, arg in zip(self._input_indices, inputs):
             if ws_idx >= 0:
-                ws[ws_idx] = arg if isinstance(arg, coker.Function) else backend.to_backend_array(arg)
+                ws[ws_idx] = (
+                    arg
+                    if isinstance(arg, coker.Function)
+                    else backend.to_backend_array(arg)
+                )
 
         for step in self._steps:
-            ws[step.out_idx] = step.post_fn(step.fn(*[ws[i] for i in step.arg_indices]))
+            ws[step.out_idx] = step.post_fn(
+                step.fn(*[ws[i] for i in step.arg_indices])
+            )
 
         return ws
 
@@ -57,7 +64,9 @@ def _build_plan(graph, backend):
         else:
             op, *args = node
             is_dynamic[i] = any(
-                isinstance(a, Tracer) and a.tape is graph and is_dynamic.get(a.index, False)
+                isinstance(a, Tracer)
+                and a.tape is graph
+                and is_dynamic.get(a.index, False)
                 for a in args
             )
 
@@ -105,7 +114,15 @@ def _build_plan(graph, backend):
             else:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
         dim = graph.dim[i]
-        steps.append(_PlanStep(backend.resolve_fn(op), arg_indices, i, dim, backend.resolve_post_fn(dim)))
+        steps.append(
+            _PlanStep(
+                backend.resolve_fn(op),
+                arg_indices,
+                i,
+                dim,
+                backend.resolve_post_fn(dim),
+            )
+        )
 
     return CompiledPlan(steps, workspace, graph.input_indicies)
 
@@ -142,6 +159,7 @@ def _cast_outputs(outputs, graph, workspace, backend):
 # ---------------------------------------------------------------------------
 # Original interpreted evaluator (kept for sympy backend and optimisation)
 # ---------------------------------------------------------------------------
+
 
 def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     workspace[-1] = None
