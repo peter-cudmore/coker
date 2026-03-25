@@ -237,6 +237,39 @@ class SympyBackend(Backend):
 
         return output
 
+    def lower_to_symbolic(self, function: Function):
+        """Return (args, output) as sympy symbolic expressions.
+
+        This is a sympy-specific utility for inspecting or printing functions
+        symbolically; it is separate from lower() which returns a callable.
+        """
+        from coker.backends.evaluator import evaluate_inner
+        tape = function.tape
+        args = []
+        workspace = {}
+        for idx, name in zip(tape.input_indicies, tape.input_names):
+            if idx < 0:
+                args.append(None)
+                continue
+            dim = tape.dim[idx]
+            if dim.is_scalar():
+                sym = sp.Symbol(name)
+            else:
+                shape = dim.shape
+                if len(shape) == 1:
+                    sym = sp.Array([sp.Symbol(f"{name}_{i}") for i in range(shape[0])])
+                else:
+                    sym = sp.Array(
+                        [[sp.Symbol(f"{name}_{i}_{j}") for j in range(shape[1])]
+                         for i in range(shape[0])]
+                    )
+            args.append(sym)
+            workspace[idx] = sym
+        outputs = evaluate_inner(tape, args, function.output, self, workspace)
+        if function.is_single:
+            return args, outputs[0]
+        return args, outputs
+
     def build_optimisation_problem(*args):
         raise NotImplementedError("not supported on sympy backend")
 
@@ -244,18 +277,3 @@ class SympyBackend(Backend):
 
         raise NotImplementedError("not supported on sympy backend")
 
-    def lower(self, function: Function):
-        arguments = []
-        for name, size in zip(function.arguments, function.input_shape()):
-            if size.is_scalar():
-                arguments.append(sp.Symbol(name))
-            elif size.is_vector():
-                symbol = sp.Array(
-                    [sp.Symbol(f"{name}_{i}") for i in range(size.flat())]
-                )
-                arguments.append(symbol)
-            else:
-                arguments.append(sp.MatrixSymbol(name, *size))
-
-        output = function(*arguments)
-        return arguments, output

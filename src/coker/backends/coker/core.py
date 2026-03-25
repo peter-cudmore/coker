@@ -45,6 +45,12 @@ class CokerBackend(Backend):
     def reshape(self, array: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
         raise NotImplementedError
 
+    def lower(self, function: Function):
+        backend = self
+        def compiled(inputs):
+            return backend.evaluate(function, inputs)
+        return compiled
+
     def build_optimisation_problem(
         self,
         cost: Tracer,  # cost

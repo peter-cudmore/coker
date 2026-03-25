@@ -37,8 +37,20 @@ impls = {
 
 
 def casadi_eval(op, *args):
-    result = op(*args)
-    return to_casadi(result)
+    # Plain Python callables (e.g. solution_proxy) can be called directly.
+    if not hasattr(op, "tape"):
+        return op(*args)
+    # coker.Function: evaluate symbolically via substitute, keeping CasADi
+    # types (MX/DM) throughout rather than converting to Python scalars.
+    workspace = {
+        idx: arg
+        for idx, arg in zip(op.tape.input_indicies, args)
+        if idx >= 0
+    }
+    result = substitute(op.output, workspace)
+    if op.is_single:
+        return result[0]
+    return result
 
 
 def concat(*args: ca.MX, axis=0):

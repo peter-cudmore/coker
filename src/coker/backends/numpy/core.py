@@ -190,6 +190,42 @@ class NumpyBackend(Backend):
             f"Don't know how to resize {arg.__class__.__name__}"
         )
 
+    def lower(self, function):
+        from coker.backends.evaluator import _build_plan, _cast_outputs
+
+        plan = _build_plan(function.tape, self)
+        tape = function.tape
+        outputs = function.output
+        backend = self
+
+        def compiled(inputs):
+            workspace = plan.execute(inputs, backend)
+            return _cast_outputs(outputs, tape, workspace, backend)
+
+        return compiled
+
+    def resolve_fn(self, op):
+        if op in impls:
+            return impls[op]
+        if isinstance(op, tuple(parameterised_impls.keys())):
+            kls = op.__class__
+            _op = op
+            return lambda *args: parameterised_impls[kls](_op, *args)
+        raise NotImplementedError(f"{op} is not implemented")
+
+    def resolve_post_fn(self, dim):
+        # For scalar outputs, reshape extracts the Python scalar from the array.
+        # Tracers must pass through unchanged (they appear during function composition tracing).
+        # For non-scalar outputs, numpy ops already produce the correct shape.
+        if dim.is_scalar():
+            _dim = dim
+            def scalar_post(v):
+                if isinstance(v, Tracer):
+                    return v
+                return reshape(v, _dim)
+            return scalar_post
+        return lambda v: v
+
     def call(self, op, *args) -> ArrayLike:
 
         if op in impls:
