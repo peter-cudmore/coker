@@ -39,21 +39,10 @@ class CasadiBackend(Backend):
         elif array.shape == (1,):
             return ca.DM(array[0])
         elif len(array.shape) >= 2:
-            result = ca.DM.zeros(*array.shape)
-            with np.nditer(
-                array, flags=["multi_index"], op_flags=["readonly"]
-            ) as it:
-                for v in it:
-                    if v != 0:
-                        key = tuple(it.multi_index)
-                        result[key] = v
+            result = ca.DM(array)
 
         elif len(array.shape) == 1 and array.shape[0] > 1:
-            (n,) = array.shape
-            result = ca.DM(n, 1)
-            for i, v in enumerate(array):
-                if v != 0:
-                    result[i] = v
+            result = ca.DM(array.reshape(-1, 1))
 
         else:
             raise NotImplementedError(
