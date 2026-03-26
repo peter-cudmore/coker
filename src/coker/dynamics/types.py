@@ -108,7 +108,10 @@ class DynamicalSystem:
 
         backend = get_backend_by_name(self.dxdt.backend)
         x, z, q = backend.evaluate_integrals(
-            [self.dxdt, self.g, self.dqdt], [x0, z0, q0], t, [u, p],
+            [self.dxdt, self.g, self.dqdt],
+            [x0, z0, q0],
+            t,
+            [u, p],
             solver_parameters=self.solver_parameters,
         )
 
