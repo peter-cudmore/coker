@@ -51,10 +51,19 @@ class CokerBackend(Backend):
         raise NotImplementedError
 
     def lower(self, function: Function):
-        backend = self
+        # FunctionSpace inputs and None outputs can't be lowered to a static
+        # graph; fall back to the numpy plan for those cases.
+        if any(
+            isinstance(function.tape.dim[i], FunctionSpace)
+            for i in function.tape.input_indicies
+        ) or any(o is None for o in function.output):
+            numpy_backend = get_backend_by_name("numpy", set_current=False)
+            return numpy_backend.lower(function)
+
+        g = create_opgraph(function)
 
         def compiled(inputs):
-            return backend.evaluate(function, inputs)
+            return [g(*inputs)]
 
         return compiled
 
@@ -106,6 +115,14 @@ def create_opgraph(function: Function):
             continue
 
         operands = [node_values[a.index] for a in args]
+        # Collapse constant BilinearWeights to plain numpy arrays so the
+        # constant-fold path below can consume them without needing a layer.
+        operands = [
+            o.constant.toarray().reshape(o.shape)
+            if isinstance(o, BilinearWeights) and o.is_constant
+            else o
+            for o in operands
+        ]
         bw_operands = [
             operand
             for operand in operands
