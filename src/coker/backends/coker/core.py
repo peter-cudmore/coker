@@ -12,6 +12,7 @@ from coker.backends.coker.layers import (
 from coker.backends.coker.weights import BilinearWeights
 from coker.backends.coker.op_impl import ops
 import numpy as np
+import scipy.sparse
 
 
 class CokerBackend(Backend):
@@ -111,6 +112,8 @@ def create_opgraph(function: Function):
 
         if op == OP.VALUE:
             (constant_value,) = args
+            if scipy.sparse.issparse(constant_value):
+                constant_value = constant_value.toarray()
             node_values[idx] = constant_value
             continue
 

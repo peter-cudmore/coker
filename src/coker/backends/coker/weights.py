@@ -146,7 +146,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             assert all(s == 1 for s in other.shape) and not isinstance(
                 other, BilinearWeights
             )
-            return float(other) * self
+            return other.flat[0] * self
         except (AttributeError, AssertionError):
             pass
 

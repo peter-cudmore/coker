@@ -142,6 +142,10 @@ class SympyBackend(Backend):
         raise ValueError(f"Cannot convert {array} to a numpy array")
 
     def to_backend_array(self, array):
+        import scipy.sparse
+
+        if scipy.sparse.issparse(array):
+            array = array.toarray()
         if isinstance(array, np.ndarray):
             if len(array.shape) == 1:
                 return to_matrix(
