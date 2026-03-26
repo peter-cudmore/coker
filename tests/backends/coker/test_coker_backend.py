@@ -56,6 +56,7 @@ def test_scalar_weights():
     assert w(0) == 1
     assert w(1) == 1
 
+
 def test_coker_graph():
     alpha = 3
     beta = 4
@@ -77,6 +78,7 @@ def test_coker_graph():
     y, dy = g.push_forward(1, 2)  # x = 1  # dx = 2
     assert y == result
     assert dy == (alpha + 2 * beta) * dx
+
 
 def test_coker_vector():
     A = np.array(
@@ -119,6 +121,7 @@ def test_coker_vector():
         y, dy = g.push_forward(x_vec, dx)
         assert np.allclose(y, result)
 
+
 def test_sin_cos():
 
     def f_impl(x):
@@ -130,6 +133,7 @@ def test_sin_cos():
     arg = np.array([1, 2])
 
     assert abs(f(arg) - g(arg)) < 1e-5
+
 
 def test_dot_derivative():
 

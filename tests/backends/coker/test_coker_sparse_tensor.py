@@ -99,7 +99,12 @@ def test_swap_indices_adjacent():
 
 def test_swap_indices_non_adjacent():
     # Swap axes 0 and 2 of a (2, 3, 4) tensor — middle axis must be preserved
-    data = {(i, j, k): float(i * 12 + j * 4 + k) for i in range(2) for j in range(3) for k in range(4)}
+    data = {
+        (i, j, k): float(i * 12 + j * 4 + k)
+        for i in range(2)
+        for j in range(3)
+        for k in range(4)
+    }
     tensor = dok_ndarray((2, 3, 4), {k: v for k, v in data.items() if v != 0})
     swapped = tensor.swap_indices(0, 2)
     assert swapped.shape == (4, 3, 2)
