@@ -134,6 +134,10 @@ class CasadiTensor:
 
 
 def to_casadi(value):
+    import scipy.sparse
+
+    if scipy.sparse.issparse(value):
+        return ca.DM(scipy.sparse.csc_matrix(value))
     if isinstance(value, np.ndarray):
         if len(value.shape) == 1:
             value = value.reshape(-1, 1)

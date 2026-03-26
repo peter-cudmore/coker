@@ -30,8 +30,12 @@ class CasadiBackend(Backend):
         raise ValueError(f"Cannot convert {array} to a numpy array")
 
     def to_backend_array(self, array):
+        import scipy.sparse
+
         if array is None:
             return ca.DM()
+        if scipy.sparse.issparse(array):
+            return ca.DM(scipy.sparse.csc_matrix(array))
         if isinstance(array, scalar_types):
             return ca.DM(array)
         if array.shape == (1, 1):

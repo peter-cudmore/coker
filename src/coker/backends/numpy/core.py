@@ -3,6 +3,7 @@ from functools import reduce
 from operator import mul
 from enum import Enum
 import numpy as np
+import scipy.sparse.csc
 import sympy as sp
 import scipy as sy
 import scipy as scp
@@ -168,6 +169,8 @@ def reshape(arg, dim):
         return reshape_sympy_matrix(arg, dim.dim)
     elif isinstance(arg, np.ndarray):
         return np.reshape(arg, dim.dim)
+    elif scp.sparse.issparse(arg):
+        return np.reshape(arg.toarray(), dim.dim)
     elif isinstance(arg, (float, int)):
         return np.array([arg]).reshape(dim.dim)
     elif arg is None:
