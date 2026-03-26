@@ -147,7 +147,11 @@ def create_opgraph(function: Function):
         count = tape.dim[idx].flat()
         mem = MemorySpec(location=next_location, count=count)
         next_location += count
-        layers.append(GenericLayerOP(mem, op, *operands))
+        compiled_operands = [
+            o.compile() if isinstance(o, BilinearWeights) else o
+            for o in operands
+        ]
+        layers.append(GenericLayerOP(mem, op, *compiled_operands))
         shape = tape.dim[idx].shape or (1,)
         node_values[idx] = BilinearWeights.reshape_identity(
             memory=mem, shape=shape
