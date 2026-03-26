@@ -355,7 +355,11 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         n = self.memory.count
         flat = int(np.prod(self.shape))
         c = self.constant.toarray().reshape(flat)
-        L = self.linear.toarray().reshape(flat, n) if self.linear.keys else None
+        L = (
+            self.linear.toarray().reshape(flat, n)
+            if self.linear.keys
+            else None
+        )
         Q = (
             self.quadratic.toarray().reshape(flat, n, n)
             if self.quadratic.keys
