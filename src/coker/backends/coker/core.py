@@ -118,9 +118,11 @@ def create_opgraph(function: Function):
         # Collapse constant BilinearWeights to plain numpy arrays so the
         # constant-fold path below can consume them without needing a layer.
         operands = [
-            o.constant.toarray().reshape(o.shape)
-            if isinstance(o, BilinearWeights) and o.is_constant
-            else o
+            (
+                o.constant.toarray().reshape(o.shape)
+                if isinstance(o, BilinearWeights) and o.is_constant
+                else o
+            )
             for o in operands
         ]
         bw_operands = [
