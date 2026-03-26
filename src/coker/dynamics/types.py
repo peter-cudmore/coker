@@ -58,6 +58,7 @@ class DynamicalSystem:
     g: Optional[Function]
     dqdt: Optional[Function]
     y: Function
+    solver_parameters: Optional[object] = field(default=None)
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
         _t, x_dim, z_dim, _u, _p, q_dim = self.y.input_shape()
@@ -107,7 +108,8 @@ class DynamicalSystem:
 
         backend = get_backend_by_name(self.dxdt.backend)
         x, z, q = backend.evaluate_integrals(
-            [self.dxdt, self.g, self.dqdt], [x0, z0, q0], t, [u, p]
+            [self.dxdt, self.g, self.dqdt], [x0, z0, q0], t, [u, p],
+            solver_parameters=self.solver_parameters,
         )
 
         if isinstance(t, (float, int)):
