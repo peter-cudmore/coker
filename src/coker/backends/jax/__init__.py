@@ -120,6 +120,10 @@ class JaxBackend(Backend):
             return array
 
     def to_backend_array(self, array):
+        import scipy.sparse
+
+        if scipy.sparse.issparse(array):
+            array = array.toarray()
         return jnp.array(array)
 
     def reshape(self, arg, dim: Dimension):
