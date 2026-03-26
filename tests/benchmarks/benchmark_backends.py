@@ -70,7 +70,9 @@ N_LAYERS = 24  # produces ~170 tape nodes; nonlinear every 4 layers
 
 def bench_function_eval():
     np.random.seed(42)
-    weights = [np.random.randn(N_STATES, N_STATES) * 0.1 for _ in range(N_LAYERS)]
+    weights = [
+        np.random.randn(N_STATES, N_STATES) * 0.1 for _ in range(N_LAYERS)
+    ]
     biases = [np.random.randn(N_STATES) * 0.1 for _ in range(N_LAYERS)]
 
     def impl(x):
@@ -88,7 +90,9 @@ def bench_function_eval():
         try:
             # Startup: time from fresh Function object to first result
             t0 = time.perf_counter()
-            f = function([VectorSpace("x", N_STATES)], impl, backend=backend_name)
+            f = function(
+                [VectorSpace("x", N_STATES)], impl, backend=backend_name
+            )
             f(x0)
             startup = time.perf_counter() - t0
             startup_results.append((backend_name, startup, None))
@@ -101,9 +105,19 @@ def bench_function_eval():
             startup_results.append((backend_name, float("inf"), msg))
             call_results.append((backend_name, float("inf"), msg))
 
-    subtitle = f"{N_STATES}-state, {N_LAYERS} layers (matmul + bias + sin every 4)"
-    print_results("Benchmark 1a: Function evaluation — startup cost", subtitle, startup_results)
-    print_results("Benchmark 1b: Function evaluation — repeat calls (1000)", subtitle, call_results)
+    subtitle = (
+        f"{N_STATES}-state, {N_LAYERS} layers (matmul + bias + sin every 4)"
+    )
+    print_results(
+        "Benchmark 1a: Function evaluation — startup cost",
+        subtitle,
+        startup_results,
+    )
+    print_results(
+        "Benchmark 1b: Function evaluation — repeat calls (1000)",
+        subtitle,
+        call_results,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +170,9 @@ def bench_ode():
             )
             results.append((f"numpy / {solver.value}", t, None))
         except Exception as e:
-            results.append((f"numpy / {solver.value}", float("inf"), str(e)[:40]))
+            results.append(
+                (f"numpy / {solver.value}", float("inf"), str(e)[:40])
+            )
 
     # -- casadi ----------------------------------------------------------------
     try:
