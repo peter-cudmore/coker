@@ -23,7 +23,7 @@ def cross(x, y):
         x.memory == y.memory
     ), "cross product requires BilinearWeights from same memory"
     assert (
-        x.is_linear() and y.is_linear()
+        x.is_linear and y.is_linear
     ), "cross product of quadratic weights not supported"
 
     eps = np.zeros((3, 3, 3))

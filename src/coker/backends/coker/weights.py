@@ -117,11 +117,17 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
     def is_scalar(self):
         return self.shape == (1,)
 
+    @property
     def is_constant(self):
         return not self.linear.keys and not self.quadratic.keys
 
+    @property
     def is_linear(self):
         return not self.quadratic.keys
+
+    @property
+    def is_quadratic(self):
+        return bool(self.quadratic.keys)
 
     def __mul__(self, other):
         if isinstance(other, scalar):
@@ -163,12 +169,12 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 assert (
                     self.memory == other.memory
                 ), f"Cannot multiply weights with different source"
-                if self.is_constant():
+                if self.is_constant:
                     return float(self.constant) * other
-                if other.is_constant() and other.is_scalar():
+                if other.is_constant and other.is_scalar():
                     return float(other.constant) * self
 
-                if self.is_linear() and other.is_linear():
+                if self.is_linear and other.is_linear:
                     result = float(self.constant) * other
                     result.quadratic = dok_ndarray(
                         (1, 1, 1),
@@ -305,9 +311,9 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             isinstance(other, BilinearWeights) and other.memory is self.memory
         )
         assert (
-            (self.is_linear() and other.is_linear())
-            or self.is_constant()
-            or other.is_constant()
+            (self.is_linear and other.is_linear)
+            or self.is_constant
+            or other.is_constant
         )
         # Contract self's last output axis with other's first output axis.
         # self.shape = (..., n), other.shape = (n, ...)
@@ -417,9 +423,9 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         """
         assert self.memory == rhs.memory
         assert (
-            (self.is_linear() and rhs.is_linear())
-            or (not self.is_linear() and rhs.is_constant())
-            or (self.is_constant() and not rhs.is_linear())
+            (self.is_linear and rhs.is_linear)
+            or (not self.is_linear and rhs.is_constant)
+            or (self.is_constant and not rhs.is_linear)
         ), "dot requires both operands order<=1, or one order==2 and the other order==0"
         memory_count = self.memory.count
         output_size = int(np.prod(self.shape))
