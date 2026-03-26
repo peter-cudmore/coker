@@ -350,6 +350,19 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         shape = (*self.shape[:-1], *other.shape[1:])
         return BilinearWeights(self.memory, shape, constant, linear, quadratic)
 
+    def compile(self) -> "_CompiledBW":
+        """Pre-materialise dok_ndarray tensors into dense numpy arrays."""
+        n = self.memory.count
+        flat = int(np.prod(self.shape))
+        c = self.constant.toarray().reshape(flat)
+        L = self.linear.toarray().reshape(flat, n) if self.linear.keys else None
+        Q = (
+            self.quadratic.toarray().reshape(flat, n, n)
+            if self.quadratic.keys
+            else None
+        )
+        return _CompiledBW(self.memory, self.shape, c, L, Q)
+
     def clone(self):
         return BilinearWeights(
             self.memory,
@@ -483,6 +496,43 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             data[(*multi_idx, k)] = 1
         linear = dok_ndarray((*shape, n), data)
         return BilinearWeights(memory, shape, linear=linear)
+
+
+class _CompiledBW:
+    """Dense pre-materialised BilinearWeights for fast runtime evaluation.
+
+    Created by BilinearWeights.compile(). Stores constant/linear/quadratic
+    as plain numpy arrays so __call__ is a pure BLAS operation with no
+    Python dict iteration.
+    """
+
+    def __init__(self, memory, shape, c, L, Q):
+        self.memory = memory
+        self.shape = shape
+        self._c = c  # numpy (flat_out,)
+        self._L = L  # numpy (flat_out, n_mem) or None
+        self._Q = Q  # numpy (flat_out, n_mem, n_mem) or None
+
+    def __call__(self, x):
+        result = self._c.copy()
+        if self._L is not None:
+            result = result + self._L @ x
+        if self._Q is not None:
+            result = result + np.einsum("ijk,j,k->i", self._Q, x, x)
+        return result.reshape(self.shape)
+
+    def push_forwards(self, x, dx):
+        result = self._c.copy()
+        jac = np.zeros((result.size, len(x)))
+        if self._L is not None:
+            result = result + self._L @ x
+            jac = jac + self._L
+        if self._Q is not None:
+            result = result + np.einsum("ijk,j,k->i", self._Q, x, x)
+            jac = jac + np.einsum(
+                "ijk,k->ij", self._Q + self._Q.transpose(0, 2, 1), x
+            )
+        return result.reshape(self.shape), (jac @ dx).reshape(self.shape)
 
 
 def outer_product(lhs: dok_ndarray, rhs: dok_ndarray):

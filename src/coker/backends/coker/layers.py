@@ -2,7 +2,9 @@ from coker import Dimension, OP, scalar_types
 from coker.backends import get_backend_by_name
 from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.memory import MemorySpec
-from coker.backends.coker.weights import BilinearWeights
+from coker.backends.coker.weights import BilinearWeights, _CompiledBW
+
+_AnyBW = (BilinearWeights, _CompiledBW)
 
 from typing import List, Set, Tuple, Dict
 
@@ -130,14 +132,12 @@ class GenericLayerOP:
         self.output = output
 
         assert all(
-            isinstance(w, (BilinearWeights, np.ndarray, int, float, bool))
+            isinstance(w, (*_AnyBW, np.ndarray, int, float, bool))
             for w in weights
         ), f"Unkown type in {weights}"
 
     def inputs(self) -> List[MemorySpec]:
-        return [
-            w.memory for w in self.weights if isinstance(w, BilinearWeights)
-        ]
+        return [w.memory for w in self.weights if isinstance(w, _AnyBW)]
 
     def outputs(self) -> List[MemorySpec]:
         return [self.output]
@@ -147,14 +147,14 @@ class GenericLayerOP:
         evaluated = []
         xi = iter(x)
         for w in self.weights:
-            if isinstance(w, BilinearWeights):
+            if isinstance(w, _AnyBW):
                 evaluated.append(w(next(xi)))
             else:
                 evaluated.append(w)
         return backend.call(self.op, *evaluated)
 
     def push_forward(self, *tangent_space):
-        n_bw = sum(1 for w in self.weights if isinstance(w, BilinearWeights))
+        n_bw = sum(1 for w in self.weights if isinstance(w, _AnyBW))
         x_bw_vals, dx_bw_vals = tangent_space[0:n_bw], tangent_space[n_bw:]
         y = self(*x_bw_vals)
 
@@ -162,7 +162,7 @@ class GenericLayerOP:
         x_eval = []
         dx_eval = []
         for weight in self.weights:
-            if isinstance(weight, BilinearWeights):
+            if isinstance(weight, _AnyBW):
                 x_i, dx_i = next(bw_iter)
                 x_out, dx_out = weight.push_forwards(x_i, dx_i)
                 x_eval.append(x_out)
