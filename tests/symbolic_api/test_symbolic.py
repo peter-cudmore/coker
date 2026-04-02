@@ -8,9 +8,9 @@ from coker import (
     Dimension,
     get_projection,
     SymbolicVector,
+    if_then_else
 )
 from ..util import is_close
-
 
 def test_symbolic_scalar(backend):
 
@@ -328,3 +328,22 @@ def test_zero_projection(backend):
     expect_none = f(np.array([0, 0, 0]))
 
     assert expect_none is None
+
+
+def test_case(backend):
+
+    def f_impl(x):
+        expression = x == 0
+        return if_then_else(expression, np.array([1,0,0], dtype=float), np.array([0,0,1], dtype=float))
+
+    f = function(
+        arguments=[Scalar("x")],
+        implementation=f_impl,
+        backend=backend,
+    )
+
+    test_values = [0, 1]
+    for test_value in test_values:
+        expected = f_impl(test_value)
+        result = f(test_value)
+        assert is_close(result, expected), f"For x={test_value}, got {result}, expected {expected}"
