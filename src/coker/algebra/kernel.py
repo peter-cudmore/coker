@@ -856,7 +856,14 @@ _comparison_ops = frozenset({OP.EQUAL, OP.LESS_THAN, OP.LESS_EQUAL})
 
 def if_then_else(expression, true_branch, false_branch):
     if isinstance(expression, Tracer):
-        cond_op, *_ = expression.tape.nodes[expression.index]
+        node = expression.tape.nodes[expression.index]
+        if isinstance(node, Tracer):
+            # Raw input variable — not a comparison result.
+            raise TypeError(
+                "expression must result from a comparison operator (==, <, <=), "
+                "got a raw input variable"
+            )
+        cond_op, *_ = node
         if cond_op not in _comparison_ops:
             raise TypeError(
                 f"expression must result from a comparison operator (==, <, <=), got {cond_op}"
