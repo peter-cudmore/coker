@@ -9,10 +9,11 @@ from coker import (
     Dimension,
     get_projection,
     SymbolicVector,
-    if_then_else
+    if_then_else,
 )
 from coker.algebra.exceptions import InvalidShape
 from ..util import is_close
+
 
 def test_symbolic_scalar(backend):
 
@@ -336,7 +337,11 @@ def test_case(backend):
 
     def f_impl(x):
         expression = x == 0
-        return if_then_else(expression, np.array([1,0,0], dtype=float), np.array([0,0,1], dtype=float))
+        return if_then_else(
+            expression,
+            np.array([1, 0, 0], dtype=float),
+            np.array([0, 0, 1], dtype=float),
+        )
 
     f = function(
         arguments=[Scalar("x")],
@@ -348,7 +353,9 @@ def test_case(backend):
     for test_value in test_values:
         expected = f_impl(test_value)
         result = f(test_value)
-        assert is_close(result, expected), f"For x={test_value}, got {result}, expected {expected}"
+        assert is_close(
+            result, expected
+        ), f"For x={test_value}, got {result}, expected {expected}"
 
 
 def test_case_mismatched_branches_raises():

@@ -868,7 +868,9 @@ def if_then_else(expression, true_branch, false_branch):
             raise TypeError(
                 f"expression must result from a comparison operator (==, <, <=), got {cond_op}"
             )
-        index = expression.tape.append(OP.CASE, expression, true_branch, false_branch)
+        index = expression.tape.append(
+            OP.CASE, expression, true_branch, false_branch
+        )
         return Tracer(expression.tape, index)
 
     try:
