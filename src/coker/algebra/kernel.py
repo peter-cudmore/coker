@@ -851,6 +851,29 @@ def normalise(v: Union[np.ndarray, Tracer]):
     return unit_v, norm_v
 
 
+_comparison_ops = frozenset({OP.EQUAL, OP.LESS_THAN, OP.LESS_EQUAL})
+
+
+def if_then_else(expression, true_branch, false_branch):
+    if isinstance(expression, Tracer):
+        cond_op, *_ = expression.tape.nodes[expression.index]
+        if cond_op not in _comparison_ops:
+            raise TypeError(
+                f"expression must result from a comparison operator (==, <, <=), got {cond_op}"
+            )
+        index = expression.tape.append(OP.CASE, expression, true_branch, false_branch)
+        return Tracer(expression.tape, index)
+
+    try:
+        cond = bool(expression)
+    except (ValueError, TypeError) as exc:
+        raise TypeError(
+            f"expression cannot be unambiguously coerced to bool: {exc}"
+        ) from exc
+
+    return true_branch if cond else false_branch
+
+
 _local = threading.local()
 
 

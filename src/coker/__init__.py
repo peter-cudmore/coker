@@ -6,6 +6,7 @@ from coker.algebra.kernel import (
     scalar_types,
     normalise,
     get_projection,
+    if_then_else
 )
 from coker.algebra.dimensions import (
     Dimension,
