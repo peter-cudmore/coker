@@ -69,7 +69,7 @@ def test_coker_graph():
 
     assert (
         len(g.layers) == 3
-    ), f"Expected 4 layers (in, compute, out), got {len(g.layers)}"
+    ), f"Expected 3 layers (in, compute, out), got {len(g.layers)}"
 
     result = f(1)
 

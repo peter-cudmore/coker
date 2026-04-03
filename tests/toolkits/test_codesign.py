@@ -15,7 +15,7 @@ def test_optimisation(backend):
     # objective
     # constraints
     if backend not in {"casadi"}:
-        return
+        pytest.skip("codesign optimisation requires casadi")
 
     with ProblemBuilder() as builder:
         assert not builder.arguments

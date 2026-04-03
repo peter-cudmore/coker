@@ -214,7 +214,7 @@ def test_fitting_line():
     assert sol.cost < 1e-6
 
 
-def test_fitting_exp():
+def test_fitting_exp_initial_condition():
 
     def x0(p):
         return p[0:2]
@@ -269,7 +269,7 @@ def test_fitting_exp():
         assert np.allclose(sol_t, sol_t_expected)
 
 
-def test_fitting_exp():
+def test_fitting_exp_eigenvalue():
 
     def x0(p):
         return p[0:2]

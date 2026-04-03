@@ -2,9 +2,17 @@ import numpy as np
 import pytest
 
 import coker
-from coker.toolkits.spatial import Isometry3, Rotation3, Screw
+from coker.toolkits.spatial import (
+    Isometry3,
+    Rotation3,
+    Screw,
+    SE3Adjoint,
+    SE3CoAdjoint,
+)
+from coker.toolkits.spatial.algebra import hat
+from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
 
-from tests.util import is_close, validate_symbolic_call
+from ..util import is_close, validate_symbolic_call
 from coker import VectorSpace, function, Scalar
 
 u_x = np.array([1, 0, 0], dtype=float)
@@ -15,8 +23,6 @@ origin = np.array([0, 0, 0, 1], dtype=float).reshape((4, 1))
 
 
 def test_hat(backend):
-    from coker.toolkits.spatial.algebra import hat
-
     expected = np.array([[0, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=float)
     result = hat(u_x)
     assert is_close(result, expected)
@@ -27,8 +33,6 @@ def test_hat(backend):
 
 
 def test_quaternions():
-    from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
-
     q_z = UnitQuaternion.from_axis_angle(u_z, np.pi / 2)
 
     result = q_z.conjugate(u_x)
@@ -52,8 +56,6 @@ def test_quaternions():
 
 
 def test_quaternions_symbolic(backend):
-    from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
-
     def conj_impl(axis, angle):
         q_z = UnitQuaternion.from_axis_angle(axis, angle)
         result = q_z.conjugate(u_x)
@@ -82,8 +84,6 @@ def test_quaternions_symbolic(backend):
 
 def test_quaternion_product(backend):
 
-    from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
-
     def q_product(a_1, b_1, a_2, b_2):
         q_1 = UnitQuaternion.from_axis_angle(a_1, b_1)
         q_2 = UnitQuaternion.from_axis_angle(a_2, b_2)
@@ -109,8 +109,6 @@ def test_quaternion_product(backend):
 
 
 def test_isometry():
-    from coker.toolkits.spatial.algebra import Isometry3, Rotation3
-
     eye = Isometry3.identity()
 
     assert is_close(u_x, eye @ u_x, tolerance=1e-9)
@@ -155,8 +153,6 @@ def test_isometry_rotations():
 
 
 def test_screws():
-    from coker.toolkits.spatial.algebra import Screw, Isometry3, Rotation3
-
     s = Screw(
         rotation=u_z,
         translation=np.array([0, 0, 0], dtype=float),
@@ -187,8 +183,6 @@ def test_screws():
 
 
 def test_prismatic_screw():
-    from coker.toolkits.spatial.algebra import Screw, Isometry3, Rotation3
-
     screw = Screw.from_tuple(0, 0, 0, 0, 0, 1)
     identity = screw.exp(0).as_matrix()
     assert is_close(identity, np.eye(4), 1e-9)
@@ -202,9 +196,6 @@ def test_prismatic_screw():
 
 
 def test_symbolic_isometries(backend):
-    from coker.algebra.kernel import Scalar
-    from coker.toolkits.spatial import Isometry3, Rotation3
-
     def translation(x):
         v = np.array([x, 0, 0])
         iso = Isometry3(translation=v)
@@ -248,9 +239,6 @@ def test_symbolic_isometries(backend):
 
 
 def test_symbolic_isometry_product_translation(backend):
-    from coker.algebra.kernel import Scalar
-    from coker.toolkits.spatial.algebra import Screw, UnitQuaternion
-
     def f_impl(x, y):
         g_0 = Isometry3(translation=x)
         g_1 = Isometry3(translation=y)
@@ -264,9 +252,6 @@ def test_symbolic_isometry_product_translation(backend):
 
 
 def test_symbolic_isometry_product_rotation(backend):
-    from coker.algebra.kernel import Scalar
-    from coker.toolkits.spatial.algebra import Screw, UnitQuaternion
-
     def f_impl(x, y):
         rotation_1 = Rotation3(axis=x, angle=np.pi / 2)
         rotation_2 = Rotation3(axis=y, angle=np.pi / 2)
@@ -282,9 +267,6 @@ def test_symbolic_isometry_product_rotation(backend):
 
 
 def test_symbolic_isometry_product_screw():
-    from coker.algebra.kernel import Scalar
-    from coker.toolkits.spatial.algebra import Screw
-
     s_1 = Screw(
         rotation=u_z,
         translation=np.array([0, 0, 0], dtype=float),
@@ -308,8 +290,6 @@ def test_symbolic_isometry_product_screw():
 
 
 def test_as_matrix():
-    from coker.toolkits.spatial import SE3Adjoint, SE3CoAdjoint, Screw
-
     transforms = [
         Isometry3(
             rotation=Rotation3(axis=np.array([0, 0, 1]), angle=np.pi / 2)
@@ -352,9 +332,6 @@ def test_bug_1():
 
 
 def test_adjoint():
-
-    from coker.toolkits.spatial import Screw, SE3Adjoint, Isometry3
-
     s = Screw.w_y()
     shift_x = Isometry3(translation=np.array([1.0, 0.0, 0.0]))
     s_shift_x = SE3Adjoint(shift_x).apply(s)
