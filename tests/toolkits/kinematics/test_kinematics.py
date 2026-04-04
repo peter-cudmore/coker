@@ -1,12 +1,11 @@
 import numpy as np
 import pytest
 
-import coker
-from coker import VectorSpace
+from coker import function, VectorSpace
 from coker.toolkits.kinematics import RigidBody, Revolute, Free, Inertia, Weld
 from coker.toolkits.spatial import Isometry3, Screw, Rotation3, SE3Adjoint
 from ..test_spatial_algebra import origin
-from ...util import validate_symbolic_call
+from ...util import is_close, validate_symbolic_call
 
 block_1m = Inertia(
     centre_of_mass=Isometry3(translation=np.array([0.5, 0, 0])),
@@ -38,31 +37,6 @@ def test_free_joint():
 
     (free_joint,) = model.joint_transforms(q, tip)
     assert np.allclose(free_joint.translation, np.array([0, 0, 0]))
-
-
-def mod_pi(x):
-    while x > np.pi:
-        x -= 2 * np.pi
-    while x < -np.pi:
-        x += 2 * np.pi
-    return x
-
-
-def is_close(lhs, rhs):
-    if isinstance(lhs, Isometry3) and isinstance(rhs, Isometry3):
-        return (
-            np.allclose(lhs.translation, rhs.translation)
-            and np.allclose(lhs.rotation.axis, rhs.rotation.axis)
-            and np.allclose(
-                mod_pi(lhs.rotation.angle), mod_pi(rhs.rotation.angle)
-            )
-        )
-    if isinstance(lhs, Screw) and isinstance(rhs, Screw):
-        return np.allclose(lhs.rotation, rhs.rotation) and np.allclose(
-            lhs.translation, rhs.translation
-        )
-
-    raise NotImplementedError
 
 
 def test_rotated_base_frame():
@@ -182,7 +156,7 @@ def test_rotated_base_frame_symbolic():
         "numpy",
     )
 
-    f = coker.function(
+    f = function(
         arguments=[VectorSpace("q", 2)],
         implementation=joint_transform,
         backend="numpy",

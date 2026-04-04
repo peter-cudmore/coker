@@ -21,12 +21,12 @@ def make_dynamics_fn():
 
 def test_evaluate_inner_speed():
     """
-    Once traced, calling a compiled function must NOT re-interpret the tape
+    Once traced, calling a compiled function must not re-interpret the tape
     node-by-node on each invocation. 1000 calls to a ~100-node function
     should complete in < 100ms total.
 
-    Currently FAILS: the interpreted loop takes ~1-5ms/call due to per-node
-    isinstance checks and dict dispatch in evaluate_inner.
+    The tape is compiled to a single lambda by _build_plan / CompiledPlan,
+    eliminating per-node Python dispatch.
     """
     f = make_dynamics_fn()
     x0 = np.zeros(N_STATES)

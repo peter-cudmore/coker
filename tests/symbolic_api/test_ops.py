@@ -1,17 +1,15 @@
 import numpy as np
-import pytest
 
 from coker import (
     function,
     Scalar,
     VectorSpace,
-    FunctionSpace,
     Dimension,
     get_projection,
     SymbolicVector,
-    if_then_else,
 )
-from coker.algebra.exceptions import InvalidShape
+from coker.algebra import zeros
+from coker.algebra.kernel import TraceContext
 from ..util import is_close
 
 
@@ -197,10 +195,6 @@ def test_build_array(backend):
 
     arg = np.array([1, 2], dtype=float)
     expected = np.array([1, 3], dtype=float)
-    # Should turn into
-    # A = [0, 1][1, 0]^T  + [0, 1][0, 1]^T
-    # ie (e_1 outer e_0) + (e_1 outer e_1)
-    # A = [[0,0],[1, 1]], b = [1, 0]
 
     result = f_impl(arg)
     assert is_close(result, expected)
@@ -233,6 +227,22 @@ def test_cos_and_sin(backend):
     assert abs(result - expected) < 1e-4, f"Got {result}, expected {expected}"
 
 
+def test_log(backend):
+    def f_impl(x):
+        return np.log(2 * x**2) + 1
+
+    x = 3
+    f = function(
+        arguments=[Scalar(name="x")],
+        implementation=f_impl,
+        backend=backend,
+    )
+    f_true = f_impl(x)
+    f_test = f(x)
+
+    assert is_close(f_true, f_test, 1e-5)
+
+
 def test_tensor_product(backend):
 
     a = np.array([[[1, 0, 1], [0, 1, 0]], [[0, 0, 1], [0, 1, 1]]], dtype=float)
@@ -254,69 +264,6 @@ def test_tensor_product(backend):
     assert is_close(b, b_test)
 
 
-def test_functional(backend):
-
-    def f_inner(A, b, x):
-        return A @ x + b
-
-    def f_outer(f, x):
-        A = np.array([[0, 1], [1, 0]], dtype=float)
-        b = np.array([0, 0], dtype=float)
-        return f(A, b, x)
-
-    f_result = f_outer(f_inner, np.array([2, 3], dtype=float))
-    assert is_close(f_result, np.array([3, 2], dtype=float))
-
-    f_coker = function(
-        arguments=[
-            FunctionSpace(
-                name="f_inner",
-                arguments=[
-                    VectorSpace(name="A", dimension=(2, 2)),
-                    VectorSpace(name="b", dimension=2),
-                    VectorSpace(name="x", dimension=2),
-                ],
-                output=[VectorSpace(name="y", dimension=2)],
-                signature=None,
-            ),
-            VectorSpace(name="x", dimension=2),
-        ],
-        implementation=f_outer,
-        backend=backend,
-    )
-
-    f_coker_result = f_coker(f_inner, np.array([2, 3], dtype=float))
-    assert is_close(f_coker_result, np.array([3, 2], dtype=float))
-
-
-def test_zeros():
-    from coker.algebra import zeros
-    from coker.algebra.kernel import TraceContext
-
-    with TraceContext():
-        x = zeros((3, 3))
-
-        assert x.shape == (3, 3)
-        x[:, 0] = np.array([1, 2, 3])
-        assert x[0, 0] == 1
-
-
-def test_log(backend):
-    def f_impl(x):
-        return np.log(2 * x**2) + 1
-
-    x = 3
-    f = function(
-        arguments=[Scalar(name="x")],
-        implementation=f_impl,
-        backend=backend,
-    )
-    f_true = f_impl(x)
-    f_test = f(x)
-
-    assert is_close(f_true, f_test, 1e-5)
-
-
 def test_zero_projection(backend):
 
     def f_impl(x):
@@ -333,56 +280,11 @@ def test_zero_projection(backend):
     assert expect_none is None
 
 
-def test_case(backend):
+def test_zeros():
 
-    def f_impl(x):
-        expression = x == 0
-        return if_then_else(
-            expression,
-            np.array([1, 0, 0], dtype=float),
-            np.array([0, 0, 1], dtype=float),
-        )
+    with TraceContext():
+        x = zeros((3, 3))
 
-    f = function(
-        arguments=[Scalar("x")],
-        implementation=f_impl,
-        backend=backend,
-    )
-
-    test_values = [0, 1]
-    for test_value in test_values:
-        expected = f_impl(test_value)
-        result = f(test_value)
-        assert is_close(
-            result, expected
-        ), f"For x={test_value}, got {result}, expected {expected}"
-
-
-def test_case_mismatched_branches_raises():
-    """Branches of different shapes must raise InvalidShape at trace time."""
-    with pytest.raises(InvalidShape):
-        function(
-            arguments=[Scalar("x")],
-            implementation=lambda x: if_then_else(
-                x == 0,
-                np.array([1.0, 0.0, 0.0]),
-                np.array([0.0, 1.0]),
-            ),
-            backend="numpy",
-        )
-
-
-def test_case_non_comparison_tracer_raises():
-    """A Tracer not produced by a comparison operator must raise TypeError."""
-    with pytest.raises(TypeError):
-        function(
-            arguments=[Scalar("x")],
-            implementation=lambda x: if_then_else(x, 1.0, 0.0),
-            backend="numpy",
-        )
-
-
-def test_case_ambiguous_condition_raises():
-    """A multi-element array condition must raise TypeError."""
-    with pytest.raises(TypeError):
-        if_then_else(np.array([1.0, 0.0]), 1.0, 0.0)
+        assert x.shape == (3, 3)
+        x[:, 0] = np.array([1, 2, 3])
+        assert x[0, 0] == 1

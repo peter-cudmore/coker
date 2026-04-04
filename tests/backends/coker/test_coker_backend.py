@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
-from coker.backends.coker import *
 from coker.backends.coker.core import create_opgraph
+from coker.backends.coker.layers import InputLayer
+from coker.backends.coker.weights import BilinearWeights, MemorySpec
 from coker import function, VectorSpace, Scalar, Dimension
 from coker.backends.coker.sparse_tensor import dok_ndarray
 
