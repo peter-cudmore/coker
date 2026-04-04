@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from coker.toolkits.spatial import Isometry3, Rotation3
+from coker.toolkits.spatial import Isometry3, Rotation3, Screw
 
 
 def is_close(a, b, tolerance=1e-8):
@@ -11,7 +11,12 @@ def is_close(a, b, tolerance=1e-8):
         )
 
     if isinstance(a, Rotation3) and isinstance(b, Rotation3):
-        return is_close(a.as_vector(), b.as_vector(), tolerance)
+        return is_close(a.as_matrix(), b.as_matrix(), tolerance)
+
+    if isinstance(a, Screw) and isinstance(b, Screw):
+        return is_close(a.rotation, b.rotation, tolerance) and is_close(
+            a.translation, b.translation, tolerance
+        )
 
     if not isinstance(a, np.ndarray) and not isinstance(b, np.ndarray):
         return abs(a - b) < tolerance
