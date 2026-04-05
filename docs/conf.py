@@ -8,7 +8,12 @@ sys.path.insert(0, os.path.abspath("../src"))
 # public module so autodoc uses the canonical coker.* name.
 import coker.algebra.dimensions as _dims
 
-for _cls in [_dims.Scalar, _dims.VectorSpace, _dims.FunctionSpace, _dims.Dimension]:
+for _cls in [
+    _dims.Scalar,
+    _dims.VectorSpace,
+    _dims.FunctionSpace,
+    _dims.Dimension,
+]:
     _cls.__module__ = "coker"
 
 project = "Coker"
@@ -49,4 +54,3 @@ html_title = "Coker"
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build"]
-
