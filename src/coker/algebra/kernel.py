@@ -588,6 +588,19 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
 
 class Function:
+    """A compiled Coker function.
+
+    Created by :func:`function`.  Holds the traced computation graph and
+    dispatches to a backend for evaluation.  Calling a ``Function`` with
+    concrete numpy arrays returns the result; calling it inside a tracing
+    context records the operations on the outer tape.
+
+    Attributes:
+        tape: The recorded computation graph.
+        backend: Name of the backend used for concrete evaluation.
+        output: List of output :class:`~coker.algebra.kernel.Tracer` nodes.
+    """
+
     INLINE_SIZE = 10
 
     def __init__(
@@ -630,9 +643,18 @@ class Function:
         )
 
     def input_spaces(self):
+        """Return the argument spaces of this function as a list.
+
+        Returns:
+            A list of :class:`~coker.algebra.dimensions.Scalar`,
+            :class:`~coker.algebra.dimensions.VectorSpace`, or
+            :class:`~coker.algebra.dimensions.FunctionSpace` objects in
+            argument order.
+        """
         return list(self.tape.list_inputs())
 
     def input_shape(self) -> Tuple[Dimension, ...]:
+        """Return the shape of each input argument as a tuple of :class:`~coker.algebra.dimensions.Dimension`."""
         special_inputs = {
             Tape.NONE: None,
             Tape.MAP_TO_NONE: Noop().cast_to_function_space(None),
@@ -644,6 +666,7 @@ class Function:
         )
 
     def output_shape(self) -> Tuple[Dimension, ...]:
+        """Return the shape of each output as a tuple of :class:`~coker.algebra.dimensions.Dimension`."""
         return tuple(o.dim if o is not None else None for o in self.output)
 
     def _prepare_argument(self, arg, index):
@@ -661,6 +684,14 @@ class Function:
         return arg
 
     def call_inline(self, *args) -> Tuple[Tracer]:
+        """Evaluate this function symbolically inside an active tracing context.
+
+        Unlike ``__call__``, which compiles to the configured backend, this
+        always routes through the numpy interpreter so that the result is a
+        :class:`~coker.algebra.kernel.Tracer` recorded on the enclosing tape.
+        Use this when composing functions inside an ``implementation`` passed
+        to :func:`function`.
+        """
         from coker.backends import get_backend_by_name
 
         backend = get_backend_by_name("numpy", set_current=False)
@@ -766,6 +797,37 @@ def function(
     backend: str = "coker",
     name: Optional[str] = None,
 ) -> Function:
+    """Compile a Python callable into a Coker :class:`Function`.
+
+    Traces ``implementation`` by calling it with symbolic arguments derived
+    from ``arguments``, records the resulting computation graph, and returns
+    a :class:`Function` that evaluates it via the chosen backend.
+
+    Args:
+        arguments: Ordered list of argument spaces describing the domain of
+            the function.  Each entry must be a :class:`Scalar`,
+            :class:`VectorSpace`, or :class:`FunctionSpace`.
+        implementation: A Python callable that defines the computation.  It
+            will be called once during tracing with symbolic
+            :class:`~coker.algebra.kernel.Tracer` arguments.
+        backend: Name of the backend used for concrete evaluation.
+            Built-in options are ``"numpy"`` (default for tracing),
+            ``"casadi"``, ``"sympy"``, and ``"coker"``.
+        name: Optional human-readable name attached to the returned
+            :class:`Function`.
+
+    Returns:
+        A compiled :class:`Function` that can be called with concrete numpy
+        arrays or symbolic tracers.
+
+    Example:
+        >>> import numpy as np
+        >>> from coker import function, VectorSpace
+        >>> A = np.eye(3)
+        >>> f = function([VectorSpace("x", 3)], lambda x: A @ x, backend="numpy")
+        >>> f(np.array([1.0, 0.0, 0.0]))
+        array([1., 0., 0.])
+    """
     # create symbols
     # call function to construct expression graph
 
@@ -855,6 +917,44 @@ _comparison_ops = frozenset({OP.EQUAL, OP.LESS_THAN, OP.LESS_EQUAL})
 
 
 def if_then_else(expression, true_branch, false_branch):
+    """Return one of two values based on a scalar boolean expression.
+
+    Inside a tracing context, records an ``OP.CASE`` node on the tape so that
+    the branch is preserved symbolically rather than evaluated eagerly.
+    Outside a tracing context, evaluates ``bool(expression)`` immediately.
+
+    Args:
+        expression: A scalar boolean condition.  Inside a trace this must be
+            the result of a comparison operator (``==``, ``<``, ``<=``) applied
+            to a :class:`~coker.algebra.kernel.Tracer`.
+        true_branch: Value returned when ``expression`` is ``True``.
+        false_branch: Value returned when ``expression`` is ``False``.  Must
+            have the same shape as ``true_branch``.
+
+    Returns:
+        ``true_branch`` or ``false_branch``, or a symbolic
+        :class:`~coker.algebra.kernel.Tracer` representing the choice.
+
+    Raises:
+        TypeError: If ``expression`` is a :class:`~coker.algebra.kernel.Tracer`
+            that was not produced by a comparison operator, or if it is a
+            multi-element array that cannot be unambiguously cast to ``bool``.
+        :class:`~coker.algebra.exceptions.InvalidShape`: If ``true_branch`` and
+            ``false_branch`` have different shapes.
+
+    Example:
+        >>> from coker import function, Scalar, if_then_else
+        >>> import numpy as np
+        >>> f = function(
+        ...     [Scalar("x")],
+        ...     lambda x: if_then_else(x == 0, np.array([1.0, 0.0]), np.array([0.0, 1.0])),
+        ...     backend="numpy",
+        ... )
+        >>> f(0)
+        array([1., 0.])
+        >>> f(1)
+        array([0., 1.])
+    """
     if isinstance(expression, Tracer):
         node = expression.tape.nodes[expression.index]
         if isinstance(node, Tracer):

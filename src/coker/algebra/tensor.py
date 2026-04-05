@@ -2,6 +2,29 @@ import numpy as np
 
 
 class SymbolicVector:
+    """A mutable array that can hold a mix of constants and symbolic tracers.
+
+    Use this inside an ``implementation`` passed to :func:`~coker.algebra.kernel.function`
+    when you need to build an output vector by assigning to individual
+    elements, some of which may be symbolic expressions and some constants.
+
+    After all assignments are made, the vector is collapsed into a single
+    tape node via :meth:`collapse`.  Coker calls ``collapse`` automatically
+    when the implementation returns a ``SymbolicVector``.
+
+    Example:
+        >>> from coker import function, VectorSpace, SymbolicVector
+        >>> def impl(x):
+        ...     r = SymbolicVector((2,))
+        ...     r[0] = 1.0          # constant
+        ...     r[1] = x[0] + x[1]  # symbolic
+        ...     return r
+        >>> import numpy as np
+        >>> f = function([VectorSpace("x", 2)], impl, backend="numpy")
+        >>> f(np.array([3.0, 4.0]))
+        array([1., 7.])
+    """
+
     def __init__(self, shape, data=None, symbolics=None):
 
         self.shape = shape

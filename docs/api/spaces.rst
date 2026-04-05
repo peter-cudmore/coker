@@ -7,7 +7,6 @@ argument passed to ``function()`` must be one of the types below.
 .. autoclass:: coker.Scalar
 
 .. autoclass:: coker.VectorSpace
-   :members:
 
 .. autoclass:: coker.FunctionSpace
 
