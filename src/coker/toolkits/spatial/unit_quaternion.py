@@ -1,6 +1,6 @@
 import numpy as np
 
-from coker import normalise
+from coker.algebra.kernel import normalise
 from coker.toolkits.spatial.types import Vec3, Scalar
 from coker.algebra.kernel import Tracer
 

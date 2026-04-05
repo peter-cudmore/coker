@@ -4,3 +4,4 @@ from coker.algebra.ops import OP
 
 from coker.algebra.helpers import is_scalar
 from coker.algebra.factories import zeros
+from coker.algebra.kernel import get_projection

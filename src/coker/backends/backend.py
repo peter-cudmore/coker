@@ -1,7 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from typing import Any, Tuple, Type
-from coker import Function
-from coker import Tracer
+from coker.algebra.kernel import Function, Tracer
 from typing import List, Dict
 
 from coker.dynamics import (
