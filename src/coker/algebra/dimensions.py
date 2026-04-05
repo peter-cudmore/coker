@@ -6,6 +6,18 @@ from typing import List, Optional, Tuple, Union
 
 @dataclasses.dataclass
 class VectorSpace:
+    """An argument space representing a finite-dimensional vector.
+
+    Args:
+        name: Identifier used in error messages and tape node labels.
+        dimension: Size of the vector.  An ``int`` for a 1-D vector; a tuple
+            of ints for a multi-dimensional array (e.g. ``(3, 3)`` for a
+            3×3 matrix).
+
+    Attributes:
+        size: Total number of scalar elements (product of all dimensions).
+    """
+
     name: str
     dimension: Union[int, Tuple[int, ...]]
 
@@ -18,6 +30,12 @@ class VectorSpace:
 
 @dataclasses.dataclass
 class Scalar:
+    """An argument space representing a single scalar value.
+
+    Args:
+        name: Identifier used in error messages and tape node labels.
+    """
+
     name: str
 
     @property
@@ -26,6 +44,18 @@ class Scalar:
 
 
 class Dimension:
+    """Shape descriptor for a single value in the computation graph.
+
+    Wraps a tuple of ints (for array-valued nodes) or ``None`` (for scalars).
+    Used internally to track shapes through the tape and by
+    :func:`~coker.algebra.kernel.get_projection` when constructing slice
+    projections.
+
+    Args:
+        tuple_or_none: Shape as a tuple of ints, a single int (converted to a
+            1-tuple), or ``None`` for a scalar.
+    """
+
     def __init__(self, tuple_or_none):
 
         if isinstance(tuple_or_none, int):
