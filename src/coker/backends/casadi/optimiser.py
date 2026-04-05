@@ -1,6 +1,6 @@
 from coker.backends.casadi.casadi import substitute, to_casadi, lower
 from typing import List
-from coker import Tracer
+from coker.algebra.kernel import Tracer
 
 import casadi as ca
 import numpy as np

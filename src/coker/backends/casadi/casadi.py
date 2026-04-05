@@ -2,7 +2,9 @@ import casadi as ca
 import numpy as np
 
 import coker
-from coker import OP, Tape, Tracer, FunctionSpace, Noop
+from coker.algebra.kernel import Tape, Tracer
+from coker.algebra.ops import OP, Noop
+from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 from typing import List
 

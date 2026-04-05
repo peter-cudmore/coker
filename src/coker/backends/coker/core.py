@@ -1,5 +1,6 @@
 from typing import Tuple, Type, List, Dict
-from coker import Tracer, Function, OP
+from coker.algebra.kernel import Tracer, Function
+from coker.algebra.ops import OP
 from coker.algebra.dimensions import FunctionSpace
 from coker.backends.backend import Backend, ArrayLike, get_backend_by_name
 from coker.backends.coker.ast_preprocessing import SparseNet

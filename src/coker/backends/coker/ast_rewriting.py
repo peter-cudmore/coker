@@ -1,4 +1,5 @@
-from coker import OP, Function
+from coker.algebra.kernel import Function
+from coker.algebra.ops import OP
 from coker.backends import get_backend_by_name
 
 

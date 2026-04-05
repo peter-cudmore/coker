@@ -1,7 +1,8 @@
 import dataclasses
 from typing import Callable, List, Optional
 import numpy as np
-from coker import VectorSpace, FunctionSpace, function, Scalar, Noop, Function
+from coker import VectorSpace, FunctionSpace, function, Scalar
+from coker.algebra.kernel import Function, Noop
 
 from .types import DynamicsSpec, DynamicalSystem
 from ..algebra import is_scalar

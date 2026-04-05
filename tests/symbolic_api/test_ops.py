@@ -5,9 +5,9 @@ from coker import (
     Scalar,
     VectorSpace,
     Dimension,
-    get_projection,
     SymbolicVector,
 )
+from coker.algebra import get_projection
 from coker.algebra import zeros
 from coker.algebra.kernel import TraceContext
 from ..util import is_close

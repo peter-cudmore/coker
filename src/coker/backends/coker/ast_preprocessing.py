@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Set, Dict, Tuple
 
-from coker import Function, Tracer
+from coker.algebra.kernel import Function, Tracer
 import numpy as np
 from coker.backends.coker.layers import InputLayer, OutputLayer
 from coker.backends.coker.memory import MemorySpec
