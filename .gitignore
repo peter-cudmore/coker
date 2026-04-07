@@ -235,4 +235,6 @@ Cargo.lock
 
 *.f360
 
-poetry.lock
+poetry.lockuv.lock
+
+uv.lock
