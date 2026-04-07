@@ -48,9 +48,6 @@ def get_projection(dimension: Dimension, slc: slice):
     return proj
 
 
-Inferred = None
-
-
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
         return Dimension(None)
@@ -63,21 +60,22 @@ def get_dim_by_class(arg):
 
     raise NotImplementedError(f"Don't know the shape of {type(arg)}")
 
+
 class DanglingTracerError(Exception):
-    def __init__(self, *args, tracers: List['Tracer']):
+    def __init__(self, *args, tracers: List["Tracer"]):
         super().__init__(*args)
         self.tracers = tracers
 
 
-def _find_closure_tracers(callable) -> dict:
-    """Return all Tracer objects captured in a callable's closure.
+def _find_closure_tracers(fn) -> dict:
+    """Return all Tracer objects captured in fn's closure.
 
     Returns a dict keyed by (tape_id, tracer_index) so duplicates are collapsed.
     """
     captured = {}
-    if not (hasattr(callable, '__code__') and callable.__closure__):
+    if not (hasattr(fn, "__code__") and fn.__closure__):
         return captured
-    for cell in callable.__closure__:
+    for cell in fn.__closure__:
         try:
             val = cell.cell_contents
             if isinstance(val, Tracer):
@@ -85,6 +83,7 @@ def _find_closure_tracers(callable) -> dict:
         except ValueError:
             pass
     return captured
+
 
 class TapeInner:
     INNER_REF = -1
@@ -242,13 +241,16 @@ class Tape:
 
         if self._substitutions:
             args = [
-                self._substitutions.get((id(a.tape), a.index), a) if isinstance(a, Tracer) else a
+                (
+                    self._substitutions.get((id(a.tape), a.index), a)
+                    if isinstance(a, Tracer)
+                    else a
+                )
                 for a in args
             ]
 
         invalid_tracers = [
-            arg for arg in args
-            if isinstance(arg, Tracer) and arg.tape != self
+            arg for arg in args if isinstance(arg, Tracer) and arg.tape != self
         ]
         if invalid_tracers:
             raise DanglingTracerError(tracers=invalid_tracers)
@@ -356,6 +358,11 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         ctx = TraceContext.get_local_tape()
         return ctx if ctx is not None else self.tape
 
+    def _emit(self, op: OP, *args) -> "Tracer":
+        """Append op to the active tape and return the resulting Tracer."""
+        tape = self._active_tape()
+        return Tracer(tape, tape.append(op, *args))
+
     def copy(self):
         return Tracer(self.tape, self.index)
 
@@ -417,72 +424,51 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return f"Tape {self.tape}:{self.index}"
 
     def __mul__(self, other):
-        tape = self._active_tape()
-        index = tape.append(OP.MUL, self, other)
-        return Tracer(tape, index)
+        return self._emit(OP.MUL, self, other)
 
     def __rmul__(self, other):
-        tape = self._active_tape()
-        index = tape.append(OP.MUL, other, self)
-        return Tracer(tape, index)
+        return self._emit(OP.MUL, other, self)
+
+    def __sub__(self, other):
+        return self._emit(OP.SUB, self, other)
+
+    def __matmul__(self, other):
+        return self._emit(OP.MATMUL, self, other)
+
+    def __rmatmul__(self, other):
+        assert other.shape[0] > 0
+        return self._emit(OP.MATMUL, other, self)
 
     def __add__(self, other):
         tape = self._active_tape()
         if is_additive_identity(other, self):
             return self
-
         if not isinstance(other, Tracer):
             other = tape.insert_value(other)
-
         if self.dim.is_scalar() and not other.dim.is_scalar():
             return self * np.ones(other.shape) + other
         elif not self.dim.is_scalar() and other.dim.is_scalar():
             return self + other * np.ones(self.shape)
-
-        index = tape.append(OP.ADD, self, other)
-        return Tracer(tape, index)
+        return self._emit(OP.ADD, self, other)
 
     def __radd__(self, other):
         tape = self._active_tape()
         if is_additive_identity(self.dim, other):
             return self
-
         if not isinstance(other, Tracer):
             other = tape.insert_value(other)
-
         return other + self
 
-    def __sub__(self, other):
-        tape = self._active_tape()
-        index = tape.append(OP.SUB, self, other)
-        return Tracer(tape, index)
-
-    def __rmatmul__(self, other):
-        tape = self._active_tape()
-        index = tape.append(OP.MATMUL, other, self)
-        assert other.shape[0] > 0
-        return Tracer(tape, index)
-
-    def __matmul__(self, other):
-        tape = self._active_tape()
-        index = tape.append(OP.MATMUL, self, other)
-        return Tracer(tape, index)
-
     def __pow__(self, power, modulo=None):
-        tape = self._active_tape()
         if isinstance(power, float) and power == 0.5:
-            index = tape.append(OP.SQRT, self)
-        elif isinstance(power, int):
+            return self._emit(OP.SQRT, self)
+        if isinstance(power, int):
             return self._do_integer_power(power)
-        else:
-            index = tape.append(OP.PWR, self, power)
-        return Tracer(tape, index)
+        return self._emit(OP.PWR, self, power)
 
     @property
     def T(self):
-        tape = self._active_tape()
-        index = tape.append(OP.TRANSPOSE, self)
-        return Tracer(tape, index)
+        return self._emit(OP.TRANSPOSE, self)
 
     def _do_integer_power(self, power):
         if power <= 0:
@@ -497,7 +483,6 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         if self.is_constant():
             return self.value()[key]
 
-        tape = self._active_tape()
         if isinstance(key, slice):
             dimension = self.tape.dim[self.index]
             if isinstance(dimension, FunctionSpace):
@@ -507,15 +492,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             else:
                 assert dimension.is_vector(), f"Tried to index a vector"
                 p = get_projection(dimension, key)
-            index = tape.append(OP.MATMUL, p, self)
-            return Tracer(tape, index)
+            return self._emit(OP.MATMUL, p, self)
 
-        elif isinstance(key, int):
+        if isinstance(key, int):
             dimension = self.tape.dim[self.index]
             assert dimension.is_vector(), f"Tried to index a vector"
             p = get_basis(dimension, key)
-            index = tape.append(OP.DOT, p, self)
-            return Tracer(tape, index)
+            return self._emit(OP.DOT, p, self)
 
         raise NotImplementedError(
             "Cannot get key {}, not yet implemented", key
@@ -561,69 +544,47 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             yield self[i]
 
     def __le__(self, other):
-        tape = self._active_tape()
-        idx = tape.append(OP.LESS_EQUAL, self, other)
-        return Tracer(tape, idx)
+        return self._emit(OP.LESS_EQUAL, self, other)
 
     def __ge__(self, other):
-        tape = self._active_tape()
-        idx = tape.append(OP.LESS_EQUAL, other, self)
-        return Tracer(tape, idx)
+        return self._emit(OP.LESS_EQUAL, other, self)
 
     def __lt__(self, other):
-        tape = self._active_tape()
-        idx = tape.append(OP.LESS_THAN, self, other)
-        return Tracer(tape, idx)
+        return self._emit(OP.LESS_THAN, self, other)
 
     def __gt__(self, other):
-        tape = self._active_tape()
-        idx = tape.append(OP.LESS_THAN, other, self)
-        return Tracer(tape, idx)
+        return self._emit(OP.LESS_THAN, other, self)
 
     def __eq__(self, other):
-        tape = self._active_tape()
-        idx = tape.append(OP.EQUAL, self, other)
-        return Tracer(tape, idx)
+        return self._emit(OP.EQUAL, self, other)
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        tape = self._active_tape()
         if (
             ufunc == np.matmul
             and isinstance(inputs[0], np.ndarray)
             and inputs[0].shape[0] == 0
         ):
+            tape = self._active_tape()
             return Tracer(tape, tape.NONE)
-
-        try:
-            op = numpy_atomics[ufunc]
-            index = tape.append(op, *inputs)
-            return Tracer(tape, index)
-        except KeyError:
-            pass
-
         if ufunc == np.less:
             lhs, rhs = inputs
             return rhs > lhs
-
+        try:
+            return self._emit(numpy_atomics[ufunc], *inputs)
+        except KeyError:
+            pass
         raise NotImplementedError(f"{ufunc} is not implemented")
 
     def __array_function__(self, func, types, args, kwargs):
-        tape = self._active_tape()
         try:
-            op = numpy_atomics[func]
-            index = tape.append(op, *args)
-            return Tracer(tape, index)
+            return self._emit(numpy_atomics[func], *args)
         except KeyError:
             pass
-
         try:
             op = numpy_composites[func](**kwargs)
-            args = op.pre_process(*args)
-            index = tape.append(op, *args)
-            return Tracer(tape, index)
+            return self._emit(op, *op.pre_process(*args))
         except KeyError:
             pass
-
         raise NotImplementedError(f"{func} with {kwargs} is not implemented")
 
     def norm(self):
@@ -633,16 +594,11 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return np.sqrt(np.dot(self, self))
 
     def normalise(self):
-        tape = self._active_tape()
         norm = self.norm()
-        condition = norm == 0
-        output = tape.append(OP.CASE, condition, self, self / norm)
-        return Tracer(tape, output)
+        return self._emit(OP.CASE, norm == 0, self, self / norm)
 
     def __call__(self, *args):
-        tape = self._active_tape()
-        index = tape.append(OP.EVALUATE, self, *args)
-        return Tracer(tape, index)
+        return self._emit(OP.EVALUATE, self, *args)
 
 
 class Function:
@@ -738,22 +694,28 @@ class Function:
                 return arg
 
             try:
-                return function(self.tape.dim[index].arguments, arg, self.backend)
+                return function(
+                    self.tape.dim[index].arguments, arg, self.backend
+                )
             except DanglingTracerError as ex:
-                return self._lift_closure(arg, self.tape.dim[index], ex)
+                return self._lift_closure(
+                    arg, self.tape.dim[index], ex
+                )  # arg is a Python callable
 
         return arg
 
-    def _lift_closure(self, callable, space: FunctionSpace, ex: DanglingTracerError) -> "_BoundFunction":
-        """Re-trace callable with captured outer-tape tracers promoted to extra inputs.
+    def _lift_closure(
+        self, fn, space: FunctionSpace, ex: DanglingTracerError
+    ) -> "_BoundFunction":
+        """Re-trace fn with captured outer-tape tracers promoted to extra inputs.
 
         Creates a new inner tape with extra inputs for each captured tracer, registers
-        substitution rules so that uses of the outer tracers inside the callable are
+        substitution rules so that uses of the outer tracers inside fn are
         transparently rewritten to the corresponding inner inputs during re-tracing,
         then wraps the result in a _BoundFunction that supplies the captured values
         at call time.
         """
-        captured = _find_closure_tracers(callable)
+        captured = _find_closure_tracers(fn)
         if not captured:
             raise NotImplementedError from ex
 
@@ -771,26 +733,15 @@ class Function:
         all_spaces = list(space.arguments) + extra_spaces
         inner_tape = Tape()
         all_inner_args = [inner_tape.input(v) for v in all_spaces]
-        orig_inner_args = all_inner_args[:len(space.arguments)]
-        cap_inner_args = all_inner_args[len(space.arguments):]
+        orig_inner_args = all_inner_args[: len(space.arguments)]
+        cap_inner_args = all_inner_args[len(space.arguments) :]
 
         for outer_t, inner_t in zip(unique_captured, cap_inner_args):
             inner_tape.add_substitution(outer_t, inner_t)
 
         with TraceContext(inner_tape):
-            result = callable(*orig_inner_args)
-
-            if isinstance(result, np.ndarray):
-                result = strip_symbols_from_array(result)
-            if isinstance(result, SymbolicVector):
-                result = result.collapse()
-            if isinstance(result, (list, tuple)):
-                result = [r if isinstance(r, Tracer) else inner_tape.insert_value(r) for r in result]
-            else:
-                if not isinstance(result, Tracer):
-                    result = inner_tape.insert_value(result)
-            if isinstance(result, Tracer) and result.index == inner_tape.NONE:
-                result = None
+            output = fn(*orig_inner_args)
+            result = _normalise_result(output, inner_tape)
 
         inner_fn = Function(inner_tape, result, self.backend)
         return _BoundFunction(inner_fn, unique_captured)
@@ -924,6 +875,30 @@ class InequalityExpression:
         self.upper = upper
 
 
+def _normalise_result(result, tape: Tape):
+    """Normalise an implementation's return value into Tracer(s) on tape."""
+    if isinstance(result, np.ndarray):
+        result = strip_symbols_from_array(result)
+    if isinstance(result, SymbolicVector):
+        result = result.collapse()
+
+    def wrap(v):
+        if isinstance(v, np.ndarray):
+            v = strip_symbols_from_array(v)
+        if isinstance(v, SymbolicVector):
+            v = v.collapse()
+        return v if isinstance(v, Tracer) else tape.insert_value(v)
+
+    if isinstance(result, (list, tuple)):
+        result = [wrap(r) for r in result]
+    else:
+        result = wrap(result)
+
+    if isinstance(result, Tracer) and result.index == tape.NONE:
+        return None
+    return result
+
+
 def function(
     arguments: List[Scalar | VectorSpace | FunctionSpace],
     implementation: Callable[[Element, ...], Element],
@@ -961,39 +936,10 @@ def function(
         >>> f(np.array([1.0, 0.0, 0.0]))
         array([1., 0., 0.])
     """
-    # create symbols
-    # call function to construct expression graph
-
     with TraceContext() as tape:
         args = [tape.input(v) for v in arguments]
-        result = implementation(*args)
-
-        if isinstance(result, np.ndarray):
-            result = strip_symbols_from_array(result)
-
-        if isinstance(result, SymbolicVector):
-            result = result.collapse()
-
-        def wrap(v):
-            if isinstance(v, np.ndarray):
-                v = strip_symbols_from_array(v)
-            if isinstance(v, SymbolicVector):
-                v = v.collapse()
-
-            if isinstance(v, Tracer):
-                return v
-
-            return tape.insert_value(v)
-
-        if isinstance(result, (list, tuple)):
-            result = [wrap(r) for r in result]
-
-        else:
-            result = wrap(result)
-
-        if isinstance(result, Tracer) and result.index == tape.NONE:
-            result = None
-
+        output = implementation(*args)
+        result = _normalise_result(output, tape)
         return Function(tape, result, backend, name)
 
 
@@ -1118,6 +1064,7 @@ def if_then_else(expression, true_branch, false_branch):
 _local = threading.local()
 _local.trace = []
 
+
 class TraceContext:
     def __init__(self, tape: "Tape | None" = None):
         self._tape = tape
@@ -1136,4 +1083,3 @@ class TraceContext:
         if not _local.trace:
             return None
         return _local.trace[-1]
-
