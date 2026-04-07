@@ -230,7 +230,6 @@ def test_casadi_inner_with_functionspace_called_from_casadi_outer():
     assert abs(result - 11.0) < 1e-9, f"Expected 11.0, got {result}"
 
 
-@pytest.mark.skip(reason="implicit closure capture not yet implemented")
 def test_casadi_inner_with_functionspace_closure_over_outer_variable():
     """The FunctionSpace argument passed to the inner function closes over a
     variable from the outer function — the closure must carry the symbolic
