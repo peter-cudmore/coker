@@ -205,7 +205,9 @@ def test_casadi_inner_with_functionspace_called_from_casadi_outer():
     # inner: (u: R->R, x: R, p: R) -> u(x) * p
     inner = function(
         arguments=[
-            FunctionSpace("u", arguments=[Scalar("t")], output=[Scalar("u(t)")]),
+            FunctionSpace(
+                "u", arguments=[Scalar("t")], output=[Scalar("u(t)")]
+            ),
             Scalar("x"),
             Scalar("p"),
         ],
@@ -239,7 +241,9 @@ def test_casadi_inner_with_functionspace_closure_over_outer_variable():
     # inner: (u: R->R, x: R) -> u(x)
     inner = function(
         arguments=[
-            FunctionSpace("u", arguments=[Scalar("t")], output=[Scalar("u(t)")]),
+            FunctionSpace(
+                "u", arguments=[Scalar("t")], output=[Scalar("u(t)")]
+            ),
             Scalar("x"),
         ],
         implementation=lambda u, x: u(x),
@@ -251,7 +255,6 @@ def test_casadi_inner_with_functionspace_closure_over_outer_variable():
     def outer_impl(a, x):
         u_closure = lambda t: a * t  # noqa: E731
         return inner(u_closure, x) + a
-
 
     outer = function(
         arguments=[Scalar("a"), Scalar("x")],
