@@ -5,7 +5,6 @@ import scipy as sp
 from typing import Callable, Union, Tuple, List, Optional, Set, Iterable, Any
 from collections import defaultdict
 
-
 from coker.algebra.dimensions import (
     Dimension,
     VectorSpace,
@@ -64,6 +63,10 @@ def get_dim_by_class(arg):
 
     raise NotImplementedError(f"Don't know the shape of {type(arg)}")
 
+class DanglingTracerError(Exception):
+    def __init__(self, *args, tracers: List['Tracer']):
+        super().__init__(*args)
+        self.tracers = tracers
 
 class TapeInner:
     INNER_REF = -1
@@ -214,10 +217,18 @@ class Tape:
     def append(self, op: OP, *args) -> int:
         args = [strip_symbols_from_array(a) for a in args]
 
+        invalid_tracers = [
+            arg for arg in args
+            if isinstance(arg,Tracer) and arg.tape != self
+        ]
+        if invalid_tracers:
+            raise DanglingTracerError(tracers=invalid_tracers)
+
         args = [
             self.insert_value(a) if not isinstance(a, Tracer) else a.copy()
             for a in args
         ]
+
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
         self.nodes.push_op(op, *args)
@@ -583,6 +594,9 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return Tracer(self.tape, output)
 
     def __call__(self, *args):
+        for arg in args:
+            if isinstance(arg, Tracer):
+                assert arg.tape == self.tape
         index = self.tape.append(OP.EVALUATE, self, *args)
         return Tracer(self.tape, index)
 
@@ -679,7 +693,12 @@ class Function:
             if isinstance(arg, Function):
                 return arg
 
-            return function(self.tape.dim[index].arguments, arg, self.backend)
+            try:
+                return function(self.tape.dim[index].arguments, arg, self.backend)
+            except DanglingTracerError as ex:
+
+
+                raise NotImplementedError from ex
 
         return arg
 
@@ -831,7 +850,6 @@ def function(
     # create symbols
     # call function to construct expression graph
 
-    tape = Tape()
     with TraceContext() as tape:
         args = [tape.input(v) for v in arguments]
         result = implementation(*args)
@@ -862,7 +880,7 @@ def function(
         if isinstance(result, Tracer) and result.index == tape.NONE:
             result = None
 
-    return Function(tape, result, backend, name)
+        return Function(tape, result, backend, name)
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):
@@ -984,17 +1002,20 @@ def if_then_else(expression, true_branch, false_branch):
 
 
 _local = threading.local()
-
+_local.trace = []
 
 class TraceContext:
     def __enter__(self):
         tape = Tape()
-        _local.trace = tape
+        _local.trace.append(tape)
         return tape
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _local.trace = None
+        _local.trace.pop()
 
     @staticmethod
     def get_local_tape() -> Tape | None:
-        return getattr(_local, "trace", None)
+        if not _local.trace:
+            return None
+        return _local.trace[-1]
+
