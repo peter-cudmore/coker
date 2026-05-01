@@ -101,7 +101,7 @@ class CasadiBackend(Backend):
         raise NotImplementedError
 
     def _lower_with_evaluate(self, function):
-        """Fallback: wraps CasadiBackend.evaluate for unsupported ca.Function cases."""
+        """Fallback wrapper for cases unsupported by ``ca.Function``."""
         backend = self
 
         def compiled(inputs):
