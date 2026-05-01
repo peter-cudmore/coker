@@ -87,13 +87,14 @@ def generate_discritisation_operators(
     np.ndarray,
 ]:
     """
-    Generates discretisation operators over an interval using Legendre-Gauss-Radau (LGR)
-    collocation points. This function computes knot points, Legendre polynomial bases,
-    as well as derivative and integral operators for numerical methods.
+    Generates discretisation operators over an interval using
+    Legendre-Gauss-Radau (LGR) collocation points. This function
+    computes knot points, Legendre polynomial bases, and derivative
+    and integral operators for numerical methods.
 
     Args:
-        interval: A tuple representing the interval [a, b] over which the discretisation
-            is computed.
+        interval: A tuple representing the interval [a, b] over which
+            the discretisation is computed.
         n: The number of discretisation points.
 
     Returns:
@@ -161,27 +162,37 @@ def split_at_non_differentiable_points(
     additional_points: Optional[List[float]] = None,
 ) -> List[Tuple[float, float]]:
     """
-    Splits the time domain into intervals taking into account control variables, additional
-    integration points, and transcription requirements.
+    Splits the time domain into intervals taking into account
+    control variables, additional integration points, and
+    transcription requirements.
 
-    The function determines interval boundaries based on the characteristics and constraints
-    of the provided control variables. It also considers any additional points passed, ensuring
-    subdivision complies with the transcription options. The intervals are adjusted to guarantee
-    a minimum required number and their lengths are subdivided iteratively when necessary.
+    The function determines interval boundaries based on the
+    characteristics and constraints of the provided control
+    variables. It also considers any additional points passed,
+    ensuring subdivision complies with the transcription options.
+    The intervals are adjusted to guarantee a minimum required
+    number and their lengths are subdivided iteratively when
+    necessary.
 
     Args:
-        control_variables (List[ControlVariable]): A list of control variables, which define
-            parameters affecting the differentiation process. This may include variables
+        control_variables (List[ControlVariable]): A list of
+            control variables, which define parameters affecting
+            the differentiation process. This may include variables
             such as piecewise constants or spike events.
-        t_final (float): The total duration of the time domain or integration window.
-        transcription_options (TranscriptionOptions): Configuration options specifying
-            transcription constraints, such as the minimum number of intervals.
-        additional_points (Optional[List[float]]): Additional time points that should be
-            included as interval boundaries, if provided.
+        t_final (float): The total duration of the time domain or
+            integration window.
+        transcription_options (TranscriptionOptions): Configuration
+            options specifying transcription constraints, such as
+            the minimum number of intervals.
+        additional_points (Optional[List[float]]): Additional time
+            points that should be included as interval boundaries,
+            if provided.
 
     Returns:
-        List[Tuple[float, float]]: A list of tuples representing the sorted interval boundaries.
-            Each tuple contains the start and end of an interval.
+        List[Tuple[float, float]]: A list of tuples representing
+            the sorted interval boundaries. Each tuple contains the
+            start and end of an interval.
+
     """
     interval_boundaries = (
         set(additional_points) if additional_points else set()
@@ -268,18 +279,24 @@ class InterpolatingPoly:
 
     def __init__(self, dimension, interval, degree, values):
         """
-        Initializes an instance of the class with given parameters and specific configurations
-        required for discretization and calculations.
+        Initializes an instance of the class with given parameters
+        and specific configurations required for discretization and
+        calculations.
 
         Args:
-            dimension: The dimension of the problem that defines the size of matrices and reshaping.
-            interval: The interval [lower_bound, upper_bound] over which discretization is computed.
-            degree: The degree of the polynomial basis used for computation.
-            values: A numpy array representing the knot points, stacked in order.
+            dimension: The dimension of the problem that defines
+                the size of matrices and reshaping.
+            interval: The interval [lower_bound, upper_bound] over
+                which discretization is computed.
+            degree: The degree of the polynomial basis used for
+                computation.
+            values: A numpy array representing the knot points,
+                stacked in order.
 
         Raises:
-            AssertionError: If the shape of the `values` input does not match the expected shape
-                calculated from the interval, dimension, and degree parameters.
+            AssertionError: If the shape of the `values` input does
+                not match the expected shape calculated from the
+                interval, dimension, and degree parameters.
         """
         self.interval = interval
         self.dimension = dimension
@@ -331,7 +348,8 @@ class InterpolatingPoly:
         return np.hstack([t, x]).T
 
     def knot_points(self) -> Iterator[Tuple[float, np.ndarray, np.ndarray]]:
-        """Get the knot points of the interpolating polynomial, not including the end point."""
+        """Get knot points of the interpolating polynomial, excluding
+        the end point."""
         # we skip the end point
         t_i = self.knot_times()[:-1]
         n = len(self.s)
@@ -344,7 +362,10 @@ class InterpolatingPoly:
         for s in self.s:
 
             ds = ds_dt * np.array(
-                [i * s ** (i - 1) if i > 0 else 0 for i in range(len(self.s))]
+                [
+                    i * s ** (i - 1) if i > 0 else 0
+                    for i in range(len(self.s))
+                ]
             ).reshape((1, n))
             projection = (ds @ self.bases).T
 
@@ -399,7 +420,8 @@ class InterpolatingPoly:
                 (size,) = values.shape
             else:
                 ex.add_note(
-                    f"Cannot reshape values of shape {values.shape}, expected a vector"
+                    "Cannot reshape values of shape "
+                    f"{values.shape}, expected a vector"
                 )
                 raise ex
 

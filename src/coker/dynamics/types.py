@@ -1,5 +1,13 @@
 import abc
-from typing import TYPE_CHECKING, List, Callable, Optional, Tuple, Union, Iterator
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+ )
 from dataclasses import dataclass, field
 
 from coker.algebra.kernel import (
@@ -92,7 +100,8 @@ class DynamicalSystem:
             )
         except IndexError as ex:
             raise ValueError(
-                f"Invalid number of arguments: Expected 2 - 3, received: {len(args)}"
+                "Invalid number of arguments: expected 2 - 3, "
+                f"received: {len(args)}"
             ) from ex
 
         return t, u, p
@@ -244,7 +253,7 @@ class VartionalIterationCallback:
         c_terminal: np.ndarray,
         **kwargs,
     ) -> bool:
-        """Wrapper class to handle callbacks at the end of each optimisation step.
+        """Handle callbacks at the end of each optimisation step.
 
         Args:
             x: State trajectory (function of time)
@@ -252,16 +261,17 @@ class VartionalIterationCallback:
             q: Quadrature trajectory (function of time)
             p: Parameter values
             u: Control law (function of time)
+            y: Output trajectory (function of time)
             loss: Loss value
             c_path: Path constraint violation
             c_terminal: Terminal constraint violation
             **kwargs: Solver-specific arguments.
 
         Returns:
-              True if the solver should continue.
+            True if the solver should continue.
 
-        The shapes of each argument should line up with the `VariationalProblem` class attributes.
-
+        The shapes of each argument should line up with the
+        `VariationalProblem` class attributes.
         """
 
         return True
@@ -303,15 +313,23 @@ class VariationalProblem:
             )
             assert (
                 expected_shape == self.system_parameter_map.shape
-            ), f"Parameter map is invalid. Expected an {expected_shape} matrix, but got {self.system_parameter_map.shape}."
+            ), (
+                "Parameter map is invalid. Expected an "
+                f"{expected_shape} matrix, but got "
+                f"{self.system_parameter_map.shape}."
+            )
         elif (
             self.parameters is not None
             and self.system.parameters.size != len(self.parameters)
         ):
             raise ValueError(
-                f"Number of parameters does not match: expected {self.system.parameters.size} but got {len(self.parameters)}. Please provide a parameter map or specify the same number of parameters."
-            )
+                "Number of parameters does not match: expected "
+                f"{self.system.parameters.size} but got "
+                f"{len(self.parameters)}. Please provide a "
+                "parameter map or specify the same number of "
+                "parameters."
 
+            )
         if self.control is not None:
             assert self.system.inputs is not Noop()
 
