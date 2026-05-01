@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from coker.toolkits.codesign import ProblemBuilder, Minimise
-from coker import function, VectorSpace, Dimension
+from coker import Dimension
 
 
 def quadratic(x, p, z):

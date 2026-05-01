@@ -45,7 +45,7 @@ def test_quaternions():
     assert is_close(result, u_z, tolerance=1e-4)
 
     with pytest.raises(TypeError):
-        q = q_x + q_z
+        q_x + q_z
 
     identity = q_z * q_z.inverse()
     identity_2 = q_z.inverse() * q_z

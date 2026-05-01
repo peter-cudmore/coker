@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.dynamics import (
@@ -16,11 +15,13 @@ from coker.dynamics.dynamical_system import create_control_system
 # solution is
 # x(t) = x_0 exp(at) + \int_0^t \exp(a (t- \tau)) u(\tau) d\tau
 
-Signal = lambda name: FunctionSpace(
-    name,
-    arguments=[Scalar("t")],
-    output=[Scalar("u(t)")],
-)
+
+def Signal(name):
+    return FunctionSpace(
+        name,
+        arguments=[Scalar("t")],
+        output=[Scalar("u(t)")],
+    )
 
 
 def test_homogenous_integrator(variational_backend):

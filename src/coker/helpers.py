@@ -1,3 +1,5 @@
+import inspect
+
 from typing import Type
 
 
