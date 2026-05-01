@@ -12,15 +12,6 @@ per-file-ignores =
     src/coker/__init__.py: F401
     src/coker/algebra/__init__.py: F401
     src/coker/backends/__init__.py: F401
-    src/coker/backends/coker/__init__.py: F401,F403
-    src/coker/backends/numpy/__init__.py: F401,F403
-    src/coker/dynamics/__init__.py: F401,F403
-    src/coker/toolkits/kinematics/__init__.py: F401,F403
-    src/coker/toolkits/spatial/__init__.py: F401,F403
-    src/coker/toolkits/system_modelling/__init__.py: F401,F403
-    src/coker/toolkits/system_modelling/std_lib/__init__.py: F401,F403
-    src/coker/toolkits/system_modelling/std_lib/common/__init__.py: F401,F403
-    src/coker/backends/casadi/__init__.py: F401,F403,F405
     src/coker/dynamics/transcription_helpers.py: E501
     src/coker/dynamics/types.py: E501
     tests/toolkits/kinematics/test_kinematics.py: F401,F541,F811,F841,E501
