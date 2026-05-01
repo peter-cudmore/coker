@@ -1,14 +1,25 @@
 from typing import Tuple, Type, Union
-from coker import Dimension, Function, VectorSpace
 
-from coker.backends.backend import Backend, ArrayLike
+import casadi as ca
+import numpy as np
 
-from coker.backends.casadi.casadi import *
-from coker.backends.casadi.casadi import lower as _lower_to_casadi
+from coker import Dimension, Function
+from coker.algebra.dimensions import FunctionSpace
+from coker.algebra.kernel import Tracer
+from coker.algebra.ops import Noop, ReshapeOP
+from coker.backends.backend import ArrayLike, Backend
+from coker.backends.casadi.casadi import (
+    call_parameterised_op,
+    impls,
+    lower as _lower_to_casadi,
+    parameterised_impls,
+    substitute,
+ )
 from coker.backends.casadi.optimiser import build_optimisation_problem
-
 from coker.backends.casadi.variational_solver import create_variational_solver
 from coker.dynamics import VariationalProblem
+
+__all__ = ["CasadiBackend"]
 
 scalar_types = (float, int)
 
