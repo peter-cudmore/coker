@@ -59,8 +59,8 @@ class Backend(metaclass=ABCMeta):
         """Return the post-processing function applied to a step's output.
 
         The default handles the general case (Tracer passthrough + reshape).
-        Backends can override to return an identity function where safe, removing
-        the isinstance check and reshape call from the hot loop.
+        Backends can override to return an identity function where safe,
+        removing the isinstance check and reshape call from the hot loop.
         """
         _dim = dim
         _reshape = self.reshape
@@ -86,7 +86,7 @@ class Backend(metaclass=ABCMeta):
         initial_conditions,
         end_point: float,
         inputs,
-        solver_parameters=None,
+        solver_parameters: SolverParameters | None = None,
     ):
         raise NotImplementedError(
             "Evaluating integrals is not implemented for this backend"
@@ -148,6 +148,8 @@ def instantiate_backend(name: str):
 
 
 def get_backend_by_name(name: str, set_current=True) -> Backend:
+    global __current_backend
+
     try:
         b = __backends[name]
         if set_current:
@@ -155,12 +157,14 @@ def get_backend_by_name(name: str, set_current=True) -> Backend:
         return b
     except KeyError:
         pass
+
     try:
         b = instantiate_backend(name)
         if set_current:
             __current_backend = b
         return b
     except KeyError:
+        pass
         pass
 
     raise NotImplementedError(f"Unknown backend {name}")

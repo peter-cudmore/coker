@@ -1,8 +1,8 @@
-from typing import List, NamedTuple, Callable
+from typing import NamedTuple, Callable
 import numpy as np
 
 import coker
-from coker.backends.backend import ArrayLike, Backend
+from coker.backends.backend import Backend
 from coker.algebra.kernel import Tracer, OP
 
 
@@ -55,7 +55,8 @@ class CompiledPlan:
 def _build_plan(graph, backend):
     """Walk the tape once and return a CompiledPlan."""
 
-    # Pass 1 — mark which nodes depend on inputs (dynamic) vs are pure constants.
+    # Pass 1 — mark nodes that depend on inputs (dynamic) versus
+    # pure constants.
     is_dynamic = {}
     for i, node in enumerate(graph.nodes):
         if isinstance(node, Tracer):

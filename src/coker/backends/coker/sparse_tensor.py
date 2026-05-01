@@ -35,8 +35,10 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
     Understood as a vector of linear tensor fields.
     Some notation:
 
-    - `e^j` always refers to the basis vectors for the V_i vector space (i.e. a column vector)
-    - `E_i` always refers to the basis covectors for the V_j vector space (i.e. a row vector)
+    - `e^j` always refers to the basis vectors for the V_i vector
+      space (a column vector)
+    - `E_i` always refers to the basis covectors for the V_j vector
+      space (a row vector)
 
 
     M = \alpha^i_{jkm} E_i*e^j*e^k*e^m...
@@ -155,7 +157,8 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             return dok_ndarray(expected_shape)
 
         raise TypeError(
-            f"Don't know how to turn {arg} into an array of shape {expected_shape}"
+            f"Don't know how to turn {arg} into an array of shape "
+            f"{expected_shape}"
         )
 
     @property
@@ -279,8 +282,10 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
         elif isinstance(other, (dok_ndarray, np.ndarray)):
             if isinstance(other, np.ndarray) and len(other.shape) == 1:
-                # Contract along the last axis with a 1D vector — use tensor_vector_product
-                # to avoid adding a spurious trailing dimension.
+                # Contract along the last axis with a 1D vector.
+
+                # Use tensor_vector_product to avoid adding a spurious
+                # trailing dimension.
                 if self.shape[-1] != other.shape[0]:
                     raise TypeError(
                         f"Cannot multiply {self.shape} @ {other.shape}"
@@ -384,7 +389,8 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             self.shape = shape
             return
         raise NotImplementedError(
-            f"Don't know how to reshape a {self.shape} tensor into a {shape} tensor"
+            f"Don't know how to reshape a {self.shape} tensor into a "
+            f"{shape} tensor"
         )
 
 

@@ -1,11 +1,7 @@
 import numpy as np
 from coker.algebra.ops import OP
-from coker.backends.coker.sparse_tensor import (
-    dok_ndarray,
-    tensor_vector_product,
-    is_constant,
-)
-from coker.backends.coker.tensor_contants import hat, levi_civita_3_tensor
+from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
+from coker.backends.coker.tensor_contants import hat
 from coker.backends.coker.weights import BilinearWeights
 
 

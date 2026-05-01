@@ -5,7 +5,7 @@ from coker.algebra.kernel import Function, Tracer
 import numpy as np
 from coker.backends.coker.layers import InputLayer, OutputLayer
 from coker.backends.coker.memory import MemorySpec
-from coker.backends.coker.op_impl import *
+from coker.algebra.ops import OP
 
 
 def label_sinks(function: Function) -> Tuple[Set[int], Set[int]]:
@@ -123,9 +123,8 @@ def label_sources(
 ) -> Dict[int, Set[int]]:
     """
 
-    Starting with the inputs and sink nodes, label all downstream nodes that depend on those sinks
-
-    we then end up with
+    Starting with the inputs and sink nodes, label all downstream nodes
+    that depend on those sinks.
 
     """
     if sink_nodes is None or constants is None:

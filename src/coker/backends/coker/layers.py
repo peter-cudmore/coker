@@ -1,17 +1,16 @@
+from typing import Dict, List, Set, Tuple
+
+import numpy as np
+
 from coker.algebra.dimensions import Dimension
-from coker.algebra.ops import OP
 from coker.algebra.kernel import scalar_types
+from coker.algebra.ops import OP
 from coker.backends import get_backend_by_name
-from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.memory import MemorySpec
+from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.weights import BilinearWeights, _CompiledBW
 
 _AnyBW = (BilinearWeights, _CompiledBW)
-
-from typing import List, Set, Tuple, Dict
-
-
-import numpy as np
 
 
 def vec(item):
