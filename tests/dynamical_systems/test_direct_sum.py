@@ -37,8 +37,11 @@ def test_direct_sum_vector(variational_backend):
     x1_0 = np.array([1, 2])
     x2_0 = np.array([-1, 0])
 
-    u1 = lambda t: np.array([1, 0]) * np.cos(t)
-    u2 = lambda t: np.array([0, 1]) * np.sin(t)
+    def u1(t):
+        return np.array([1, 0]) * np.cos(t)
+
+    def u2(t):
+        return np.array([0, 1]) * np.sin(t)
     p1 = np.array([1, 2])
     p2 = np.array([3, 4])
     A = np.array([[1, 2], [3, 4]])

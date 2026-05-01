@@ -11,7 +11,6 @@ sparse arrays before building a ca.Function.
 """
 
 import numpy as np
-import pytest
 from coker import function, VectorSpace
 
 
@@ -29,7 +28,8 @@ def _sparse_projection(n_out: int, n_in: int, offset: int) -> np.ndarray:
 
 
 def test_sparse_constant_concrete_call(backend):
-    """A function with a sparsified constant evaluates correctly on all backends."""
+    """A function with a sparsified constant evaluates correctly on all
+    backends."""
     proj = _sparse_projection(10, 13, 3)
 
     def impl(x):
@@ -44,8 +44,9 @@ def test_sparse_constant_concrete_call(backend):
 
 def test_sparse_constant_tracer_call():
     """
-    A function with a sparsified VALUE-node constant must be callable in a
-    tracing context (Tracer input), which routes through numpy's evaluate_inner.
+    A function with a sparsified VALUE-node constant must be callable in
+    a tracing context (Tracer input), which routes through numpy's
+    evaluate_inner.
 
     This reproduces the regression where numpy's reshape() raised
     NotImplementedError on scipy CSC sparse arrays produced by try_sparsify.

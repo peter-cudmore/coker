@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from coker import VectorSpace
 
@@ -102,9 +101,9 @@ def test_variational_iteration_callback_loss_matches_payload(
     assert max(callback.loss_differences) < 1e-9
 
 
-def test_variational_iteration_callback_loss_matches_payload_each_step_until_completion(
+def test_variational_iteration_callback_stepwise_payload_loss(
     variational_backend,
-):
+ ):
     def x0(p):
         return p[0]
 

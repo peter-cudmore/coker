@@ -1,17 +1,19 @@
+import importlib
+
 import warnings
 
 backends = ["numpy", "sympy", "coker"]
 variational_backends = []
 
 try:
-    import jax
+    importlib.import_module("jax")
 
     backends.append("jax")
 except ImportError:
     warnings.warn("jax is not installed")
 
 try:
-    import casadi
+    importlib.import_module("casadi")
 
     backends.append("casadi")
     variational_backends.append("casadi")

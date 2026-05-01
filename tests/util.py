@@ -56,7 +56,10 @@ def validate_symbolic_call(name, f, arguments, test_set, backend):
 
         assert (
             are_equal
-        ), f"Test {name} failed on item {i}: {item}\n Expected: {expected}\nGot: {result}"
+        ), (
+            f"Test {name} failed on item {i}: {item}\n"
+            f"Expected: {expected}\nGot: {result}"
+        )
 
 
 def validate_symbolic_call_throws(
@@ -67,5 +70,5 @@ def validate_symbolic_call_throws(
     f_test = function(implementation=f, arguments=arguments, backend=backend)
 
     for item, exception in value_exception_pairs:
-        with pytest.raises(exception) as ex:
+        with pytest.raises(exception):
             _ = f_test(*item)

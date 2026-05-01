@@ -7,17 +7,14 @@ body-level CasADi system calls individual compartment evaluators whose
 boundary-flow inputs are Python callables.
 """
 
+import importlib
+
 import numpy as np
 import pytest
 
-try:
-    import casadi as ca
-
-    casadi_available = True
-except ImportError:
-    casadi_available = False
-
 from coker import function, Scalar, VectorSpace, FunctionSpace
+
+casadi_available = importlib.util.find_spec("casadi") is not None
 
 
 pytestmark = pytest.mark.skipif(
@@ -152,7 +149,8 @@ def test_casadi_outer_passes_symbolic_arg_to_inner():
 
 
 def test_three_level_nesting():
-    """Three-level nesting: coker leaf inside casadi middle inside casadi outer."""
+    """Three-level nesting: coker leaf inside casadi middle inside
+    casadi outer."""
 
     leaf = function(
         arguments=[Scalar("x")],

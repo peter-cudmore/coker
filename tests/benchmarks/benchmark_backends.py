@@ -1,9 +1,9 @@
 """
 Backend performance benchmarks.
 
-Benchmark 1 — Function evaluation: chain of matmul + nonlinear ops across backends
-Benchmark 2 — ODE integration: Van der Pol oscillator across backends and solvers
-Benchmark 3 — Variational problem: parameter fitting (CasADi only)
+Benchmark 1 — Function evaluation across backends.
+Benchmark 2 — ODE integration across backends and solvers.
+Benchmark 3 — Variational problem parameter fitting (CasADi only).
 
 Run with:
     python tests/benchmarks/benchmark_backends.py
@@ -12,8 +12,7 @@ Run with:
 import time
 import numpy as np
 
-import coker
-from coker import function, VectorSpace, Scalar
+from coker import function, VectorSpace
 from coker.dynamics import create_autonomous_ode
 from coker.dynamics.types import VariationalProblem, BoundedVariable
 from coker.backends.backend import get_backend_by_name
@@ -105,9 +104,8 @@ def bench_function_eval():
             startup_results.append((backend_name, float("inf"), msg))
             call_results.append((backend_name, float("inf"), msg))
 
-    subtitle = (
-        f"{N_STATES}-state, {N_LAYERS} layers (matmul + bias + sin every 4)"
-    )
+    subtitle = f"{N_STATES}-state, {N_LAYERS} layers "
+    subtitle += "(matmul + bias + sin every 4)"
     print_results(
         "Benchmark 1a: Function evaluation — startup cost",
         subtitle,
@@ -136,7 +134,7 @@ def bench_ode():
     def xdot(x, p):
         return np.array([x[1], p[0] * (1.0 - x[0] ** 2) * x[1] - x[0]])
 
-    # -- numpy variants --------------------------------------------------------
+    # -- numpy variants ----------------------------------------------
     system_np = create_autonomous_ode(
         x0=x0_val,
         xdot=xdot,
@@ -174,7 +172,7 @@ def bench_ode():
                 (f"numpy / {solver.value}", float("inf"), str(e)[:40])
             )
 
-    # -- casadi ----------------------------------------------------------------
+    # -- casadi ------------------------------------------------------
     try:
         system_ca = create_autonomous_ode(
             x0=x0_val,
