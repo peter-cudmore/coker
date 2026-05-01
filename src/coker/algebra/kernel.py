@@ -70,7 +70,8 @@ class DanglingTracerError(Exception):
 def _find_closure_tracers(fn) -> dict:
     """Return all Tracer objects captured in fn's closure.
 
-    Returns a dict keyed by (tape_id, tracer_index) so duplicates are collapsed.
+    Returns a dict keyed by ``(tape_id, tracer_index)`` so duplicates
+    are collapsed.
     """
     captured = {}
     if not (hasattr(fn, "__code__") and fn.__closure__):
@@ -180,7 +181,11 @@ class Tape:
         self._substitutions: dict = {}
 
     def add_substitution(self, foreign: "Tracer", local: "Tracer"):
-        """Register a rewrite rule: any occurrence of foreign in append args is replaced by local."""
+        """Register a rewrite rule for substituting a traced value.
+
+        Any occurrence of ``foreign`` in appended args is replaced by
+        ``local``.
+        """
         self._substitutions[(id(foreign.tape), foreign.index)] = local
 
     def op(self, i):
@@ -332,7 +337,7 @@ def is_additive_identity(space: Dimension, arg) -> bool:
         return True
     try:
         return (space.dim == arg.shape) and (arg == 0).all()
-    except:
+    except (AttributeError, TypeError, ValueError):
         pass
 
     return False
@@ -348,12 +353,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return self._tape()
 
     def _active_tape(self) -> "Tape":
-        """Return the tape that operations on this Tracer should be recorded on.
+        """Return the tape that operations on this Tracer should use.
 
-        During tracing the current TraceContext tape is returned so that all ops
-        land on the active tape (which may differ from self.tape when a closure
-        captures a tracer from an enclosing trace). Falls back to self.tape when
-        no TraceContext is active.
+        During tracing the current TraceContext tape is returned so that
+        all ops land on the active tape. That tape may differ from
+        ``self.tape`` when a closure captures a tracer from an enclosing
+        trace. Falls back to ``self.tape`` when no TraceContext is
+        active.
         """
         ctx = TraceContext.get_local_tape()
         return ctx if ctx is not None else self.tape
@@ -490,13 +496,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
                 assert dimension.output_dimensions()[0].is_vector()
                 p = get_projection(dimension.output_dimensions()[0], key)
             else:
-                assert dimension.is_vector(), f"Tried to index a vector"
+                assert dimension.is_vector(), "Tried to index a non-vector"
                 p = get_projection(dimension, key)
             return self._emit(OP.MATMUL, p, self)
 
         if isinstance(key, int):
             dimension = self.tape.dim[self.index]
-            assert dimension.is_vector(), f"Tried to index a vector"
+            assert dimension.is_vector(), "Tried to index a non-vector"
             p = get_basis(dimension, key)
             return self._emit(OP.DOT, p, self)
 
@@ -507,15 +513,17 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __setitem__(self, key, value):
         if len(key) != len(self.shape):
             raise ValueError(
-                f"Cannot set item {key} = {value} on {self} with shape {self.shape}"
+                f"Cannot set item {key} = {value} on {self} with shape "
+                f"{self.shape}"
             )
 
         # when we set an item, we need to do 2 things.
         # 1. Store the operation in the tape
         # 2. Mutate this object so that it points to the new tracer
-        assert (
-            self[key].shape == value.shape
-        ), f"Expected shape {self[key].shape } but got {value.shape} for {key} = {value} on {self} with shape {self.shape}"
+        assert self[key].shape == value.shape, (
+            f"Expected shape {self[key].shape} but got {value.shape} "
+            f"for {key} = {value} on {self} with shape {self.shape}"
+        )
 
         # if the value here is a constant that is not referenced by any other
         # tracers, we can just go ahead and mutate it.
@@ -536,7 +544,8 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         # and change this tracers index to point to that.
 
         raise NotImplementedError(
-            f"Cannot set item. SET operation not implemented yet for {key} = {value} on {self} with shape {self.shape}"
+            f"Cannot set item. SET operation not implemented yet for "
+            f"{key} = {value} on {self} with shape {self.shape}"
         )
 
     def __iter__(self):
@@ -668,7 +677,8 @@ class Function:
         return list(self.tape.list_inputs())
 
     def input_shape(self) -> Tuple[Dimension, ...]:
-        """Return the shape of each input argument as a tuple of :class:`~coker.algebra.dimensions.Dimension`."""
+        """Return each input argument shape as a
+        :class:`~coker.algebra.dimensions.Dimension` tuple."""
         special_inputs = {
             Tape.NONE: None,
             Tape.MAP_TO_NONE: Noop().cast_to_function_space(None),
@@ -680,7 +690,8 @@ class Function:
         )
 
     def output_shape(self) -> Tuple[Dimension, ...]:
-        """Return the shape of each output as a tuple of :class:`~coker.algebra.dimensions.Dimension`."""
+        """Return each output shape as a
+        :class:`~coker.algebra.dimensions.Dimension` tuple."""
         return tuple(o.dim if o is not None else None for o in self.output)
 
     def _prepare_argument(self, arg, index):
@@ -707,13 +718,14 @@ class Function:
     def _lift_closure(
         self, fn, space: FunctionSpace, ex: DanglingTracerError
     ) -> "_BoundFunction":
-        """Re-trace fn with captured outer-tape tracers promoted to extra inputs.
+        """Re-trace ``fn`` with captured outer-tape tracers as inputs.
 
-        Creates a new inner tape with extra inputs for each captured tracer, registers
-        substitution rules so that uses of the outer tracers inside fn are
-        transparently rewritten to the corresponding inner inputs during re-tracing,
-        then wraps the result in a _BoundFunction that supplies the captured values
-        at call time.
+        Creates a new inner tape with extra inputs for each captured
+        tracer, registers substitution rules so uses of the outer
+        tracers inside ``fn`` are rewritten to the corresponding inner
+        inputs during re-tracing, then wraps the result in a
+        ``_BoundFunction`` that supplies the captured values at call
+        time.
         """
         captured = _find_closure_tracers(fn)
         if not captured:
@@ -747,13 +759,13 @@ class Function:
         return _BoundFunction(inner_fn, unique_captured)
 
     def call_inline(self, *args) -> Tuple[Tracer]:
-        """Evaluate this function symbolically inside an active tracing context.
+        """Evaluate this function symbolically inside an active trace.
 
-        Unlike ``__call__``, which compiles to the configured backend, this
-        always routes through the numpy interpreter so that the result is a
-        :class:`~coker.algebra.kernel.Tracer` recorded on the enclosing tape.
-        Use this when composing functions inside an ``implementation`` passed
-        to :func:`function`.
+        Unlike ``__call__``, which compiles to the configured backend,
+        this always routes through the numpy interpreter so the result
+        is a :class:`~coker.algebra.kernel.Tracer` recorded on the
+        enclosing tape. Use this when composing functions inside an
+        ``implementation`` passed to :func:`function`.
         """
         from coker.backends import get_backend_by_name
 
@@ -766,7 +778,10 @@ class Function:
     def __call__(self, *args):
         assert len(args) == len(
             self.tape.input_indicies
-        ), f"Expected {len(self.tape.input_indicies)} arguments but got {len(args)}"
+        ), (
+            f"Expected {len(self.tape.input_indicies)} arguments but got "
+            f"{len(args)}"
+        )
 
         args = [
             (self._prepare_argument(arg, idx))
@@ -842,10 +857,11 @@ class Function:
 
 
 class _BoundFunction(Function):
-    """A Function whose extra tail inputs are pre-bound to captured outer-tape tracers.
+    """A Function whose extra tail inputs are pre-bound to closures.
 
-    Created by Function._lift_closure when a Python callable passed as a
-    FunctionSpace argument closes over tracers from an enclosing trace.
+    Created by :meth:`Function._lift_closure` when a Python callable
+    passed as a FunctionSpace argument closes over tracers from an
+    enclosing trace.
     """
 
     def __init__(self, inner_fn: Function, captured: List[Tracer]):
@@ -932,7 +948,11 @@ def function(
         >>> import numpy as np
         >>> from coker import function, VectorSpace
         >>> A = np.eye(3)
-        >>> f = function([VectorSpace("x", 3)], lambda x: A @ x, backend="numpy")
+        >>> f = function(
+            ...     [VectorSpace("x", 3)],
+            ...     lambda x: A @ x,
+            ...     backend="numpy",
+            ... )
         >>> f(np.array([1.0, 0.0, 0.0]))
         array([1., 0., 0.])
     """
@@ -955,7 +975,7 @@ def strip_symbols_from_array(array: np.ndarray, float_type=float):
         for x in it:
             try:
                 x[...] = float_type(x)
-            except TypeError as e:
+            except TypeError:
 
                 value = x.tolist()
                 assert isinstance(
@@ -1025,7 +1045,11 @@ def if_then_else(expression, true_branch, false_branch):
         >>> import numpy as np
         >>> f = function(
         ...     [Scalar("x")],
-        ...     lambda x: if_then_else(x == 0, np.array([1.0, 0.0]), np.array([0.0, 1.0])),
+        ...     lambda x: if_then_else(
+            ...         x == 0,
+            ...         np.array([1.0, 0.0]),
+            ...         np.array([0.0, 1.0]),
+            ...     ),
         ...     backend="numpy",
         ... )
         >>> f(0)
@@ -1038,13 +1062,14 @@ def if_then_else(expression, true_branch, false_branch):
         if isinstance(node, Tracer):
             # Raw input variable — not a comparison result.
             raise TypeError(
-                "expression must result from a comparison operator (==, <, <=), "
-                "got a raw input variable"
+                "expression must result from a comparison operator "
+                "(==, <, <=), got a raw input variable"
             )
         cond_op, *_ = node
         if cond_op not in _comparison_ops:
             raise TypeError(
-                f"expression must result from a comparison operator (==, <, <=), got {cond_op}"
+                "expression must result from a comparison operator "
+                f"(==, <, <=), got {cond_op}"
             )
         index = expression.tape.append(
             OP.CASE, expression, true_branch, false_branch

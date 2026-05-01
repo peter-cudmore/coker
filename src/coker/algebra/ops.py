@@ -91,7 +91,8 @@ class ConcatenateOP(Operator):
         return True
 
     def pre_process(self, *args):
-        # Args should be a single argument containing a list of things to concatenate
+        # Args should be a single argument containing a list of values
+        # to concatenate.
         assert len(args) == 1
         return args[0]
 
@@ -183,7 +184,8 @@ def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
 
     if len(args) != len(function_sig.arguments):
         raise InvalidShape(
-            f"Expected {len(function_sig.arguments)} arguments, got {len(args)}"
+            f"Expected {len(function_sig.arguments)} arguments, got "
+            f"{len(args)}"
         )
 
     for i, (arg_dim, input_dim) in enumerate(
@@ -191,7 +193,8 @@ def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
     ):
         if arg_dim != input_dim:
             raise InvalidShape(
-                f"Argument {i} has dimension {arg_dim.dim}, expected {input_dim.dim}"
+                f"Argument {i} has dimension {arg_dim.dim}, expected "
+                f"{input_dim.dim}"
             )
     try:
         (out_dim,) = function_sig.output_dimensions()

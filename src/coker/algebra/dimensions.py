@@ -86,8 +86,10 @@ class Dimension:
             count *= d
 
         # Compute per-dimension strides for mixed-radix decomposition.
-        # column-major (row_major=False): first index varies fastest → strides [1, d0, d0*d1, ...]
-        # row-major (row_major=True):    last  index varies fastest → strides [..., d1, 1]
+        # column-major (row_major=False): first index varies fastest →
+        # strides [1, d0, d0*d1, ...]
+        # row-major (row_major=True): last index varies fastest →
+        # strides [..., d1, 1]
         strides = []
         stride = 1
         if row_major:
@@ -142,13 +144,16 @@ class FunctionSpace:
 
     Attributes:
         name (str): The name of the function space.
-        arguments (List[Scalar | VectorSpace]): A list specifying the input arguments of
-            the function, where each argument can be either a scalar or a vector space.
-        output (List[Scalar | VectorSpace]): A list specifying the output of the function,
-            where each element can be either a scalar or a vector space.
-        signature (Optional[Tuple[int]]): Optional list of integers denoting the degree
-            of differentiability for each argument. If not provided, the default is
-            smooth (infinitely differentiable) functions.
+        arguments (List[Scalar | VectorSpace]): A list specifying the
+            input arguments of the function, where each argument can be
+            either a scalar or a vector space.
+        output (List[Scalar | VectorSpace]): A list specifying the
+            output of the function, where each element can be either a
+            scalar or a vector space.
+        signature (Optional[Tuple[int]]): Optional list of integers
+            denoting the degree of differentiability for each argument.
+            If not provided, the default is smooth (infinitely
+            differentiable) functions.
 
     """
 
@@ -156,7 +161,11 @@ class FunctionSpace:
     arguments: List[Scalar | VectorSpace]
     output: List[Scalar | VectorSpace]
     signature: Optional[Tuple[int]] = None
-    """Optional list of integers, specifying the degree of differentiability for each argument. Defaults to infinite (i.e. smooth function)."""
+    """Optional list of integers specifying the degree of
+    differentiability for each argument.
+
+    Defaults to infinite (that is, smooth functions).
+    """
 
     def input_dimensions(self):
         return [
