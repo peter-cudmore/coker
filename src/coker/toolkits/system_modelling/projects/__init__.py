@@ -1,8 +1,8 @@
-import pathlib
-from typing import Type, Callable, Tuple, Dict
-from coker.modelling import Block
+from typing import Callable, Tuple, Dict
+
 from coker.algebra.kernel import Function
 from coker.helpers import get_all_subclasses
+from coker.toolkits.system_modelling.modelling import Block
 
 __ALL__ = [
     "Workspace",
@@ -39,7 +39,7 @@ class Worksheet:
 
     def add_instance(self, constructor: Callable, *args, name=None, **kwargs):
         try:
-            component: coker.Block = constructor(*args, **kwargs)
+            component: Block = constructor(*args, **kwargs)
         except Exception as e:
             raise e
         if not isinstance(component, Block):

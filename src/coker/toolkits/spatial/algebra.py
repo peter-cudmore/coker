@@ -1,4 +1,3 @@
-from types import NotImplementedType
 from typing import Optional
 import numpy as np
 from coker.toolkits.spatial.types import Vec3, Scalar
@@ -249,8 +248,8 @@ class Screw:
         self.magnitude = magnitude
 
     def __repr__(self):
-        l = self.to_array().tolist()
-        return repr(l)
+        values = self.to_array().tolist()
+        return repr(values)
 
     @staticmethod
     def w_z():
