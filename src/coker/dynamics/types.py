@@ -7,7 +7,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
- )
+)
 from dataclasses import dataclass, field
 
 from coker.algebra.kernel import (
@@ -311,9 +311,7 @@ class VariationalProblem:
                 self.system.parameters.size,
                 len(self.parameters),
             )
-            assert (
-                expected_shape == self.system_parameter_map.shape
-            ), (
+            assert expected_shape == self.system_parameter_map.shape, (
                 "Parameter map is invalid. Expected an "
                 f"{expected_shape} matrix, but got "
                 f"{self.system_parameter_map.shape}."
@@ -328,7 +326,6 @@ class VariationalProblem:
                 f"{len(self.parameters)}. Please provide a "
                 "parameter map or specify the same number of "
                 "parameters."
-
             )
         if self.control is not None:
             assert self.system.inputs is not Noop()

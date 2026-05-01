@@ -8,7 +8,7 @@ from coker.backends.coker.sparse_tensor import (
     scalar,
     tensor_sum,
     tensor_vector_product,
- )
+)
 
 
 def dense_array_cast(x):
@@ -481,9 +481,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             linear_linear + c_self_quadratic + c_rhs_quadratic
         )
 
-        return BilinearWeights(
-            self.memory, (1,), c, linear_weights, q
-        )
+        return BilinearWeights(self.memory, (1,), c, linear_weights, q)
 
     @staticmethod
     def identity2(memory: MemorySpec):

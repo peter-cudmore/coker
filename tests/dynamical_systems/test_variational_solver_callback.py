@@ -103,7 +103,7 @@ def test_variational_iteration_callback_loss_matches_payload(
 
 def test_variational_iteration_callback_stepwise_payload_loss(
     variational_backend,
- ):
+):
     def x0(p):
         return p[0]
 

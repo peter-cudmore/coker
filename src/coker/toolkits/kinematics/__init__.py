@@ -6,7 +6,7 @@ from coker.toolkits.kinematics.rigid_body import (
     Revolute,
     RigidBody,
     Weld,
- )
+)
 
 __all__ = [
     "Free",

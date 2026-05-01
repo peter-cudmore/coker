@@ -14,7 +14,7 @@ from coker.toolkits.system_modelling.std_lib.common.signal_processing import (
     ValueType,
     Variable,
     Vector,
- )
+)
 
 __all__ = [
     "Block",

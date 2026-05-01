@@ -42,6 +42,7 @@ def test_direct_sum_vector(variational_backend):
 
     def u2(t):
         return np.array([0, 1]) * np.sin(t)
+
     p1 = np.array([1, 2])
     p2 = np.array([3, 4])
     A = np.array([[1, 2], [3, 4]])

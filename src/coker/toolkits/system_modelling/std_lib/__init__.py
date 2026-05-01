@@ -14,7 +14,7 @@ from coker.toolkits.system_modelling.std_lib.common import (
     ValueType,
     Variable,
     Vector,
- )
+)
 
 __all__ = [
     "Block",

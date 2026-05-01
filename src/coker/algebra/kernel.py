@@ -776,9 +776,7 @@ class Function:
         return output
 
     def __call__(self, *args):
-        assert len(args) == len(
-            self.tape.input_indicies
-        ), (
+        assert len(args) == len(self.tape.input_indicies), (
             f"Expected {len(self.tape.input_indicies)} arguments but got "
             f"{len(args)}"
         )

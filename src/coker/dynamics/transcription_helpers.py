@@ -362,10 +362,7 @@ class InterpolatingPoly:
         for s in self.s:
 
             ds = ds_dt * np.array(
-                [
-                    i * s ** (i - 1) if i > 0 else 0
-                    for i in range(len(self.s))
-                ]
+                [i * s ** (i - 1) if i > 0 else 0 for i in range(len(self.s))]
             ).reshape((1, n))
             projection = (ds @ self.bases).T
 

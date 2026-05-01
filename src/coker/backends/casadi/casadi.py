@@ -116,9 +116,7 @@ class CasadiTensor:
         self.data = {k: d * other for k, d in self.data.items()}
 
     def __matmul__(self, other):
-        assert (
-            len(self.shape) == 3
-        ), "Higher order tensors not yet implemented"
+        assert len(self.shape) == 3, "Higher order tensors not yet implemented"
         assert len(other.shape) == 2
         assert other.shape[0] == self.shape[-1]
         assert other.shape[1] == 1
