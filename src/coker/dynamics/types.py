@@ -18,6 +18,7 @@ from typing import Dict
 
 class SolverParameters(metaclass=abc.ABCMeta):
     """Interface for backend-specific ODE solver configuration."""
+
     pass
 
 
@@ -227,15 +228,19 @@ LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
 
 class VartionalIterationCallback:
 
-    def __call__(self,
-                 x: Callable[[float], np.ndarray],
-                 z: Callable[[float], np.ndarray],
-                 q: Callable[[float], np.ndarray],
-                 p: float,
-                 u: Callable[[float], np.ndarray],
-                 loss:float,
-                 c_path: Callable[[float], np.ndarray],
-                 c_terminal:np.ndarray) -> bool:
+    def __call__(
+        self,
+        x: Callable[[float], np.ndarray],
+        z: Callable[[float], np.ndarray],
+        q: Callable[[float], np.ndarray],
+        p: float,
+        u: Callable[[float], np.ndarray],
+        y: Callable[[float], np.ndarray],
+        loss: float,
+        c_path: Callable[[float], np.ndarray],
+        c_terminal: np.ndarray,
+        **kwargs,
+    ) -> bool:
         """Wrapper class to handle callbacks at the end of each optimisation step.
 
         Args:
@@ -247,6 +252,7 @@ class VartionalIterationCallback:
             loss: Loss value
             c_path: Path constraint violation
             c_terminal: Terminal constraint violation
+            **kwargs: Solver-specific arguments.
 
         Returns:
               True if the solver should continue.
