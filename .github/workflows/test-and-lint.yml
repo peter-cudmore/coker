@@ -30,11 +30,20 @@ jobs:
         run: poetry run pytest
 
   linter-name:
-    name: runner / black formatter
+    name: runner / black and flake8
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: psf/black@stable
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
         with:
-          use_pyproject: true
-          options: '--check --diff src'
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+      - name: Install package
+        run: poetry install --with ci,casadi,jax
+      - name: Run black
+        run: poetry run black --check --diff src
+      - name: Run flake8
+        run: poetry run flake8 src tests docs examples scripts
