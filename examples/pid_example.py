@@ -1,12 +1,24 @@
-import coker
-from coker import BlockContainer
-from coker.std_lib import *
+from coker.toolkits.system_modelling.modelling import (
+    Block,
+    BlockContainer,
+    BlockSpec,
+    Signal,
+    Variable,
+    model,
+)
+from coker.toolkits.system_modelling.std_lib.common.signal_processing import (
+    Difference,
+    Gain,
+    Integrator,
+    Sum,
+)
 
 
-@coker.model
+@model
 def plant():
-    # Motor model from https://ctms.engin.umich.edu/CTMS/index.php?example=MotorPosition&section=SimulinkModeling
-    plant = coker.BlockContainer("plant")
+    # Motor model adapted from CTMS motor position Simulink example:
+    # https://ctms.engin.umich.edu/CTMS/index.php?example=MotorPosition&section=SimulinkModeling
+    plant = BlockContainer("plant")
 
     voltage_in = plant.add_input(Signal("voltage_in"))
     position_out = plant.add_output(Signal("position_out"))
@@ -82,9 +94,9 @@ class Differentiator(Block):
         return [dx, dx]
 
 
-@coker.model
+@model
 def controller():
-    controller = coker.BlockContainer("controller")
+    controller = BlockContainer("controller")
     position_in = controller.add_input(Signal("position_in"))
     setpoint_in = controller.add_input(Signal("setpoint_in"))
     voltage_out = controller.add_output(Signal("voltage_out"))
@@ -127,8 +139,8 @@ def controller():
 
 
 def main():
-    p = plant()
-    c = controller()
+    plant()
+    controller()
 
 
 if __name__ == "__main__":

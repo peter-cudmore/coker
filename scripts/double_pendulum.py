@@ -9,7 +9,6 @@ from coker.toolkits.spatial import Isometry3, Screw
 import matplotlib
 
 matplotlib.use("qtagg")
-import matplotlib.pyplot as plt
 
 
 block_inertia = Inertia(
