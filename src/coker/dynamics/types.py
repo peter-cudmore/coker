@@ -1,5 +1,5 @@
 import abc
-from typing import List, Callable, Optional, Tuple, Union, Iterator
+from typing import TYPE_CHECKING, List, Callable, Optional, Tuple, Union, Iterator
 from dataclasses import dataclass, field
 
 from coker.algebra.kernel import (
@@ -14,6 +14,9 @@ from coker.algebra.kernel import (
 )
 import numpy as np
 from typing import Dict
+
+if TYPE_CHECKING:
+    from .transcription_helpers import InterpolatingPoly
 
 
 class SolverParameters(metaclass=abc.ABCMeta):
