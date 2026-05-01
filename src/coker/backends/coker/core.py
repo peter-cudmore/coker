@@ -12,7 +12,6 @@ from coker.backends.coker.layers import (
 )
 from coker.backends.coker.weights import BilinearWeights
 from coker.backends.coker.op_impl import ops
-import numpy as np
 import scipy.sparse
 
 
@@ -37,7 +36,8 @@ class CokerBackend(Backend):
         if all(o is None for o in function.output):
             return function.output
 
-        # Fall back to numpy for higher-order functions with FunctionSpace inputs.
+        # Fall back to numpy for higher-order functions with
+        # FunctionSpace inputs.
         if any(
             isinstance(function.tape.dim[i], FunctionSpace)
             for i in function.tape.input_indicies

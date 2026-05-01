@@ -1,15 +1,14 @@
 from typing import Tuple
-from functools import reduce
-from coker import Dimension
+
+import numpy as np
+
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.sparse_tensor import (
     dok_ndarray,
     scalar,
-    tensor_vector_product,
     tensor_sum,
-    cast_vector,
-)
-import numpy as np
+    tensor_vector_product,
+ )
 
 
 def dense_array_cast(x):
@@ -21,10 +20,11 @@ def dense_array_cast(x):
 def _scale_tensor_by_array(
     tensor: dok_ndarray, scale: np.ndarray, n_output_dims: int
 ) -> dok_ndarray:
-    """Return a copy of tensor where each entry is scaled by scale[output_indices].
+    """Return a copy of tensor scaled by ``scale[output_indices]``.
 
-    tensor has shape (*output_shape, *memory_shape).  The first n_output_dims
-    index axes are the output axes; scale must have exactly that shape.
+    ``tensor`` has shape ``(*output_shape, *memory_shape)``. The first
+    ``n_output_dims`` axes are the output axes, and ``scale`` must have
+    exactly that shape.
     """
     new_keys = {}
     for k, v in tensor.keys.items():
@@ -168,7 +168,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             if isinstance(other, BilinearWeights):
                 assert (
                     self.memory == other.memory
-                ), f"Cannot multiply weights with different source"
+                ), "Cannot multiply weights with different source"
                 if self.is_constant:
                     return float(self.constant) * other
                 if other.is_constant and other.is_scalar():
@@ -317,9 +317,10 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         )
         # Contract self's last output axis with other's first output axis.
         # self.shape = (..., n), other.shape = (n, ...)
-        # self.constant/linear/quadratic have shape (*self.shape, ...) — output axes first,
-        # memory axes last.  We must contract over axis len(self.shape)-1 of self's tensors
-        # and axis 0 of other's tensors, NOT the last (memory) axis.
+        # self.constant/linear/quadratic have shape (*self.shape, ...) —
+        # output axes first, memory axes last. We must contract over
+        # axis len(self.shape)-1 of self's tensors and axis 0 of
+        # other's tensors, not the last (memory) axis.
         col = len(self.shape) - 1
 
         def _contract(lhs: dok_ndarray, rhs: dok_ndarray) -> dok_ndarray:
@@ -334,7 +335,8 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             self.linear, other.linear, l_index=col, r_index=0
         )
         # tensor_sum produces (out_l..., mem_l, out_r..., mem_r).
-        # BilinearWeights convention requires (out_l..., out_r..., mem_l, mem_r).
+        # BilinearWeights convention requires
+        # (out_l..., out_r..., mem_l, mem_r).
         # Move mem_l (at position col) past the M-1 out_r axes.
         mem_l_pos = col
         for _ in range(len(other.shape) - 1):
@@ -443,7 +445,10 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             (self.is_linear and rhs.is_linear)
             or (not self.is_linear and rhs.is_constant)
             or (self.is_constant and not rhs.is_linear)
-        ), "dot requires both operands order<=1, or one order==2 and the other order==0"
+        ), (
+            "dot requires both operands order<=1, or one order==2 and "
+            "the other order==0"
+        )
         memory_count = self.memory.count
         output_size = int(np.prod(self.shape))
         c_self = self.constant.toarray().flatten()  # (output_size,)
@@ -461,7 +466,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         c = dok_ndarray.fromarray(np.array([constant_val]))
 
         linear_val = (c_self @ l_rhs + c_rhs @ l_self).reshape(1, memory_count)
-        l = dok_ndarray.fromarray(linear_val)
+        linear_weights = dok_ndarray.fromarray(linear_val)
 
         linear_linear = (l_self.T @ l_rhs).reshape(
             1, memory_count, memory_count
@@ -476,7 +481,9 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             linear_linear + c_self_quadratic + c_rhs_quadratic
         )
 
-        return BilinearWeights(self.memory, (1,), c, l, q)
+        return BilinearWeights(
+            self.memory, (1,), c, linear_weights, q
+        )
 
     @staticmethod
     def identity2(memory: MemorySpec):
@@ -492,7 +499,8 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     @staticmethod
     def reshape_identity(memory: MemorySpec, shape: tuple):
-        """BilinearWeights that maps a flat vector of size memory.count to the given shape."""
+        """BilinearWeights that maps a flat vector of size memory.count
+        to the given shape."""
         n = memory.count
         data = {}
         for k in range(n):

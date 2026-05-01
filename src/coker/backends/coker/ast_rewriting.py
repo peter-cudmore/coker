@@ -66,7 +66,6 @@ def try_rewrite_mul(nodes: list, atoms, constants, i):
 def rewrite_graph(function: Function):
     constants = {}
 
-    outputs = {o.index for o in function.output}
     inputs = set(function.tape.input_indicies)
     atoms = inputs.copy()
     work_set = [i for i in range(len(function.tape.nodes)) if i not in inputs]
