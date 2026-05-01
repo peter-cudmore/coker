@@ -2,7 +2,7 @@ import dataclasses
 from typing import Callable, List, Optional
 import numpy as np
 from coker import VectorSpace, FunctionSpace, function, Scalar
-from coker.algebra.kernel import Function, Noop
+from coker.algebra.kernel import Noop
 
 from .types import DynamicsSpec, DynamicalSystem
 from ..algebra import is_scalar
@@ -28,7 +28,10 @@ def create_dynamics_from_spec(
 
     assert (
         len(x0.output) == 2
-    ), "Initial conditions must a pair, one for the state and one for the algebraic variables"
+    ), (
+        "Initial conditions must be a pair, one for the state and one "
+        "for the algebraic variables"
+    )
 
     state = x0.output[0]
     algebraic = x0.output[1]
@@ -38,7 +41,10 @@ def create_dynamics_from_spec(
     if algebraic is not None:
         assert (
             algebraic.dim == spec.algebraic.dim
-        ), "Initial algebraic conditions must have the same dimension as the algebraic variables"
+        ), (
+            "Initial algebraic conditions must have the same dimension "
+            "as the algebraic variables"
+        )
 
     # Order: t, x, z, u, p
     arguments = [
@@ -55,12 +61,18 @@ def create_dynamics_from_spec(
 
     assert (
         xdot.output[0].dim.shape == state.dim.shape
-    ), f"Dynamics must return a vector of the same dimension as the state: x0 gave {state.dim} and dynamics gave {xdot.output[0].dim}"
+    ), (
+        "Dynamics must return a vector of the same dimension as the "
+        f"state: x0 gave {state.dim} and dynamics gave {xdot.output[0].dim}"
+    )
 
     if spec.algebraic is not None:
         assert (
             spec.constraints is not Noop()
-        ), "If algebraic constraints are specified, constraints must be specified"
+        ), (
+            "If algebraic constraints are specified, constraints must "
+            "also be specified"
+        )
     elif spec.constraints is not Noop():
         raise ValueError("Constraints specified, but no algebraic variables")
 
@@ -91,7 +103,13 @@ def create_dynamics_from_spec(
     output = function(arguments, spec.outputs, backend)
 
     return DynamicalSystem(
-        spec.inputs, spec.parameters, x0, xdot, constraint, quadrature, output
+        spec.inputs,
+        spec.parameters,
+        x0,
+        xdot,
+        constraint,
+        quadrature,
+        output,
     )
 
 
@@ -111,9 +129,13 @@ def create_control_system(
     if isinstance(x0, (list, tuple, int, float)):
         x0 = np.array(x0)
     if isinstance(x0, np.ndarray):
-        x0_func = lambda z, u, p: (x0, None)
+        def x0_func(z, u, p):
+            _ = z, u
+            return x0, None
     else:
-        x0_func = lambda z, u, p: (x0(p), None)
+        def x0_func(z, u, p):
+            _ = z, u
+            return x0(p), None
 
     if p_init is not None:
         assert (
@@ -138,7 +160,10 @@ def create_control_system(
         u0 = u_init(0)
         assert (
             u0.shape == u_dim.shape
-        ), f"u0 must have the same shape as the control output; u0 is {u0} and control output is {u_dim}"
+        ), (
+            "u0 must have the same shape as the control output; "
+            f"u0 is {u0} and control output is {u_dim}"
+        )
     else:
         u0 = np.zeros(u_dim.shape)
 
@@ -147,16 +172,26 @@ def create_control_system(
 
     assert (
         is_scalar(x0_eval) and is_scalar(dot_x_eval)
-    ) or x0_eval.shape == dot_x_eval.shape, f"x0 and xdot must have the same shape; x0 is {x0_eval} and xdot is {dot_x_eval}"
+    ) or x0_eval.shape == dot_x_eval.shape, (
+        "x0 and xdot must have the same shape; "
+        f"x0 is {x0_eval} and xdot is {dot_x_eval}"
+    )
 
     if output is None:
-        output_func = lambda t, x, z, u, p, q: x
+        def output_func(t, x, z, u, p, q):
+            _ = t, z, u, p, q
+            return x
     else:
         y_eval = output(0, x0_eval, u0, p_init)
         assert y_eval is not None, "Output function must return a value"
-        output_func = lambda t, x, z, u, p, q: output(t, x, u(t), p)
 
-    dynamics = lambda t, x, z, u, p: xdot(t, x, u(t), p)
+        def output_func(t, x, z, u, p, q):
+            _ = z, q
+            return output(t, x, u(t), p)
+
+    def dynamics(t, x, z, u, p):
+        _ = z
+        return xdot(t, x, u(t), p)
 
     spec = DynamicsSpec(
         inputs=control,
@@ -188,9 +223,13 @@ def create_autonomous_ode(
         x0 = np.array(x0)
 
     if isinstance(x0, (np.ndarray, int, float)):
-        x0_func = lambda z, u, p: (x0, None)
+        def x0_func(z, u, p):
+            _ = z, u
+            return x0, None
     else:
-        x0_func = lambda z, u, p: (x0(p), None)
+        def x0_func(z, u, p):
+            _ = z, u
+            return x0(p), None
 
     if p_init is not None:
         assert (
@@ -213,21 +252,31 @@ def create_autonomous_ode(
 
     assert (
         is_scalar(x0_eval) and is_scalar(dot_x_eval)
-    ) or x0_eval.shape == dot_x_eval.shape, f"x0 and xdot must have the same shape; x0 is {x0_eval} and xdot is {dot_x_eval}"
+    ) or x0_eval.shape == dot_x_eval.shape, (
+        "x0 and xdot must have the same shape; "
+        f"x0 is {x0_eval} and xdot is {dot_x_eval}"
+    )
 
     if output is None:
         if is_scalar(x0_eval):
-            output_func = lambda t, x, z, u, p, q: x[0]
+            def output_func(t, x, z, u, p, q):
+                _ = t, z, u, p, q
+                return x[0]
         else:
-            output_func = lambda t, x, z, u, p, q: x
-
+            def output_func(t, x, z, u, p, q):
+                _ = t, z, u, p, q
+                return x
     else:
         y_eval = output(x0_eval, p_init)
         assert y_eval is not None, "Output function must return a value"
-        output_func = (lambda t, x, z, u, p, q: output(x, p),)
 
-    dynamics = lambda t, x, z, u, p: xdot(x, p)
+        def output_func(t, x, z, u, p, q):
+            _ = t, z, u, q
+            return output(x, p)
 
+    def dynamics(t, x, z, u, p):
+        _ = t, z, u
+        return xdot(x, p)
     spec = DynamicsSpec(
         inputs=Noop(),
         parameters=parameters,
@@ -264,7 +313,7 @@ class CompositionOperator:
     def dim(self) -> Scalar | VectorSpace | None:
 
         dim = sum(self.sizes())
-        return VectorSpace(f"composition", (dim,)) if dim else None
+        return VectorSpace("composition", (dim,)) if dim else None
 
     def inverse(self, ab) -> List:
         next_slice = ab
@@ -347,7 +396,7 @@ def direct_sum(
         for system in systems
     ]
 
-    proj_u = CompositionOperator.from_dimensions(f"u", *u_range)
+    proj_u = CompositionOperator.from_dimensions("u", *u_range)
     if proj_u.dim() is None:
         u_space = Noop()
     else:

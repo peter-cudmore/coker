@@ -21,3 +21,5 @@ per-file-ignores =
     src/coker/toolkits/system_modelling/std_lib/__init__.py: F401,F403
     src/coker/toolkits/system_modelling/std_lib/common/__init__.py: F401,F403
     src/coker/backends/casadi/__init__.py: F401,F403,F405
+    src/coker/dynamics/transcription_helpers.py: E501
+    src/coker/dynamics/types.py: E501

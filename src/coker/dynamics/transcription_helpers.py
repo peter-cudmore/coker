@@ -145,7 +145,8 @@ def generate_discritisation_operators(
         * time_scaling_factor
     )
 
-    t = lambda tau: (interval[0] + interval[1]) / 2 + tau * time_scaling_factor
+    def t(tau):
+        return (interval[0] + interval[1]) / 2 + tau * time_scaling_factor
 
     derivative: List[np.ndarray] = [row for row in colocation_coeff.T]
     bases: List[np.ndarray] = [row for row in bases]
@@ -217,7 +218,7 @@ def split_at_non_differentiable_points(
                 sorted_boundaries[:-1], sorted_boundaries[1:]
             )
         ]
-        max_length = max(l for l, _ in intervals)
+        max_length = max(length for length, _ in intervals)
 
         if all(length == max_length for length, _ in intervals):
             sorted_boundaries += [mid for _, mid in intervals]
