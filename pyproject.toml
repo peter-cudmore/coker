@@ -65,6 +65,7 @@ version = "0.3.17"
 pytest ="^8.0.0"
 pytest-mypy = "*"
 black = "25.1.0"
+flake8 = "^7.1.1"
 
 [tool.poetry.group.casadi.dependencies]
 casadi="^3.7.0"
