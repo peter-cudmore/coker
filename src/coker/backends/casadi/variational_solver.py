@@ -93,15 +93,18 @@ def create_variational_solver(problem: VariationalProblem):
     # Set up functions
     equalities = []
 
-    dynamics = lambda *args: casadi.evaluate(problem.system.dxdt, args)
-    algebraic = lambda *args: (
-        casadi.evaluate(problem.system.g, args) if problem.system.g else noop
-    )
-    quadrature = lambda *args: (
-        casadi.evaluate(problem.system.dqdt, args)
-        if problem.system.dqdt
-        else noop
-    )
+    def dynamics(*args):
+        return casadi.evaluate(problem.system.dxdt, args)
+
+    def algebraic(*args):
+        if problem.system.g:
+            return casadi.evaluate(problem.system.g, args)
+        return noop
+
+    def quadrature(*args):
+        if problem.system.dqdt:
+            return casadi.evaluate(problem.system.dqdt, args)
+        return noop
 
     # parameters & control - need to know how big they are
     # to construct our decision variables
@@ -599,7 +602,8 @@ def _evaluate_violation(raw_value, lower, upper) -> np.ndarray:
         has_upper = np.isfinite(upper_i)
         if has_lower and has_upper:
             raise ValueError(
-                "Variational iteration callbacks only support half-space constraints per component"
+                "Variational iteration callbacks only support half-space "
+                "constraints per component"
             )
         if has_lower:
             violations.append(max(lower_i - value_i, 0.0))
@@ -729,7 +733,8 @@ class _CallbackIterate:
 
 
 class CallbackWrapper(ca.Callback):
-    """Wrap a CasADi NLP iteration callback into the variational callback API."""
+    """Wrap a CasADi NLP iteration callback into the variational
+    callback API."""
 
     def __init__(
         self,

@@ -1,4 +1,4 @@
-from typing import Type, Tuple, List, Any
+from typing import List, Any
 from functools import reduce
 from operator import mul
 from enum import Enum
@@ -9,7 +9,7 @@ import scipy as sy
 import scipy as scp
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Tracer, VectorSpace, Noop
+from coker.algebra.kernel import Tracer, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike, SolverParameters
@@ -230,9 +230,10 @@ class NumpyBackend(Backend):
         raise NotImplementedError(f"{op} is not implemented")
 
     def resolve_post_fn(self, dim):
-        # For scalar outputs, reshape extracts the Python scalar from the array.
-        # Tracers must pass through unchanged (they appear during function composition tracing).
-        # For non-scalar outputs, numpy ops already produce the correct shape.
+        # For scalar outputs, reshape extracts the Python scalar from the
+        # array. Tracers must pass through unchanged during function
+        # composition tracing. Non-scalar outputs already have the
+        # correct shape.
         if dim.is_scalar():
             _dim = dim
 
@@ -287,13 +288,17 @@ class NumpyBackend(Backend):
 
         if dqdt is Noop():
             y0 = x0
-            f = lambda t, x: dxdt(t, x, None, u, p)
+
+            def f(t, x):
+                return dxdt(t, x, None, u, p)
 
         else:
             y0 = (np.concatenate([x0, q0]),)
-            f = lambda t, x: np.concatenate(
-                [dxdt(t, x, None, u, p), dqdt(t, x, None, u, p)]
-            )
+
+            def f(t, x):
+                return np.concatenate(
+                    [dxdt(t, x, None, u, p), dqdt(t, x, None, u, p)]
+                )
 
         if isinstance(solver_parameters, NumpySolverParameters):
             method = solver_parameters.solver.value
@@ -329,7 +334,6 @@ class NumpyBackend(Backend):
         outputs: List[Tracer],
     ):
 
-        impl = None
         tape = cost.tape
 
         assert all(c.tape == tape for c in constraints)
@@ -378,9 +382,10 @@ class NumpyBackend(Backend):
         problem_args = [x, *arg_symbols]
         cost_f = sp.lambdify(problem_args, cost)
 
-        cost_jac = lambda a: sp.lambdify(problem_args, jacobian(cost, x))(
-            a
-        ).reshape(x.shape)
+        def cost_jac(a):
+            return sp.lambdify(problem_args, jacobian(cost, x))(a).reshape(
+                x.shape
+            )
         cost_hess = sp.lambdify(problem_args, hessian(cost, x))
 
         out_constriants = []

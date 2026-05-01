@@ -15,7 +15,7 @@ def to_array(value, shape):
     if isinstance(value, np.ndarray) and value.shape == shape:
         return jnp.array(value)
 
-    raise plementedError
+    raise NotImplementedError
 
 
 scalar_types = (

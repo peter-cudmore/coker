@@ -2,7 +2,7 @@ import sympy as sp
 import numpy as np
 from coker import Function
 from coker.backends.backend import Backend, ArrayLike
-from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP, NormOP
+from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP
 from coker.algebra.dimensions import Dimension
 from coker.backends.numpy.core import reshape
 
@@ -65,7 +65,7 @@ def sympy_dot(x, y):
         return to_matrix(x).dot(to_matrix(y))
     try:
         return sp.tensorcontraction(sp.tensorproduct(x, y), (0, 1))
-    except:
+    except (AttributeError, TypeError, ValueError):
         pass
     return x.T @ y
 

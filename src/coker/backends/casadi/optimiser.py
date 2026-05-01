@@ -3,7 +3,6 @@ from typing import List
 from coker.algebra.kernel import Tracer
 
 import casadi as ca
-import numpy as np
 
 
 def build_optimisation_problem(
@@ -52,8 +51,6 @@ def build_optimisation_problem(
 
     (cost_fn,) = substitute([cost], workspace)
     output_map = ca.Function("y", *lower(tape, outputs, workspace))
-
-    n_constraints = len(constraints)
 
     #    constraint_function = np.zeros((n_constraints,))
     #    lower_bound = ca.DM(n_constraints, 1)
