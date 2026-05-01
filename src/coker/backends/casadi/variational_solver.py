@@ -295,6 +295,7 @@ def create_variational_solver(problem: VariationalProblem):
             decode_controls=(
                 control_factory.to_output_array if problem.control else None
             ),
+            parameter_solution_map=p_output_map,
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
 
@@ -601,6 +602,7 @@ class CallbackWrapper(ca.Callback):
         terminal_constraints,
         t_final: float,
         decode_controls: Optional[Callable[[ca.DM], list]],
+        parameter_solution_map: Optional[Callable[[ca.DM], list]] = None,
         opts=None,
     ):
         ca.Callback.__init__(self)
@@ -618,6 +620,7 @@ class CallbackWrapper(ca.Callback):
         self.decode_controls = decode_controls
         self.construct(name, {} if opts is None else opts)
         self._iterate_count = 0
+        self.parameter_solution_map = parameter_solution_map
 
     @staticmethod
     def new(*args, **kwargs) -> "CallbackWrapper":
@@ -667,7 +670,7 @@ class CallbackWrapper(ca.Callback):
         solution = VariationalSolution(
             cost=loss,
             projectors=self.projectors,
-            parameter_solutions={},
+            parameter_solutions=self.parameter_solution_map(parameters),
             parameters=system_parameters,
             path=path,
             control_solutions=control_solutions,

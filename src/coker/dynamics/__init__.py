@@ -32,7 +32,7 @@ from coker.dynamics.types import (
     ValueType,
     VariationalProblem,
     VariationalSolution,
-    VartionalIterationCallback,
+    VariationalIterationCallback,
 )
 
 __all__ = [
@@ -60,7 +60,7 @@ __all__ = [
     "ValueType",
     "VariationalProblem",
     "VariationalSolution",
-    "VartionalIterationCallback",
+    "VariationalIterationCallback",
     "create_autonomous_ode",
     "direct_sum",
     "evaluate_legendre_polynomial",
