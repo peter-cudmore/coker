@@ -1,5 +1,4 @@
 import dataclasses
-import enum
 from typing import Optional, List, Tuple, Callable
 
 import numpy as np
@@ -117,7 +116,7 @@ class VariationalProblem:
 
         s.t.
             dx/dt = f(x(t), p)                              [Dynamics]
-            dq/dt = g(x(t), p)                              [Integral Constraints]
+            dq/dt = g(x(t), p)                          [Integral Constraints]
             0 < h(t, x, p)                                  [Path Constraints]
             c = C(t, x, q, p)                               [Cost]
             (t, x, q, u, p) in  [0, 1] * X * Q * U * P      [Set Constraints]
@@ -133,8 +132,8 @@ class VariationalProblem:
 
     This is solved by:
         1. Choosing a discritisation scheme for t, [x,q] and u
-        2. transcribing the problem into a nonlinear program by evaluating the constraints at knot points
-           and adding additional constraints to enforce continuity.
+        2. Transcribing the problem into a nonlinear program by
+        evaluating constraints at knot points and enforcing continuity.
         3. Classifying the NLP and passing it into an appropriate solver.
 
     """

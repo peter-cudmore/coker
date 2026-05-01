@@ -172,7 +172,7 @@ class KinematicsVisualiser:
             self.update_values(angles)
             return self.get_artists()
 
-        ani = FuncAnimation(
+        animation = FuncAnimation(
             fig=self.figure,
             func=update,
             frames=len(angles_over_time),
@@ -180,3 +180,4 @@ class KinematicsVisualiser:
             repeat=loop,
         )
         plt.show()
+        return animation

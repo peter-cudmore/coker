@@ -8,7 +8,6 @@ from coker.toolkits.spatial import (
     SE3Adjoint,
     SE3CoAdjoint,
     hat,
-    se3Adjoint,
 )
 
 
@@ -101,7 +100,9 @@ class RigidBody:
         transforms:
             transform X_{lam(i), i} is the location of the origin of the ith
             link in lam(i) coordinates, so that at rest
-            g_i(0) = prod_{j=0, i}(X_{lam(j), j} = X_{-1, 0} @ X_{0, 1} @ X_{lam(1), 1}) @ ...
+            g_i(0) = prod_{j=0, i}(
+                X_{lam(j), j} = X_{-1, 0} @ X_{0, 1} @ X_{lam(1), 1}
+            ) @ ...
 
         rest transforms:
             the rest transform is g_i(0) s.t. g_i(q) = exp(zeta q) g_i(0)
@@ -256,7 +257,8 @@ class RigidBody:
         The position of each joint $i$ is given by
         \prod_{j <= i} g_{j-1; j} exp(zeta_jq_j)
 
-        where g_{i-1; j} is the transfrom of the joint origin to the parent frame
+        where g_{i-1; j} is the transform of the joint origin to the
+        parent frame
         zeta_j is the joint basis in the joint frame
         q_j is the joint angle
 

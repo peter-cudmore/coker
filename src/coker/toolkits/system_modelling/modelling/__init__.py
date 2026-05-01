@@ -65,7 +65,7 @@ def is_component_def(obj) -> bool:
             return True
         if issubclass(obj, BlockContainer):
             return True
-    except:
+    except TypeError:
         pass
     return False
 
@@ -167,8 +167,9 @@ class BlockContainer(CokerListableSubclasses):
         in_port = port_in.resolve()
         out_port = port_out.resolve()
         assert in_port not in self.connections, (
-            f"Component input {port_in.component}: {port_in.component.spec().inputs[port_in.port_index]} "
-            f"is already in use "
+            f"Component input {port_in.component}: "
+            f"{port_in.component.spec().inputs[port_in.port_index]} is "
+            "already in use"
         )
         self.connections[in_port] = out_port
 
