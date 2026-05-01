@@ -3,15 +3,9 @@ from typing import Any, Tuple, Type
 from coker.algebra.kernel import Function, Tracer
 from typing import List, Dict
 
-from coker.dynamics import (
-    VariationalProblem,
-    SolverParameters
-)
+from coker.dynamics import VariationalProblem, SolverParameters
 
 ArrayLike = Any
-
-
-
 
 
 class Backend(metaclass=ABCMeta):
