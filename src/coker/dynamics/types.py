@@ -238,7 +238,7 @@ Solution = Union[
 LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
 
 
-class VartionalIterationCallback:
+class VariationalIterationCallback:
 
     def __call__(
         self,
@@ -269,7 +269,7 @@ class TranscriptionOptions:
     verbose: bool = False
     optimiser_options: dict = field(default_factory=dict)
     initialise_near_guess: bool = True
-    interation_callback: Optional[VartionalIterationCallback] = None
+    interation_callback: Optional[VariationalIterationCallback] = None
 
 
 @dataclass
