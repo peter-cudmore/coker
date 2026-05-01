@@ -386,6 +386,7 @@ class NumpyBackend(Backend):
             return sp.lambdify(problem_args, jacobian(cost, x))(a).reshape(
                 x.shape
             )
+
         cost_hess = sp.lambdify(problem_args, hessian(cost, x))
 
         out_constriants = []

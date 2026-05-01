@@ -25,7 +25,7 @@ from coker.toolkits.system_modelling.modelling import (
     is_component_def,
     is_model,
     model,
- )
+)
 
 __all__ = [
     "Angle",

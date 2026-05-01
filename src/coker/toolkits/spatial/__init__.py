@@ -12,11 +12,11 @@ from coker.toolkits.spatial.algebra import (
     se3Adjoint,
     se3CoAdjoint,
     se3_bracket,
- )
+)
 from coker.toolkits.spatial.unit_quaternion import (
     UnitQuaternion,
     quaternion_mul,
- )
+)
 
 __all__ = [
     "Isometry3",

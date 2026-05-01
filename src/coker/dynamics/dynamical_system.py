@@ -26,9 +26,7 @@ def create_dynamics_from_spec(
         backend=backend,
     )
 
-    assert (
-        len(x0.output) == 2
-    ), (
+    assert len(x0.output) == 2, (
         "Initial conditions must be a pair, one for the state and one "
         "for the algebraic variables"
     )
@@ -39,9 +37,7 @@ def create_dynamics_from_spec(
     state_space = VectorSpace("x", state.dim.flat())
 
     if algebraic is not None:
-        assert (
-            algebraic.dim == spec.algebraic.dim
-        ), (
+        assert algebraic.dim == spec.algebraic.dim, (
             "Initial algebraic conditions must have the same dimension "
             "as the algebraic variables"
         )
@@ -59,17 +55,13 @@ def create_dynamics_from_spec(
 
     assert len(xdot.output) == 1, "Dynamics must return a single vector"
 
-    assert (
-        xdot.output[0].dim.shape == state.dim.shape
-    ), (
+    assert xdot.output[0].dim.shape == state.dim.shape, (
         "Dynamics must return a vector of the same dimension as the "
         f"state: x0 gave {state.dim} and dynamics gave {xdot.output[0].dim}"
     )
 
     if spec.algebraic is not None:
-        assert (
-            spec.constraints is not Noop()
-        ), (
+        assert spec.constraints is not Noop(), (
             "If algebraic constraints are specified, constraints must "
             "also be specified"
         )
@@ -129,10 +121,13 @@ def create_control_system(
     if isinstance(x0, (list, tuple, int, float)):
         x0 = np.array(x0)
     if isinstance(x0, np.ndarray):
+
         def x0_func(z, u, p):
             _ = z, u
             return x0, None
+
     else:
+
         def x0_func(z, u, p):
             _ = z, u
             return x0(p), None
@@ -158,9 +153,7 @@ def create_control_system(
     if u_init is not None:
         assert callable(u_init), "u_init must be a callable"
         u0 = u_init(0)
-        assert (
-            u0.shape == u_dim.shape
-        ), (
+        assert u0.shape == u_dim.shape, (
             "u0 must have the same shape as the control output; "
             f"u0 is {u0} and control output is {u_dim}"
         )
@@ -178,9 +171,11 @@ def create_control_system(
     )
 
     if output is None:
+
         def output_func(t, x, z, u, p, q):
             _ = t, z, u, p, q
             return x
+
     else:
         y_eval = output(0, x0_eval, u0, p_init)
         assert y_eval is not None, "Output function must return a value"
@@ -223,10 +218,13 @@ def create_autonomous_ode(
         x0 = np.array(x0)
 
     if isinstance(x0, (np.ndarray, int, float)):
+
         def x0_func(z, u, p):
             _ = z, u
             return x0, None
+
     else:
+
         def x0_func(z, u, p):
             _ = z, u
             return x0(p), None
@@ -259,13 +257,17 @@ def create_autonomous_ode(
 
     if output is None:
         if is_scalar(x0_eval):
+
             def output_func(t, x, z, u, p, q):
                 _ = t, z, u, p, q
                 return x[0]
+
         else:
+
             def output_func(t, x, z, u, p, q):
                 _ = t, z, u, p, q
                 return x
+
     else:
         y_eval = output(x0_eval, p_init)
         assert y_eval is not None, "Output function must return a value"
@@ -277,6 +279,7 @@ def create_autonomous_ode(
     def dynamics(t, x, z, u, p):
         _ = t, z, u
         return xdot(x, p)
+
     spec = DynamicsSpec(
         inputs=Noop(),
         parameters=parameters,

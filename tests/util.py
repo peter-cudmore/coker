@@ -54,9 +54,7 @@ def validate_symbolic_call(name, f, arguments, test_set, backend):
             ex.add_note(f"Expected: {expected}\n Result: {result}")
             raise ex
 
-        assert (
-            are_equal
-        ), (
+        assert are_equal, (
             f"Test {name} failed on item {i}: {item}\n"
             f"Expected: {expected}\nGot: {result}"
         )

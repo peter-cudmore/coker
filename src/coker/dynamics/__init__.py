@@ -7,7 +7,7 @@ from coker.dynamics.transcription_helpers import (
     legendre_coefficient,
     lgr_points,
     split_at_non_differentiable_points,
- )
+)
 from coker.dynamics.types import (
     BoundedVariable,
     Constant,
@@ -33,7 +33,7 @@ from coker.dynamics.types import (
     VariationalProblem,
     VariationalSolution,
     VartionalIterationCallback,
- )
+)
 
 __all__ = [
     "BoundedVariable",
