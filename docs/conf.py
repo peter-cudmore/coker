@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath("../src"))
 # Re-exported symbols have __module__ = 'coker.algebra.dimensions', which
 # causes Sphinx to create duplicate object descriptions. Patch them to their
 # public module so autodoc uses the canonical coker.* name.
-import coker.algebra.dimensions as _dims
+import coker.algebra.dimensions as _dims  # noqa: E402
 
 for _cls in [
     _dims.Scalar,
