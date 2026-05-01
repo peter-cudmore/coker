@@ -367,6 +367,9 @@ def create_variational_solver(problem: VariationalProblem):
         path=path,
         control_solutions=control_out,
         output=problem.system.y,
+        t_final=problem.t_final,
+        path_constraint_exprs=problem.path_constraints,
+        terminal_constraint_exprs=problem.terminal_constraints,
     )
 
     return solution
@@ -576,162 +579,6 @@ def _to_output_projector(proj: ca.MX) -> Optional[np.ndarray]:
     return np.array(proj.to_DM()).reshape(proj.shape)
 
 
-def _to_flat_array(value) -> np.ndarray:
-    if value is None:
-        return np.zeros((0,))
-
-    if isinstance(value, (tuple, list)):
-        assert len(value) == 1, "Expected a single output value"
-        (value,) = value
-
-    array = np.array(value, dtype=float)
-    return array.reshape((-1,))
-
-
-def _evaluate_violation(raw_value, lower, upper) -> np.ndarray:
-    values = _to_flat_array(raw_value)
-    lower_bounds = _to_flat_array(lower)
-    upper_bounds = _to_flat_array(upper)
-    assert (
-        values.shape == lower_bounds.shape == upper_bounds.shape
-    ), "Constraint bounds do not match constraint values"
-
-    violations = []
-    for value_i, lower_i, upper_i in zip(values, lower_bounds, upper_bounds):
-        has_lower = np.isfinite(lower_i)
-        has_upper = np.isfinite(upper_i)
-        if has_lower and has_upper:
-            raise ValueError(
-                "Variational iteration callbacks only support half-space "
-                "constraints per component"
-            )
-        if has_lower:
-            violations.append(max(lower_i - value_i, 0.0))
-        elif has_upper:
-            violations.append(max(value_i - upper_i, 0.0))
-
-    if not violations:
-        return np.zeros((0,))
-
-    return np.array(violations, dtype=float)
-
-
-class CallbackControlProxy:
-    def __init__(self, control_solutions):
-        self.control_solutions = control_solutions
-
-    def __call__(self, t) -> np.ndarray:
-        return np.array([control(t) for control in self.control_solutions])
-
-
-class CallbackTrajectoryProxy:
-    def __init__(
-        self,
-        path: InterpolatingPolyCollection,
-        evaluator: Callable[[float], np.ndarray],
-    ):
-        self.path = path
-        self.intervals = path.intervals
-        self._evaluator = evaluator
-
-    def __call__(self, t) -> np.ndarray:
-        return _to_flat_array(self._evaluator(t))
-
-    def interval_starts(self):
-        for t, _ in self.path.interval_starts():
-            yield t, self(t)
-
-    def interval_ends(self):
-        for t, _ in self.path.interval_ends():
-            yield t, self(t)
-
-    def knot_points(self):
-        for t, _, _ in self.path.knot_points():
-            yield t, self(t), None
-
-
-class _CallbackIterate:
-    def __init__(
-        self,
-        *,
-        path: InterpolatingPolyCollection,
-        projectors: Tuple[
-            Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
-        ],
-        control_solutions,
-        parameters: np.ndarray,
-        system_parameters: np.ndarray,
-        output_function,
-        path_constraints,
-        terminal_constraints,
-    ):
-        self.path = path
-        self.projectors = projectors
-        self.control_solutions = control_solutions
-        self.parameters = parameters
-        self.system_parameters = system_parameters
-        self.output_function = output_function
-        self.path_constraints = path_constraints
-        self.terminal_constraints = terminal_constraints
-
-    def state(self, t) -> np.ndarray:
-        projector = self.projectors[0]
-        assert projector is not None
-        return projector @ self.path(t)
-
-    def algebraic(self, t) -> Optional[np.ndarray]:
-        projector = self.projectors[1]
-        if projector is None:
-            return None
-        return projector @ self.path(t)
-
-    def quadratures(self, t) -> Optional[np.ndarray]:
-        projector = self.projectors[2]
-        if projector is None:
-            return None
-        return projector @ self.path(t)
-
-    def control_law(self, t) -> Optional[np.ndarray]:
-        if self.control_solutions is None:
-            return None
-        return np.array([control(t) for control in self.control_solutions])
-
-    def _args_at(self, t):
-        return (
-            t,
-            self.state(t),
-            self.algebraic(t),
-            self.control_law(t),
-            self.system_parameters,
-            self.quadratures(t),
-        )
-
-    def output(self, t) -> np.ndarray:
-        return _to_flat_array(self.output_function(*self._args_at(t)))
-
-    def constraint_violations(self, constraints, t) -> np.ndarray:
-        if not constraints:
-            return np.zeros((0,))
-
-        args = self._args_at(t)
-        violations = [
-            _evaluate_violation(
-                constraint.value(*args), constraint.lower, constraint.upper
-            )
-            for constraint in constraints
-        ]
-        return np.concatenate(violations) if violations else np.zeros((0,))
-
-    def path_constraint_trajectory(self) -> CallbackTrajectoryProxy:
-        return CallbackTrajectoryProxy(
-            self.path,
-            lambda t: self.constraint_violations(self.path_constraints, t),
-        )
-
-    def terminal_constraint_vector(self, t_final: float) -> np.ndarray:
-        return self.constraint_violations(self.terminal_constraints, t_final)
-
-
 class CallbackWrapper(ca.Callback):
     """Wrap a CasADi NLP iteration callback into the variational
     callback API."""
@@ -770,6 +617,7 @@ class CallbackWrapper(ca.Callback):
         self.t_final = t_final
         self.decode_controls = decode_controls
         self.construct(name, {} if opts is None else opts)
+        self._iterate_count = 0
 
     @staticmethod
     def new(*args, **kwargs) -> "CallbackWrapper":
@@ -816,40 +664,18 @@ class CallbackWrapper(ca.Callback):
             else None
         )
 
-        iterate = _CallbackIterate(
-            path=path,
+        solution = VariationalSolution(
+            cost=loss,
             projectors=self.projectors,
+            parameter_solutions={},
+            parameters=system_parameters,
+            path=path,
             control_solutions=control_solutions,
-            parameters=parameter_vector,
-            system_parameters=system_parameters,
-            output_function=self.output_function,
-            path_constraints=self.path_constraints,
-            terminal_constraints=self.terminal_constraints,
+            output=self.output_function,
+            t_final=self.t_final,
+            path_constraint_exprs=self.path_constraints,
+            terminal_constraint_exprs=self.terminal_constraints,
         )
-
-        x = CallbackTrajectoryProxy(path, iterate.state)
-        z = (
-            CallbackTrajectoryProxy(path, iterate.algebraic)
-            if self.projectors[1] is not None
-            else None
-        )
-        q = (
-            CallbackTrajectoryProxy(path, iterate.quadratures)
-            if self.projectors[2] is not None
-            else None
-        )
-        u = (
-            CallbackControlProxy(control_solutions)
-            if control_solutions is not None
-            else None
-        )
-        y = CallbackTrajectoryProxy(path, iterate.output)
-        c_path = iterate.path_constraint_trajectory()
-        c_terminal = iterate.terminal_constraint_vector(self.t_final)
-
-        should_continue = bool(
-            self.callback(
-                x, z, q, parameter_vector, u, y, loss, c_path, c_terminal
-            )
-        )
+        should_continue = bool(self.callback(self._iterate_count, solution))
+        self._iterate_count += 1
         return [0 if should_continue else 1]

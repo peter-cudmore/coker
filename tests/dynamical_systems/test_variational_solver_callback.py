@@ -5,6 +5,7 @@ from coker import VectorSpace
 from coker.dynamics import (
     BoundedVariable,
     VariationalProblem,
+    VariationalSolution,
     create_autonomous_ode,
 )
 
@@ -17,38 +18,26 @@ class LossCheckingCallback:
         self.loss_differences = []
         self.losses = []
 
-    def __call__(
-        self,
-        x,
-        z,
-        q,
-        p,
-        u,
-        y,
-        loss,
-        c_path,
-        c_terminal,
-        **_kwargs,
-    ):
+    def __call__(self, iterate: int, solution: VariationalSolution, **_kwargs):
 
-        assert z is None
-        assert q is None
-        assert u is None
-        assert p.shape == self.param.shape
-        assert c_terminal.shape == (0,)
-        assert c_path(0.5).shape == (0,)
+        assert solution.algebraic(0) is None
+        assert solution.quadratures(0) is None
+        assert solution.control_law(0) is None
+        assert solution.parameters.shape == self.param.shape
+        assert solution.terminal_constraints().shape == (0,)
+        assert solution.path_constraints(0.5).shape == (0,)
 
         recomputed_loss = 0.0
         for t_i in self.sample_times:
-            y_i = np.atleast_1d(y(t_i))
-            x_i = np.atleast_1d(x(t_i))
+            y_i = np.atleast_1d(solution(t_i))
+            x_i = np.atleast_1d(solution.state(t_i))
             truth = np.atleast_1d(self.solution(t_i, self.param))
             error = truth - y_i
             recomputed_loss += float(error.T @ error)
             assert np.allclose(x_i, y_i)
 
-        self.losses.append(loss)
-        self.loss_differences.append(abs(loss - recomputed_loss))
+        self.losses.append(solution.cost)
+        self.loss_differences.append(abs(solution.cost - recomputed_loss))
         return True
 
 
