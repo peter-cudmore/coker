@@ -252,6 +252,16 @@ def create_variational_solver(problem: VariationalProblem):
 
     solver_options = problem.transcription_options.optimiser_options
 
+    f_out = ca.Function(
+        "Output",
+        [decision_variables],
+        [path_symbols, u_symbols, p],
+        {},
+    )
+
+    
+
+
     if not problem.transcription_options.verbose:
         solver_options.update(
             {
@@ -311,12 +321,7 @@ def create_variational_solver(problem: VariationalProblem):
     min_loss = float(soln["f"])
     min_args = soln["x"]
 
-    f_out = ca.Function(
-        "Output",
-        [decision_variables],
-        [path_symbols, u_symbols, p],
-        {},
-    )
+
     x_out, u_out, p_out = f_out(min_args)
 
     path = poly_collection.to_fixed(np.array(x_out))

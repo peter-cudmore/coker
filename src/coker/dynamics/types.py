@@ -16,6 +16,11 @@ import numpy as np
 from typing import Dict
 
 
+class SolverParameters(metaclass=abc.ABCMeta):
+    """Interface for backend-specific ODE solver configuration."""
+    pass
+
+
 @dataclass
 class DynamicsSpec:
     inputs: FunctionSpace
@@ -210,14 +215,47 @@ class ConstantControlVariable(ParameterMixin):
 Constant = Union[float, int]
 ValueType = Scalar | VectorSpace
 ControlLaw = Callable[[Scalar], ValueType]
-ControlVariable = (
+ControlVariable = Union[
     ConstantControlVariable | PiecewiseConstantVariable | SpikeVariable
-)
+]
 ParameterVariable = BoundedVariable | Constant
 Solution = Union[
     DynamicalSystem, Callable[[Scalar, ControlLaw, ValueType], Scalar]
 ]
 LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
+
+
+class VartionalIterationCallback:
+
+    def __call__(self,
+                 x: Callable[[float], np.ndarray],
+                 z: Callable[[float], np.ndarray],
+                 q: Callable[[float], np.ndarray],
+                 p: float,
+                 u: Callable[[float], np.ndarray],
+                 loss:float,
+                 c_path: Callable[[float], np.ndarray],
+                 c_terminal:np.ndarray) -> bool:
+        """Wrapper class to handle callbacks at the end of each optimisation step.
+
+        Args:
+            x: State trajectory (function of time)
+            z: Control trajectory (function of time)
+            q: Quadrature trajectory (function of time)
+            p: Parameter values
+            u: Control law (function of time)
+            loss: Loss value
+            c_path: Path constraint violation
+            c_terminal: Terminal constraint violation
+
+        Returns:
+              True if the solver should continue.
+
+        The shapes of each argument should line up with the `VariationalProblem` class attributes.
+
+        """
+
+        return True
 
 
 @dataclass
@@ -228,6 +266,7 @@ class TranscriptionOptions:
     verbose: bool = False
     optimiser_options: dict = field(default_factory=dict)
     initialise_near_guess: bool = True
+    interation_callback: Optional[VartionalIterationCallback] = None
 
 
 @dataclass

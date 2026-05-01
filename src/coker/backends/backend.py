@@ -5,17 +5,13 @@ from typing import List, Dict
 
 from coker.dynamics import (
     VariationalProblem,
-    create_autonomous_ode,
-    DynamicsSpec,
+    SolverParameters
 )
 
 ArrayLike = Any
 
 
-class SolverParameters(metaclass=ABCMeta):
-    """Interface for backend-specific ODE solver configuration."""
 
-    pass
 
 
 class Backend(metaclass=ABCMeta):
