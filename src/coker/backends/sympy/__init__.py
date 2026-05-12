@@ -4,7 +4,7 @@ from coker import Function
 from coker.backends.backend import Backend, ArrayLike
 from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP, NormOP
 from coker.algebra.dimensions import Dimension
-from coker.backends.numpy.core import reshape
+from coker.backends.sympy.shape import reshape
 
 MatrixType = (sp.Matrix, sp.ImmutableMatrix)
 
@@ -80,7 +80,8 @@ def sympy_norm(x, ord):
         matrix = to_matrix(x)
     except (NotImplementedError, ValueError) as ex:
         raise NotImplementedError(
-            f"Norm is only implemented for scalars, vectors, and matrices, got {x}"
+            "Norm is only implemented for scalars, vectors, and "
+            f"matrices, got {x}"
         ) from ex
 
     rows, cols = matrix.shape

@@ -37,3 +37,22 @@ def solve_info_from_casadi_stats(
         unified_return_status=unified_status,
         iteration_count=iteration_count,
     )
+
+
+def solve_info_from_scipy_result(
+    result, *, solver: str = "trust-constr"
+) -> SolveInfo:
+    iteration_count = getattr(result, "nit", None)
+    if iteration_count is not None:
+        iteration_count = int(iteration_count)
+
+    status = getattr(result, "status", None)
+    unified_status = None if status is None else str(status)
+    return SolveInfo(
+        backend="numpy",
+        solver=solver,
+        success=bool(getattr(result, "success", False)),
+        return_status=str(getattr(result, "message", "unknown")),
+        unified_return_status=unified_status,
+        iteration_count=iteration_count,
+    )

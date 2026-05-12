@@ -1,11 +1,8 @@
 from typing import List, Any
-from functools import reduce
-from operator import mul
 from enum import Enum
+
 import numpy as np
 import scipy.sparse.csc
-import sympy as sp
-import scipy as sy
 import scipy as scp
 
 from coker.algebra import Dimension, OP
@@ -13,7 +10,7 @@ from coker.algebra.kernel import Tracer, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike, SolverParameters
-from coker.backends.evaluator import evaluate_inner
+from coker.backends.numpy.optimisation import build_optimisation_problem
 
 
 class Solver(Enum):
@@ -47,12 +44,6 @@ scalar_types = (
     bool,
     np.bool_,
 )
-
-
-def is_scalar_symbol(v):
-    if isinstance(v, sp.MatrixSymbol):
-        return v.shape == (1, 1)
-    return isinstance(v, (sp.Symbol, sp.Expr))
 
 
 def div(num, den):
@@ -116,64 +107,24 @@ def call_parameterised_op(op, *args):
     return result
 
 
-def jacobian(f: sp.Expr, x):
-    result = sp.Matrix([f]).jacobian(x)
-    return result
-
-
-def hessian(f: sp.Expr, x):
-    h = sp.hessian(f, x)
-    return h
-
-
-def reshape_sympy_matrix(arg, shape):
-
-    if len(shape) == 1:
-        out_shape = (shape[0], 1)
-    else:
-        assert len(shape) == 2
-        out_shape = shape
-
-    if arg.shape == (*out_shape, 1):
-        return arg[:, :, 0]
-
-    old_cols = 1 if len(arg.shape) == 1 else arg.shape[1]
-
-    def lookup(i, j):
-        offset = i * out_shape[1] + j
-        old_row = offset // old_cols
-        old_col = offset % old_cols
-        value = arg[old_row, old_col]
-        return value
-
-    return sp.Matrix(*out_shape, lookup)
-
-
 def reshape(arg, dim):
     if dim.is_scalar():
-        if isinstance(arg, scalar_types) or is_scalar_symbol(arg):
+        if isinstance(arg, scalar_types):
             return arg
-        else:
-            try:
-                (inner,) = arg
-            except ValueError as ex:
-                raise TypeError(f"Expecting a scalar, got {arg}") from ex
-            except TypeError as ex:
-                raise TypeError(f"Expecting a scalar, got {arg}") from ex
-            return reshape(inner, dim)
-    elif isinstance(
-        arg, (sp.Matrix, sp.Array, sp.MatrixSlice, sp.ImmutableMatrix)
-    ):
-        if arg.shape == dim.dim:
-            return arg
-        return reshape_sympy_matrix(arg, dim.dim)
-    elif isinstance(arg, np.ndarray):
+        try:
+            (inner,) = arg
+        except ValueError as ex:
+            raise TypeError(f"Expecting a scalar, got {arg}") from ex
+        except TypeError as ex:
+            raise TypeError(f"Expecting a scalar, got {arg}") from ex
+        return reshape(inner, dim)
+    if isinstance(arg, np.ndarray):
         return np.reshape(arg, dim.dim)
-    elif scp.sparse.issparse(arg):
+    if scp.sparse.issparse(arg):
         return np.reshape(arg.toarray(), dim.dim)
-    elif isinstance(arg, (float, int)):
+    if isinstance(arg, (float, int)):
         return np.array([arg]).reshape(dim.dim)
-    elif arg is None:
+    if arg is None:
         return arg
     raise NotImplementedError(f"Dont know how to reshape {arg}")
 
@@ -328,115 +279,15 @@ class NumpyBackend(Backend):
 
     def build_optimisation_problem(
         self,
-        cost: Tracer,  # cost
+        cost: Tracer,
         constraints: List[Tracer],
         arguments: List[Tracer],
         outputs: List[Tracer],
+        initial_conditions,
     ):
-
-        tape = cost.tape
-
-        assert all(c.tape == tape for c in constraints)
-        assert all(a.tape == tape for a in arguments)
-        assert all(o.tape == tape for o in outputs)
-
-        # For each variable
-        #
-        # 2. replace each 'variable' with a projection P, such that
-        # V_i = P_iX + \sum_j R_jA_j
-        # where A_j is the jth argument
-
-        # construct Q_0, P_0, R_0 and N(X)
-        # c_i = X^T Q_i X + P_i X + R_i + N_i(Z)
-
-        arg_indexes = {a.index for a in arguments}
-        decision_variables = [
-            i for i in tape.input_indicies if i not in arg_indexes
-        ]
-
-        arg_symbols = []
-        for i, a in enumerate(arguments):
-            shape = (a.shape[0], 1) if len(a.shape) == 1 else a.shape
-            assert len(shape) == 2
-            arg_symbols.append(sp.MatrixSymbol(f"p_{i}", *shape))
-
-        n = 0
-        mappings = []
-        for index in decision_variables:
-            dim: Dimension = tape.dim[index]
-            if dim.is_scalar():
-                flat_dim = 1
-            else:
-                flat_dim = reduce(mul, dim)
-
-            mappings.append((index, dim, (n, flat_dim + n)))
-            n += flat_dim
-
-        x = sp.Array([sp.symbols(f"x_{i}") for i in range(n)])
-        for idx, dim, (start, stop) in mappings:
-            tape.substitute(idx, (OP.VALUE, x[start:stop]))
-
-        workspace = {}
-        (cost,) = evaluate_inner(tape, arguments, [cost], self, workspace)
-
-        problem_args = [x, *arg_symbols]
-        cost_f = sp.lambdify(problem_args, cost)
-
-        def cost_jac(a):
-            return sp.lambdify(problem_args, jacobian(cost, x))(a).reshape(
-                x.shape
-            )
-
-        cost_hess = sp.lambdify(problem_args, hessian(cost, x))
-
-        out_constriants = []
-        for i, constraint in enumerate(constraints):
-            (c,) = evaluate_inner(
-                tape,
-                arguments,
-                [constraint.as_halfplane_bound()],
-                self,
-                workspace,
-            )
-            c_func = sp.lambdify(problem_args, c)
-            c_jac = jacobian(c, problem_args)
-
-            if not c_jac.free_symbols:
-                c_0 = c_func(*[np.zeros_like(x_i) for x_i in problem_args])
-                this_constraint = sy.optimize.LinearConstraint(
-                    c_jac.evalf(), -c_0, np.inf
-                )
-            else:
-                this_constraint = sy.optimize.NonlinearConstraint(
-                    sp.lambdify(problem_args, c),
-                    0,
-                    np.inf,
-                    jac=sp.lambdify(problem_args, c_jac),
-                    hess="cs",
-                )
-            out_constriants.append(this_constraint)
-
-        out_symbols = evaluate_inner(tape, arguments, outputs, self, workspace)
-
-        out_map = [sp.lambdify(problem_args, o) for o in out_symbols]
-
-        def solver(*solver_args):
-            x0 = np.zeros(n)
-
-            soln = sy.optimize.minimize(
-                cost_f,
-                x0,
-                method="trust-constr",
-                jac=cost_jac,
-                hess=cost_hess,
-                constraints=out_constriants,
-            )
-
-            inner_args = [soln.x] + list(*solver_args)
-            result = [o(*inner_args)[0] for o in out_map]
-            return [self.to_backend_array(r) for r in result]
-
-        return solver
+        return build_optimisation_problem(
+            self, cost, constraints, arguments, outputs, initial_conditions
+        )
 
 
 #
