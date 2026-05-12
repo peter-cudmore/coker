@@ -143,43 +143,5 @@ class ProblemBuilder:
         pass
 
 
-class VariationalProblem:
-    """
-
-    A Variational problem is of the form
-
-
-        min_[u(t), p]  c(1)
-
-        s.t.
-            dx/dt = f(x(t), p)                              [Dynamics]
-            dq/dt = g(x(t), p)                          [Integral Constraints]
-            0 < h(t, x, p)                                  [Path Constraints]
-            c = C(t, x, q, p)                               [Cost]
-            (t, x, q, u, p) in  [0, 1] * X * Q * U * P      [Set Constraints]
-
-
-    A solution is the
-        - value c,
-        - vector function u(t)
-        - parameters p
-
-    that (locally) minimise c.
-
-
-    This is solved by:
-        1. Choosing a discritisation scheme for t, [x,q] and u
-        2. Transcribing the problem into a nonlinear program by
-        evaluating constraints at knot points and enforcing continuity.
-        3. Classifying the NLP and passing it into an appropriate solver.
-
-    """
-
-    def __init__(self, intervals: List[float]):
-        self.intervals = intervals
-        self.signals = []
-        self.variables = []
-
-
 def norm(arg, order=2):
     return np.linalg.norm(arg, ord=order)
