@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from coker import function, Scalar, VectorSpace, FunctionSpace
+from coker import function, Scalar, VectorSpace, FunctionSpace, Dimension
 from ..util import is_close
 
 
@@ -106,3 +107,32 @@ def test_partial_evaluation(backend):
         backend=backend,
     )
     assert evaluator_f_sqr_plus_one(sqr, 2) == 5
+
+
+def test_vector_norm_order_is_preserved(backend):
+
+    norm_1 = function(
+        arguments=[VectorSpace("x", 2)],
+        implementation=lambda x: np.linalg.norm(x, ord=1),
+        backend=backend,
+    )
+
+    assert norm_1.output_shape() == (Dimension(None),)
+    result = norm_1(np.array([3.0, -4.0]))
+    assert isinstance(result, float)
+    assert is_close(result, 7.0, tolerance=1e-6)
+
+
+def test_matrix_norm_order_is_preserved(backend):
+
+    matrix_norm = function(
+        arguments=[VectorSpace("A", (2, 2))],
+        implementation=lambda A: np.linalg.norm(A, ord=1),
+        backend=backend,
+    )
+    matrix = np.array([[1.0, -2.0], [3.0, 4.0]])
+    assert is_close(
+        matrix_norm(matrix),
+        np.linalg.norm(matrix, ord=1),
+        tolerance=1e-6,
+    )

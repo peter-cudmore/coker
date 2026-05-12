@@ -44,3 +44,26 @@ def test_vector_lowering():
     ]
     out_flat = list(sp.ImmutableMatrix(out))
     assert all(sp.simplify(a - e) == 0 for a, e in zip(out_flat, expected))
+
+
+def test_matrix_norm_lowering():
+    matrix_norm = coker.function(
+        [coker.VectorSpace("A", (2, 2))],
+        lambda A: np.linalg.norm(A, ord=1),
+        backend="sympy",
+    )
+
+    backend = get_backend_by_name("sympy")
+    args, out = backend.lower_to_symbolic(matrix_norm)
+    matrix_symbol = sp.Array(
+        [
+            [sp.Symbol("A_0_0"), sp.Symbol("A_0_1")],
+            [sp.Symbol("A_1_0"), sp.Symbol("A_1_1")],
+        ]
+    )
+    assert args == [matrix_symbol]
+    expected = sp.Max(
+        sp.Abs(sp.Symbol("A_0_0")) + sp.Abs(sp.Symbol("A_1_0")),
+        sp.Abs(sp.Symbol("A_0_1")) + sp.Abs(sp.Symbol("A_1_1")),
+    )
+    assert sp.simplify(out - expected) == 0

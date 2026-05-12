@@ -11,6 +11,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.factories import zeros
+from coker.optimisation import SolveFailure, SolveInfo
 
 
 __all__ = [
@@ -23,4 +24,6 @@ __all__ = [
     "FunctionSpace",
     "SymbolicVector",
     "zeros",
+    "SolveFailure",
+    "SolveInfo",
 ]

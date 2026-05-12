@@ -67,12 +67,23 @@ def concat(*args: ca.MX, axis=0):
 
 
 def norm(x, ord):
-    if ord == 1:
-        return ca.norm_1(x)
-    if ord == 2:
-        return ca.norm_2(x)
+    rows, cols = x.shape
+    is_vector = rows == 1 or cols == 1
 
-    raise NotImplementedError
+    if is_vector:
+        if ord in (None, 2):
+            return ca.norm_2(x)
+        if ord == 1:
+            return ca.norm_1(x)
+        raise NotImplementedError(f"Vector norm ord={ord} is not supported")
+
+    if ord is None:
+        return ca.norm_fro(x)
+    if ord == 1:
+        return ca.mmax(ca.sum1(ca.fabs(x)))
+    raise NotImplementedError(
+        f"Matrix norm ord={ord} is not supported by the CasADi backend"
+    )
 
 
 def reshape(x, *shape):

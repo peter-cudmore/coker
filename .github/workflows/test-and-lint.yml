@@ -17,33 +17,29 @@ jobs:
         with:
           timezoneLinux: "Australia/Melbourne"
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
+          enable-cache: true
       - name: Install package
-        run: poetry install --with ci,casadi,jax
+        run: uv sync --group ci --extra casadi --extra jax
       - name: Run tests
-        run: poetry run pytest
+        run: uv run pytest
 
   linter-name:
     name: runner / black and flake8
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          python-version: '3.13'
-          cache: 'pip'
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
+          python-version: "3.13"
+          enable-cache: true
       - name: Install package
-        run: poetry install --with ci,casadi,jax
+        run: uv sync --group ci --extra casadi --extra jax
       - name: Run black
-        run: poetry run black --check --diff src
+        run: uv run black --check --diff src
       - name: Run flake8
-        run: poetry run flake8 src tests docs examples scripts
+        run: uv run flake8 src tests docs examples scripts

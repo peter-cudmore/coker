@@ -114,10 +114,12 @@ class JaxBackend(Backend):
         )
 
     def to_numpy_array(self, array) -> ArrayLike:
-        if array is not None:
-            return np.array(array)
-        else:
+        if array is None:
             return array
+        numpy_array = np.array(array)
+        if numpy_array.shape == ():
+            return numpy_array.item()
+        return numpy_array
 
     def to_backend_array(self, array):
         import scipy.sparse
@@ -135,6 +137,7 @@ class JaxBackend(Backend):
                     (inner,) = arg
                 except ValueError as ex:
                     raise TypeError(f"Expecting a scalar, got {arg}") from ex
+
                 return self.reshape(inner, dim)
         elif isinstance(arg, jnp.ndarray):
             return jnp.reshape(arg, dim.dim)

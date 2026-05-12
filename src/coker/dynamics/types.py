@@ -22,6 +22,7 @@ from coker.algebra.kernel import (
 )
 import numpy as np
 from typing import Dict
+from coker.optimisation import SolveInfo
 
 if TYPE_CHECKING:
     from .transcription_helpers import InterpolatingPoly
@@ -453,6 +454,7 @@ class VariationalSolution:
         np.ndarray,
     ]
     t_final: float = 0.0
+    solve_info: Optional[SolveInfo] = None
     path_constraint_exprs: List[InequalityExpression] = field(
         default_factory=list
     )

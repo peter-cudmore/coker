@@ -1,8 +1,11 @@
 from coker.backends.casadi.casadi import substitute, to_casadi, lower
 from typing import List
-from coker.algebra.kernel import Tracer
 
 import casadi as ca
+import numpy as np
+
+from coker.algebra.kernel import Tracer
+from coker.optimisation import SolveFailure, solve_info_from_casadi_stats
 
 
 def build_optimisation_problem(
@@ -88,18 +91,44 @@ class CasadiSolver:
         self.output_map = output_map
         self.x0 = x0
         self.p: ca.MX = p
+        self.last_solve_info = None
 
     def __call__(self, *args):
-        if not self.p.is_empty():
-            raise NotImplementedError
-
         spec = {
             "x0": self.x0,
             "lbg": self.g_bounds[0],
             "ubg": self.g_bounds[1],
         }
+        output_args = []
+        if not self.p.is_empty():
+            parameter_values = [
+                np.asarray(arg, dtype=float).reshape((-1, 1)) for arg in args
+            ]
+            p_value = ca.vertcat(*[ca.DM(value) for value in parameter_values])
+            if p_value.shape != self.p.shape:
+                raise ValueError(
+                    f"Expected parameter vector with shape {self.p.shape}, got {p_value.shape}"
+                )
+            spec["p"] = p_value
+            output_args.append(p_value)
+        elif args:
+            raise ValueError(
+                "This optimisation problem does not accept runtime parameters"
+            )
+
         soln = self.solver_inner(**spec)
+        self.last_solve_info = solve_info_from_casadi_stats(
+            self.solver_inner.stats()
+        )
+        if not self.last_solve_info.success:
+            raise SolveFailure(
+                "CasADi optimisation solve failed with status "
+                f"{self.last_solve_info.return_status}",
+                self.last_solve_info,
+            )
 
-        result = self.output_map(soln["x"])
+        result = self.output_map(soln["x"], *output_args)
+        if self.output_map.n_out() == 1:
+            result = [result]
 
-        return [r.full() for r in result]
+        return [np.asarray(r.full()) for r in result]

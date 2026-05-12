@@ -134,7 +134,7 @@ class ReshapeOP(Operator):
 
 class NormOP(Operator):
     def __init__(self, ord=2):
-        self.ord = 2
+        self.ord = ord
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return Dimension(None)

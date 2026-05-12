@@ -1,32 +1,24 @@
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-
+requires = ["uv_build>=0.9.18,<0.10"]
+build-backend = "uv_build"
 
 [project]
 name = "coker"
+version = "0.3.20"
 requires-python = ">=3.10"
-dynamic = ["version"]
 authors = [
     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
 ]
 maintainers = [
-     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
+    {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
 ]
-license="MPL-2.0"
-license-files=["LICEN[CS]E.*"]
+license = "MPL-2.0"
+license-files = ["LICEN[CS]E.*"]
 classifiers = [
-
-  "Development Status :: 3 - Alpha",
-
-  # Indicate who your project is intended for
-  "Intended Audience :: Developers",
-  "Topic :: Software Development :: Build Tools",
-
-  # Specify the Python versions you support here.
-  "Programming Language :: Python",
-
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "Programming Language :: Python",
 ]
 description = "Coker Mathematical Programming Toolkit"
 readme = "README.md"
@@ -36,45 +28,41 @@ dependencies = [
     "scipy",
     "typing-extensions",
 ]
+
 [project.optional-dependencies]
-dev = [
-    "black == 25.1.0",
-    "pytest",
-    "pytest-mypy",
-    "mypy"
+casadi = [
+    "casadi>=3.7.0,<4",
+]
+jax = [
+    "jax>=0.10,<0.11; python_version >= '3.11'",
 ]
 
-
+[dependency-groups]
+dev = [
+    "black==25.1.0",
+    "pytest",
+    "pytest-mypy",
+    "mypy",
+]
+ci = [
+    "pytest>=8.0.0,<9",
+    "pytest-mypy",
+    "black==25.1.0",
+    "flake8>=7.1.1,<8",
+]
+docs = [
+    "sphinx>=7.0",
+    "furo",
+    "sphinx-autodoc-typehints",
+]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
 pythonpath = ["src"]
 testpaths = [
-	"tests",
+    "tests",
 ]
-
 
 [tool.black]
 line-length = 79
 target-version = ["py310", "py311", "py312", "py313"]
-
-[tool.poetry]
-version = "0.3.20"
-
-[tool.poetry.group.ci.dependencies]
-pytest ="^8.0.0"
-pytest-mypy = "*"
-black = "25.1.0"
-flake8 = "^7.1.1"
-
-[tool.poetry.group.casadi.dependencies]
-casadi="^3.7.0"
-
-[tool.poetry.group.jax.dependencies]
-jax="^0.6"
-
-[tool.poetry.group.docs.dependencies]
-sphinx = ">=7.0"
-furo = "*"
-sphinx-autodoc-typehints = "*"
-
