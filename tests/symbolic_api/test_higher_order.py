@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from coker import function, Scalar, VectorSpace, FunctionSpace, Dimension
 from ..util import is_close
