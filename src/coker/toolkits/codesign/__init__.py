@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Optional, List, Tuple, Callable
+from collections.abc import Mapping, Sequence
+from typing import Optional, List, Tuple, Callable, Any
 
 import numpy as np
 
@@ -29,24 +30,39 @@ class MathematicalProgram:
         self.input_shape = input_shape
         self.output_shape = output_shape
         self.impl = impl
+        self.solve_info = None
 
     def __call__(self, *args):
-        assert len(args) == len(self.input_shape)
+        if len(args) != len(self.input_shape):
+            raise ValueError(
+                f"Expected {len(self.input_shape)} runtime arguments, got {len(args)}"
+            )
+
+        try:
+            result = self.impl(*args)
+        finally:
+            self.solve_info = getattr(self.impl, "last_solve_info", None)
+        if not isinstance(result, (list, tuple)):
+            result = [result]
+        if len(result) != len(self.output_shape):
+            raise ValueError(
+                f"Backend returned {len(result)} outputs for "
+                f"{len(self.output_shape)} requested outputs"
+            )
 
         return [
-            np.reshape(o, dim.shape)
-            for o, dim in zip(self.impl(args), self.output_shape)
+            np.reshape(np.asarray(o), dim.shape)
+            for o, dim in zip(result, self.output_shape)
         ]
 
 
 class ProblemBuilder:
     def __init__(self, arguments: Optional[List[VectorSpace | Scalar]] = None):
-
+        self.tape: Optional[Tape] = Tape()
         self.arguments = (
             [self.tape.input(a) for a in arguments] if arguments else []
         )
         self.objective = None
-        self.tape: Optional[Tape] = None
         self.constraints = []
         self.outputs = []
         self.initial_conditions = {}
@@ -76,6 +92,28 @@ class ProblemBuilder:
     def output_shape(self) -> Tuple[Dimension, ...]:
         return tuple(o.dim for o in self.outputs)
 
+    def _normalise_initial_conditions(self) -> dict[int, Any]:
+        if isinstance(self.initial_conditions, Mapping):
+            return dict(self.initial_conditions)
+        if not isinstance(self.initial_conditions, Sequence):
+            raise TypeError(
+                "initial_conditions must be a mapping from tracer index to value "
+                "or a sequence aligned with decision-variable declaration order"
+            )
+        assert self.tape is not None
+        parameter_indicies = {argument.index for argument in self.arguments}
+        decision_input_indicies = [
+            index
+            for index in self.tape.input_indicies
+            if index not in parameter_indicies
+        ]
+        if len(self.initial_conditions) != len(decision_input_indicies):
+            raise ValueError(
+                "initial_conditions sequence length does not match the number of "
+                "decision variables"
+            )
+        return dict(zip(decision_input_indicies, self.initial_conditions))
+
     def build(self, backend: Optional[str] = None) -> MathematicalProgram:
         assert isinstance(self.objective, Minimise)
         assert self.tape is not None
@@ -92,17 +130,16 @@ class ProblemBuilder:
             self.constraints,
             self.arguments,
             self.outputs,
-            self.initial_conditions,
+            self._normalise_initial_conditions(),
         )
 
         return MathematicalProgram(self.input_shape, self.output_shape, impl)
 
     def __enter__(self):
-        self.tape = Tape()
+        assert self.tape is not None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.tape = None
         pass
 
 
@@ -145,4 +182,4 @@ class VariationalProblem:
 
 
 def norm(arg, order=2):
-    pass
+    return np.linalg.norm(arg, ord=order)

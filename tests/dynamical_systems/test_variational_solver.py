@@ -1,5 +1,6 @@
 import numpy as np
-from coker import FunctionSpace, Scalar, VectorSpace, function
+import pytest
+from coker import FunctionSpace, Scalar, SolveFailure, VectorSpace, function
 from coker.dynamics import (
     create_autonomous_ode,
     VariationalProblem,
@@ -168,6 +169,8 @@ def test_fitting_constant():
     sol = problem()
     assert sol.cost < 1e-6
     assert abs(sol.parameter_solutions["value"] - 2) < 1e-4
+    assert sol.solve_info is not None
+    assert sol.solve_info.success
 
 
 def test_fitting_line():
@@ -476,3 +479,41 @@ def test_fitting_line_with_constraints_and_regularisation(variational_backend):
     sol = problem()
     assert sol.parameter_solutions["value"] <= 1.75 + 1e-4
     assert 0 < sol.parameter_solutions["regularisation"] < 1
+
+
+def test_variational_solver_raises_on_infeasible_problem(variational_backend):
+    def x0(p):
+        return p[0]
+
+    def xdot(x, p):
+        return 0 * x + 0 * p[0]
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 1), x0=x0, xdot=xdot, backend="numpy"
+    )
+
+    def loss(f, p_inner):
+        return (f(1.0, p_inner) - 1.0) ** 2
+
+    impossible_constraint = function(
+        system.y.input_spaces(),
+        lambda _t, _x, _z, _u, p, _q: 1.0 - p[0],
+        backend=variational_backend,
+    )
+
+    problem = VariationalProblem(
+        loss=loss,
+        system=system,
+        parameters=[
+            BoundedVariable("value", upper_bound=3.0, lower_bound=2.0, guess=2.5)
+        ],
+        t_final=1,
+        terminal_constraints=[impossible_constraint >= 0],
+        backend=variational_backend,
+    )
+    problem.transcription_options.optimiser_options = {"ipopt.max_iter": 20}
+
+    with pytest.raises(SolveFailure) as exc_info:
+        problem()
+
+    assert not exc_info.value.solve_info.success

@@ -2,7 +2,7 @@ import sympy as sp
 import numpy as np
 from coker import Function
 from coker.backends.backend import Backend, ArrayLike
-from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP
+from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP, NormOP
 from coker.algebra.dimensions import Dimension
 from coker.backends.numpy.core import reshape
 
@@ -70,6 +70,38 @@ def sympy_dot(x, y):
     return x.T @ y
 
 
+def sympy_norm(x, ord):
+    if not hasattr(x, "shape"):
+        if ord in (None, 1, 2):
+            return sp.Abs(x)
+        raise NotImplementedError(f"Scalar norm ord={ord} is not supported")
+
+    try:
+        matrix = to_matrix(x)
+    except (NotImplementedError, ValueError) as ex:
+        raise NotImplementedError(
+            f"Norm is only implemented for scalars, vectors, and matrices, got {x}"
+        ) from ex
+
+    rows, cols = matrix.shape
+    is_vector = rows == 1 or cols == 1
+
+    if is_vector:
+        if ord in (None, 2):
+            return matrix.norm()
+        if ord == 1:
+            return matrix.norm(1)
+        raise NotImplementedError(f"Vector norm ord={ord} is not supported")
+
+    if ord in (None, "fro"):
+        return matrix.norm()
+    if ord == 1:
+        return matrix.norm(1)
+    raise NotImplementedError(
+        f"Matrix norm ord={ord} is not supported by the sympy backend"
+    )
+
+
 impls = {
     OP.ADD: lambda x, y: x + y,
     OP.SUB: lambda x, y: x - y,
@@ -110,7 +142,7 @@ def sympy_concat(*arrays, axis: int = 0):
 parameterised_impls = {
     ConcatenateOP: lambda op, *x: sympy_concat(*x, axis=op.axis),
     ReshapeOP: lambda op, x: reshape(x, dim=Dimension(op.newshape)),
-    #    NormOP: lambda op, x:
+    NormOP: lambda op, x: sympy_norm(x, ord=op.ord),
 }
 
 
@@ -135,6 +167,8 @@ class SympyBackend(Backend):
         try:
             value = sp.nsimplify(array, tolerance=1e-10)
             out = np.array(value, dtype=float)
+            if out.shape == ():
+                return out.item()
             return out
         except (AttributeError, TypeError):
             pass

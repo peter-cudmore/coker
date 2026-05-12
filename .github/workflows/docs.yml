@@ -19,19 +19,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.12"
-
-      - name: Install Poetry
-        run: pip install poetry
+          enable-cache: true
 
       - name: Install dependencies
-        run: poetry install --with docs
+        run: uv sync --group docs
 
       - name: Build docs
-        run: poetry run sphinx-build docs/ docs/_build/html -W --keep-going
+        run: uv run sphinx-build docs/ docs/_build/html -W --keep-going
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3

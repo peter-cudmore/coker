@@ -34,6 +34,7 @@ from coker.dynamics.types import (
     VariationalSolution,
     VariationalIterationCallback,
 )
+from coker.optimisation import SolveFailure, SolveInfo
 
 __all__ = [
     "BoundedVariable",
@@ -61,6 +62,8 @@ __all__ = [
     "VariationalProblem",
     "VariationalSolution",
     "VariationalIterationCallback",
+    "SolveFailure",
+    "SolveInfo",
     "create_autonomous_ode",
     "direct_sum",
     "evaluate_legendre_polynomial",

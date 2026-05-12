@@ -21,6 +21,8 @@ from coker.dynamics import (
     VariationalSolution,
 )
 
+from coker.optimisation import SolveFailure, solve_info_from_casadi_stats
+
 
 def noop(*args):
     return None
@@ -346,6 +348,13 @@ def create_variational_solver(problem: VariationalProblem):
         lbg=lbg,
         ubg=ubg,
     )
+    solve_info = solve_info_from_casadi_stats(nlp_solver.stats())
+    if not solve_info.success:
+        raise SolveFailure(
+            "CasADi variational solve failed with status "
+            f"{solve_info.return_status}",
+            solve_info,
+        )
 
     min_loss = float(soln["f"])
     min_args = soln["x"]
@@ -369,6 +378,7 @@ def create_variational_solver(problem: VariationalProblem):
         control_solutions=control_out,
         output=problem.system.y,
         t_final=problem.t_final,
+        solve_info=solve_info,
         path_constraint_exprs=problem.path_constraints,
         terminal_constraint_exprs=problem.terminal_constraints,
     )
