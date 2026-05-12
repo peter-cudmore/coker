@@ -35,7 +35,8 @@ class MathematicalProgram:
     def __call__(self, *args):
         if len(args) != len(self.input_shape):
             raise ValueError(
-                f"Expected {len(self.input_shape)} runtime arguments, got {len(args)}"
+                f"Expected {len(self.input_shape)} runtime arguments, "
+                f"got {len(args)}"
             )
 
         try:
@@ -97,8 +98,9 @@ class ProblemBuilder:
             return dict(self.initial_conditions)
         if not isinstance(self.initial_conditions, Sequence):
             raise TypeError(
-                "initial_conditions must be a mapping from tracer index to value "
-                "or a sequence aligned with decision-variable declaration order"
+                "initial_conditions must be a mapping from tracer "
+                "index to value or a sequence aligned with "
+                "decision-variable declaration order"
             )
         assert self.tape is not None
         parameter_indicies = {argument.index for argument in self.arguments}
@@ -109,8 +111,8 @@ class ProblemBuilder:
         ]
         if len(self.initial_conditions) != len(decision_input_indicies):
             raise ValueError(
-                "initial_conditions sequence length does not match the number of "
-                "decision variables"
+                "initial_conditions sequence length does not match "
+                "the number of decision variables"
             )
         return dict(zip(decision_input_indicies, self.initial_conditions))
 

@@ -107,7 +107,8 @@ class CasadiSolver:
             p_value = ca.vertcat(*[ca.DM(value) for value in parameter_values])
             if p_value.shape != self.p.shape:
                 raise ValueError(
-                    f"Expected parameter vector with shape {self.p.shape}, got {p_value.shape}"
+                    f"Expected parameter vector with shape "
+                    f"{self.p.shape}, got {p_value.shape}"
                 )
             spec["p"] = p_value
             output_args.append(p_value)

@@ -505,7 +505,9 @@ def test_variational_solver_raises_on_infeasible_problem(variational_backend):
         loss=loss,
         system=system,
         parameters=[
-            BoundedVariable("value", upper_bound=3.0, lower_bound=2.0, guess=2.5)
+            BoundedVariable(
+                "value", upper_bound=3.0, lower_bound=2.0, guess=2.5
+            )
         ],
         t_final=1,
         terminal_constraints=[impossible_constraint >= 0],
