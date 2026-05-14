@@ -128,17 +128,31 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
 
     @staticmethod
     def fromarray(other: np.ndarray):
+        other = np.asarray(other)
         shape = other.shape
 
-        keys = {}
-        with np.nditer(
-            other, op_flags=["readonly"], flags=["multi_index", "reduce_ok"]
-        ) as it:
-            for item in it:
-                if item != 0:
-                    index = tuple(it.multi_index)
-                    keys[index] = float(item)
+        if other.ndim == 0:
+            value = float(other)
+            if value == 0:
+                return dok_ndarray(shape)
+            return dok_ndarray(shape, {(): value})
 
+        nz = np.nonzero(other)
+        if len(nz) == 0 or nz[0].size == 0:
+            return dok_ndarray(shape)
+
+        values = other[nz]
+        if other.ndim == 1:
+            keys = {
+                (int(i),): float(v)
+                for i, v in zip(nz[0], values, strict=False)
+            }
+            return dok_ndarray(shape, keys)
+
+        keys = {
+            tuple(int(axis[row]) for axis in nz): float(values[row])
+            for row in range(values.size)
+        }
         return dok_ndarray(shape, keys)
 
     @staticmethod

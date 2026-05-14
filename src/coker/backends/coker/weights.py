@@ -56,6 +56,36 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             quadratic, expected_shape=(*shape, memory.count, memory.count)
         )
 
+    @classmethod
+    def from_trusted_dok(
+        cls,
+        memory: MemorySpec,
+        shape: Tuple[int, ...],
+        constant: dok_ndarray | None = None,
+        linear: dok_ndarray | None = None,
+        quadratic: dok_ndarray | None = None,
+    ) -> "BilinearWeights":
+        def _coerce(value, expected_shape: Tuple[int, ...]) -> dok_ndarray:
+            if value is None:
+                return dok_ndarray(expected_shape)
+            if isinstance(value, dok_ndarray):
+                return value
+            if isinstance(value, np.ndarray):
+                return dok_ndarray.fromarray(value)
+            raise TypeError(
+                f"Expected dok_ndarray or ndarray, got {type(value)}"
+            )
+
+        obj = cls.__new__(cls)
+        obj.memory = memory
+        obj.shape = shape
+        obj.constant = _coerce(constant, shape)
+        obj.linear = _coerce(linear, (*shape, memory.count))
+        obj.quadratic = _coerce(
+            quadratic, (*shape, memory.count, memory.count)
+        )
+        return obj
+
     def transpose(self) -> "BilinearWeights":
         if len(self.shape) == 1:
             (n,) = self.shape
@@ -300,7 +330,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 raise ex
             quadratic = other @ self.quadratic
             shape = constant.shape
-            return BilinearWeights(
+            return BilinearWeights.from_trusted_dok(
                 self.memory, shape, constant, linear, quadratic
             )
 
@@ -350,26 +380,36 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             + linear_linear_quadratic
         )
         shape = (*self.shape[:-1], *other.shape[1:])
-        return BilinearWeights(self.memory, shape, constant, linear, quadratic)
+        return BilinearWeights.from_trusted_dok(
+            self.memory, shape, constant, linear, quadratic
+        )
 
-    def reshape(self, newshape: Tuple[int, ...], order="C") -> "BilinearWeights":
+    def reshape(
+        self, newshape: Tuple[int, ...], order="C"
+    ) -> "BilinearWeights":
         if order != "C":
             raise NotImplementedError("Only C-order reshape is supported")
         assert int(np.prod(self.shape)) == int(np.prod(newshape))
 
         def _reshape_tensor(tensor: dok_ndarray) -> dok_ndarray:
             if tensor.is_empty():
-                return dok_ndarray((*newshape, *tensor.shape[len(self.shape) :]))
+                return dok_ndarray(
+                    (*newshape, *tensor.shape[len(self.shape) :])
+                )
             data = {}
             for key, value in tensor.keys.items():
                 out_key = key[: len(self.shape)]
                 mem_key = key[len(self.shape) :]
-                flat_index = np.ravel_multi_index(out_key, self.shape, order="C")
+                flat_index = np.ravel_multi_index(
+                    out_key, self.shape, order="C"
+                )
                 new_out_key = np.unravel_index(flat_index, newshape, order="C")
                 data[(*new_out_key, *mem_key)] = value
-            return dok_ndarray((*newshape, *tensor.shape[len(self.shape) :]), data)
+            return dok_ndarray(
+                (*newshape, *tensor.shape[len(self.shape) :]), data
+            )
 
-        return BilinearWeights(
+        return BilinearWeights.from_trusted_dok(
             self.memory,
             newshape,
             constant=_reshape_tensor(self.constant),
@@ -392,7 +432,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             (*self.shape, memory.count, memory.count),
             {k: v for k, v in self.quadratic.keys.items()},
         )
-        return BilinearWeights(
+        return BilinearWeights.from_trusted_dok(
             memory,
             self.shape,
             constant=self.constant.clone(),
@@ -401,7 +441,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         )
 
     def clone(self):
-        return BilinearWeights(
+        return BilinearWeights.from_trusted_dok(
             self.memory,
             self.shape,
             self.constant.clone(),
@@ -429,7 +469,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 linear = -self.linear
                 quadratic = -self.quadratic
 
-                return BilinearWeights(
+                return BilinearWeights.from_trusted_dok(
                     self.memory, self.shape, constant, linear, quadratic
                 )
 
@@ -437,7 +477,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __truediv__(self, other):
         if isinstance(other, scalar):
-            return BilinearWeights(
+            return BilinearWeights.from_trusted_dok(
                 self.memory,
                 self.shape,
                 self.constant / other,
@@ -510,14 +550,16 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             linear_linear + c_self_quadratic + c_rhs_quadratic
         )
 
-        return BilinearWeights(self.memory, (1,), c, linear_weights, q)
+        return BilinearWeights.from_trusted_dok(
+            self.memory, (1,), c, linear_weights, q
+        )
 
     @staticmethod
     def identity2(memory: MemorySpec):
         shape = (memory.count,)
         data = {(i, i): 1 for i in range(memory.count)}
         linear = dok_ndarray((memory.count, memory.count), data)
-        return BilinearWeights(memory, shape, linear=linear)
+        return BilinearWeights.from_trusted_dok(memory, shape, linear=linear)
 
     @staticmethod
     def project(memory: MemorySpec, spec: MemorySpec, shape: tuple):
@@ -526,7 +568,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             multi_idx = np.unravel_index(k, shape, order="C")
             data[(*multi_idx, spec.location + k)] = 1
         linear = dok_ndarray((*shape, memory.count), data)
-        return BilinearWeights(memory, shape, linear=linear)
+        return BilinearWeights.from_trusted_dok(memory, shape, linear=linear)
 
     @staticmethod
     def reshape_identity(memory: MemorySpec, shape: tuple):
