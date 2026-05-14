@@ -420,6 +420,7 @@ class FunctionEvaluationLayer:
             return [float(value)]
         raise TypeError(f"Unsupported evaluate constant operand {type(value)}")
 
+
 class GenericVectorLayer:
     def __init__(
         self,

@@ -456,6 +456,7 @@ fn compile_evaluate_output_binding(
         length: compiled_length,
     })
 }
+
 fn compile_row_op(exported_row_op: ExportedRowOp) -> Result<RowOp, CompileError> {
     Ok(RowOp {
         first: compile_operand_index(exported_row_op.first, "first")?,
@@ -564,6 +565,7 @@ fn checked_u8_length(
         reason: "expected u8-sized collection",
     })
 }
+
 fn checked_u16(value: u32, field_name: &'static str) -> Result<u16, CompileError> {
     u16::try_from(value).map_err(|_| CompileError::InvalidField {
         field: field_name,
