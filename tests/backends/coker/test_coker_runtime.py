@@ -138,7 +138,6 @@ def test_runtime_matches_vector_valued_nested_evaluate_graph():
         tangents=(np.array([0.75, 0.5]),),
     )
 
-
 def test_runtime_matches_dot_graph():
     symbolic_function = function(
         [VectorSpace("x", 3)], implementation=lambda x: np.dot(x, x)

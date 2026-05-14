@@ -216,6 +216,7 @@ impl SparseTensor {
 
         Ok(Self {
             shape: (ROW_COUNT as u16, COLUMN_COUNT as u16, 0),
+
             entries,
         })
     }
