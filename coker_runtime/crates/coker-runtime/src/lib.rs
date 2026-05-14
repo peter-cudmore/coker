@@ -375,6 +375,7 @@ fn validate_evaluate_input_binding(
         }
     }
 }
+
 fn validate_generic_operand(
     operand_index: u16,
     input_length: u16,
@@ -452,6 +453,7 @@ fn pack_owned_inputs(input_specs: &[InputSpec], inputs: &[Vec<f32>], workspace: 
         workspace[start..stop].copy_from_slice(input_value);
     }
 }
+
 fn collect_outputs(program: &Program, workspace: &[f32]) -> Vec<Vec<f32>> {
     program
         .output_specs
@@ -509,6 +511,7 @@ fn push_forward_program_layers(
     }
     Ok(())
 }
+
 fn execute_bilinear_layer(
     bilinear_layer: &BilinearLayer,
     workspace: &mut [f32],
@@ -721,6 +724,7 @@ fn write_evaluate_outputs(
         workspace[start..stop].copy_from_slice(output_value);
     }
 }
+
 fn evaluate_generic_value(
     row_operation: &RowOp,
     input_slice: &[f32],
