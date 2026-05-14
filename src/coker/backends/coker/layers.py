@@ -256,6 +256,171 @@ class BilinearWorkspaceLayer:
         }
 
 
+class FunctionEvaluationLayer:
+    def __init__(
+        self,
+        memory_in: MemorySpec,
+        memory_out: MemorySpec,
+        input_bindings: Sequence[ArrayOperand],
+        output_bindings: Sequence[MemorySpec],
+        callee_graph,
+        callee_function_id: int | None = None,
+    ):
+        self.memory_in = memory_in
+        self.memory_out = memory_out
+        self.input_bindings = list(input_bindings)
+        self.output_bindings = list(output_bindings)
+        self.callee_graph = callee_graph
+        self.callee_function_id = callee_function_id
+
+    def inputs(self) -> List[MemorySpec]:
+        return [self.memory_in]
+
+    def outputs(self) -> List[MemorySpec]:
+        return [self.memory_out]
+
+    def __call__(self, workspace: np.ndarray) -> np.ndarray:
+        workspace = np.asarray(workspace).reshape(-1, order="C")
+        next_workspace = np.zeros(self.memory_out.count, dtype=float)
+        next_workspace[: self.memory_in.count] = workspace[
+            : self.memory_in.count
+        ]
+        inputs = [
+            self._materialize_value(binding, workspace)
+            for binding in self.input_bindings
+        ]
+        outputs = self._normalize_outputs(self.callee_graph(*inputs))
+        self._write_outputs(next_workspace, outputs)
+        return next_workspace
+
+    def push_forward(self, workspace: np.ndarray, dworkspace: np.ndarray):
+        workspace = np.asarray(workspace).reshape(-1, order="C")
+        dworkspace = np.asarray(dworkspace).reshape(-1, order="C")
+        next_workspace = np.zeros(self.memory_out.count, dtype=float)
+        next_dworkspace = np.zeros(self.memory_out.count, dtype=float)
+        next_workspace[: self.memory_in.count] = workspace[
+            : self.memory_in.count
+        ]
+        next_dworkspace[: self.memory_in.count] = dworkspace[
+            : self.memory_in.count
+        ]
+        inputs = [
+            self._materialize_value(binding, workspace)
+            for binding in self.input_bindings
+        ]
+        tangents = [
+            self._materialize_tangent(binding, dworkspace)
+            for binding in self.input_bindings
+        ]
+        outputs, tangent_outputs = self.callee_graph.push_forward(
+            *inputs, *tangents
+        )
+        self._write_outputs(next_workspace, self._normalize_outputs(outputs))
+        self._write_outputs(
+            next_dworkspace, self._normalize_outputs(tangent_outputs)
+        )
+        return next_workspace, next_dworkspace
+
+    def to_export_dict(self):
+        if self.callee_function_id is None:
+            raise ValueError(
+                "callee_function_id must be assigned before export"
+            )
+        return {
+            "kind": "evaluate",
+            "memory_in": self.memory_in.to_export_dict(),
+            "memory_out": self.memory_out.to_export_dict(),
+            "callee_function_id": int(self.callee_function_id),
+            "inputs": [
+                self._export_input_binding(binding)
+                for binding in self.input_bindings
+            ],
+            "outputs": [
+                {
+                    "destination_offset": int(binding.location),
+                    "length": int(binding.count),
+                }
+                for binding in self.output_bindings
+            ],
+        }
+
+    def _materialize_value(self, binding: ArrayOperand, workspace: np.ndarray):
+        if isinstance(binding, WorkspaceOperand):
+            raw = workspace[
+                binding.spec.location : binding.spec.location
+                + binding.spec.count
+            ]
+            return np.reshape(raw, binding.shape, order="C")
+        if isinstance(binding.value, dok_ndarray):
+            return np.reshape(
+                binding.value.toarray(), binding.shape, order="C"
+            )
+        return binding.value
+
+    def _materialize_tangent(
+        self, binding: ArrayOperand, dworkspace: np.ndarray
+    ):
+        if isinstance(binding, WorkspaceOperand):
+            raw = dworkspace[
+                binding.spec.location : binding.spec.location
+                + binding.spec.count
+            ]
+            return np.reshape(raw, binding.shape, order="C")
+        if isinstance(binding.value, dok_ndarray):
+            return np.zeros(binding.shape, dtype=float)
+        return 0.0
+
+    def _normalize_outputs(self, outputs) -> List[object]:
+        if len(self.output_bindings) == 1:
+            return [outputs]
+        assert isinstance(outputs, list)
+        return outputs
+
+    def _write_outputs(
+        self, destination_workspace: np.ndarray, outputs: Sequence[object]
+    ):
+        assert len(outputs) == len(self.output_bindings)
+        for binding, output_value in zip(
+            self.output_bindings, outputs, strict=False
+        ):
+            flat_output = vec(output_value).astype(float, copy=False)
+            assert flat_output.shape == (binding.count,)
+            start = binding.location
+            stop = start + binding.count
+            destination_workspace[start:stop] = flat_output
+
+    def _export_input_binding(self, binding: ArrayOperand):
+        if isinstance(binding, WorkspaceOperand):
+            return {
+                "kind": "workspace",
+                "offset": int(binding.spec.location),
+                "length": int(binding.spec.count),
+            }
+        values = self._flatten_constant_binding(binding)
+        return {
+            "kind": "constant",
+            "length": len(values),
+            "values": values,
+        }
+
+    def _flatten_constant_binding(
+        self, binding: ConstantOperand
+    ) -> List[float]:
+        value = binding.value
+        if isinstance(value, dok_ndarray):
+            array = value.toarray()
+            return (
+                np.asarray(array, dtype=float).reshape(-1, order="C").tolist()
+            )
+        if isinstance(value, np.ndarray):
+            return (
+                np.asarray(value, dtype=float).reshape(-1, order="C").tolist()
+            )
+        if isinstance(value, (float, int, bool, np.bool_)):
+            return [float(value)]
+        raise TypeError(f"Unsupported evaluate constant operand {type(value)}")
+
+
 class GenericVectorLayer:
     def __init__(
         self,
