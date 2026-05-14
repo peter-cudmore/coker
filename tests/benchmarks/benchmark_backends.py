@@ -16,6 +16,8 @@ from coker import function, VectorSpace
 from coker.dynamics import create_autonomous_ode
 from coker.dynamics.types import VariationalProblem, BoundedVariable
 from coker.backends.backend import get_backend_by_name
+from coker.backends.coker.core import create_opgraph
+from coker.backends.coker.runtime import CompiledGraph
 from coker.backends.numpy.core import NumpySolverParameters, Solver
 
 
@@ -103,6 +105,23 @@ def bench_function_eval():
             msg = str(e)[:40]
             startup_results.append((backend_name, float("inf"), msg))
             call_results.append((backend_name, float("inf"), msg))
+
+    try:
+        t0 = time.perf_counter()
+        symbolic_function = function(
+            [VectorSpace("x", N_STATES)], impl, backend="coker"
+        )
+        graph = create_opgraph(symbolic_function)
+        compiled_graph = CompiledGraph.compile(graph)
+        compiled_graph(x0)
+        startup = time.perf_counter() - t0
+        startup_results.append(("coker-runtime", startup, None))
+        t = timeit(lambda: compiled_graph(x0), n_warmup=5, n_calls=1000)
+        call_results.append(("coker-runtime", t, None))
+    except Exception as e:
+        msg = str(e)[:40]
+        startup_results.append(("coker-runtime", float("inf"), msg))
+        call_results.append(("coker-runtime", float("inf"), msg))
 
     subtitle = f"{N_STATES}-state, {N_LAYERS} layers "
     subtitle += "(matmul + bias + sin every 4)"

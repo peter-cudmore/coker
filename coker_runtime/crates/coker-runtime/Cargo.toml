@@ -1,0 +1,17 @@
+[package]
+name = "coker-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["std"]
+std = ["coker-bytecode/std"]
+
+[dependencies]
+coker-bytecode = { path = "../coker-bytecode", default-features = false }
+thiserror.workspace = true
