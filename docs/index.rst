@@ -12,6 +12,12 @@ them efficiently on embedded or bare-metal hardware.
    getting_started
 
 .. toctree::
+   :maxdepth: 1
+   :caption: Internals
+
+   backend_architecture
+
+.. toctree::
    :maxdepth: 2
    :caption: API Reference
 

@@ -49,18 +49,22 @@ scalar_types = (
 def div(num, den):
     if isinstance(den, Tracer):
         return num / den
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = np.divide(num, den)
     try:
-        if den == 0:
-            if isinstance(num, np.ndarray) and (num == 0).all():
-                return num
-            elif num == 0:
-                return num
-            else:
-                raise ZeroDivisionError(num, den)
+        if np.isscalar(den) and den == 0:
+            if np.isscalar(num):
+                return float("nan")
+            return np.full_like(result, np.nan, dtype=float)
+        zero_mask = den == 0
     except ValueError:
-        pass
-
-    return np.divide(num, den)
+        return result
+    if np.isscalar(zero_mask):
+        return result
+    if np.any(zero_mask):
+        result = np.asarray(result, dtype=float)
+        result[zero_mask] = np.nan
+    return result
 
 
 impls = {

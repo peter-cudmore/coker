@@ -352,22 +352,53 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         shape = (*self.shape[:-1], *other.shape[1:])
         return BilinearWeights(self.memory, shape, constant, linear, quadratic)
 
-    def compile(self) -> "_CompiledBW":
-        """Pre-materialise dok_ndarray tensors into dense numpy arrays."""
-        n = self.memory.count
-        flat = int(np.prod(self.shape))
-        c = self.constant.toarray().reshape(flat)
-        L = (
-            self.linear.toarray().reshape(flat, n)
-            if self.linear.keys
-            else None
+    def reshape(self, newshape: Tuple[int, ...], order="C") -> "BilinearWeights":
+        if order != "C":
+            raise NotImplementedError("Only C-order reshape is supported")
+        assert int(np.prod(self.shape)) == int(np.prod(newshape))
+
+        def _reshape_tensor(tensor: dok_ndarray) -> dok_ndarray:
+            if tensor.is_empty():
+                return dok_ndarray((*newshape, *tensor.shape[len(self.shape) :]))
+            data = {}
+            for key, value in tensor.keys.items():
+                out_key = key[: len(self.shape)]
+                mem_key = key[len(self.shape) :]
+                flat_index = np.ravel_multi_index(out_key, self.shape, order="C")
+                new_out_key = np.unravel_index(flat_index, newshape, order="C")
+                data[(*new_out_key, *mem_key)] = value
+            return dok_ndarray((*newshape, *tensor.shape[len(self.shape) :]), data)
+
+        return BilinearWeights(
+            self.memory,
+            newshape,
+            constant=_reshape_tensor(self.constant),
+            linear=_reshape_tensor(self.linear),
+            quadratic=_reshape_tensor(self.quadratic),
         )
-        Q = (
-            self.quadratic.toarray().reshape(flat, n, n)
-            if self.quadratic.keys
-            else None
+
+    def extend_memory(self, memory: MemorySpec) -> "BilinearWeights":
+        assert memory.location == 0
+        assert self.memory.location == 0
+        assert memory.count >= self.memory.count
+        if memory.count == self.memory.count:
+            return self.clone()
+
+        linear = dok_ndarray(
+            (*self.shape, memory.count),
+            {k: v for k, v in self.linear.keys.items()},
         )
-        return _CompiledBW(self.memory, self.shape, c, L, Q)
+        quadratic = dok_ndarray(
+            (*self.shape, memory.count, memory.count),
+            {k: v for k, v in self.quadratic.keys.items()},
+        )
+        return BilinearWeights(
+            memory,
+            self.shape,
+            constant=self.constant.clone(),
+            linear=linear,
+            quadratic=quadratic,
+        )
 
     def clone(self):
         return BilinearWeights(
@@ -437,8 +468,6 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             dot(y_0, y_1) = dot(c_0, c_1)
                              + ((c_0.T @ L_1 + c_1.T @ L_0 x)
                              + (c_0.T @ Q_1 + c_1.T @ Q_0 + L_0.T @ L_1) (x,x)
-
-
         """
         assert self.memory == rhs.memory
         assert (
@@ -451,8 +480,8 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         )
         memory_count = self.memory.count
         output_size = int(np.prod(self.shape))
-        c_self = self.constant.toarray().flatten()  # (output_size,)
-        c_rhs = rhs.constant.toarray().flatten()  # (output_size,)
+        c_self = self.constant.toarray().flatten()
+        c_rhs = rhs.constant.toarray().flatten()
         l_self = self.linear.toarray().reshape(output_size, memory_count)
         l_rhs = rhs.linear.toarray().reshape(output_size, memory_count)
         q_self = self.quadratic.toarray().reshape(
@@ -485,64 +514,25 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
     @staticmethod
     def identity2(memory: MemorySpec):
-
         shape = (memory.count,)
-        data = {}
-        for i in range(memory.count):
-            data[(i, i)] = 1
-
+        data = {(i, i): 1 for i in range(memory.count)}
         linear = dok_ndarray((memory.count, memory.count), data)
+        return BilinearWeights(memory, shape, linear=linear)
 
+    @staticmethod
+    def project(memory: MemorySpec, spec: MemorySpec, shape: tuple):
+        data = {}
+        for k in range(spec.count):
+            multi_idx = np.unravel_index(k, shape, order="C")
+            data[(*multi_idx, spec.location + k)] = 1
+        linear = dok_ndarray((*shape, memory.count), data)
         return BilinearWeights(memory, shape, linear=linear)
 
     @staticmethod
     def reshape_identity(memory: MemorySpec, shape: tuple):
-        """BilinearWeights that maps a flat vector of size memory.count
-        to the given shape."""
-        n = memory.count
-        data = {}
-        for k in range(n):
-            multi_idx = np.unravel_index(k, shape, order="C")
-            data[(*multi_idx, k)] = 1
-        linear = dok_ndarray((*shape, n), data)
-        return BilinearWeights(memory, shape, linear=linear)
-
-
-class _CompiledBW:
-    """Dense pre-materialised BilinearWeights for fast runtime evaluation.
-
-    Created by BilinearWeights.compile(). Stores constant/linear/quadratic
-    as plain numpy arrays so __call__ is a pure BLAS operation with no
-    Python dict iteration.
-    """
-
-    def __init__(self, memory, shape, c, L, Q):
-        self.memory = memory
-        self.shape = shape
-        self._c = c  # numpy (flat_out,)
-        self._L = L  # numpy (flat_out, n_mem) or None
-        self._Q = Q  # numpy (flat_out, n_mem, n_mem) or None
-
-    def __call__(self, x):
-        result = self._c.copy()
-        if self._L is not None:
-            result = result + self._L @ x
-        if self._Q is not None:
-            result = result + np.einsum("ijk,j,k->i", self._Q, x, x)
-        return result.reshape(self.shape)
-
-    def push_forwards(self, x, dx):
-        result = self._c.copy()
-        jac = np.zeros((result.size, len(x)))
-        if self._L is not None:
-            result = result + self._L @ x
-            jac = jac + self._L
-        if self._Q is not None:
-            result = result + np.einsum("ijk,j,k->i", self._Q, x, x)
-            jac = jac + np.einsum(
-                "ijk,k->ij", self._Q + self._Q.transpose(0, 2, 1), x
-            )
-        return result.reshape(self.shape), (jac @ dx).reshape(self.shape)
+        return BilinearWeights.project(
+            memory, MemorySpec(memory.location, memory.count), shape
+        )
 
 
 def outer_product(lhs: dok_ndarray, rhs: dok_ndarray):
