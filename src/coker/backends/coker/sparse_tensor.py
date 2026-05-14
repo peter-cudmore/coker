@@ -94,6 +94,15 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             m[k] = v
         return m
 
+    def to_export_dict(self):
+        return {
+            "shape": [int(size) for size in self.shape],
+            "entries": [
+                {"index": [int(axis) for axis in key], "value": float(value)}
+                for key, value in sorted(self.keys.items())
+            ],
+        }
+
     def swap_indices(self, i, j):
         assert i != j and i < len(self.shape) and j < len(self.shape)
         if i > j:

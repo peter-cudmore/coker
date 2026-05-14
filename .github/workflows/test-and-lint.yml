@@ -22,10 +22,31 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
       - name: Install package
         run: uv sync --group ci --extra casadi --extra jax
+      - name: Build runtime wheel
+        run: uv run maturin build --manifest-path coker_runtime/crates/coker-python/Cargo.toml -o target/wheels
+      - name: Extract runtime wheel
+        run: |
+          uv run python -c "import pathlib, shutil, zipfile; output = pathlib.Path('target/wheel_extract'); shutil.rmtree(output, ignore_errors=True); wheel = max(pathlib.Path('target/wheels').glob('coker-*.whl')); zipfile.ZipFile(wheel).extractall(output)"
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest -o pythonpath=target/wheel_extract
+
+  rust-runtime:
+    name: Rust workspace checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run Rust tests
+        run: cargo test --workspace
+        working-directory: coker_runtime
+      - name: Check no_std runtime
+        run: cargo check -p coker-runtime --no-default-features
+        working-directory: coker_runtime
 
   linter-name:
     name: runner / black and flake8

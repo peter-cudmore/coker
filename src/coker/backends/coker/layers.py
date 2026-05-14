@@ -5,7 +5,7 @@ import numpy as np
 
 from coker.algebra.dimensions import Dimension
 from coker.algebra.kernel import Function, scalar_types
-from coker.algebra.ops import OP
+from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP
 from coker.backends import get_backend_by_name
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.sparse_tensor import dok_ndarray
@@ -25,11 +25,25 @@ class WorkspaceOperand:
     spec: MemorySpec
     shape: Tuple[int, ...]
 
+    def to_export_dict(self):
+        return {
+            "kind": "workspace",
+            "memory": self.spec.to_export_dict(),
+            "shape": _export_shape(self.shape),
+        }
+
 
 @dataclass(frozen=True)
 class ConstantOperand:
     value: StoredConstant
     shape: Tuple[int, ...] | None
+
+    def to_export_dict(self):
+        return {
+            "kind": "constant",
+            "shape": _export_shape(self.shape),
+            "value": _export_constant_value(self.value, self.shape),
+        }
 
 
 @dataclass(frozen=True)
@@ -43,8 +57,57 @@ class OpaqueProgram:
     def row_count(self) -> int:
         return int(np.prod(self.shape))
 
+    def to_export_dict(self):
+        return {
+            "row_start": int(self.row_start),
+            "shape": _export_shape(self.shape),
+            "op": _export_operator(self.op),
+            "operands": [
+                operand.to_export_dict() for operand in self.operands
+            ],
+        }
+
 
 ArrayOperand = Union[WorkspaceOperand, ConstantOperand]
+
+
+def _export_shape(shape):
+    if shape is None:
+        return None
+    return [int(size) for size in shape]
+
+
+def _export_operator(op):
+    if isinstance(op, OP):
+        return {"kind": "enum", "value": op.name}
+    if op in {IDENTITY_OP, CONSTANT_OP, OPAQUE_OP}:
+        return {"kind": "internal", "value": op}
+    if isinstance(op, ConcatenateOP):
+        return {"kind": "concatenate", "axis": int(op.axis)}
+    if isinstance(op, ReshapeOP):
+        return {
+            "kind": "reshape",
+            "shape": [int(size) for size in op.newshape],
+            "order": op.order,
+        }
+    raise TypeError(f"Unsupported export operator {op!r}")
+
+
+def _export_constant_value(value, shape):
+    if isinstance(value, dok_ndarray):
+        return {"kind": "tensor", "value": value.to_export_dict()}
+    if isinstance(value, Function):
+        from coker.backends.coker.core import create_opgraph
+
+        return {
+            "kind": "function",
+            "value": create_opgraph(value).export_payload(),
+        }
+    if isinstance(value, (float, int, bool, np.bool_)):
+        return {"kind": "scalar", "value": float(value)}
+    raise TypeError(
+        f"Unsupported constant operand {type(value)} for shape {shape}"
+    )
 
 
 def vec(item):
@@ -93,6 +156,17 @@ class InputLayer:
             return np.zeros((0,), dtype=float)
         return np.concatenate([vec(dx_i) for dx_i in dx])
 
+    def to_export_dict(self):
+        return {
+            "dimension": self.dimension,
+            "inputs": [
+                {
+                    "memory": spec.to_export_dict(),
+                }
+                for spec, _shape in self.input_specs
+            ],
+        }
+
 
 def scalar_divide(num: float, den: float) -> float:
     if den == 0:
@@ -135,6 +209,16 @@ class OutputLayer:
             return result[0]
         return result
 
+    def to_export_dict(self):
+        return {
+            "outputs": [
+                {
+                    "memory": memory.to_export_dict(),
+                }
+                for memory, _shape in self.outputs
+            ]
+        }
+
 
 class BilinearWorkspaceLayer:
     def __init__(
@@ -162,6 +246,14 @@ class BilinearWorkspaceLayer:
             np.asarray(y).reshape(-1, order="C"),
             np.asarray(dy).reshape(-1, order="C"),
         )
+
+    def to_export_dict(self):
+        return {
+            "kind": "bilinear",
+            "memory_in": self.memory_in.to_export_dict(),
+            "memory_out": self.memory_out.to_export_dict(),
+            "weights": self.weights.to_export_dict(),
+        }
 
 
 class GenericVectorLayer:
@@ -243,6 +335,32 @@ class GenericVectorLayer:
             tangents[start:stop] = dflat
 
         return values, tangents
+
+    def to_export_dict(self):
+        if self.constants:
+            raise NotImplementedError(
+                "Generic constants must be folded into bilinear "
+                "layers before export"
+            )
+        if self.opaque_programs:
+            raise NotImplementedError(
+                "Function evaluation and opaque programs are "
+                "not yet exportable"
+            )
+        return {
+            "kind": "generic",
+            "memory_in": self.memory_in.to_export_dict(),
+            "memory_out": self.memory_out.to_export_dict(),
+            "ops": [
+                {
+                    "op": _export_operator(op),
+                    "first": first,
+                    "second": second,
+                    "third": third,
+                }
+                for op, first, second, third in self.ops
+            ],
+        }
 
     def _resolve_scalar(self, index: int, workspace: np.ndarray) -> float:
         if index >= 0:

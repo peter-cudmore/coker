@@ -184,3 +184,13 @@ class SparseNet:
 
     def apply_output_map(self, workspace):
         return self.output_layer.call(workspace)
+
+    def export_payload(self):
+        return {
+            "workspace": self.memory.to_export_dict(),
+            "input_layer": self.input_layer.to_export_dict(),
+            "output_layer": self.output_layer.to_export_dict(),
+            "intermediate_layers": [
+                layer.to_export_dict() for layer in self.intermediate_layers
+            ],
+        }

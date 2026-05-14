@@ -115,11 +115,9 @@ def _constant_to_bw(
     )
 
 
-def _flatten_constant_refs(value, shape: Tuple[int, ...], add_constant):
+def _flatten_constant_rows(value, shape: Tuple[int, ...]) -> List[float]:
     flat = _constant_array(value, shape).reshape(-1, order="C")
-    if flat.size == 1:
-        return add_constant(flat[0])
-    return [add_constant(v) for v in flat]
+    return [float(item) for item in flat]
 
 
 def _append_bilinear_value(
@@ -141,6 +139,67 @@ def _append_bilinear_value(
         row = np.ravel_multi_index(key[:-2], bw.shape, order="C")
         target = (start + row, key[-2], key[-1])
         quadratic[target] = quadratic[target] + value
+
+
+def _constant_extension_weights(
+    memory: MemorySpec, current_size: int, constant_values: List[float]
+) -> BilinearWeights:
+    next_size = current_size + len(constant_values)
+    constant = dok_ndarray((next_size,))
+    linear = dok_ndarray((next_size, memory.count))
+    quadratic = dok_ndarray((next_size, memory.count, memory.count))
+    for row in range(current_size):
+        linear[(row, row)] = 1
+    for offset, value in enumerate(constant_values):
+        constant[(current_size + offset,)] = value
+    return BilinearWeights(
+        memory,
+        (next_size,),
+        constant=constant,
+        linear=linear,
+        quadratic=quadratic,
+    )
+
+
+def _concatenate_bilinear_operands(
+    memory: MemorySpec, operands: List, axis: int
+) -> BilinearWeights:
+    bilinear_operands = []
+    for operand in operands:
+        if isinstance(operand, BilinearWeights):
+            assert operand.memory == memory
+            bilinear_operands.append(operand)
+            continue
+        operand_array = np.asarray(_as_numpy_value(operand))
+        bilinear_operands.append(
+            _constant_to_bw(memory, operand_array, operand_array.shape)
+        )
+
+    constant = dok_ndarray.fromarray(
+        np.concatenate(
+            [operand.constant.toarray() for operand in bilinear_operands],
+            axis=axis,
+        )
+    )
+    linear = dok_ndarray.fromarray(
+        np.concatenate(
+            [operand.linear.toarray() for operand in bilinear_operands],
+            axis=axis,
+        )
+    )
+    quadratic = dok_ndarray.fromarray(
+        np.concatenate(
+            [operand.quadratic.toarray() for operand in bilinear_operands],
+            axis=axis,
+        )
+    )
+    return BilinearWeights.from_trusted_dok(
+        memory,
+        constant.shape,
+        constant=constant,
+        linear=linear,
+        quadratic=quadratic,
+    )
 
 
 def _build_opaque_operand(
@@ -246,22 +305,16 @@ def create_opgraph(function: Function):
 
         output_shape = _node_shape(tape.dim[idx])
         output_count = tape.dim[idx].flat()
-        output_spec = MemorySpec(current_size, output_count)
-        next_memory = MemorySpec(0, current_size + output_count)
+        base_size = current_size
+        constant_values: List[float] = []
 
-        layer_ops = [
-            (IDENTITY_OP, i, UNUSED_REF, UNUSED_REF)
-            for i in range(current_size)
-        ]
-        constants: Dict[int, float] = {}
-        next_constant = -1
-
-        def add_constant(value):
-            nonlocal next_constant
-            ref = next_constant
-            constants[ref] = float(value)
-            next_constant -= 1
-            return ref
+        def reserve_constant_rows(value, shape: Tuple[int, ...]):
+            start = base_size + len(constant_values)
+            rows = _flatten_constant_rows(value, shape)
+            constant_values.extend(rows)
+            if len(rows) == 1:
+                return start
+            return [start + offset for offset in range(len(rows))]
 
         def refs_for_arg(arg):
             arg_shape = _node_shape(tape.dim[arg.index])
@@ -270,18 +323,17 @@ def create_opgraph(function: Function):
                 if spec.count == 1:
                     return spec.location
                 return [spec.location + i for i in range(spec.count)]
-            return _flatten_constant_refs(
-                node_values[arg.index], arg_shape, add_constant
-            )
+            return reserve_constant_rows(node_values[arg.index], arg_shape)
 
         def row_ref(refs, row: int):
             return refs if isinstance(refs, int) else refs[row]
 
+        appended_ops = []
         scalar_lowered = False
         if isinstance(op, ReshapeOP):
             (arg,) = args
             refs = refs_for_arg(arg)
-            layer_ops.extend(
+            appended_ops.extend(
                 (IDENTITY_OP, row_ref(refs, row), UNUSED_REF, UNUSED_REF)
                 for row in range(output_count)
             )
@@ -302,7 +354,7 @@ def create_opgraph(function: Function):
                     concatenated_refs.append(refs)
                 else:
                     concatenated_refs.extend(refs)
-            layer_ops.extend(
+            appended_ops.extend(
                 (IDENTITY_OP, ref, UNUSED_REF, UNUSED_REF)
                 for ref in concatenated_refs
             )
@@ -319,7 +371,7 @@ def create_opgraph(function: Function):
         }:
             (arg,) = args
             refs = refs_for_arg(arg)
-            layer_ops.extend(
+            appended_ops.extend(
                 (op, row_ref(refs, row), UNUSED_REF, UNUSED_REF)
                 for row in range(output_count)
             )
@@ -338,7 +390,7 @@ def create_opgraph(function: Function):
         }:
             lhs_refs = refs_for_arg(args[0])
             rhs_refs = refs_for_arg(args[1])
-            layer_ops.extend(
+            appended_ops.extend(
                 (
                     op,
                     row_ref(lhs_refs, row),
@@ -352,7 +404,7 @@ def create_opgraph(function: Function):
             cond_refs = refs_for_arg(args[0])
             true_refs = refs_for_arg(args[1])
             false_refs = refs_for_arg(args[2])
-            layer_ops.extend(
+            appended_ops.extend(
                 (
                     op,
                     row_ref(cond_refs, 0),
@@ -362,6 +414,29 @@ def create_opgraph(function: Function):
                 for row in range(output_count)
             )
             scalar_lowered = True
+
+        if constant_values:
+            constant_memory = MemorySpec(0, base_size + len(constant_values))
+            layers.append(
+                BilinearWorkspaceLayer(
+                    current_memory,
+                    constant_memory,
+                    _constant_extension_weights(
+                        current_memory, base_size, constant_values
+                    ),
+                )
+            )
+            current_memory = constant_memory
+            current_size = constant_memory.count
+            extend_node_values(constant_memory)
+
+        output_spec = MemorySpec(current_size, output_count)
+        next_memory = MemorySpec(0, current_size + output_count)
+        layer_ops = [
+            (IDENTITY_OP, i, UNUSED_REF, UNUSED_REF)
+            for i in range(current_size)
+        ]
+        layer_ops.extend(appended_ops)
 
         opaque_programs: List[OpaqueProgram] = []
         if not scalar_lowered:
@@ -391,7 +466,6 @@ def create_opgraph(function: Function):
             current_memory,
             next_memory,
             layer_ops,
-            constants=constants,
             opaque_programs=opaque_programs,
         )
         layers.append(layer)
@@ -433,6 +507,27 @@ def create_opgraph(function: Function):
                         queue_bilinear(idx, result)
                         continue
                 except (AssertionError, TypeError, NotImplementedError):
+                    pass
+
+        if isinstance(op, ConcatenateOP):
+            bilinear_memory = next(
+                (
+                    operand.memory
+                    for operand in operands
+                    if isinstance(operand, BilinearWeights)
+                ),
+                None,
+            )
+            if bilinear_memory is not None:
+                try:
+                    queue_bilinear(
+                        idx,
+                        _concatenate_bilinear_operands(
+                            bilinear_memory, operands, axis=op.axis
+                        ),
+                    )
+                    continue
+                except (AssertionError, TypeError, ValueError):
                     pass
 
         if isinstance(op, ReshapeOP):

@@ -144,6 +144,50 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         w = self.constant.clone() + lx + qxx
         return w.toarray(), (dw @ dx).toarray()
 
+    def to_export_dict(self):
+        output_count = int(np.prod(self.shape, dtype=int))
+        homogeneous_count = self.memory.count + 1
+        entries = []
+
+        for key, value in sorted(self.constant.keys.items()):
+            row_index = int(np.ravel_multi_index(key, self.shape, order="C"))
+            entries.append({"index": [row_index, 0, 0], "value": float(value)})
+
+        for key, value in sorted(self.linear.keys.items()):
+            row_index = int(
+                np.ravel_multi_index(key[:-1], self.shape, order="C")
+            )
+            entries.append(
+                {
+                    "index": [row_index, int(key[-1]) + 1, 0],
+                    "value": float(value),
+                }
+            )
+
+        for key, value in sorted(self.quadratic.keys.items()):
+            row_index = int(
+                np.ravel_multi_index(key[:-2], self.shape, order="C")
+            )
+            entries.append(
+                {
+                    "index": [
+                        row_index,
+                        int(key[-2]) + 1,
+                        int(key[-1]) + 1,
+                    ],
+                    "value": float(value),
+                }
+            )
+
+        return {
+            "memory": self.memory.to_export_dict(),
+            "shape": list(self.shape),
+            "quadratic": {
+                "shape": [output_count, homogeneous_count, homogeneous_count],
+                "entries": entries,
+            },
+        }
+
     def is_scalar(self):
         return self.shape == (1,)
 

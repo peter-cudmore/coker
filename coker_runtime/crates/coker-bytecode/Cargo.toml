@@ -1,0 +1,16 @@
+[package]
+name = "coker-bytecode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+binrw.workspace = true
+bincode.workspace = true
+serde.workspace = true
+thiserror.workspace = true
