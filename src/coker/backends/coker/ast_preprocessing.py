@@ -150,11 +150,15 @@ class SparseNet:
         input_layer: InputLayer,
         output_layer: OutputLayer,
         intermediate_layers,
+        function_id: int = 0,
+        function_table=None,
     ):
         self.memory = memory
         self.input_layer = input_layer
         self.output_layer = output_layer
         self.intermediate_layers = intermediate_layers
+        self.function_id = function_id
+        self.function_table = function_table
 
     @property
     def layers(self):
@@ -185,7 +189,7 @@ class SparseNet:
     def apply_output_map(self, workspace):
         return self.output_layer.call(workspace)
 
-    def export_payload(self):
+    def export_program_payload(self):
         return {
             "workspace": self.memory.to_export_dict(),
             "input_layer": self.input_layer.to_export_dict(),
@@ -193,4 +197,18 @@ class SparseNet:
             "intermediate_layers": [
                 layer.to_export_dict() for layer in self.intermediate_layers
             ],
+        }
+
+    def export_payload(self):
+        function_table = self.function_table or [self]
+        return {
+            "functions": [
+                {
+                    "function_id": graph.function_id,
+                    "program": graph.export_program_payload(),
+                }
+                for graph in sorted(
+                    function_table, key=lambda graph: graph.function_id
+                )
+            ]
         }
