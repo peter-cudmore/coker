@@ -137,7 +137,12 @@ class OutputLayer:
 
 
 class BilinearWorkspaceLayer:
-    def __init__(self, memory_in: MemorySpec, memory_out: MemorySpec, weights: BilinearWeights):
+    def __init__(
+        self,
+        memory_in: MemorySpec,
+        memory_out: MemorySpec,
+        weights: BilinearWeights,
+    ):
         self.memory_in = memory_in
         self.memory_out = memory_out
         self.weights = weights
@@ -186,18 +191,20 @@ class GenericVectorLayer:
         opaque_rows = {
             row
             for program in self.opaque_programs
-            for row in range(program.row_start, program.row_start + program.row_count)
+            for row in range(
+                program.row_start, program.row_start + program.row_count
+            )
         }
         for row, (op, first, second, third) in enumerate(self.ops):
             if row in opaque_rows:
                 continue
-            values[row], _ = self._eval_scalar_row(
-                op, first, second, third, workspace, np.zeros_like(workspace)
+            values[row] = self._eval_scalar_value(
+                op, first, second, third, workspace
             )
         for program in self.opaque_programs:
-            flat = np.asarray(self._eval_opaque_value(program, workspace)).reshape(
-                -1, order="C"
-            )
+            flat = np.asarray(
+                self._eval_opaque_value(program, workspace)
+            ).reshape(-1, order="C")
             start = program.row_start
             stop = start + program.row_count
             values[start:stop] = flat
@@ -212,7 +219,9 @@ class GenericVectorLayer:
         opaque_rows = {
             row
             for program in self.opaque_programs
-            for row in range(program.row_start, program.row_start + program.row_count)
+            for row in range(
+                program.row_start, program.row_start + program.row_count
+            )
         }
 
         for row, (op, first, second, third) in enumerate(self.ops):
@@ -223,7 +232,9 @@ class GenericVectorLayer:
             )
 
         for program in self.opaque_programs:
-            result, dresult = self._eval_opaque_program(program, workspace, dworkspace)
+            result, dresult = self._eval_opaque_program(
+                program, workspace, dworkspace
+            )
             flat = np.asarray(result).reshape(-1, order="C")
             dflat = np.asarray(dresult).reshape(-1, order="C")
             start = program.row_start
@@ -243,24 +254,95 @@ class GenericVectorLayer:
             return float(dworkspace[index])
         return 0.0
 
-    def _eval_scalar_row(self, op, first, second, third, workspace, dworkspace):
+    def _eval_scalar_value(self, op, first, second, third, workspace):
         a = (
-            self._resolve_scalar(first, workspace) if first != UNUSED_REF else None
+            self._resolve_scalar(first, workspace)
+            if first != UNUSED_REF
+            else None
         )
         b = (
-            self._resolve_scalar(second, workspace) if second != UNUSED_REF else None
+            self._resolve_scalar(second, workspace)
+            if second != UNUSED_REF
+            else None
         )
         c = (
-            self._resolve_scalar(third, workspace) if third != UNUSED_REF else None
+            self._resolve_scalar(third, workspace)
+            if third != UNUSED_REF
+            else None
+        )
+
+        if op == IDENTITY_OP or op == CONSTANT_OP:
+            return a
+        if op == OP.SIN:
+            return np.sin(a)
+        if op == OP.COS:
+            return np.cos(a)
+        if op == OP.TAN:
+            return np.tan(a)
+        if op == OP.EXP:
+            return np.exp(a)
+        if op == OP.SQRT:
+            return np.sqrt(a)
+        if op == OP.LOG:
+            return np.log(a)
+        if op == OP.NEG:
+            return -a
+        if op == OP.ABS:
+            return np.abs(a)
+        if op == OP.ADD:
+            return a + b
+        if op == OP.SUB:
+            return a - b
+        if op == OP.MUL:
+            return a * b
+        if op == OP.DIV:
+            return scalar_divide(a, b)
+        if op == OP.PWR or op == OP.INT_PWR:
+            return np.power(a, b)
+        if op == OP.ARCTAN2:
+            return np.arctan2(a, b)
+        if op == OP.EQUAL:
+            return float(a == b)
+        if op == OP.LESS_THAN:
+            return float(a < b)
+        if op == OP.LESS_EQUAL:
+            return float(a <= b)
+        if op == OP.CASE:
+            return b if bool(a) else c
+        raise NotImplementedError(f"Unsupported scalar op {op}")
+
+    def _eval_scalar_row(
+        self, op, first, second, third, workspace, dworkspace
+    ):
+        a = (
+            self._resolve_scalar(first, workspace)
+            if first != UNUSED_REF
+            else None
+        )
+        b = (
+            self._resolve_scalar(second, workspace)
+            if second != UNUSED_REF
+            else None
+        )
+        c = (
+            self._resolve_scalar(third, workspace)
+            if third != UNUSED_REF
+            else None
         )
         da = (
-            self._resolve_tangent(first, dworkspace) if first != UNUSED_REF else 0.0
+            self._resolve_tangent(first, dworkspace)
+            if first != UNUSED_REF
+            else 0.0
         )
         db = (
-            self._resolve_tangent(second, dworkspace) if second != UNUSED_REF else 0.0
+            self._resolve_tangent(second, dworkspace)
+            if second != UNUSED_REF
+            else 0.0
         )
         dc = (
-            self._resolve_tangent(third, dworkspace) if third != UNUSED_REF else 0.0
+            self._resolve_tangent(third, dworkspace)
+            if third != UNUSED_REF
+            else 0.0
         )
 
         if op == IDENTITY_OP:
@@ -315,10 +397,13 @@ class GenericVectorLayer:
             return c, dc
         raise NotImplementedError(f"Unsupported scalar op {op}")
 
-    def _materialize_operand(self, operand: ArrayOperand, workspace: np.ndarray):
+    def _materialize_operand(
+        self, operand: ArrayOperand, workspace: np.ndarray
+    ):
         if isinstance(operand, WorkspaceOperand):
             raw = workspace[
-                operand.spec.location : operand.spec.location + operand.spec.count
+                operand.spec.location : operand.spec.location
+                + operand.spec.count
             ]
             return np.reshape(raw, operand.shape, order="C")
         value = operand.value
@@ -326,17 +411,23 @@ class GenericVectorLayer:
             return np.reshape(value.toarray(), operand.shape, order="C")
         return value
 
-    def _eval_opaque_value(self, program: OpaqueProgram, workspace: np.ndarray):
+    def _eval_opaque_value(
+        self, program: OpaqueProgram, workspace: np.ndarray
+    ):
         backend = get_backend_by_name("numpy", set_current=False)
         values = [
-            self._materialize_operand(operand, workspace) for operand in program.operands
+            self._materialize_operand(operand, workspace)
+            for operand in program.operands
         ]
         return backend.call(program.op, *values)
 
-    def _materialize_tangent(self, operand: ArrayOperand, dworkspace: np.ndarray):
+    def _materialize_tangent(
+        self, operand: ArrayOperand, dworkspace: np.ndarray
+    ):
         if isinstance(operand, WorkspaceOperand):
             raw = dworkspace[
-                operand.spec.location : operand.spec.location + operand.spec.count
+                operand.spec.location : operand.spec.location
+                + operand.spec.count
             ]
             return np.reshape(raw, operand.shape, order="C")
         value = operand.value
@@ -349,10 +440,16 @@ class GenericVectorLayer:
         return 0.0
 
     def _eval_opaque_program(
-        self, program: OpaqueProgram, workspace: np.ndarray, dworkspace: np.ndarray
+        self,
+        program: OpaqueProgram,
+        workspace: np.ndarray,
+        dworkspace: np.ndarray,
     ):
         backend = get_backend_by_name("numpy", set_current=False)
-        values = [self._materialize_operand(operand, workspace) for operand in program.operands]
+        values = [
+            self._materialize_operand(operand, workspace)
+            for operand in program.operands
+        ]
 
         if program.op == OP.EVALUATE and isinstance(values[0], Function):
             from coker.backends.coker.core import create_opgraph
@@ -367,7 +464,8 @@ class GenericVectorLayer:
 
         result = backend.call(program.op, *values)
         tangents = [
-            self._materialize_tangent(operand, dworkspace) for operand in program.operands
+            self._materialize_tangent(operand, dworkspace)
+            for operand in program.operands
         ]
 
         linear_like = program.op in {OP.TRANSPOSE}
@@ -375,4 +473,6 @@ class GenericVectorLayer:
             tangent = backend.call(program.op, *tangents)
             return result, tangent
 
-        raise NotImplementedError(f"push_forward not implemented for opaque op {program.op}")
+        raise NotImplementedError(
+            f"push_forward not implemented for opaque op {program.op}"
+        )

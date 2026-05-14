@@ -106,9 +106,13 @@ def _constant_array(value, shape: Tuple[int, ...]) -> np.ndarray:
     return np.array([value]).reshape(shape, order="C")
 
 
-def _constant_to_bw(memory: MemorySpec, value, shape: Tuple[int, ...]) -> BilinearWeights:
+def _constant_to_bw(
+    memory: MemorySpec, value, shape: Tuple[int, ...]
+) -> BilinearWeights:
     array = _constant_array(value, shape)
-    return BilinearWeights(memory, shape, constant=dok_ndarray.fromarray(array))
+    return BilinearWeights(
+        memory, shape, constant=dok_ndarray.fromarray(array)
+    )
 
 
 def _flatten_constant_refs(value, shape: Tuple[int, ...], add_constant):
@@ -139,14 +143,18 @@ def _append_bilinear_value(
         quadratic[target] = quadratic[target] + value
 
 
-def _build_opaque_operand(value, spec: MemorySpec | None, shape: Tuple[int, ...]):
+def _build_opaque_operand(
+    value, spec: MemorySpec | None, shape: Tuple[int, ...]
+):
     if spec is not None:
         return WorkspaceOperand(spec, shape)
     if isinstance(value, np.ndarray):
         stored = dok_ndarray.fromarray(np.reshape(value, shape, order="C"))
         return ConstantOperand(stored, shape)
     if scipy.sparse.issparse(value):
-        stored = dok_ndarray.fromarray(np.reshape(value.toarray(), shape, order="C"))
+        stored = dok_ndarray.fromarray(
+            np.reshape(value.toarray(), shape, order="C")
+        )
         return ConstantOperand(stored, shape)
     return ConstantOperand(value, shape)
 
@@ -176,7 +184,10 @@ def create_opgraph(function: Function):
 
     def extend_node_values(new_memory: MemorySpec):
         for node_idx, value in list(node_values.items()):
-            if isinstance(value, BilinearWeights) and value.memory != new_memory:
+            if (
+                isinstance(value, BilinearWeights)
+                and value.memory != new_memory
+            ):
                 node_values[node_idx] = value.extend_memory(new_memory)
 
     def queue_bilinear(idx: int, value: BilinearWeights):
@@ -202,11 +213,15 @@ def create_opgraph(function: Function):
         new_memory = MemorySpec(0, next_location)
         constant = dok_ndarray((next_location,))
         linear = dok_ndarray((next_location, old_memory.count))
-        quadratic = dok_ndarray((next_location, old_memory.count, old_memory.count))
+        quadratic = dok_ndarray(
+            (next_location, old_memory.count, old_memory.count)
+        )
         for i in range(current_size):
             linear[(i, i)] = 1
         for _, bw, _, spec in additions:
-            _append_bilinear_value(constant, linear, quadratic, spec.location, bw)
+            _append_bilinear_value(
+                constant, linear, quadratic, spec.location, bw
+            )
 
         weights = BilinearWeights(
             old_memory,
@@ -235,7 +250,8 @@ def create_opgraph(function: Function):
         next_memory = MemorySpec(0, current_size + output_count)
 
         layer_ops = [
-            (IDENTITY_OP, i, UNUSED_REF, UNUSED_REF) for i in range(current_size)
+            (IDENTITY_OP, i, UNUSED_REF, UNUSED_REF)
+            for i in range(current_size)
         ]
         constants: Dict[int, float] = {}
         next_constant = -1
@@ -270,9 +286,14 @@ def create_opgraph(function: Function):
                 for row in range(output_count)
             )
             scalar_lowered = True
-        elif isinstance(op, ConcatenateOP) and op.axis == 0 and all(
-            tape.dim[arg.index].is_scalar() or tape.dim[arg.index].is_vector()
-            for arg in args
+        elif (
+            isinstance(op, ConcatenateOP)
+            and op.axis == 0
+            and all(
+                tape.dim[arg.index].is_scalar()
+                or tape.dim[arg.index].is_vector()
+                for arg in args
+            )
         ):
             concatenated_refs = []
             for arg in args:
@@ -349,12 +370,17 @@ def create_opgraph(function: Function):
                 spec = node_specs.get(arg.index)
                 operand_specs.append(
                     _build_opaque_operand(
-                        node_values[arg.index], spec, _node_shape(tape.dim[arg.index])
+                        node_values[arg.index],
+                        spec,
+                        _node_shape(tape.dim[arg.index]),
                     )
                 )
             opaque_programs.append(
                 OpaqueProgram(
-                    output_spec.location, output_shape, op, tuple(operand_specs)
+                    output_spec.location,
+                    output_shape,
+                    op,
+                    tuple(operand_specs),
                 )
             )
             layer_ops.extend(
@@ -373,7 +399,9 @@ def create_opgraph(function: Function):
         current_size = next_memory.count
         extend_node_values(next_memory)
         node_specs[idx] = output_spec
-        node_values[idx] = BilinearWeights.project(next_memory, output_spec, output_shape)
+        node_values[idx] = BilinearWeights.project(
+            next_memory, output_spec, output_shape
+        )
 
     for idx in range(len(tape)):
         if idx in tape.input_indicies:
@@ -386,7 +414,9 @@ def create_opgraph(function: Function):
             continue
 
         operands = [node_values[a.index] for a in args]
-        if all(not isinstance(operand, BilinearWeights) for operand in operands):
+        if all(
+            not isinstance(operand, BilinearWeights) for operand in operands
+        ):
             node_values[idx] = numpy_backend.call(op, *operands)
             continue
 
@@ -408,9 +438,13 @@ def create_opgraph(function: Function):
         if isinstance(op, ReshapeOP):
             (arg_value,) = operands
             if isinstance(arg_value, BilinearWeights):
-                queue_bilinear(idx, arg_value.reshape(op.newshape, order=op.order))
+                queue_bilinear(
+                    idx, arg_value.reshape(op.newshape, order=op.order)
+                )
                 continue
-            node_values[idx] = np.reshape(arg_value, op.newshape, order=op.order)
+            node_values[idx] = np.reshape(
+                arg_value, op.newshape, order=op.order
+            )
             continue
 
         lower_generic(idx, op, args)
@@ -426,7 +460,9 @@ def create_opgraph(function: Function):
         else:
             queue_bilinear(
                 output.index,
-                _constant_to_bw(current_memory, value, _node_shape(output.dim)),
+                _constant_to_bw(
+                    current_memory, value, _node_shape(output.dim)
+                ),
             )
 
     flush_bilinear()

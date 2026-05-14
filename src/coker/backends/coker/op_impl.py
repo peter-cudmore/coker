@@ -4,6 +4,12 @@ from coker.backends.coker.sparse_tensor import dok_ndarray, is_constant
 from coker.backends.coker.tensor_contants import hat
 from coker.backends.coker.weights import BilinearWeights
 
+_CROSS_EPSILON = np.zeros((3, 3, 3))
+_CROSS_EPSILON[0, 1, 2] = _CROSS_EPSILON[1, 2, 0] = _CROSS_EPSILON[2, 0, 1] = 1
+_CROSS_EPSILON[2, 1, 0] = _CROSS_EPSILON[0, 2, 1] = _CROSS_EPSILON[1, 0, 2] = (
+    -1
+)
+
 
 def cross(x, y):
     if is_constant(x):
@@ -22,10 +28,6 @@ def cross(x, y):
         x.is_linear and y.is_linear
     ), "cross product of quadratic weights not supported"
 
-    eps = np.zeros((3, 3, 3))
-    eps[0, 1, 2] = eps[1, 2, 0] = eps[2, 0, 1] = 1
-    eps[2, 1, 0] = eps[0, 2, 1] = eps[1, 0, 2] = -1
-
     c_x = x.constant.toarray()  # shape (3,)
     c_y = y.constant.toarray()  # shape (3,)
     L_x = x.linear.toarray()  # shape (3, n)
@@ -38,9 +40,9 @@ def cross(x, y):
         -hat(c_y).toarray() @ L_x + hat(c_x).toarray() @ L_y
     )  # shape (3, n)
     # quadratic contribution: cross(L_x @ m, L_y @ m)
-    Q_result = np.einsum("ijk,js,kt->ist", eps, L_x, L_y)  # shape (3, n, n)
+    Q_result = np.einsum("ijk,js,kt->ist", _CROSS_EPSILON, L_x, L_y)
 
-    return BilinearWeights(
+    return BilinearWeights.from_trusted_dok(
         x.memory,
         (3,),
         constant=dok_ndarray.fromarray(c_result),
