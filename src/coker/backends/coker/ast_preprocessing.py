@@ -146,7 +146,7 @@ def label_sources(
 class SparseNet:
     def __init__(
         self,
-        memory,
+        memory: MemorySpec,
         input_layer: InputLayer,
         output_layer: OutputLayer,
         intermediate_layers,
@@ -162,35 +162,25 @@ class SparseNet:
 
     def __call__(self, *args):
         workspace = self.apply_input_map(*args)
-
         for layer in self.intermediate_layers:
-            in_specs = layer.inputs()
-            (out_spec,) = layer.outputs()
-            out = layer(*[workspace[k] for k in in_specs])
-            workspace[out_spec] = np.asarray(out).flatten()
+            workspace = layer(workspace)
         return self.output_layer.call(workspace)
 
     def push_forward(self, *tangent_spaces):
-        n_args = len(self.input_layer.vec_to_arg_maps)
+        n_args = len(self.input_layer.input_specs)
         x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
         workspace = self.apply_input_map(*x)
         dworkspace = self.apply_input_map(*dx)
 
         for layer in self.intermediate_layers:
-            in_specs = layer.inputs()
-            (out_spec,) = layer.outputs()
-            x_i = [workspace[k] for k in in_specs]
-            dx_i = [dworkspace[k] for k in in_specs]
-            out, dout = layer.push_forward(*x_i, *dx_i)
-            workspace[out_spec] = out
-            dworkspace[out_spec] = dout
+            workspace, dworkspace = layer.push_forward(workspace, dworkspace)
 
         y = self.output_layer.call(workspace)
         dy = self.output_layer.call(dworkspace)
         return y, dy
 
-    def apply_input_map(self, *args) -> Dict[MemorySpec, np.ndarray]:
-        return {self.memory[0]: self.input_layer(*args)}
+    def apply_input_map(self, *args) -> np.ndarray:
+        return self.input_layer(*args)
 
-    def apply_output_map(self, context):
-        return self.output_layer.call(context)
+    def apply_output_map(self, workspace):
+        return self.output_layer.call(workspace)
