@@ -334,7 +334,9 @@ class VariationalProblem:
         from coker.backends import get_backend_by_name
 
         backend_name = self.backend if backend is None else backend
-        return get_backend_by_name(backend_name).create_variational_solver(self)
+        return get_backend_by_name(backend_name).create_variational_solver(
+            self
+        )
 
     def __call__(self) -> "VariationalSolution":
         return self.get_solver().solve()

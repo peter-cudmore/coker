@@ -33,7 +33,9 @@ class CasadiVariationalSolver(VariationalSolver):
         parameters: List[str],
         map_arguments: Callable[[Dict[str, float]], Dict[str, ca.DM]],
         solver: ca.Function,
-        assemble_solution: Callable[[ca.DM, float, object], VariationalSolution],
+        assemble_solution: Callable[
+            [ca.DM, float, object], VariationalSolution
+        ],
         initialiser: Optional[ca.Function] = None,
     ):
         self.problem = problem
@@ -86,7 +88,9 @@ class CasadiVariationalSolver(VariationalSolver):
         )
 
 
-def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalSolver:
+def create_variational_solver(
+    problem: VariationalProblem,
+) -> CasadiVariationalSolver:
     casadi = get_backend_by_name("casadi")
 
     x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
@@ -100,7 +104,9 @@ def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalS
         problem.t_final,
         problem.transcription_options,
     )
-    colocation_points = [problem.transcription_options.minimum_degree] * len(intervals)
+    colocation_points = [problem.transcription_options.minimum_degree] * len(
+        intervals
+    )
     poly_collection = SymbolicPolyCollection(
         name="x",
         dimension=x_size + z_size + q_size,
@@ -108,9 +114,7 @@ def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalS
         degrees=colocation_points,
     )
 
-    proj_x = ca.hcat(
-        [ca.MX.eye(x_size), ca.MX.zeros(x_size, z_size + q_size)]
-    )
+    proj_x = ca.hcat([ca.MX.eye(x_size), ca.MX.zeros(x_size, z_size + q_size)])
     proj_z = ca.hcat(
         [
             ca.MX.zeros(z_size, x_size),
@@ -162,9 +166,13 @@ def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalS
         control_eval = control_factory
         control_decoder = control_factory.to_output_array
 
-    p, p_symbols, p0_guess, (p_lower_base, p_guess_base, p_upper_base), p_output_map = (
-        construct_parameters(problem.parameters)
-    )
+    (
+        p,
+        p_symbols,
+        p0_guess,
+        (p_lower_base, p_guess_base, p_upper_base),
+        p_output_map,
+    ) = construct_parameters(problem.parameters)
     if problem.system_parameter_map is not None:
         proj_p = ca.DM(problem.system_parameter_map)
     else:
@@ -211,7 +219,9 @@ def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalS
 
             if q_size > 0:
                 dq = proj_q @ dv
-                (quadrature_ij,) = quadrature(t, x, z, control_eval, proj_p @ p)
+                (quadrature_ij,) = quadrature(
+                    t, x, z, control_eval, proj_p @ p
+                )
                 equalities.append(dq - quadrature_ij)
                 interval_quadratures.append(quadrature_ij)
 
@@ -227,7 +237,9 @@ def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalS
         equalities.append(proj_x @ v_end - proj_x @ v_start - d_x @ weights)
         if q_size > 0:
             d_q = ca.hcat(interval_quadratures)
-            equalities.append(proj_q @ v_end - proj_q @ v_start - d_q @ weights)
+            equalities.append(
+                proj_q @ v_end - proj_q @ v_start - d_q @ weights
+            )
 
     path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
     path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
@@ -253,7 +265,9 @@ def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalS
     if control_factory is None:
         (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
     else:
-        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, control_factory, p])
+        (cost,) = casadi.evaluate(
+            problem.loss, [solution_proxy, control_factory, p]
+        )
 
     g = ca.vertcat(*[e for e in equalities if e is not None])
     ubg = tolerance * ca.DM.ones(g.shape)
@@ -263,7 +277,11 @@ def create_variational_solver(problem: VariationalProblem) -> CasadiVariationalS
     x_end_val = proj_x @ v_end
     z_end_val = proj_z @ v_end
     q_end_val = proj_q @ v_end
-    u_end = control_eval(t_end) if control_factory is not None else control_eval(t_end)
+    u_end = (
+        control_eval(t_end)
+        if control_factory is not None
+        else control_eval(t_end)
+    )
     end_args = (t_end, x_end_val, z_end_val, u_end, p, q_end_val)
 
     for constraint in problem.terminal_constraints:
@@ -420,9 +438,9 @@ class CasadiSolutionAssembler:
         ) = self.output_function(decision_variables)
         path = self.poly_collection.to_fixed(np.array(path_coefficients))
         parameter_vector = np.array(parameters, dtype=float).reshape((-1, 1))
-        system_parameters = np.array(self.proj_p @ ca.DM(parameter_vector)).reshape(
-            (-1,)
-        )
+        system_parameters = np.array(
+            self.proj_p @ ca.DM(parameter_vector)
+        ).reshape((-1,))
         control_solutions = (
             self.decode_controls(control_coefficients)
             if self.decode_controls is not None
@@ -584,7 +602,8 @@ class ControlFactory:
         self.t_final = t_final
         self.variables = variables
         self._symbols = [
-            ca.MX.sym(v.name, v.degrees_of_freedom(0, t_final)) for v in variables
+            ca.MX.sym(v.name, v.degrees_of_freedom(0, t_final))
+            for v in variables
         ]
         self.upper_bounds = [
             ca.DM.ones(v.degrees_of_freedom(0, t_final))
@@ -604,10 +623,14 @@ class ControlFactory:
         return ca.DM.zeros(len(self.variables), 1)
 
     def symbols(self) -> ca.MX:
-        return ca.vertcat(*self._symbols) if self._symbols else ca.MX.zeros(0, 1)
+        return (
+            ca.vertcat(*self._symbols) if self._symbols else ca.MX.zeros(0, 1)
+        )
 
     def __call__(self, t):
-        assert 0 <= t <= self.t_final, f"Control variable is not defined at t = {t}"
+        assert (
+            0 <= t <= self.t_final
+        ), f"Control variable is not defined at t = {t}"
         out = []
         for s, var in zip(self._symbols, self.variables):
             if isinstance(var, ConstantControlVariable):
@@ -626,7 +649,9 @@ class ControlFactory:
     def to_output_array(self, solution: ca.DM):
         return [
             v.to_solution(solution[offset : offset + size])
-            for v, offset, size in zip(self.variables, self.offsets, self.sizes)
+            for v, offset, size in zip(
+                self.variables, self.offsets, self.sizes
+            )
         ]
 
 
@@ -644,7 +669,9 @@ class CallbackWrapper(ca.Callback):
         *,
         nx: int,
         ng: int,
-        assemble_solution: Callable[[ca.DM, float, object], VariationalSolution],
+        assemble_solution: Callable[
+            [ca.DM, float, object], VariationalSolution
+        ],
         opts=None,
     ):
         ca.Callback.__init__(self)
