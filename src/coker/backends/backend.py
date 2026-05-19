@@ -43,7 +43,7 @@ class Backend(metaclass=ABCMeta):
     ):
         raise NotImplementedError
 
-    def create_variational_solver(self, problem: VariationalProblem):
+    def create_variational_solver(self, problem: VariationalProblem) -> 'VariationalSolver':
         raise NotImplementedError
 
     def resolve_fn(self, op):
@@ -115,6 +115,21 @@ class Backend(metaclass=ABCMeta):
 
         return compiled
 
+
+class VariationalSolver:
+    """Interface definition for variational solvers."""
+
+    @property
+    def parameters(self) -> List[str]:
+        """List the free optimisation parameter names."""
+        raise NotImplementedError("Subclasses must implement parameters property")
+
+    def solve(self, **kwargs):
+        """Solve the variational problem, optionally fixing parameters by name."""
+        raise NotImplementedError("Subclasses must implement solve")
+
+    def __call__(self, **kwargs):
+        return self.solve(**kwargs)
 
 __known_backends = {}
 
