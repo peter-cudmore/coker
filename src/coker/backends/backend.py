@@ -129,7 +129,10 @@ class VariationalSolver:
         )
 
     def solve(self, **kwargs):
-        """Solve the variational problem, optionally fixing parameters by name."""
+        """Solve the variational problem.
+
+        Optionally fix parameters by name.
+        """
         raise NotImplementedError("Subclasses must implement solve")
 
     def __call__(self, **kwargs):
