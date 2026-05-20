@@ -523,8 +523,6 @@ def test_variational_solver_raises_on_infeasible_problem(variational_backend):
 
 
 def test_reentrant_solver(variational_backend):
-
-
     def x0(p):
         return p[0:2]
 
@@ -586,7 +584,3 @@ def test_reentrant_solver(variational_backend):
 
     with pytest.raises(KeyError):
         solver.solve(unknown_parameter=0.0)
-
-
-
-
