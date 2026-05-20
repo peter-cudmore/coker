@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened]
-  pull_request_review:
-    types: [submitted]
+  push:
+    branches: ["main"]
 
 permissions:
   contents: read
@@ -13,13 +13,6 @@ permissions:
 jobs:
   detect-version-bump:
     name: Detect version bump
-    if: >-
-      github.event_name == 'pull_request' ||
-      (
-        github.event_name == 'pull_request_review' &&
-        github.event.review.state == 'approved' &&
-        github.event.pull_request.base.ref == 'main'
-      )
     runs-on: ubuntu-latest
     outputs:
       version_bumped: ${{ steps.compare.outputs.version_bumped }}
@@ -29,14 +22,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: >-
+            ${{
+              github.event_name == 'pull_request' &&
+              github.event.pull_request.head.sha ||
+              github.sha
+            }}
       - name: Fetch base branch
+        if: github.event_name == 'pull_request'
         run: git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
       - name: Compare package versions
         id: compare
         shell: python
         env:
+          EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           import os
           import subprocess
@@ -49,22 +50,38 @@ jobs:
                   return tuple(int(part) for part in version_parts)
               return None
 
-          base_ref = os.environ["BASE_REF"]
+          def version_is_bumped(head_version: str, base_version: str):
+              head_simple_version = parse_simple_version(head_version)
+              base_simple_version = parse_simple_version(base_version)
+
+              if head_simple_version is not None and base_simple_version is not None:
+                  return head_simple_version > base_simple_version
+              return head_version != base_version
+
+          event_name = os.environ["EVENT_NAME"]
           head_pyproject = Path("pyproject.toml").read_bytes()
-          base_pyproject = subprocess.check_output(
-              ["git", "show", f"origin/{base_ref}:pyproject.toml"]
-          )
-
           head_version = tomllib.loads(head_pyproject.decode())["project"]["version"]
-          base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
 
-          head_simple_version = parse_simple_version(head_version)
-          base_simple_version = parse_simple_version(base_version)
-
-          if head_simple_version is not None and base_simple_version is not None:
-              version_bumped = head_simple_version > base_simple_version
+          if event_name == "pull_request":
+              base_ref = os.environ["BASE_REF"]
+              base_pyproject = subprocess.check_output(
+                  ["git", "show", f"origin/{base_ref}:pyproject.toml"]
+              )
+              base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
+              version_bumped = version_is_bumped(head_version, base_version)
+          elif event_name == "push":
+              before_sha = os.environ["BEFORE_SHA"]
+              if before_sha and before_sha != "0000000000000000000000000000000000000000":
+                  base_pyproject = subprocess.check_output(
+                      ["git", "show", f"{before_sha}:pyproject.toml"]
+                  )
+                  base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
+                  version_bumped = version_is_bumped(head_version, base_version)
+              else:
+                  base_version = ""
+                  version_bumped = False
           else:
-              version_bumped = head_version != base_version
+              raise RuntimeError(f"Unsupported event: {event_name}")
 
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output_file:
               output_file.write(f"head_version={head_version}\n")
@@ -78,13 +95,21 @@ jobs:
     needs: detect-version-bump
     if: >-
       needs.detect-version-bump.outputs.version_bumped == 'true' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: >-
+            ${{
+              github.event_name == 'pull_request' &&
+              github.event.pull_request.head.sha ||
+              github.sha
+            }}
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
@@ -123,9 +148,7 @@ jobs:
   publish-to-pypi:
     name: Publish to PyPI
     needs: [detect-version-bump, build]
-    if: >-
-      github.event_name == 'pull_request_review' &&
-      github.event.review.state == 'approved'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: pypi
