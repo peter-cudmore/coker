@@ -3,49 +3,142 @@ name: Publish Coker
 on:
   pull_request:
     branches: ["main"]
-    types: ["closed"]
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
 
-
+permissions:
+  contents: read
 
 jobs:
-  build:
-    name: Build distribution 📦
+  detect-version-bump:
+    name: Detect version bump
+    if: >-
+      github.event_name == 'pull_request' ||
+      (
+        github.event_name == 'pull_request_review' &&
+        github.event.review.state == 'approved' &&
+        github.event.pull_request.base.ref == 'main'
+      )
     runs-on: ubuntu-latest
-
+    outputs:
+      version_bumped: ${{ steps.compare.outputs.version_bumped }}
+      head_version: ${{ steps.compare.outputs.head_version }}
+      base_version: ${{ steps.compare.outputs.base_version }}
     steps:
-    - uses: actions/checkout@v4
-      with:
-        persist-credentials: false
-    - name: Install uv
-      uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-      with:
-        python-version: "3.x"
-        enable-cache: true
-    - name: Build a binary wheel and a source tarball
-      run: uv build
-    - name: Store the distribution packages
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+      - name: Compare package versions
+        id: compare
+        shell: python
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          def parse_simple_version(version: str):
+              version_parts = version.split(".")
+              if all(part.isdigit() for part in version_parts):
+                  return tuple(int(part) for part in version_parts)
+              return None
+
+          base_ref = os.environ["BASE_REF"]
+          head_pyproject = Path("pyproject.toml").read_bytes()
+          base_pyproject = subprocess.check_output(
+              ["git", "show", f"origin/{base_ref}:pyproject.toml"]
+          )
+
+          head_version = tomllib.loads(head_pyproject.decode())["project"]["version"]
+          base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
+
+          head_simple_version = parse_simple_version(head_version)
+          base_simple_version = parse_simple_version(base_version)
+
+          if head_simple_version is not None and base_simple_version is not None:
+              version_bumped = head_simple_version > base_simple_version
+          else:
+              version_bumped = head_version != base_version
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output_file:
+              output_file.write(f"head_version={head_version}\n")
+              output_file.write(f"base_version={base_version}\n")
+              output_file.write(
+                  f"version_bumped={'true' if version_bumped else 'false'}\n"
+              )
+
+  build:
+    name: Build distribution
+    needs: detect-version-bump
+    if: >-
+      needs.detect-version-bump.outputs.version_bumped == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.x"
+          enable-cache: true
+      - name: Build distribution packages
+        run: uv build
+      - name: Store distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish-to-test-pypi:
+    name: Publish to TestPyPI
+    needs: [detect-version-bump, build]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/coker
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution packages
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish distribution packages to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-to-pypi:
     name: Publish to PyPI
-    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
-    needs:
-    - build
+    needs: [detect-version-bump, build]
+    if: >-
+      github.event_name == 'pull_request_review' &&
+      github.event.review.state == 'approved'
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/p/coker
     permissions:
-      id-token: write  # IMPORTANT: mandatory for trusted publishing
-
+      id-token: write
     steps:
-    - name: Download all the dists
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-    - name: Publish distribution 📦 to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Download distribution packages
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish distribution packages to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
