@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "coker"
-version = "0.3.22"
+version = "0.3.23"
 requires-python = ">=3.10"
 authors = [
     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}

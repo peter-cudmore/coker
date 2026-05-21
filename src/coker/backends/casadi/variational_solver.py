@@ -360,7 +360,7 @@ def create_variational_solver(
 
     parameter_offset = int(path_symbols.shape[0] + u_symbols.shape[0])
 
-    def map_arguments(fixed_parameters: Dict[str, float]) -> Dict[str, ca.DM]:
+    def map_arguments(fixed_parameters: Dict[str, arameterVariable]) -> Dict[str, ca.DM]:
         unknown = sorted(set(fixed_parameters) - set(parameter_indices))
         if unknown:
             raise KeyError(f"Unknown solver parameters: {', '.join(unknown)}")
@@ -368,15 +368,24 @@ def create_variational_solver(
         x0 = ca.DM(decision_variables_0)
         lbx = ca.DM(lower_bound_base)
         ubx = ca.DM(upper_bound_base)
+
+        # Used if we're pre-solving.
         p_guess = ca.DM(p_guess_base)
 
         for name, value in fixed_parameters.items():
-            index = parameter_indices[name]
-            scalar = float(value)
-            p_guess[index] = scalar
-            lbx[parameter_offset + index] = scalar
-            ubx[parameter_offset + index] = scalar
-            x0[parameter_offset + index] = scalar
+            if isinstance(value, BoundedVariable):
+                index = parameter_indices[name]
+                p_guess[index] = value.guess
+                lbx[parameter_offset + index] = value.lower_bound
+                ubx[parameter_offset + index] = value.upper_bound
+                x0[parameter_offset + index] = value.guess
+            else:
+                index = parameter_indices[name]
+                scalar = float(value)
+                p_guess[index] = scalar
+                lbx[parameter_offset + index] = scalar
+                ubx[parameter_offset + index] = scalar
+                x0[parameter_offset + index] = scalar
 
         init_lbg = ca.vertcat(lbg, p_guess, ca.DM.zeros(u_symbols.shape))
         init_ubg = ca.vertcat(ubg, p_guess, ca.DM.zeros(u_symbols.shape))
