@@ -578,7 +578,12 @@ def test_reentrant_solver(variational_backend):
     assert abs(soln_0.parameter_solutions["value"] - param[0]) < 1e-4
     assert abs(soln_0.parameter_solutions["p1"] - param[1]) < 1e-4
 
-    soln_constrained = solver.solve(p1=param[1], value=BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2))
+    soln_constrained = solver.solve(
+        p1=param[1],
+        value=BoundedVariable(
+            "value", upper_bound=3, lower_bound=0.5, guess=2
+        ),
+    )
     assert isinstance(soln_constrained, VariationalSolution)
     assert abs(soln_constrained.parameter_solutions["p1"] - param[1]) < 1e-9
 
