@@ -29,31 +29,24 @@ dependencies = [
     "typing-extensions",
 ]
 
-[project.optional-dependencies]
-casadi = [
-    "casadi>=3.7.0,<4",
-]
-jax = [
-    "jax>=0.10,<0.11; python_version >= '3.11'",
-]
-
 [dependency-groups]
 dev = [
     "black==25.1.0",
-    "pytest",
     "pytest-mypy",
     "mypy",
-]
-ci = [
     "pytest>=8.0.0,<9",
-    "pytest-mypy",
-    "black==25.1.0",
     "flake8>=7.1.1,<8",
 ]
 docs = [
     "sphinx>=7.0",
     "furo",
     "sphinx-autodoc-typehints",
+]
+casadi = [
+    "casadi>=3.7.0,<4",
+]
+jax = [
+    "jax>=0.10,<0.11; python_version >= '3.11'",
 ]
 
 [tool.pytest.ini_options]
