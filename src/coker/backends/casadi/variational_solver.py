@@ -55,14 +55,13 @@ class CasadiVariationalSolver(VariationalSolver):
 
         if self._initialiser is not None:
             initialised = self._initialiser(
-                x0=solver_arguments["init_x0"],
-                p=solver_arguments["p_guess"],
-                lbx=solver_arguments["init_lbx"],
-                ubx=solver_arguments["init_ubx"],
+                x0=x0,
+                lbx=solver_arguments["lbx"],
+                ubx=solver_arguments["ubx"],
                 lbg=solver_arguments["init_lbg"],
                 ubg=solver_arguments["init_ubg"],
             )
-            x0 = ca.vertcat(initialised["x"], solver_arguments["p_guess"])
+            x0 = initialised["x"]
             initial_cost = float(initialised["f"])
             assert (
                 initial_cost <= ca.inf
@@ -342,18 +341,12 @@ def create_variational_solver(
         ca.repmat(state_guess, n_reps), u_guess, p_guess_base
     )
 
-    init_decision_variables = ca.vertcat(path_symbols, u_symbols)
-    init_lower_bound_base = ca.vertcat(path_lower_bound, *u_lower)
-    init_upper_bound_base = ca.vertcat(path_upper_bound, *u_upper)
-    init_lbg = ca.vertcat(lbg, ca.DM.zeros(u_symbols.shape))
-    init_ubg = ca.vertcat(ubg, ca.DM.zeros(u_symbols.shape))
     init_solver = None
     if problem.transcription_options.initialise_near_guess:
         init_spec = {
             "f": cost,
-            "x": init_decision_variables,
-            "g": ca.vertcat(g, u_symbols),
-            "p": p_symbols,
+            "x": decision_variables,
+            "g": ca.vertcat(g, p_symbols, u_symbols),
         }
         init_solver = ca.nlpsol(
             "initialiser",
@@ -378,9 +371,9 @@ def create_variational_solver(
         lbx = ca.DM(lower_bound_base)
         ubx = ca.DM(upper_bound_base)
 
-        path_x0 = ca.DM(decision_variables_0[:parameter_offset])
-        path_lbx = ca.DM(init_lower_bound_base)
-        path_ubx = ca.DM(init_upper_bound_base)
+        path_x0 = ca.DM(decision_variables_0)
+        path_lbx = ca.DM(lower_bound_base)
+        path_ubx = ca.DM(upper_bound_base)
 
         p_guess = ca.DM(p_guess_base)
 
@@ -397,6 +390,8 @@ def create_variational_solver(
                 lbx[parameter_offset + index] = scalar
                 ubx[parameter_offset + index] = scalar
                 x0[parameter_offset + index] = scalar
+        init_lbg = ca.vertcat(lbg, p_guess, ca.DM.zeros(u_symbols.shape))
+        init_ubg = ca.vertcat(ubg, p_guess, ca.DM.zeros(u_symbols.shape))
         return {
             "x0": x0,
             "lbx": lbx,
