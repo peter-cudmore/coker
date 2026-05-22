@@ -589,3 +589,97 @@ def test_reentrant_solver(variational_backend):
 
     with pytest.raises(KeyError):
         solver.solve(unknown_parameter=0.0)
+
+
+def test_reentrant_solver_warm_starts_from_previous_solution(
+    variational_backend,
+):
+    def x0(p):
+        return p[0:2]
+
+    def xdot(x, p):
+        A = np.array([[p[2], 0], [0, p[3]]])
+        return A @ x
+
+    param = np.array([1, 1, 4, 3])
+
+    def solution(t, p):
+        exp_at = np.array([[np.exp(p[2] * t), 0], [0, np.exp(p[3] * t)]])
+        return exp_at @ x0(p)
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 4), x0=x0, xdot=xdot, backend="numpy"
+    )
+
+    def loss(f, p_inner):
+        total_error = 0.0
+        for t_i in [0.4, 0.6, 1]:
+            truth = solution(t_i, param)
+            test = f(t_i, p_inner)
+            error = truth - test
+            total_error += error.T @ error
+        return total_error
+
+    problem = VariationalProblem(
+        loss=loss,
+        system=system,
+        parameters=[
+            BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2),
+            BoundedVariable("p1", upper_bound=3, lower_bound=0.5, guess=2),
+            float(param[2]),
+            float(param[3]),
+        ],
+        t_final=1,
+        backend=variational_backend,
+    )
+    problem.transcription_options.optimiser_options = {"warm_start": True}
+
+    solver = problem.get_solver()
+    assert solver is not None
+
+    class TrackingInitialiser:
+        def __init__(self, delegate):
+            self._delegate = delegate
+            self.calls = 0
+
+        def __call__(self, *args, **kwargs):
+            self.calls += 1
+            return self._delegate(*args, **kwargs)
+
+    class TrackingSolver:
+        def __init__(self, delegate):
+            self._delegate = delegate
+            self.calls = []
+            self.results = []
+
+        def __call__(self, *args, **kwargs):
+            self.calls.append(kwargs)
+            result = self._delegate(*args, **kwargs)
+            self.results.append(result)
+            return result
+
+        def stats(self):
+            return self._delegate.stats()
+
+    solver._initialiser = TrackingInitialiser(solver._initialiser)
+    solver._solver = TrackingSolver(solver._solver)
+
+    first = solver.solve()
+    second = solver.solve()
+
+    assert isinstance(first, VariationalSolution)
+    assert isinstance(second, VariationalSolution)
+    assert solver._initialiser.calls == 1
+    assert len(solver._solver.calls) == 2
+    assert np.allclose(
+        np.asarray(solver._solver.calls[1]["x0"]),
+        np.asarray(solver._solver.results[0]["x"]),
+    )
+    assert np.allclose(
+        np.asarray(solver._solver.calls[1]["lam_x0"]),
+        np.asarray(solver._solver.results[0]["lam_x"]),
+    )
+    assert np.allclose(
+        np.asarray(solver._solver.calls[1]["lam_g0"]),
+        np.asarray(solver._solver.results[0]["lam_g"]),
+    )

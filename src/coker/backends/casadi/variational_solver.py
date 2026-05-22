@@ -25,6 +25,7 @@ from coker.optimisation import SolveFailure, solve_info_from_casadi_stats
 def noop(*_args):
     return None
 
+
 def _is_acceptable_small_search_direction(
     solve_info,
     result: Dict[str, ca.DM],
@@ -32,7 +33,7 @@ def _is_acceptable_small_search_direction(
     upper_bounds: ca.DM,
     *,
     tolerance: float,
-    min_tolerance: float = 1e-5
+    min_tolerance: float = 1e-5,
 ) -> bool:
     if solve_info.return_status != "Search_Direction_Becomes_Too_Small":
         return False
@@ -59,6 +60,7 @@ class CasadiVariationalSolver(VariationalSolver):
             [ca.DM, float, object], VariationalSolution
         ],
         initialiser: Optional[ca.Function] = None,
+        warm_start: bool = False,
     ):
         self.problem = problem
         self._parameters = parameters
@@ -66,6 +68,10 @@ class CasadiVariationalSolver(VariationalSolver):
         self._solver = solver
         self._assemble_solution = assemble_solution
         self._initialiser = initialiser
+        self._warm_start = warm_start
+        self._last_primal: Optional[ca.DM] = None
+        self._last_lam_x: Optional[ca.DM] = None
+        self._last_lam_g: Optional[ca.DM] = None
 
     @property
     def parameters(self) -> List[str]:
@@ -74,8 +80,23 @@ class CasadiVariationalSolver(VariationalSolver):
     def solve(self, **fixed_parameters) -> VariationalSolution:
         solver_arguments = self._map_arguments(fixed_parameters)
         x0 = solver_arguments["x0"]
+        solver_kwargs = {
+            "lbx": solver_arguments["lbx"],
+            "ubx": solver_arguments["ubx"],
+            "lbg": solver_arguments["lbg"],
+            "ubg": solver_arguments["ubg"],
+        }
 
-        if self._initialiser is not None:
+        if self._warm_start and self._last_primal is not None:
+            x0 = ca.fmin(
+                ca.fmax(self._last_primal, solver_kwargs["lbx"]),
+                solver_kwargs["ubx"],
+            )
+            if self._last_lam_x is not None:
+                solver_kwargs["lam_x0"] = self._last_lam_x
+            if self._last_lam_g is not None:
+                solver_kwargs["lam_g0"] = self._last_lam_g
+        elif self._initialiser is not None:
             initialised = self._initialiser(
                 x0=x0,
                 lbx=solver_arguments["lbx"],
@@ -91,10 +112,7 @@ class CasadiVariationalSolver(VariationalSolver):
 
         result = self._solver(
             x0=x0,
-            lbx=solver_arguments["lbx"],
-            ubx=solver_arguments["ubx"],
-            lbg=solver_arguments["lbg"],
-            ubg=solver_arguments["ubg"],
+            **solver_kwargs,
         )
         solve_info = solve_info_from_casadi_stats(self._solver.stats())
         if not solve_info.success:
@@ -103,7 +121,9 @@ class CasadiVariationalSolver(VariationalSolver):
                 result,
                 solver_arguments["lbg"],
                 solver_arguments["ubg"],
-                tolerance=self.problem.transcription_options.absolute_tolerance,
+                tolerance=(
+                    self.problem.transcription_options.absolute_tolerance
+                ),
             ):
                 solve_info = replace(solve_info, success=True)
             else:
@@ -112,6 +132,10 @@ class CasadiVariationalSolver(VariationalSolver):
                     f"{solve_info.return_status}",
                     solve_info,
                 )
+        if self._warm_start:
+            self._last_primal = result["x"]
+            self._last_lam_x = result["lam_x"]
+            self._last_lam_g = result["lam_g"]
         return self._assemble_solution(
             result["x"],
             float(result["f"]),
@@ -325,6 +349,7 @@ def create_variational_solver(
         ubg = ca.vertcat(ubg, g_upper)
 
     solver_options = dict(problem.transcription_options.optimiser_options)
+    warm_start = bool(solver_options.pop("warm_start", False))
     if not problem.transcription_options.verbose:
         solver_options.update(
             {
@@ -352,6 +377,8 @@ def create_variational_solver(
 
     callback_wrapper = None
     nlp_solver_options = dict(solver_options)
+    if warm_start:
+        nlp_solver_options["ipopt.warm_start_init_point"] = "yes"
     if problem.transcription_options.interation_callback is not None:
         callback_wrapper = CallbackWrapper.new(
             "variational_iteration_callback",
@@ -444,6 +471,7 @@ def create_variational_solver(
         solver=nlp_solver,
         assemble_solution=assemble_solution,
         initialiser=init_solver,
+        warm_start=warm_start,
     )
     solver._callback_wrapper = callback_wrapper
     return solver
