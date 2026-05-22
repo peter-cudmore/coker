@@ -1,3 +1,4 @@
+from dataclasses import replace
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -23,6 +24,27 @@ from coker.optimisation import SolveFailure, solve_info_from_casadi_stats
 
 def noop(*_args):
     return None
+
+def _is_acceptable_small_search_direction(
+    solve_info,
+    result: Dict[str, ca.DM],
+    lower_bounds: ca.DM,
+    upper_bounds: ca.DM,
+    *,
+    tolerance: float,
+    min_tolerance: float = 1e-5
+) -> bool:
+    if solve_info.return_status != "Search_Direction_Becomes_Too_Small":
+        return False
+    objective = float(result["f"])
+    if not np.isfinite(objective):
+        return False
+    residual = result["g"]
+    if residual.numel() == 0:
+        return True
+    violation = ca.fmax(lower_bounds - residual, residual - upper_bounds)
+    max_violation = float(ca.mmax(ca.fmax(violation, 0)))
+    return max_violation <= max(tolerance, min_tolerance)
 
 
 class CasadiVariationalSolver(VariationalSolver):
@@ -76,11 +98,20 @@ class CasadiVariationalSolver(VariationalSolver):
         )
         solve_info = solve_info_from_casadi_stats(self._solver.stats())
         if not solve_info.success:
-            raise SolveFailure(
-                "CasADi variational solve failed with status "
-                f"{solve_info.return_status}",
+            if _is_acceptable_small_search_direction(
                 solve_info,
-            )
+                result,
+                solver_arguments["lbg"],
+                solver_arguments["ubg"],
+                tolerance=self.problem.transcription_options.absolute_tolerance,
+            ):
+                solve_info = replace(solve_info, success=True)
+            else:
+                raise SolveFailure(
+                    "CasADi variational solve failed with status "
+                    f"{solve_info.return_status}",
+                    solve_info,
+                )
         return self._assemble_solution(
             result["x"],
             float(result["f"]),
