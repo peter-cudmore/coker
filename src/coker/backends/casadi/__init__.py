@@ -16,6 +16,10 @@ from coker.backends.casadi.casadi import (
     substitute,
 )
 from coker.backends.casadi.optimiser import build_optimisation_problem
+from coker.backends.casadi.dae_optimiser import (
+    create_dae_optimiser,
+    uses_dae_optimiser,
+)
 from coker.backends.casadi.variational_solver import create_variational_solver
 from coker.dynamics import VariationalProblem
 
@@ -217,6 +221,8 @@ class CasadiBackend(Backend):
         )
 
     def create_variational_solver(self, problem: VariationalProblem):
+        if uses_dae_optimiser(problem):
+            return create_dae_optimiser(problem)
         return create_variational_solver(problem)
 
     def evaluate_integrals(

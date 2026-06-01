@@ -252,10 +252,12 @@ def create_variational_solver(
 
     equalities.append(proj_x @ x0_symbol - x0_val)
     if z_size > 0:
-        equalities.append(proj_z @ z0_val)
+        equalities.append(proj_z @ x0_symbol - z0_val)
 
     equalities.extend(
-        xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
+        ca.reshape(xs_i, (xs_i.numel(), 1))
+        - ca.reshape(xe_i, (xe_i.numel(), 1))
+        for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
     )
 
     for poly in poly_collection.polys:
@@ -350,6 +352,7 @@ def create_variational_solver(
 
     solver_options = dict(problem.transcription_options.optimiser_options)
     warm_start = bool(solver_options.pop("warm_start", False))
+    solver_options.pop("variational_solver", None)
     if not problem.transcription_options.verbose:
         solver_options.update(
             {
@@ -733,7 +736,7 @@ class ControlFactory:
 def _to_output_projector(proj: ca.MX) -> Optional[np.ndarray]:
     if proj.shape[0] == 0:
         return None
-    return np.array(proj.to_DM()).reshape(proj.shape)
+    return np.array(ca.evalf(proj)).reshape(proj.shape)
 
 
 class CallbackWrapper(ca.Callback):
