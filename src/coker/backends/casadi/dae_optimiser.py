@@ -27,6 +27,8 @@ from .variational_solver import (
 VARIATIONAL_SOLVER_OPTION = "variational_solver"
 COLLOCATION_SOLVER = "collocation"
 DAE_OPTIMISER_SOLVER = "dae_optimiser"
+
+
 def _as_column(value):
     if value is None:
         return ca.DM.zeros(0, 1)
@@ -52,14 +54,18 @@ class DaePointEvaluator:
         self,
         *,
         problem: VariationalProblem,
-        projected_parameters: ca.MX,
+        parameter_projector: ca.DM,
     ):
         self.problem = problem
         self._casadi = get_backend_by_name("casadi")
-        self._projected_parameters = projected_parameters
+        self._parameter_projector = parameter_projector
         self._is_dae = problem.system.g is not Noop()
         self._has_quadrature = problem.system.dqdt is not Noop()
+        self._projected_parameter_size = parameter_projector.shape[0]
         self._integrator = self._build_integrator()
+
+    def project_parameters(self, full_parameters):
+        return self._parameter_projector @ full_parameters
 
     def initial_conditions(self, projected_parameters):
         x0, z0 = self._casadi.evaluate(
@@ -70,20 +76,21 @@ class DaePointEvaluator:
 
     def state_at(self, time: float, projected_parameters):
         if time < 0 or time > self.problem.t_final:
-            raise ValueError(f"Time {time} is outside [0, {self.problem.t_final}]")
+            raise ValueError(
+                f"Time {time} is outside [0, {self.problem.t_final}]"
+            )
 
         x0, z0 = self.initial_conditions(projected_parameters)
-        if self._has_quadrature:
-            q0 = ca.DM.zeros(self.problem.system.y.input_shape()[-1].flat(), 1)
-        else:
-            q0 = ca.DM.zeros(0, 1)
-
+        q0 = self._quadrature_initial_state()
         if time == 0:
             return x0, z0, q0
 
-        txq0 = ca.vertcat(ca.DM([0.0]), x0, q0)
         runtime_parameters = ca.vertcat(projected_parameters, ca.DM([time]))
-        result = self._integrator(x0=txq0, p=runtime_parameters, z0=z0)
+        result = self._integrator(
+            x0=ca.vertcat(ca.DM([0.0]), x0, q0),
+            p=runtime_parameters,
+            z0=z0,
+        )
         txq_final = result["xf"]
         x_size = _vector_size(x0)
         x_final = txq_final[1 : 1 + x_size]
@@ -92,7 +99,7 @@ class DaePointEvaluator:
         return x_final, z_final, q_final
 
     def output_at(self, time: float, full_parameters):
-        projected_parameters = self._projected_parameters_expr(full_parameters)
+        projected_parameters = self.project_parameters(full_parameters)
         x_val, z_val, q_val = self.state_at(time, projected_parameters)
         (output,) = self._casadi.evaluate(
             self.problem.system.y,
@@ -100,57 +107,63 @@ class DaePointEvaluator:
         )
         return output
 
-    def _projected_parameters_expr(self, full_parameters):
-        if self.problem.system_parameter_map is None:
-            return full_parameters
-        return ca.DM(self.problem.system_parameter_map) @ full_parameters
+    def _quadrature_initial_state(self):
+        if not self._has_quadrature:
+            return ca.DM.zeros(0, 1)
+        q_dim = int(self.problem.system.y.input_shape()[-1].flat())
+        return ca.DM.zeros(q_dim, 1)
 
     def _build_integrator(self) -> ca.Function:
-        parameter_shape = self._projected_parameters.shape
-        p = ca.MX.sym("p", parameter_shape[0], parameter_shape[1])
+        projected_parameters = ca.MX.sym(
+            "p",
+            self._projected_parameter_size,
+            1,
+        )
         horizon = ca.MX.sym("horizon")
-        x0_expr, z0_expr = self.initial_conditions(p)
-        x_size = _vector_size(x0_expr)
-        x = ca.MX.sym("x", x_size, 1)
+        x0_expr, z0_expr = self.initial_conditions(projected_parameters)
+        x = ca.MX.sym("x", _vector_size(x0_expr), 1)
         t = ca.MX.sym("t")
-        if self._is_dae:
-            z_size = _vector_size(z0_expr)
-            z = ca.MX.sym("z", z_size, 1)
-        else:
-            z = ca.MX.zeros(0, 1)
-
-        if self._has_quadrature:
-            q_dim = int(self.problem.system.y.input_shape()[-1].flat())
-            q = ca.MX.sym("q", q_dim, 1)
-            (dqdt,) = self._casadi.evaluate(
-                self.problem.system.dqdt,
-                [t, x, z, None, p],
-            )
-            dqdt = horizon * _as_column(dqdt)
-        else:
-            q = ca.MX.zeros(0, 1)
-            dqdt = ca.MX.zeros(0, 1)
+        z = self._algebraic_symbol(z0_expr)
+        q, dqdt = self._quadrature_dynamics(
+            t, x, z, projected_parameters, horizon
+        )
 
         (dxdt,) = self._casadi.evaluate(
             self.problem.system.dxdt,
-            [t, x, z, None, p],
+            [t, x, z, None, projected_parameters],
         )
-        dxdt = horizon * _as_column(dxdt)
-        ode = ca.vertcat(horizon, dxdt, dqdt)
         dae = {
             "x": ca.vertcat(t, x, q),
-            "p": ca.vertcat(p, horizon),
-            "ode": ode,
+            "p": ca.vertcat(projected_parameters, horizon),
+            "ode": ca.vertcat(horizon, horizon * _as_column(dxdt), dqdt),
         }
         if self._is_dae:
             (alg,) = self._casadi.evaluate(
                 self.problem.system.g,
-                [t, x, z, None, p],
+                [t, x, z, None, projected_parameters],
             )
             dae["z"] = z
             dae["alg"] = _as_column(alg)
 
         return ca.integrator("dae_optimiser", "idas", dae, 0.0, 1.0, {})
+
+    def _algebraic_symbol(self, z0_expr):
+        if not self._is_dae:
+            return ca.MX.zeros(0, 1)
+        return ca.MX.sym("z", _vector_size(z0_expr), 1)
+
+    def _quadrature_dynamics(self, time, x, z, projected_parameters, horizon):
+        if not self._has_quadrature:
+            return ca.MX.zeros(0, 1), ca.MX.zeros(0, 1)
+
+        q_dim = int(self.problem.system.y.input_shape()[-1].flat())
+        q = ca.MX.sym("q", q_dim, 1)
+        (dqdt,) = self._casadi.evaluate(
+            self.problem.system.dqdt,
+            [time, x, z, None, projected_parameters],
+        )
+        return q, horizon * _as_column(dqdt)
+
 
 class IntegratedPath:
     def __init__(
@@ -178,7 +191,9 @@ class IntegratedPath:
         )
 
     def __call__(self, time):
-        x_val, z_val, q_val = self.point_evaluator.state_at(time, self.parameters)
+        x_val, z_val, q_val = self.point_evaluator.state_at(
+            time, self.parameters
+        )
         point = [np.array(x_val, dtype=float).reshape((-1,))]
         if self.z_size > 0:
             point.append(np.array(z_val, dtype=float).reshape((-1,)))
@@ -202,7 +217,9 @@ class IntegratedPath:
                 self.degree,
                 np.zeros(((self.degree + 1) * self.total_size, 1)),
             )
-            values = [self(time).reshape((-1, 1)) for time in seed.knot_times()]
+            values = [
+                self(time).reshape((-1, 1)) for time in seed.knot_times()
+            ]
             polys.append(
                 InterpolatingPoly(
                     self.total_size,
@@ -249,14 +266,16 @@ class DaeSolutionAssembler:
             z_size=self._z_size,
             q_size=self._q_size,
         )
+        projected_parameters = self.point_evaluator.project_parameters(
+            parameter_vector
+        )
         return VariationalSolution(
             cost=loss,
             projectors=self._projectors,
             parameter_solutions=self.parameter_solution_map(free_parameters),
-            parameters=np.array(
-                self.point_evaluator._projected_parameters_expr(parameter_vector),
-                dtype=float,
-            ).reshape((-1,)),
+            parameters=np.array(projected_parameters, dtype=float).reshape(
+                (-1,)
+            ),
             path=path,
             control_solutions=[],
             output=self.problem.system.y,
@@ -265,7 +284,6 @@ class DaeSolutionAssembler:
             path_constraint_exprs=self.problem.path_constraints,
             terminal_constraint_exprs=self.problem.terminal_constraints,
         )
-
 
     def _build_projectors(self):
         proj_x = np.hstack(
@@ -335,21 +353,17 @@ def create_dae_optimiser(problem: VariationalProblem) -> CasadiDaeOptimiser:
     (
         p,
         p_symbols,
-        p0_guess,
+        _,
         (p_lower_base, p_guess_base, p_upper_base),
         p_output_map,
     ) = construct_parameters(problem.parameters)
     parameter_names = list(p_output_map.indices)
     parameter_indices = dict(p_output_map.indices)
-
-    if problem.system_parameter_map is not None:
-        proj_p = ca.DM(problem.system_parameter_map)
-    else:
-        proj_p = ca.DM.eye(p.shape[0])
+    parameter_projector = _parameter_projector(problem, p.shape[0])
 
     point_evaluator = DaePointEvaluator(
         problem=problem,
-        projected_parameters=proj_p @ p,
+        parameter_projector=parameter_projector,
     )
 
     output_function = ca.Function(
@@ -370,19 +384,18 @@ def create_dae_optimiser(problem: VariationalProblem) -> CasadiDaeOptimiser:
     def solution_proxy(time, p_val):
         if isinstance(time, (ca.MX, ca.SX)):
             raise TypeError(
-                "The CasADi DAE optimiser requires concrete evaluation times in the loss function"
+                "The CasADi DAE optimiser requires concrete evaluation "
+                "times in the loss function"
             )
         scalar_time = float(time)
-        try:
-            return symbolic_output_cache[scalar_time]
-        except KeyError:
-            pass
+        cached_output = symbolic_output_cache.get(scalar_time)
+        if cached_output is not None:
+            return cached_output
         value = point_evaluator.output_at(scalar_time, p_val)
         symbolic_output_cache[scalar_time] = value
         return value
 
     (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
-    g = ca.MX.zeros(0, 1)
     lbg = ca.DM.zeros(0, 1)
     ubg = ca.DM.zeros(0, 1)
 
@@ -412,7 +425,7 @@ def create_dae_optimiser(problem: VariationalProblem) -> CasadiDaeOptimiser:
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
 
-    nlp_spec = {"f": cost, "x": p_symbols, "g": g}
+    nlp_spec = {"f": cost, "x": p_symbols, "g": ca.MX.zeros(0, 1)}
     init_solver = None
     if problem.transcription_options.initialise_near_guess:
         init_solver = ca.nlpsol(
@@ -421,7 +434,12 @@ def create_dae_optimiser(problem: VariationalProblem) -> CasadiDaeOptimiser:
             nlp_spec,
             dict(solver_options),
         )
-    nlp_solver = ca.nlpsol("dae_optimiser", "ipopt", nlp_spec, nlp_solver_options)
+    nlp_solver = ca.nlpsol(
+        "dae_optimiser",
+        "ipopt",
+        nlp_spec,
+        nlp_solver_options,
+    )
 
     def map_arguments(
         fixed_parameters: Dict[str, ParameterVariable],
@@ -468,3 +486,11 @@ def create_dae_optimiser(problem: VariationalProblem) -> CasadiDaeOptimiser:
     )
     solver._callback_wrapper = callback_wrapper
     return solver
+
+
+def _parameter_projector(
+    problem: VariationalProblem, parameter_size: int
+) -> ca.DM:
+    if problem.system_parameter_map is None:
+        return ca.DM.eye(parameter_size)
+    return ca.DM(problem.system_parameter_map)
