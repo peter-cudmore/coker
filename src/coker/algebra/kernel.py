@@ -13,7 +13,7 @@ from coker.algebra.dimensions import (
     Element,
 )
 from coker.algebra.tensor import SymbolicVector
-from coker.algebra.ops import OP, Noop, Operator
+from coker.algebra.ops import OP, Noop, Operator, ReshapeOP
 
 from coker.algebra.ops import numpy_atomics, numpy_composites
 
@@ -488,27 +488,57 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __getitem__(self, key):
         if self.is_constant():
             return self.value()[key]
+        if isinstance(key, tuple):
+            op, *args = self.tape.nodes[self.index]
+            if isinstance(op, ReshapeOP) and op.order == "C":
+                (base,) = args
+                if base.dim.is_vector():
+                    flat = np.arange(np.prod(self.shape)).reshape(self.shape)[
+                        key
+                    ]
+                    if np.isscalar(flat):
+                        return base[int(flat)]
+                    flat = np.asarray(flat)
+                    if flat.ndim == 1:
+                        p = np.zeros((flat.size, base.shape[0]), dtype=float)
+                        p[np.arange(flat.size), flat] = 1
+                        return base._emit(OP.MATMUL, p, base)
 
-        if isinstance(key, slice):
-            dimension = self.tape.dim[self.index]
-            if isinstance(dimension, FunctionSpace):
-                assert len(dimension.output_dimensions()) == 1
-                assert dimension.output_dimensions()[0].is_vector()
-                p = get_projection(dimension.output_dimensions()[0], key)
-            else:
+        def leading_item(tracer, item):
+            dimension = tracer.tape.dim[tracer.index]
+            if isinstance(item, slice):
+                if isinstance(dimension, FunctionSpace):
+                    assert len(dimension.output_dimensions()) == 1
+                    dimension = dimension.output_dimensions()[0]
+                if dimension.is_matrix():
+                    dimension = Dimension((dimension.dim[0],))
                 assert dimension.is_vector(), "Tried to index a non-vector"
-                p = get_projection(dimension, key)
-            return self._emit(OP.MATMUL, p, self)
+                return tracer._emit(
+                    OP.MATMUL, get_projection(dimension, item), tracer
+                )
+            if isinstance(item, int):
+                if dimension.is_matrix():
+                    rows = dimension.dim[0]
+                    p = get_basis(Dimension((rows,)), item).reshape((1, rows))
+                    return tracer._emit(OP.MATMUL, p, tracer).T
+                assert dimension.is_vector(), "Tried to index a non-vector"
+                return tracer._emit(OP.DOT, get_basis(dimension, item), tracer)
+            raise NotImplementedError(
+                f"Cannot get key {item}, not yet implemented"
+            )
 
-        if isinstance(key, int):
-            dimension = self.tape.dim[self.index]
-            assert dimension.is_vector(), "Tried to index a non-vector"
-            p = get_basis(dimension, key)
-            return self._emit(OP.DOT, p, self)
+        if not isinstance(key, tuple):
+            return leading_item(self, key)
 
-        raise NotImplementedError(
-            "Cannot get key {}, not yet implemented", key
-        )
+        result = self
+        for i, item in enumerate(key):
+            if i and result.dim.is_matrix():
+                result = leading_item(result.T, item)
+                if result.dim.is_matrix():
+                    result = result.T
+                continue
+            result = leading_item(result, item)
+        return result
 
     def __setitem__(self, key, value):
         if len(key) != len(self.shape):
