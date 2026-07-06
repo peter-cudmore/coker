@@ -66,6 +66,7 @@ def lgr_points(n: int) -> List[float]:
             -(legendre_coefficient(n - 1, i) + legendre_coefficient(n, i))
             / leading_term
         )
+    # tol=1000 means imaginary parts below ~1000 * machine eps are treated as round-off noise.
     roots = np.real_if_close(np.linalg.eigvals(companion_matrix), tol=1000)
     roots = np.sort(np.asarray(roots, dtype=float)).tolist()
     roots.append(1.0)
