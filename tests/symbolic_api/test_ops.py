@@ -288,3 +288,28 @@ def test_zeros():
         assert x.shape == (3, 3)
         x[:, 0] = np.array([1, 2, 3])
         assert x[0, 0] == 1
+
+
+def test_matrix_slice(backend):
+    x = np.array([[1, 2, 3], [4, 5, 6]], dtype=float)
+    x_flat = x.reshape(-1)
+    f = function(
+        arguments=[VectorSpace("x", 6)],
+        implementation=lambda x: np.reshape(x, shape=(2, 3))[0, :],
+        backend=backend,
+    )
+    assert is_close(f(x_flat), np.array([1, 2, 3], dtype=float))
+
+    f = function(
+        arguments=[VectorSpace("x", 6)],
+        implementation=lambda x: np.reshape(x, shape=(2, 3))[:, 0],
+        backend=backend,
+    )
+    assert is_close(f(x_flat), np.array([1, 4], dtype=float))
+
+    f = function(
+        arguments=[VectorSpace("x", 6)],
+        implementation=lambda x: np.reshape(x, shape=(2, 3))[1, 2],
+        backend=backend,
+    )
+    assert is_close(f(x_flat), 6.0)
