@@ -1,5 +1,6 @@
 import time
 import numpy as np
+import pytest
 from coker import function, VectorSpace
 
 N_STATES = 10
@@ -18,6 +19,7 @@ def make_dynamics_fn():
 
     return function([VectorSpace("x", N_STATES)], impl, backend="numpy")
 
+@pytest.mark.perf
 
 def test_evaluate_inner_speed():
     """

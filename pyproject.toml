@@ -62,7 +62,9 @@ pythonpath = ["src"]
 testpaths = [
     "tests",
 ]
-
+markers = [
+    "perf: machine-dependent performance assertions run only in the dedicated perf suite",
+]
 [tool.black]
 line-length = 79
 target-version = ["py310", "py311", "py312", "py313"]
