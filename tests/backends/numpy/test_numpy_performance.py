@@ -19,8 +19,8 @@ def make_dynamics_fn():
 
     return function([VectorSpace("x", N_STATES)], impl, backend="numpy")
 
-@pytest.mark.perf
 
+@pytest.mark.perf
 def test_evaluate_inner_speed():
     """
     Once traced, calling a compiled function must not re-interpret the tape
