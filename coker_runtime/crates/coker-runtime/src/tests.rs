@@ -108,7 +108,8 @@ fn execute_bilinear_homogeneous_tensor() {
         })],
     )]);
     let mut workspace = vec![0.0; 2];
-    let outputs = execute(&module, &[&[1.5]], &mut workspace).unwrap();
+    let mut outputs = vec![vec![0.0; 1]];
+    execute(&module, &[&[1.5]], &mut workspace, &mut outputs).unwrap();
     assert_eq!(outputs[0], vec![15.0]);
 }
 
@@ -150,16 +151,20 @@ fn push_forward_bilinear_homogeneous_tensor() {
     )]);
     let mut workspace = vec![0.0; 2];
     let mut tangent_workspace = vec![0.0; 2];
-    let (outputs, tangents) = push_forward(
+    let mut outputs = vec![vec![0.0; 1]];
+    let mut tangent_outputs = vec![vec![0.0; 1]];
+    push_forward(
         &module,
         &[&[2.0]],
         &[&[0.5]],
         &mut workspace,
         &mut tangent_workspace,
+        &mut outputs,
+        &mut tangent_outputs,
     )
     .unwrap();
     assert_eq!(outputs[0], vec![14.0]);
-    assert_eq!(tangents[0], vec![5.5]);
+    assert_eq!(tangent_outputs[0], vec![5.5]);
 }
 
 #[test]
@@ -192,7 +197,8 @@ fn execute_generic_layer_operations() {
         })],
     )]);
     let mut workspace = vec![0.0; 2];
-    let outputs = execute(&module, &[&[1.0]], &mut workspace).unwrap();
+    let mut outputs = vec![vec![0.0; 1]];
+    execute(&module, &[&[1.0]], &mut workspace, &mut outputs).unwrap();
     assert_eq!(outputs[0][0], 1.0f32.sin());
 }
 
@@ -200,7 +206,8 @@ fn execute_generic_layer_operations() {
 fn execute_evaluate_layer_calls_nested_function() {
     let module = build_nested_module();
     let mut workspace = vec![0.0; 4];
-    let outputs = execute(&module, &[], &mut workspace).unwrap();
+    let mut outputs = vec![vec![0.0; 1]];
+    execute(&module, &[], &mut workspace, &mut outputs).unwrap();
     assert_eq!(outputs[0], vec![2.0f32.sin()]);
 }
 
@@ -270,16 +277,20 @@ fn push_forward_evaluate_layer_calls_nested_function() {
     let module = BytecodeModule::new(vec![entry_program, callee_program]);
     let mut workspace = vec![0.0; 4];
     let mut tangent_workspace = vec![0.0; 4];
-    let (outputs, tangents) = push_forward(
+    let mut outputs = vec![vec![0.0; 1]];
+    let mut tangent_outputs = vec![vec![0.0; 1]];
+    push_forward(
         &module,
         &[&[2.0]],
         &[&[0.5]],
         &mut workspace,
         &mut tangent_workspace,
+        &mut outputs,
+        &mut tangent_outputs,
     )
     .unwrap();
     assert_eq!(outputs[0], vec![6.0]);
-    assert_eq!(tangents[0], vec![2.5]);
+    assert_eq!(tangent_outputs[0], vec![2.5]);
 }
 
 #[test]
@@ -319,7 +330,8 @@ fn execute_overlapping_bilinear_layer_uses_scratch_workspace() {
         })],
     )]);
     let mut workspace = vec![0.0; 3];
-    let outputs = execute(&module, &[&[3.0]], &mut workspace).unwrap();
+    let mut outputs = vec![vec![0.0; 1]];
+    execute(&module, &[&[3.0]], &mut workspace, &mut outputs).unwrap();
     assert_eq!(outputs[0], vec![18.0]);
 }
 
@@ -330,8 +342,10 @@ fn module_builder_allocates_workspace_and_executes() {
         .build()
         .unwrap();
     let execution_inputs = module.validate_inputs(&[]).unwrap();
-    module.execute(execution_inputs);
-    assert_eq!(module.collect_outputs()[0], vec![2.0f32.sin()]);
+    let mut outputs = vec![vec![0.0; 1]];
+    let execution_outputs = module.validate_outputs(&mut outputs).unwrap();
+    module.execute(execution_inputs, execution_outputs);
+    assert_eq!(outputs[0], vec![2.0f32.sin()]);
     assert_eq!(module.workspace().len(), 4);
 }
 
@@ -363,6 +377,24 @@ fn module_validate_inputs_rejects_wrong_shape_before_execution() {
         RuntimeError::InputCountMismatch {
             expected: 0,
             actual: 1,
+        }
+    ));
+}
+
+#[test]
+fn module_validate_outputs_rejects_wrong_shape_before_execution() {
+    let module = ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .build()
+        .unwrap();
+    let mut outputs = vec![vec![0.0; 2]];
+    let error = module.validate_outputs(&mut outputs).unwrap_err();
+    assert!(matches!(
+        error,
+        RuntimeError::OutputSizeMismatch {
+            index: 0,
+            expected: 1,
+            actual: 2,
         }
     ));
 }

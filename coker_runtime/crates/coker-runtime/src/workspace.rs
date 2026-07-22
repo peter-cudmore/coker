@@ -76,16 +76,12 @@ impl<'a> Workspace<'a> {
     }
 }
 
-pub(crate) fn collect_outputs(program: &Program, workspace: &[f32]) -> Vec<Vec<f32>> {
-    program
-        .output_specs
-        .iter()
-        .map(|output_spec| {
-            let start = output_spec.workspace_offset as usize;
-            let stop = start + output_spec.length as usize;
-            workspace[start..stop].to_vec()
-        })
-        .collect()
+pub(crate) fn write_outputs(program: &Program, workspace: &[f32], outputs: &mut [Vec<f32>]) {
+    for (output_spec, output_buffer) in program.output_specs.iter().zip(outputs.iter_mut()) {
+        let start = output_spec.workspace_offset as usize;
+        let stop = start + output_spec.length as usize;
+        output_buffer.copy_from_slice(&workspace[start..stop]);
+    }
 }
 
 pub(crate) fn pack_evaluate_inputs(

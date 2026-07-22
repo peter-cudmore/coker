@@ -7,6 +7,7 @@ use pyo3::types::{PyBytes, PyDict};
 #[pyclass(name = "RuntimeProgram")]
 struct PyRuntimeProgram {
     module: Module,
+    output_lengths: Vec<usize>,
 }
 
 #[pymethods]
@@ -21,8 +22,13 @@ impl PyRuntimeProgram {
             .module
             .validate_inputs(&input_slices)
             .map_err(runtime_error)?;
-        self.module.execute(execution_inputs);
-        Ok(self.module.collect_outputs())
+        let mut outputs = allocate_output_buffers(&self.output_lengths);
+        let execution_outputs = self
+            .module
+            .validate_outputs(&mut outputs)
+            .map_err(runtime_error)?;
+        self.module.execute(execution_inputs, execution_outputs);
+        Ok(outputs)
     }
 
     fn push_forward(
@@ -36,11 +42,15 @@ impl PyRuntimeProgram {
             .module
             .validate_push_forward_inputs(&input_slices, &tangent_slices)
             .map_err(runtime_error)?;
-        self.module.push_forward(push_forward_inputs);
-        Ok((
-            self.module.collect_outputs(),
-            self.module.collect_tangent_outputs(),
-        ))
+        let mut outputs = allocate_output_buffers(&self.output_lengths);
+        let mut tangent_outputs = allocate_output_buffers(&self.output_lengths);
+        let push_forward_outputs = self
+            .module
+            .validate_push_forward_outputs(&mut outputs, &mut tangent_outputs)
+            .map_err(runtime_error)?;
+        self.module
+            .push_forward(push_forward_inputs, push_forward_outputs);
+        Ok((outputs, tangent_outputs))
     }
 }
 
@@ -59,7 +69,11 @@ fn load_program(program: &[u8]) -> PyResult<PyRuntimeProgram> {
     let module = ModuleBuilder::new_from_bytes(program)
         .and_then(ModuleBuilder::build)
         .map_err(runtime_error)?;
-    Ok(PyRuntimeProgram { module })
+    let output_lengths = output_lengths(&module.info());
+    Ok(PyRuntimeProgram {
+        module,
+        output_lengths,
+    })
 }
 
 #[pyfunction]
@@ -84,8 +98,13 @@ fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<Vec<f3
     let execution_inputs = module
         .validate_inputs(&input_slices)
         .map_err(runtime_error)?;
-    module.execute(execution_inputs);
-    Ok(module.collect_outputs())
+    let module_info = module.info();
+    let mut outputs = allocate_output_buffers(&output_lengths(&module_info));
+    let execution_outputs = module
+        .validate_outputs(&mut outputs)
+        .map_err(runtime_error)?;
+    module.execute(execution_inputs, execution_outputs);
+    Ok(outputs)
 }
 
 #[pyfunction]
@@ -102,8 +121,29 @@ fn push_forward_program(
     let push_forward_inputs = module
         .validate_push_forward_inputs(&input_slices, &tangent_slices)
         .map_err(runtime_error)?;
-    module.push_forward(push_forward_inputs);
-    Ok((module.collect_outputs(), module.collect_tangent_outputs()))
+    let module_info = module.info();
+    let output_lengths = output_lengths(&module_info);
+    let mut outputs = allocate_output_buffers(&output_lengths);
+    let mut tangent_outputs = allocate_output_buffers(&output_lengths);
+    let push_forward_outputs = module
+        .validate_push_forward_outputs(&mut outputs, &mut tangent_outputs)
+        .map_err(runtime_error)?;
+    module.push_forward(push_forward_inputs, push_forward_outputs);
+    Ok((outputs, tangent_outputs))
+}
+
+fn output_lengths(info: &ProgramInfo) -> Vec<usize> {
+    info.output_specs
+        .iter()
+        .map(|output_spec| output_spec.length as usize)
+        .collect()
+}
+
+fn allocate_output_buffers(output_lengths: &[usize]) -> Vec<Vec<f32>> {
+    output_lengths
+        .iter()
+        .map(|&output_length| vec![0.0; output_length])
+        .collect()
 }
 
 fn program_info_dict<'py>(py: Python<'py>, info: &ProgramInfo) -> PyResult<Bound<'py, PyDict>> {
