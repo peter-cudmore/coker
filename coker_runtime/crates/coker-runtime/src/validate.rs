@@ -1,7 +1,7 @@
 use alloc::{format, string::ToString};
 use coker_bytecode::{
     BilinearLayer, BytecodeModule, EvaluateInputBinding, EvaluateLayer, GenericLayer, Layer,
-    Program,
+    Program, RowOp, ScalarOp,
 };
 
 use crate::{entry_program, find_function, RuntimeError, UNUSED_OPERAND};
@@ -19,17 +19,16 @@ pub(crate) fn validate_module_struct(module: &BytecodeModule) -> Result<(), Runt
             .iter()
             .any(|prior_program| prior_program.function_id == function_program.function_id)
         {
-            return Err(RuntimeError::Validation("duplicate function id".to_string()));
+            return Err(RuntimeError::Validation(
+                "duplicate function id".to_string(),
+            ));
         }
         validate_program_struct(module, function_program)?;
     }
     Ok(())
 }
 
-fn validate_program_struct(
-    module: &BytecodeModule,
-    program: &Program,
-) -> Result<(), RuntimeError> {
+fn validate_program_struct(module: &BytecodeModule, program: &Program) -> Result<(), RuntimeError> {
     let workspace_size = program.workspace_size as usize;
     let required_workspace_size = program.required_workspace_size as usize;
     if required_workspace_size < workspace_size {
@@ -59,15 +58,10 @@ fn validate_program_struct(
             Layer::Bilinear(bilinear_layer) => {
                 validate_bilinear_layer(bilinear_layer, workspace_size)?
             }
-            Layer::Generic(generic_layer) => {
-                validate_generic_layer(generic_layer, workspace_size)?
+            Layer::Generic(generic_layer) => validate_generic_layer(generic_layer, workspace_size)?,
+            Layer::Evaluate(evaluate_layer) => {
+                validate_evaluate_layer(module, evaluate_layer, program, workspace_size)?
             }
-            Layer::Evaluate(evaluate_layer) => validate_evaluate_layer(
-                module,
-                evaluate_layer,
-                program,
-                workspace_size,
-            )?,
         }
     }
     Ok(())
@@ -89,15 +83,24 @@ fn validate_bilinear_layer(
         workspace_size,
         "bilinear output",
     )?;
+    validate_disjoint_ranges(
+        bilinear_layer.in_offset,
+        bilinear_layer.in_length,
+        bilinear_layer.out_offset,
+        bilinear_layer.out_length,
+        "bilinear layer",
+    )?;
 
     let expected_shape = (
         bilinear_layer.out_length,
-        bilinear_layer.in_length.checked_add(1).ok_or_else(|| {
-            RuntimeError::Validation("bilinear input too large".to_string())
-        })?,
-        bilinear_layer.in_length.checked_add(1).ok_or_else(|| {
-            RuntimeError::Validation("bilinear input too large".to_string())
-        })?,
+        bilinear_layer
+            .in_length
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::Validation("bilinear input too large".to_string()))?,
+        bilinear_layer
+            .in_length
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::Validation("bilinear input too large".to_string()))?,
     );
     if bilinear_layer.quadratic.shape != expected_shape {
         return Err(RuntimeError::Validation(
@@ -143,11 +146,19 @@ fn validate_generic_layer(
         workspace_size,
         "generic output",
     )?;
+    validate_disjoint_ranges(
+        generic_layer.in_offset,
+        generic_layer.in_length,
+        generic_layer.out_offset,
+        generic_layer.out_length,
+        "generic layer",
+    )?;
 
     for row_operation in &generic_layer.ops {
         validate_generic_operand(row_operation.first, generic_layer.in_length)?;
         validate_generic_operand(row_operation.second, generic_layer.in_length)?;
         validate_generic_operand(row_operation.third, generic_layer.in_length)?;
+        validate_generic_row_operation(row_operation)?;
     }
 
     Ok(())
@@ -159,8 +170,8 @@ fn validate_evaluate_layer(
     caller_program: &Program,
     caller_workspace_size: usize,
 ) -> Result<(), RuntimeError> {
-    let callee_program = find_function(module, evaluate_layer.callee_function_id)
-        .ok_or_else(|| {
+    let callee_program =
+        find_function(module, evaluate_layer.callee_function_id).ok_or_else(|| {
             RuntimeError::Validation("evaluate callee function id missing".to_string())
         })?;
 
@@ -180,8 +191,8 @@ fn validate_evaluate_layer(
         ));
     }
 
-    let scratch_end = evaluate_layer.scratch_offset as usize
-        + callee_program.required_workspace_size as usize;
+    let scratch_end =
+        evaluate_layer.scratch_offset as usize + callee_program.required_workspace_size as usize;
     if scratch_end > caller_program.required_workspace_size as usize {
         return Err(RuntimeError::Validation(
             "evaluate scratch range exceeds caller required workspace".to_string(),
@@ -228,12 +239,7 @@ fn validate_evaluate_input_binding(
                     "evaluate input binding length mismatch".to_string(),
                 ));
             }
-            validate_range(
-                *offset,
-                *length,
-                caller_workspace_size,
-                "evaluate input",
-            )
+            validate_range(*offset, *length, caller_workspace_size, "evaluate input")
         }
         EvaluateInputBinding::ConstantSlice { length, values } => {
             if *length != expected_length || values.len() != *length as usize {
@@ -246,16 +252,55 @@ fn validate_evaluate_input_binding(
     }
 }
 
-fn validate_generic_operand(
-    operand_index: u16,
-    input_length: u16,
-) -> Result<(), RuntimeError> {
+fn validate_generic_operand(operand_index: u16, input_length: u16) -> Result<(), RuntimeError> {
     if operand_index != UNUSED_OPERAND && operand_index >= input_length {
         return Err(RuntimeError::Validation(
             "generic operand index out of bounds".to_string(),
         ));
     }
     Ok(())
+}
+
+fn validate_generic_row_operation(row_operation: &RowOp) -> Result<(), RuntimeError> {
+    let operand_indices = [
+        row_operation.first,
+        row_operation.second,
+        row_operation.third,
+    ];
+    for required_index in 0..required_operand_count(row_operation.op) as usize {
+        if operand_indices[required_index] == UNUSED_OPERAND {
+            return Err(RuntimeError::Validation(format!(
+                "generic operation {:?} missing required operand",
+                row_operation.op
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn required_operand_count(operation: ScalarOp) -> u8 {
+    match operation {
+        ScalarOp::Identity
+        | ScalarOp::Sin
+        | ScalarOp::Cos
+        | ScalarOp::Tan
+        | ScalarOp::Exp
+        | ScalarOp::Sqrt
+        | ScalarOp::Log
+        | ScalarOp::Neg
+        | ScalarOp::Abs => 1,
+        ScalarOp::Add
+        | ScalarOp::Sub
+        | ScalarOp::Mul
+        | ScalarOp::Div
+        | ScalarOp::Pow
+        | ScalarOp::IntPow
+        | ScalarOp::Atan2
+        | ScalarOp::Equal
+        | ScalarOp::LessThan
+        | ScalarOp::LessEqual => 2,
+        ScalarOp::Case => 3,
+    }
 }
 
 fn validate_range(
@@ -268,6 +313,25 @@ fn validate_range(
     if end > workspace_size {
         return Err(RuntimeError::Validation(format!(
             "{context} range exceeds workspace"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_disjoint_ranges(
+    first_offset: u32,
+    first_length: u16,
+    second_offset: u32,
+    second_length: u16,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    let first_start = first_offset as usize;
+    let first_end = first_start + first_length as usize;
+    let second_start = second_offset as usize;
+    let second_end = second_start + second_length as usize;
+    if first_end > second_start && second_end > first_start {
+        return Err(RuntimeError::Validation(format!(
+            "{context} input and output ranges overlap"
         )));
     }
     Ok(())
@@ -298,11 +362,17 @@ pub(crate) fn validate_inputs(program: &Program, inputs: &[&[f32]]) -> Result<()
 }
 
 pub(crate) fn validate_workspace(program: &Program, workspace: &[f32]) -> Result<(), RuntimeError> {
-    let expected_size = program.required_workspace_size as usize;
-    if workspace.len() < expected_size {
+    validate_workspace_size(program.required_workspace_size as usize, workspace.len())
+}
+
+pub(crate) fn validate_workspace_size(
+    expected_size: usize,
+    actual_size: usize,
+) -> Result<(), RuntimeError> {
+    if actual_size < expected_size {
         return Err(RuntimeError::WorkspaceTooSmall {
             expected: expected_size,
-            actual: workspace.len(),
+            actual: actual_size,
         });
     }
     Ok(())

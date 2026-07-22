@@ -1,52 +1,46 @@
-use coker_bytecode::BytecodeModule;
 use coker_compiler::{compile_exported_json, CompileError};
-use coker_runtime::{
-    execute, entry_program, program_info, program_info_from_program, push_forward,
-    validate_module, ProgramInfo,
-};
+use coker_runtime::{program_info, validate_module, Module, ModuleBuilder, ProgramInfo};
 use pyo3::exceptions::{PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 #[pyclass(name = "RuntimeProgram")]
 struct PyRuntimeProgram {
-    module: BytecodeModule,
+    module: Module,
 }
 
 #[pymethods]
 impl PyRuntimeProgram {
     fn info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let program = entry_program(&self.module).map_err(runtime_error)?;
-        program_info_dict(py, &program_info_from_program(program))
+        program_info_dict(py, &self.module.info())
     }
 
-    fn execute(&self, inputs: Vec<Vec<f32>>) -> PyResult<Vec<Vec<f32>>> {
-        let entry_program = entry_program(&self.module).map_err(runtime_error)?;
-        let mut workspace = vec![0.0; entry_program.required_workspace_size as usize];
+    fn execute(&mut self, inputs: Vec<Vec<f32>>) -> PyResult<Vec<Vec<f32>>> {
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-        execute(&self.module, &input_slices, &mut workspace).map_err(runtime_error)
+        let execution_inputs = self
+            .module
+            .validate_inputs(&input_slices)
+            .map_err(runtime_error)?;
+        self.module.execute(execution_inputs);
+        Ok(self.module.collect_outputs())
     }
 
     fn push_forward(
-        &self,
+        &mut self,
         inputs: Vec<Vec<f32>>,
         tangents: Vec<Vec<f32>>,
     ) -> PyResult<(Vec<Vec<f32>>, Vec<Vec<f32>>)> {
-        let entry_program = entry_program(&self.module).map_err(runtime_error)?;
-        let mut workspace = vec![0.0; entry_program.required_workspace_size as usize];
-        let mut tangent_workspace =
-            vec![0.0; entry_program.required_workspace_size as usize];
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-        let tangent_slices: Vec<&[f32]> =
-            tangents.iter().map(|input| input.as_slice()).collect();
-        push_forward(
-            &self.module,
-            &input_slices,
-            &tangent_slices,
-            &mut workspace,
-            &mut tangent_workspace,
-        )
-        .map_err(runtime_error)
+        let tangent_slices: Vec<&[f32]> = tangents.iter().map(|input| input.as_slice()).collect();
+        let push_forward_inputs = self
+            .module
+            .validate_push_forward_inputs(&input_slices, &tangent_slices)
+            .map_err(runtime_error)?;
+        self.module.push_forward(push_forward_inputs);
+        Ok((
+            self.module.collect_outputs(),
+            self.module.collect_tangent_outputs(),
+        ))
     }
 }
 
@@ -55,40 +49,43 @@ fn compile_exported_graph<'py>(
     py: Python<'py>,
     exported_graph_json: &[u8],
 ) -> PyResult<Bound<'py, PyBytes>> {
-    let module_bytes = compile_exported_json(exported_graph_json)
-        .map_err(compile_error_to_python)?;
+    let module_bytes =
+        compile_exported_json(exported_graph_json).map_err(compile_error_to_python)?;
     Ok(PyBytes::new(py, &module_bytes))
 }
 
 #[pyfunction]
 fn load_program(program: &[u8]) -> PyResult<PyRuntimeProgram> {
-    let parsed_module = validate_module(program).map_err(runtime_error)?;
-    Ok(PyRuntimeProgram {
-        module: parsed_module,
-    })
+    let module = ModuleBuilder::new_from_bytes(program)
+        .and_then(ModuleBuilder::build)
+        .map_err(runtime_error)?;
+    Ok(PyRuntimeProgram { module })
 }
 
 #[pyfunction]
 fn validate_compiled_program(program: &[u8]) -> PyResult<bool> {
-    validate_module(program).map(|_| true).map_err(runtime_error)
+    validate_module(program)
+        .map(|_| true)
+        .map_err(runtime_error)
 }
 
 #[pyfunction]
-fn program_info_py<'py>(
-    py: Python<'py>,
-    program: &[u8],
-) -> PyResult<Bound<'py, PyDict>> {
+fn program_info_py<'py>(py: Python<'py>, program: &[u8]) -> PyResult<Bound<'py, PyDict>> {
     let info = program_info(program).map_err(runtime_error)?;
     program_info_dict(py, &info)
 }
 
 #[pyfunction]
 fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<Vec<f32>>> {
-    let parsed_module = validate_module(program).map_err(runtime_error)?;
-    let entry_program = entry_program(&parsed_module).map_err(runtime_error)?;
-    let mut workspace = vec![0.0; entry_program.required_workspace_size as usize];
+    let mut module = ModuleBuilder::new_from_bytes(program)
+        .and_then(ModuleBuilder::build)
+        .map_err(runtime_error)?;
     let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-    execute(&parsed_module, &input_slices, &mut workspace).map_err(runtime_error)
+    let execution_inputs = module
+        .validate_inputs(&input_slices)
+        .map_err(runtime_error)?;
+    module.execute(execution_inputs);
+    Ok(module.collect_outputs())
 }
 
 #[pyfunction]
@@ -97,28 +94,19 @@ fn push_forward_program(
     inputs: Vec<Vec<f32>>,
     tangents: Vec<Vec<f32>>,
 ) -> PyResult<(Vec<Vec<f32>>, Vec<Vec<f32>>)> {
-    let parsed_module = validate_module(program).map_err(runtime_error)?;
-    let entry_program = entry_program(&parsed_module).map_err(runtime_error)?;
-    let mut workspace = vec![0.0; entry_program.required_workspace_size as usize];
-    let mut tangent_workspace =
-        vec![0.0; entry_program.required_workspace_size as usize];
+    let mut module = ModuleBuilder::new_from_bytes(program)
+        .and_then(ModuleBuilder::build)
+        .map_err(runtime_error)?;
     let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-    let tangent_slices: Vec<&[f32]> =
-        tangents.iter().map(|input| input.as_slice()).collect();
-    push_forward(
-        &parsed_module,
-        &input_slices,
-        &tangent_slices,
-        &mut workspace,
-        &mut tangent_workspace,
-    )
-    .map_err(runtime_error)
+    let tangent_slices: Vec<&[f32]> = tangents.iter().map(|input| input.as_slice()).collect();
+    let push_forward_inputs = module
+        .validate_push_forward_inputs(&input_slices, &tangent_slices)
+        .map_err(runtime_error)?;
+    module.push_forward(push_forward_inputs);
+    Ok((module.collect_outputs(), module.collect_tangent_outputs()))
 }
 
-fn program_info_dict<'py>(
-    py: Python<'py>,
-    info: &ProgramInfo,
-) -> PyResult<Bound<'py, PyDict>> {
+fn program_info_dict<'py>(py: Python<'py>, info: &ProgramInfo) -> PyResult<Bound<'py, PyDict>> {
     let info_dict = PyDict::new(py);
     info_dict.set_item("workspace_size", info.workspace_size)?;
     info_dict.set_item("required_workspace_size", info.required_workspace_size)?;

@@ -161,10 +161,7 @@ impl CompileContext {
         required_workspace_size: &mut u32,
     ) -> Result<EvaluateLayer, CompileError> {
         let callee_function_id = checked_u16(
-            required_field(
-                exported_layer.callee_function_id,
-                "callee_function_id",
-            )?,
+            required_field(exported_layer.callee_function_id, "callee_function_id")?,
             "callee_function_id",
         )?;
         let callee_program = self.compile_function(callee_function_id)?;
@@ -187,9 +184,7 @@ impl CompileContext {
         let input_bindings = exported_inputs
             .into_iter()
             .zip(callee_program.input_specs.iter())
-            .map(|(binding, input_spec)| {
-                compile_evaluate_input_binding(binding, input_spec.length)
-            })
+            .map(|(binding, input_spec)| compile_evaluate_input_binding(binding, input_spec.length))
             .collect::<Result<Vec<_>, _>>()?;
         let output_bindings = exported_outputs
             .into_iter()
