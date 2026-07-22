@@ -22,6 +22,8 @@ fn build_nested_module() -> BytecodeModule {
             out_offset: 1,
             in_length: 1,
             out_length: 2,
+            scratch_offset: 0,
+            scratch_length: 0,
             ops: vec![
                 RowOp {
                     first: 0,
@@ -84,6 +86,8 @@ fn execute_bilinear_homogeneous_tensor() {
             out_offset: 1,
             in_length: 1,
             out_length: 1,
+            scratch_offset: 0,
+            scratch_length: 0,
             quadratic: SparseTensor {
                 shape: (1, 2, 2),
                 entries: vec![
@@ -127,6 +131,8 @@ fn push_forward_bilinear_homogeneous_tensor() {
             out_offset: 1,
             in_length: 1,
             out_length: 1,
+            scratch_offset: 0,
+            scratch_length: 0,
             quadratic: SparseTensor {
                 shape: (1, 2, 2),
                 entries: vec![
@@ -175,6 +181,8 @@ fn execute_generic_layer_operations() {
             out_offset: 1,
             in_length: 1,
             out_length: 1,
+            scratch_offset: 0,
+            scratch_length: 0,
             ops: vec![RowOp {
                 first: 0,
                 second: UNUSED_OPERAND,
@@ -215,6 +223,8 @@ fn push_forward_evaluate_layer_calls_nested_function() {
             out_offset: 2,
             in_length: 1,
             out_length: 1,
+            scratch_offset: 0,
+            scratch_length: 0,
             quadratic: SparseTensor {
                 shape: (1, 2, 2),
                 entries: vec![
@@ -273,6 +283,47 @@ fn push_forward_evaluate_layer_calls_nested_function() {
 }
 
 #[test]
+fn execute_overlapping_bilinear_layer_uses_scratch_workspace() {
+    let module = BytecodeModule::new(vec![Program::new(
+        0,
+        2,
+        3,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 1,
+            length: 1,
+        }],
+        vec![Layer::Bilinear(BilinearLayer {
+            in_offset: 0,
+            out_offset: 0,
+            in_length: 1,
+            out_length: 2,
+            scratch_offset: 2,
+            scratch_length: 1,
+            quadratic: SparseTensor {
+                shape: (2, 2, 2),
+                entries: vec![
+                    SparseEntry {
+                        index: (0, 0, 1),
+                        value: 1.0,
+                    },
+                    SparseEntry {
+                        index: (1, 1, 1),
+                        value: 2.0,
+                    },
+                ],
+            },
+        })],
+    )]);
+    let mut workspace = vec![0.0; 3];
+    let outputs = execute(&module, &[&[3.0]], &mut workspace).unwrap();
+    assert_eq!(outputs[0], vec![18.0]);
+}
+
+#[test]
 fn module_builder_allocates_workspace_and_executes() {
     let mut module = ModuleBuilder::new(build_nested_module())
         .unwrap()
@@ -317,7 +368,7 @@ fn module_validate_inputs_rejects_wrong_shape_before_execution() {
 }
 
 #[test]
-fn validate_rejects_overlapping_generic_ranges() {
+fn validate_rejects_overlapping_generic_ranges_without_scratch() {
     let module = BytecodeModule::new(vec![Program::new(
         0,
         3,
@@ -335,6 +386,8 @@ fn validate_rejects_overlapping_generic_ranges() {
             out_offset: 1,
             in_length: 2,
             out_length: 2,
+            scratch_offset: 0,
+            scratch_length: 0,
             ops: vec![
                 RowOp {
                     first: 0,
@@ -356,7 +409,7 @@ fn validate_rejects_overlapping_generic_ranges() {
     assert!(matches!(error, RuntimeError::Validation(_)));
     assert!(error
         .to_string()
-        .contains("generic layer input and output ranges overlap"));
+        .contains("generic layer scratch length must match input length"));
 }
 
 #[test]
