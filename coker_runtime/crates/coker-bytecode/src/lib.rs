@@ -99,6 +99,8 @@ pub struct BilinearLayer {
     pub out_offset: u32,
     pub in_length: u16,
     pub out_length: u16,
+    pub scratch_offset: u32,
+    pub scratch_length: u16,
     pub quadratic: SparseTensor,
 }
 
@@ -111,6 +113,8 @@ pub struct GenericLayer {
     pub out_offset: u32,
     pub in_length: u16,
     pub out_length: u16,
+    pub scratch_offset: u32,
+    pub scratch_length: u16,
     #[br(count = out_length)]
     pub ops: Vec<RowOp>,
 }
@@ -278,6 +282,8 @@ mod tests {
                     out_offset: 4,
                     in_length: 3,
                     out_length: 2,
+                    scratch_offset: 0,
+                    scratch_length: 0,
                     quadratic: tensor,
                 }),
                 Layer::Evaluate(EvaluateLayer {

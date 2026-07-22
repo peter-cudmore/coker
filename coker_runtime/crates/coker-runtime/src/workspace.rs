@@ -46,6 +46,18 @@ impl<'a> Workspace<'a> {
         }
     }
 
+    pub(crate) fn copy_range_to_scratch(
+        &mut self,
+        source_start: usize,
+        source_stop: usize,
+        scratch_start: usize,
+    ) {
+        let scratch_stop = scratch_start + (source_stop - source_start);
+        let (primary_workspace, scratch_and_after) = self.values.split_at_mut(scratch_start);
+        scratch_and_after[..scratch_stop - scratch_start]
+            .copy_from_slice(&primary_workspace[source_start..source_stop]);
+    }
+
     pub(crate) fn split_at_mut(self, index: usize) -> (Workspace<'a>, Workspace<'a>) {
         let (prefix, suffix) = self.values.split_at_mut(index);
         (Workspace::new(prefix), Workspace::new(suffix))

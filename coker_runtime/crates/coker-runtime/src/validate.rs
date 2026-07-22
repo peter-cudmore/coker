@@ -56,9 +56,11 @@ fn validate_program_struct(module: &BytecodeModule, program: &Program) -> Result
     for layer in &program.intermediate_layers {
         match layer {
             Layer::Bilinear(bilinear_layer) => {
-                validate_bilinear_layer(bilinear_layer, workspace_size)?
+                validate_bilinear_layer(bilinear_layer, workspace_size, required_workspace_size)?
             }
-            Layer::Generic(generic_layer) => validate_generic_layer(generic_layer, workspace_size)?,
+            Layer::Generic(generic_layer) => {
+                validate_generic_layer(generic_layer, workspace_size, required_workspace_size)?
+            }
             Layer::Evaluate(evaluate_layer) => {
                 validate_evaluate_layer(module, evaluate_layer, program, workspace_size)?
             }
@@ -70,6 +72,7 @@ fn validate_program_struct(module: &BytecodeModule, program: &Program) -> Result
 fn validate_bilinear_layer(
     bilinear_layer: &BilinearLayer,
     workspace_size: usize,
+    required_workspace_size: usize,
 ) -> Result<(), RuntimeError> {
     validate_range(
         bilinear_layer.in_offset,
@@ -83,11 +86,15 @@ fn validate_bilinear_layer(
         workspace_size,
         "bilinear output",
     )?;
-    validate_disjoint_ranges(
+    validate_layer_scratch(
         bilinear_layer.in_offset,
         bilinear_layer.in_length,
         bilinear_layer.out_offset,
         bilinear_layer.out_length,
+        bilinear_layer.scratch_offset,
+        bilinear_layer.scratch_length,
+        workspace_size,
+        required_workspace_size,
         "bilinear layer",
     )?;
 
@@ -133,6 +140,7 @@ fn validate_bilinear_layer(
 fn validate_generic_layer(
     generic_layer: &GenericLayer,
     workspace_size: usize,
+    required_workspace_size: usize,
 ) -> Result<(), RuntimeError> {
     validate_range(
         generic_layer.in_offset,
@@ -146,11 +154,15 @@ fn validate_generic_layer(
         workspace_size,
         "generic output",
     )?;
-    validate_disjoint_ranges(
+    validate_layer_scratch(
         generic_layer.in_offset,
         generic_layer.in_length,
         generic_layer.out_offset,
         generic_layer.out_length,
+        generic_layer.scratch_offset,
+        generic_layer.scratch_length,
+        workspace_size,
+        required_workspace_size,
         "generic layer",
     )?;
 
@@ -303,6 +315,50 @@ fn required_operand_count(operation: ScalarOp) -> u8 {
     }
 }
 
+fn validate_layer_scratch(
+    input_offset: u32,
+    input_length: u16,
+    output_offset: u32,
+    output_length: u16,
+    scratch_offset: u32,
+    scratch_length: u16,
+    workspace_size: usize,
+    required_workspace_size: usize,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    let ranges_overlap = range_end(input_offset, input_length) > output_offset as usize
+        && range_end(output_offset, output_length) > input_offset as usize;
+    if !ranges_overlap {
+        if scratch_length != 0 {
+            return Err(RuntimeError::Validation(format!(
+                "{context} scratch storage must be zero when ranges are disjoint"
+            )));
+        }
+        return Ok(());
+    }
+
+    if scratch_length != input_length {
+        return Err(RuntimeError::Validation(format!(
+            "{context} scratch length must match input length"
+        )));
+    }
+    if (scratch_offset as usize) < workspace_size {
+        return Err(RuntimeError::Validation(format!(
+            "{context} scratch storage overlaps primary workspace"
+        )));
+    }
+    validate_range(
+        scratch_offset,
+        scratch_length,
+        required_workspace_size,
+        "layer scratch",
+    )
+}
+
+fn range_end(workspace_offset: u32, length: u16) -> usize {
+    workspace_offset as usize + length as usize
+}
+
 fn validate_range(
     workspace_offset: u32,
     length: u16,
@@ -313,25 +369,6 @@ fn validate_range(
     if end > workspace_size {
         return Err(RuntimeError::Validation(format!(
             "{context} range exceeds workspace"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_disjoint_ranges(
-    first_offset: u32,
-    first_length: u16,
-    second_offset: u32,
-    second_length: u16,
-    context: &str,
-) -> Result<(), RuntimeError> {
-    let first_start = first_offset as usize;
-    let first_end = first_start + first_length as usize;
-    let second_start = second_offset as usize;
-    let second_end = second_start + second_length as usize;
-    if first_end > second_start && second_end > first_start {
-        return Err(RuntimeError::Validation(format!(
-            "{context} input and output ranges overlap"
         )));
     }
     Ok(())

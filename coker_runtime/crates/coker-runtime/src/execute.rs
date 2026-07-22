@@ -46,14 +46,40 @@ pub(crate) fn push_forward_program_layers(
     }
 }
 
+fn prepare_input_range(
+    workspace: &mut Workspace<'_>,
+    input_start: usize,
+    input_stop: usize,
+    scratch_offset: u32,
+    scratch_length: u16,
+) -> (usize, usize) {
+    if scratch_length == 0 {
+        return (input_start, input_stop);
+    }
+
+    let scratch_start = scratch_offset as usize;
+    workspace.copy_range_to_scratch(input_start, input_stop, scratch_start);
+    (scratch_start, scratch_start + scratch_length as usize)
+}
+
 fn execute_bilinear_layer(bilinear_layer: &BilinearLayer, workspace: &mut Workspace<'_>) {
     let input_start = bilinear_layer.in_offset as usize;
     let input_stop = input_start + bilinear_layer.in_length as usize;
     let output_start = bilinear_layer.out_offset as usize;
     let output_stop = output_start + bilinear_layer.out_length as usize;
-
-    let (input_slice, output_slice) =
-        workspace.input_output_slices(input_start, input_stop, output_start, output_stop);
+    let prepared_input_range = prepare_input_range(
+        workspace,
+        input_start,
+        input_stop,
+        bilinear_layer.scratch_offset,
+        bilinear_layer.scratch_length,
+    );
+    let (input_slice, output_slice) = workspace.input_output_slices(
+        prepared_input_range.0,
+        prepared_input_range.1,
+        output_start,
+        output_stop,
+    );
     output_slice.fill(0.0);
 
     for entry in &bilinear_layer.quadratic.entries {
@@ -73,11 +99,32 @@ fn execute_bilinear_push_forward(
     let input_stop = input_start + bilinear_layer.in_length as usize;
     let output_start = bilinear_layer.out_offset as usize;
     let output_stop = output_start + bilinear_layer.out_length as usize;
-
-    let (input_slice, output_slice) =
-        workspace.input_output_slices(input_start, input_stop, output_start, output_stop);
-    let (tangent_input_slice, tangent_output_slice) =
-        tangent_workspace.input_output_slices(input_start, input_stop, output_start, output_stop);
+    let prepared_input_range = prepare_input_range(
+        workspace,
+        input_start,
+        input_stop,
+        bilinear_layer.scratch_offset,
+        bilinear_layer.scratch_length,
+    );
+    let prepared_tangent_input_range = prepare_input_range(
+        tangent_workspace,
+        input_start,
+        input_stop,
+        bilinear_layer.scratch_offset,
+        bilinear_layer.scratch_length,
+    );
+    let (input_slice, output_slice) = workspace.input_output_slices(
+        prepared_input_range.0,
+        prepared_input_range.1,
+        output_start,
+        output_stop,
+    );
+    let (tangent_input_slice, tangent_output_slice) = tangent_workspace.input_output_slices(
+        prepared_tangent_input_range.0,
+        prepared_tangent_input_range.1,
+        output_start,
+        output_stop,
+    );
     output_slice.fill(0.0);
     tangent_output_slice.fill(0.0);
 
@@ -98,9 +145,19 @@ fn execute_generic_layer(generic_layer: &GenericLayer, workspace: &mut Workspace
     let input_stop = input_start + generic_layer.in_length as usize;
     let output_start = generic_layer.out_offset as usize;
     let output_stop = output_start + generic_layer.out_length as usize;
-
-    let (input_slice, output_slice) =
-        workspace.input_output_slices(input_start, input_stop, output_start, output_stop);
+    let prepared_input_range = prepare_input_range(
+        workspace,
+        input_start,
+        input_stop,
+        generic_layer.scratch_offset,
+        generic_layer.scratch_length,
+    );
+    let (input_slice, output_slice) = workspace.input_output_slices(
+        prepared_input_range.0,
+        prepared_input_range.1,
+        output_start,
+        output_stop,
+    );
     for (row_index, row_operation) in generic_layer.ops.iter().enumerate() {
         output_slice[row_index] = evaluate_generic_value(row_operation, input_slice);
     }
@@ -115,11 +172,32 @@ fn execute_generic_push_forward(
     let input_stop = input_start + generic_layer.in_length as usize;
     let output_start = generic_layer.out_offset as usize;
     let output_stop = output_start + generic_layer.out_length as usize;
-
-    let (input_slice, output_slice) =
-        workspace.input_output_slices(input_start, input_stop, output_start, output_stop);
-    let (tangent_input_slice, tangent_output_slice) =
-        tangent_workspace.input_output_slices(input_start, input_stop, output_start, output_stop);
+    let prepared_input_range = prepare_input_range(
+        workspace,
+        input_start,
+        input_stop,
+        generic_layer.scratch_offset,
+        generic_layer.scratch_length,
+    );
+    let prepared_tangent_input_range = prepare_input_range(
+        tangent_workspace,
+        input_start,
+        input_stop,
+        generic_layer.scratch_offset,
+        generic_layer.scratch_length,
+    );
+    let (input_slice, output_slice) = workspace.input_output_slices(
+        prepared_input_range.0,
+        prepared_input_range.1,
+        output_start,
+        output_stop,
+    );
+    let (tangent_input_slice, tangent_output_slice) = tangent_workspace.input_output_slices(
+        prepared_tangent_input_range.0,
+        prepared_tangent_input_range.1,
+        output_start,
+        output_stop,
+    );
     for (row_index, row_operation) in generic_layer.ops.iter().enumerate() {
         let (value, tangent) =
             evaluate_generic_push_forward(row_operation, input_slice, tangent_input_slice);

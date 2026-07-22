@@ -144,8 +144,12 @@ impl CompileContext {
         required_workspace_size: &mut u32,
     ) -> Result<Layer, CompileError> {
         match exported_layer.kind.as_str() {
-            "bilinear" => compile_bilinear_layer(exported_layer).map(Layer::Bilinear),
-            "generic" => compile_generic_layer(exported_layer).map(Layer::Generic),
+            "bilinear" => {
+                compile_bilinear_layer(exported_layer, required_workspace_size).map(Layer::Bilinear)
+            }
+            "generic" => {
+                compile_generic_layer(exported_layer, required_workspace_size).map(Layer::Generic)
+            }
             "evaluate" => self
                 .compile_evaluate_layer(exported_layer, required_workspace_size)
                 .map(Layer::Evaluate),

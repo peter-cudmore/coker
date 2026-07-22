@@ -54,7 +54,7 @@ fn compile_exported_json_builds_module_bytecode() {
     let program = &module.functions[0];
     assert_eq!(program.function_id, 0);
     assert_eq!(program.workspace_size, 2);
-    assert_eq!(program.required_workspace_size, 2);
+    assert_eq!(program.required_workspace_size, 3);
     assert_eq!(program.input_specs[0].length, 1);
     assert_eq!(program.output_specs[0].length, 1);
     match &program.intermediate_layers[0] {
@@ -62,6 +62,8 @@ fn compile_exported_json_builds_module_bytecode() {
             assert_eq!(generic_layer.ops.len(), 2);
             assert_eq!(generic_layer.ops[0].second, u16::MAX);
             assert_eq!(generic_layer.ops[1].op, ScalarOp::Sin);
+            assert_eq!(generic_layer.scratch_offset, 2);
+            assert_eq!(generic_layer.scratch_length, 1);
         }
         _ => panic!("expected generic layer"),
     }
@@ -142,7 +144,7 @@ fn compile_exported_json_builds_evaluate_layer() {
     let module_bytes = compile_exported_json(exported_module_json.as_bytes()).unwrap();
     let module = decode_module(&module_bytes).unwrap();
     let program = &module.functions[0];
-    assert_eq!(program.required_workspace_size, 3);
+    assert_eq!(program.required_workspace_size, 4);
     match &program.intermediate_layers[0] {
         Layer::Evaluate(evaluate_layer) => {
             assert_eq!(evaluate_layer.callee_function_id, 1);
