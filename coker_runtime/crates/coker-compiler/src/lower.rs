@@ -6,8 +6,8 @@ use serde_json::Value;
 
 use crate::{
     model::{
-        ExportedEvaluateInputBinding, ExportedEvaluateOutputBinding, ExportedLayer,
-        ExportedRowOp, ExportedSparseEntry, ExportedSparseTensor,
+        ExportedEvaluateInputBinding, ExportedEvaluateOutputBinding, ExportedLayer, ExportedRowOp,
+        ExportedSparseEntry, ExportedSparseTensor,
     },
     util::{checked_u16, compile_operand_index, operator_kind, operator_name, required_field},
     CompileError,

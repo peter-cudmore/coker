@@ -2,7 +2,11 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
+};
 use binrw::{binrw, io::Cursor, BinReaderExt, BinWriterExt};
 use thiserror::Error;
 
@@ -194,10 +198,7 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub fn try_from_row_major_array<
-        const ROW_COUNT: usize,
-        const COLUMN_COUNT: usize,
-    >(
+    pub fn try_from_row_major_array<const ROW_COUNT: usize, const COLUMN_COUNT: usize>(
         data: &[[f32; ROW_COUNT]; COLUMN_COUNT],
     ) -> Result<Self, BytecodeError> {
         if ROW_COUNT >= u16::MAX as usize || COLUMN_COUNT >= u16::MAX as usize {

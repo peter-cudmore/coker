@@ -1,9 +1,9 @@
-    use super::*;
-    use coker_bytecode::{decode_module, Layer, ScalarOp};
+use super::*;
+use coker_bytecode::{decode_module, Layer, ScalarOp};
 
-    #[test]
-    fn compile_exported_json_builds_module_bytecode() {
-        let exported_module_json = r#"
+#[test]
+fn compile_exported_json_builds_module_bytecode() {
+    let exported_module_json = r#"
         {
             "functions": [
                 {
@@ -47,29 +47,29 @@
         }
         "#;
 
-        let module_bytes = compile_exported_json(exported_module_json.as_bytes()).unwrap();
-        let module = decode_module(&module_bytes).unwrap();
+    let module_bytes = compile_exported_json(exported_module_json.as_bytes()).unwrap();
+    let module = decode_module(&module_bytes).unwrap();
 
-        assert_eq!(module.functions.len(), 1);
-        let program = &module.functions[0];
-        assert_eq!(program.function_id, 0);
-        assert_eq!(program.workspace_size, 2);
-        assert_eq!(program.required_workspace_size, 2);
-        assert_eq!(program.input_specs[0].length, 1);
-        assert_eq!(program.output_specs[0].length, 1);
-        match &program.intermediate_layers[0] {
-            Layer::Generic(generic_layer) => {
-                assert_eq!(generic_layer.ops.len(), 2);
-                assert_eq!(generic_layer.ops[0].second, u16::MAX);
-                assert_eq!(generic_layer.ops[1].op, ScalarOp::Sin);
-            }
-            _ => panic!("expected generic layer"),
+    assert_eq!(module.functions.len(), 1);
+    let program = &module.functions[0];
+    assert_eq!(program.function_id, 0);
+    assert_eq!(program.workspace_size, 2);
+    assert_eq!(program.required_workspace_size, 2);
+    assert_eq!(program.input_specs[0].length, 1);
+    assert_eq!(program.output_specs[0].length, 1);
+    match &program.intermediate_layers[0] {
+        Layer::Generic(generic_layer) => {
+            assert_eq!(generic_layer.ops.len(), 2);
+            assert_eq!(generic_layer.ops[0].second, u16::MAX);
+            assert_eq!(generic_layer.ops[1].op, ScalarOp::Sin);
         }
+        _ => panic!("expected generic layer"),
     }
+}
 
-    #[test]
-    fn compile_exported_json_builds_evaluate_layer() {
-        let exported_module_json = r#"
+#[test]
+fn compile_exported_json_builds_evaluate_layer() {
+    let exported_module_json = r#"
         {
             "functions": [
                 {
@@ -139,22 +139,22 @@
         }
         "#;
 
-        let module_bytes = compile_exported_json(exported_module_json.as_bytes()).unwrap();
-        let module = decode_module(&module_bytes).unwrap();
-        let program = &module.functions[0];
-        assert_eq!(program.required_workspace_size, 3);
-        match &program.intermediate_layers[0] {
-            Layer::Evaluate(evaluate_layer) => {
-                assert_eq!(evaluate_layer.callee_function_id, 1);
-                assert_eq!(evaluate_layer.scratch_offset, 1);
-            }
-            _ => panic!("expected evaluate layer"),
+    let module_bytes = compile_exported_json(exported_module_json.as_bytes()).unwrap();
+    let module = decode_module(&module_bytes).unwrap();
+    let program = &module.functions[0];
+    assert_eq!(program.required_workspace_size, 3);
+    match &program.intermediate_layers[0] {
+        Layer::Evaluate(evaluate_layer) => {
+            assert_eq!(evaluate_layer.callee_function_id, 1);
+            assert_eq!(evaluate_layer.scratch_offset, 1);
         }
+        _ => panic!("expected evaluate layer"),
     }
+}
 
-    #[test]
-    fn compile_exported_json_rejects_opaque_programs() {
-        let exported_module_json = r#"
+#[test]
+fn compile_exported_json_rejects_opaque_programs() {
+    let exported_module_json = r#"
         {
             "functions": [
                 {
@@ -185,6 +185,6 @@
         }
         "#;
 
-        let error = compile_exported_json(exported_module_json.as_bytes()).unwrap_err();
-        assert!(matches!(error, CompileError::NotImplemented(_)));
-    }
+    let error = compile_exported_json(exported_module_json.as_bytes()).unwrap_err();
+    assert!(matches!(error, CompileError::NotImplemented(_)));
+}

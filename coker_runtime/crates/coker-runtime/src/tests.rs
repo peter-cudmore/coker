@@ -4,286 +4,365 @@ use coker_bytecode::{
     GenericLayer, Layer, RowOp, ScalarOp, SparseEntry, SparseTensor,
 };
 
-    fn build_nested_module() -> BytecodeModule {
-        let callee_program = Program::new(
-            1,
-            2,
-            2,
-            vec![InputSpec {
-                workspace_offset: 0,
+fn build_nested_module() -> BytecodeModule {
+    let callee_program = Program::new(
+        1,
+        3,
+        3,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 2,
+            length: 1,
+        }],
+        vec![Layer::Generic(GenericLayer {
+            in_offset: 0,
+            out_offset: 1,
+            in_length: 1,
+            out_length: 2,
+            ops: vec![
+                RowOp {
+                    first: 0,
+                    second: UNUSED_OPERAND,
+                    third: UNUSED_OPERAND,
+                    op: ScalarOp::Identity,
+                },
+                RowOp {
+                    first: 0,
+                    second: UNUSED_OPERAND,
+                    third: UNUSED_OPERAND,
+                    op: ScalarOp::Sin,
+                },
+            ],
+        })],
+    );
+    let entry_program = Program::new(
+        0,
+        1,
+        4,
+        vec![],
+        vec![OutputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![Layer::Evaluate(EvaluateLayer {
+            scratch_offset: 1,
+            callee_function_id: 1,
+            input_count: 1,
+            output_count: 1,
+            input_bindings: vec![EvaluateInputBinding::ConstantSlice {
+                length: 1,
+                values: vec![2.0],
+            }],
+            output_bindings: vec![EvaluateOutputBinding {
+                destination_offset: 0,
                 length: 1,
             }],
-            vec![OutputSpec {
-                workspace_offset: 1,
-                length: 1,
-            }],
-            vec![Layer::Generic(GenericLayer {
-                in_offset: 0,
-                out_offset: 0,
-                in_length: 1,
-                out_length: 2,
-                ops: vec![
-                    RowOp {
-                        first: 0,
-                        second: UNUSED_OPERAND,
-                        third: UNUSED_OPERAND,
-                        op: ScalarOp::Identity,
+        })],
+    );
+    BytecodeModule::new(vec![entry_program, callee_program])
+}
+
+#[test]
+fn execute_bilinear_homogeneous_tensor() {
+    let module = BytecodeModule::new(vec![Program::new(
+        0,
+        2,
+        2,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 1,
+            length: 1,
+        }],
+        vec![Layer::Bilinear(BilinearLayer {
+            in_offset: 0,
+            out_offset: 1,
+            in_length: 1,
+            out_length: 1,
+            quadratic: SparseTensor {
+                shape: (1, 2, 2),
+                entries: vec![
+                    SparseEntry {
+                        index: (0, 0, 0),
+                        value: 3.0,
                     },
-                    RowOp {
-                        first: 0,
-                        second: UNUSED_OPERAND,
-                        third: UNUSED_OPERAND,
-                        op: ScalarOp::Sin,
+                    SparseEntry {
+                        index: (0, 0, 1),
+                        value: 2.0,
+                    },
+                    SparseEntry {
+                        index: (0, 1, 1),
+                        value: 4.0,
                     },
                 ],
-            })],
-        );
-        let entry_program = Program::new(
-            0,
-            1,
-            3,
-            vec![],
-            vec![OutputSpec {
-                workspace_offset: 0,
-                length: 1,
-            }],
-            vec![Layer::Evaluate(EvaluateLayer {
-                scratch_offset: 1,
-                callee_function_id: 1,
-                input_count: 1,
-                output_count: 1,
-                input_bindings: vec![EvaluateInputBinding::ConstantSlice {
-                    length: 1,
-                    values: vec![2.0],
-                }],
-                output_bindings: vec![EvaluateOutputBinding {
-                    destination_offset: 0,
-                    length: 1,
-                }],
-            })],
-        );
-        BytecodeModule::new(vec![entry_program, callee_program])
-    }
+            },
+        })],
+    )]);
+    let mut workspace = vec![0.0; 2];
+    let outputs = execute(&module, &[&[1.5]], &mut workspace).unwrap();
+    assert_eq!(outputs[0], vec![15.0]);
+}
 
-    #[test]
-    fn execute_bilinear_homogeneous_tensor() {
-        let module = BytecodeModule::new(vec![Program::new(
-            0,
-            2,
-            2,
-            vec![InputSpec {
-                workspace_offset: 0,
-                length: 1,
-            }],
-            vec![OutputSpec {
-                workspace_offset: 1,
-                length: 1,
-            }],
-            vec![Layer::Bilinear(BilinearLayer {
-                in_offset: 0,
-                out_offset: 1,
-                in_length: 1,
-                out_length: 1,
-                quadratic: SparseTensor {
-                    shape: (1, 2, 2),
-                    entries: vec![
-                        SparseEntry {
-                            index: (0, 0, 0),
-                            value: 3.0,
-                        },
-                        SparseEntry {
-                            index: (0, 0, 1),
-                            value: 2.0,
-                        },
-                        SparseEntry {
-                            index: (0, 1, 1),
-                            value: 4.0,
-                        },
-                    ],
-                },
-            })],
-        )]);
-        let mut workspace = vec![0.0; 2];
-        let outputs = execute(&module, &[&[1.5]], &mut workspace).unwrap();
-        assert_eq!(outputs[0], vec![15.0]);
-    }
-
-    #[test]
-    fn push_forward_bilinear_homogeneous_tensor() {
-        let module = BytecodeModule::new(vec![Program::new(
-            0,
-            2,
-            2,
-            vec![InputSpec {
-                workspace_offset: 0,
-                length: 1,
-            }],
-            vec![OutputSpec {
-                workspace_offset: 1,
-                length: 1,
-            }],
-            vec![Layer::Bilinear(BilinearLayer {
-                in_offset: 0,
-                out_offset: 1,
-                in_length: 1,
-                out_length: 1,
-                quadratic: SparseTensor {
-                    shape: (1, 2, 2),
-                    entries: vec![
-                        SparseEntry {
-                            index: (0, 0, 1),
-                            value: 3.0,
-                        },
-                        SparseEntry {
-                            index: (0, 1, 1),
-                            value: 2.0,
-                        },
-                    ],
-                },
-            })],
-        )]);
-        let mut workspace = vec![0.0; 2];
-        let mut tangent_workspace = vec![0.0; 2];
-        let (outputs, tangents) = push_forward(
-            &module,
-            &[&[2.0]],
-            &[&[0.5]],
-            &mut workspace,
-            &mut tangent_workspace,
-        )
-        .unwrap();
-        assert_eq!(outputs[0], vec![14.0]);
-        assert_eq!(tangents[0], vec![5.5]);
-    }
-
-    #[test]
-    fn execute_generic_layer_operations() {
-        let module = BytecodeModule::new(vec![Program::new(
-            0,
-            2,
-            2,
-            vec![InputSpec {
-                workspace_offset: 0,
-                length: 1,
-            }],
-            vec![OutputSpec {
-                workspace_offset: 1,
-                length: 1,
-            }],
-            vec![Layer::Generic(GenericLayer {
-                in_offset: 0,
-                out_offset: 0,
-                in_length: 1,
-                out_length: 2,
-                ops: vec![
-                    RowOp {
-                        first: 0,
-                        second: UNUSED_OPERAND,
-                        third: UNUSED_OPERAND,
-                        op: ScalarOp::Identity,
+#[test]
+fn push_forward_bilinear_homogeneous_tensor() {
+    let module = BytecodeModule::new(vec![Program::new(
+        0,
+        2,
+        2,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 1,
+            length: 1,
+        }],
+        vec![Layer::Bilinear(BilinearLayer {
+            in_offset: 0,
+            out_offset: 1,
+            in_length: 1,
+            out_length: 1,
+            quadratic: SparseTensor {
+                shape: (1, 2, 2),
+                entries: vec![
+                    SparseEntry {
+                        index: (0, 0, 1),
+                        value: 3.0,
                     },
-                    RowOp {
-                        first: 0,
-                        second: UNUSED_OPERAND,
-                        third: UNUSED_OPERAND,
-                        op: ScalarOp::Sin,
+                    SparseEntry {
+                        index: (0, 1, 1),
+                        value: 2.0,
                     },
                 ],
-            })],
-        )]);
-        let mut workspace = vec![0.0; 2];
-        let outputs = execute(&module, &[&[1.0]], &mut workspace).unwrap();
-        assert_eq!(outputs[0][0], 1.0f32.sin());
-    }
+            },
+        })],
+    )]);
+    let mut workspace = vec![0.0; 2];
+    let mut tangent_workspace = vec![0.0; 2];
+    let (outputs, tangents) = push_forward(
+        &module,
+        &[&[2.0]],
+        &[&[0.5]],
+        &mut workspace,
+        &mut tangent_workspace,
+    )
+    .unwrap();
+    assert_eq!(outputs[0], vec![14.0]);
+    assert_eq!(tangents[0], vec![5.5]);
+}
 
-    #[test]
-    fn execute_evaluate_layer_calls_nested_function() {
-        let module = build_nested_module();
-        let mut workspace = vec![0.0; 3];
-        let outputs = execute(&module, &[], &mut workspace).unwrap();
-        assert_eq!(outputs[0], vec![2.0f32.sin()]);
-    }
+#[test]
+fn execute_generic_layer_operations() {
+    let module = BytecodeModule::new(vec![Program::new(
+        0,
+        2,
+        2,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 1,
+            length: 1,
+        }],
+        vec![Layer::Generic(GenericLayer {
+            in_offset: 0,
+            out_offset: 1,
+            in_length: 1,
+            out_length: 1,
+            ops: vec![RowOp {
+                first: 0,
+                second: UNUSED_OPERAND,
+                third: UNUSED_OPERAND,
+                op: ScalarOp::Sin,
+            }],
+        })],
+    )]);
+    let mut workspace = vec![0.0; 2];
+    let outputs = execute(&module, &[&[1.0]], &mut workspace).unwrap();
+    assert_eq!(outputs[0][0], 1.0f32.sin());
+}
 
-    #[test]
-    fn push_forward_evaluate_layer_calls_nested_function() {
-        let callee_program = Program::new(
-            1,
-            3,
-            3,
-            vec![InputSpec {
-                workspace_offset: 0,
+#[test]
+fn execute_evaluate_layer_calls_nested_function() {
+    let module = build_nested_module();
+    let mut workspace = vec![0.0; 4];
+    let outputs = execute(&module, &[], &mut workspace).unwrap();
+    assert_eq!(outputs[0], vec![2.0f32.sin()]);
+}
+
+#[test]
+fn push_forward_evaluate_layer_calls_nested_function() {
+    let callee_program = Program::new(
+        1,
+        3,
+        3,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 2,
+            length: 1,
+        }],
+        vec![Layer::Bilinear(BilinearLayer {
+            in_offset: 0,
+            out_offset: 2,
+            in_length: 1,
+            out_length: 1,
+            quadratic: SparseTensor {
+                shape: (1, 2, 2),
+                entries: vec![
+                    SparseEntry {
+                        index: (0, 0, 1),
+                        value: 1.0,
+                    },
+                    SparseEntry {
+                        index: (0, 1, 1),
+                        value: 1.0,
+                    },
+                ],
+            },
+        })],
+    );
+    let entry_program = Program::new(
+        0,
+        1,
+        4,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![Layer::Evaluate(EvaluateLayer {
+            scratch_offset: 1,
+            callee_function_id: 1,
+            input_count: 1,
+            output_count: 1,
+            input_bindings: vec![EvaluateInputBinding::WorkspaceSlice {
+                offset: 0,
                 length: 1,
             }],
-            vec![OutputSpec {
-                workspace_offset: 2,
+            output_bindings: vec![EvaluateOutputBinding {
+                destination_offset: 0,
                 length: 1,
             }],
-            vec![Layer::Bilinear(BilinearLayer {
-                in_offset: 0,
-                out_offset: 2,
-                in_length: 1,
-                out_length: 1,
-                quadratic: SparseTensor {
-                    shape: (1, 2, 2),
-                    entries: vec![
-                        SparseEntry {
-                            index: (0, 0, 1),
-                            value: 1.0,
-                        },
-                        SparseEntry {
-                            index: (0, 1, 1),
-                            value: 1.0,
-                        },
-                    ],
-                },
-            })],
-        );
-        let entry_program = Program::new(
-            0,
-            1,
-            4,
-            vec![InputSpec {
-                workspace_offset: 0,
-                length: 1,
-            }],
-            vec![OutputSpec {
-                workspace_offset: 0,
-                length: 1,
-            }],
-            vec![Layer::Evaluate(EvaluateLayer {
-                scratch_offset: 1,
-                callee_function_id: 1,
-                input_count: 1,
-                output_count: 1,
-                input_bindings: vec![EvaluateInputBinding::WorkspaceSlice {
-                    offset: 0,
-                    length: 1,
-                }],
-                output_bindings: vec![EvaluateOutputBinding {
-                    destination_offset: 0,
-                    length: 1,
-                }],
-            })],
-        );
-        let module = BytecodeModule::new(vec![entry_program, callee_program]);
-        let mut workspace = vec![0.0; 4];
-        let mut tangent_workspace = vec![0.0; 4];
-        let (outputs, tangents) = push_forward(
-            &module,
-            &[&[2.0]],
-            &[&[0.5]],
-            &mut workspace,
-            &mut tangent_workspace,
-        )
+        })],
+    );
+    let module = BytecodeModule::new(vec![entry_program, callee_program]);
+    let mut workspace = vec![0.0; 4];
+    let mut tangent_workspace = vec![0.0; 4];
+    let (outputs, tangents) = push_forward(
+        &module,
+        &[&[2.0]],
+        &[&[0.5]],
+        &mut workspace,
+        &mut tangent_workspace,
+    )
+    .unwrap();
+    assert_eq!(outputs[0], vec![6.0]);
+    assert_eq!(tangents[0], vec![2.5]);
+}
+
+#[test]
+fn module_builder_allocates_workspace_and_executes() {
+    let mut module = ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .build()
         .unwrap();
-        assert_eq!(outputs[0], vec![6.0]);
-        assert_eq!(tangents[0], vec![2.5]);
-    }
+    let execution_inputs = module.validate_inputs(&[]).unwrap();
+    module.execute(execution_inputs);
+    assert_eq!(module.collect_outputs()[0], vec![2.0f32.sin()]);
+    assert_eq!(module.workspace().len(), 4);
+}
 
-    #[test]
-    fn parse_and_validate_round_trip() {
-        let module = BytecodeModule::new(vec![Program::new(0, 0, 0, vec![], vec![], vec![])]);
-        let encoded = encode_module(&module).unwrap();
-        let decoded = validate_module(&encoded).unwrap();
-        assert_eq!(decoded.functions[0].workspace_size, 0);
-    }
+#[test]
+fn module_builder_rejects_short_workspace() {
+    let error = ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .with_workspace(vec![0.0; 3])
+        .build()
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        RuntimeError::WorkspaceTooSmall {
+            expected: 4,
+            actual: 3,
+        }
+    ));
+}
+
+#[test]
+fn module_validate_inputs_rejects_wrong_shape_before_execution() {
+    let module = ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .build()
+        .unwrap();
+    let error = module.validate_inputs(&[&[1.0]]).unwrap_err();
+    assert!(matches!(
+        error,
+        RuntimeError::InputCountMismatch {
+            expected: 0,
+            actual: 1,
+        }
+    ));
+}
+
+#[test]
+fn validate_rejects_overlapping_generic_ranges() {
+    let module = BytecodeModule::new(vec![Program::new(
+        0,
+        3,
+        3,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 2,
+            length: 1,
+        }],
+        vec![Layer::Generic(GenericLayer {
+            in_offset: 0,
+            out_offset: 1,
+            in_length: 2,
+            out_length: 2,
+            ops: vec![
+                RowOp {
+                    first: 0,
+                    second: UNUSED_OPERAND,
+                    third: UNUSED_OPERAND,
+                    op: ScalarOp::Identity,
+                },
+                RowOp {
+                    first: 1,
+                    second: UNUSED_OPERAND,
+                    third: UNUSED_OPERAND,
+                    op: ScalarOp::Identity,
+                },
+            ],
+        })],
+    )]);
+    let encoded = encode_module(&module).unwrap();
+    let error = validate_module(&encoded).unwrap_err();
+    assert!(matches!(error, RuntimeError::Validation(_)));
+    assert!(error
+        .to_string()
+        .contains("generic layer input and output ranges overlap"));
+}
+
+#[test]
+fn parse_and_validate_round_trip() {
+    let module = BytecodeModule::new(vec![Program::new(0, 0, 0, vec![], vec![], vec![])]);
+    let encoded = encode_module(&module).unwrap();
+    let decoded = validate_module(&encoded).unwrap();
+    assert_eq!(decoded.functions[0].workspace_size, 0);
+}
