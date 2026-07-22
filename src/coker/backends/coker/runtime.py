@@ -79,12 +79,16 @@ class CompiledGraph:
         )
 
     def _restore_outputs(self, flat_outputs):
-        restored = [
-            _restore_output(flat_output, shape)
-            for flat_output, shape in zip(
-                flat_outputs, self._output_shapes, strict=False
+        restored = []
+        offset = 0
+        for output_length, shape in zip(
+            self._output_lengths, self._output_shapes, strict=False
+        ):
+            next_offset = offset + output_length
+            restored.append(
+                _restore_output(flat_outputs[offset:next_offset], shape)
             )
-        ]
+            offset = next_offset
         if len(restored) == 1:
             return restored[0]
         return restored

@@ -32,14 +32,8 @@ pub enum RuntimeError {
         expected: usize,
         actual: usize,
     },
-    #[error("output count mismatch: expected {expected}, got {actual}")]
-    OutputCountMismatch { expected: usize, actual: usize },
-    #[error("output {index} size mismatch: expected {expected}, got {actual}")]
-    OutputSizeMismatch {
-        index: usize,
-        expected: usize,
-        actual: usize,
-    },
+    #[error("output buffer size mismatch: expected {expected}, got {actual}")]
+    OutputBufferSizeMismatch { expected: usize, actual: usize },
     #[error("workspace buffer too small: expected at least {expected}, got {actual}")]
     WorkspaceTooSmall { expected: usize, actual: usize },
     #[error("program validation failed: {0}")]
@@ -61,7 +55,7 @@ pub struct ExecutionInputs<'a> {
 
 #[derive(Debug)]
 pub struct ExecutionOutputs<'a> {
-    outputs: &'a mut [Vec<f32>],
+    outputs: &'a mut [f32],
 }
 
 #[derive(Debug)]
@@ -72,8 +66,8 @@ pub struct PushForwardInputs<'a> {
 
 #[derive(Debug)]
 pub struct PushForwardOutputs<'a> {
-    outputs: &'a mut [Vec<f32>],
-    tangent_outputs: &'a mut [Vec<f32>],
+    outputs: &'a mut [f32],
+    tangent_outputs: &'a mut [f32],
 }
 
 #[derive(Debug)]
@@ -152,7 +146,7 @@ impl Module {
 
     pub fn validate_outputs<'a>(
         &self,
-        outputs: &'a mut [Vec<f32>],
+        outputs: &'a mut [f32],
     ) -> Result<ExecutionOutputs<'a>, RuntimeError> {
         validate::validate_outputs(self.entry_program(), outputs)?;
         Ok(ExecutionOutputs { outputs })
@@ -170,8 +164,8 @@ impl Module {
 
     pub fn validate_push_forward_outputs<'a>(
         &self,
-        outputs: &'a mut [Vec<f32>],
-        tangent_outputs: &'a mut [Vec<f32>],
+        outputs: &'a mut [f32],
+        tangent_outputs: &'a mut [f32],
     ) -> Result<PushForwardOutputs<'a>, RuntimeError> {
         validate::validate_outputs(self.entry_program(), outputs)?;
         validate::validate_outputs(self.entry_program(), tangent_outputs)?;
@@ -189,13 +183,16 @@ impl Module {
         let bytecode_module = &self.bytecode_module;
         let entry_program = entry_program_unchecked(bytecode_module);
         let workspace = &mut self.workspace;
-        execute_in_place_unchecked(
+        let wrote_direct_outputs = execute_in_place_unchecked(
             bytecode_module,
             entry_program,
             execution_inputs.inputs,
             workspace,
+            Some(execution_outputs.outputs),
         );
-        workspace::write_outputs(entry_program, workspace, execution_outputs.outputs);
+        if !wrote_direct_outputs {
+            workspace::write_outputs(entry_program, workspace, execution_outputs.outputs);
+        }
     }
 
     pub fn push_forward(
@@ -207,20 +204,24 @@ impl Module {
         let entry_program = entry_program_unchecked(bytecode_module);
         let workspace = &mut self.workspace;
         let tangent_workspace = &mut self.tangent_workspace;
-        push_forward_in_place_unchecked(
+        let wrote_direct_outputs = push_forward_in_place_unchecked(
             bytecode_module,
             entry_program,
             push_forward_inputs.inputs,
             push_forward_inputs.tangents,
             workspace,
             tangent_workspace,
+            Some(push_forward_outputs.outputs),
+            Some(push_forward_outputs.tangent_outputs),
         );
-        workspace::write_outputs(entry_program, workspace, push_forward_outputs.outputs);
-        workspace::write_outputs(
-            entry_program,
-            tangent_workspace,
-            push_forward_outputs.tangent_outputs,
-        );
+        if !wrote_direct_outputs {
+            workspace::write_outputs(entry_program, workspace, push_forward_outputs.outputs);
+            workspace::write_outputs(
+                entry_program,
+                tangent_workspace,
+                push_forward_outputs.tangent_outputs,
+            );
+        }
     }
 
     pub fn workspace(&self) -> &[f32] {
@@ -255,14 +256,17 @@ pub fn execute(
     module: &BytecodeModule,
     inputs: &[&[f32]],
     workspace: &mut [f32],
-    outputs: &mut [Vec<f32>],
+    outputs: &mut [f32],
 ) -> Result<(), RuntimeError> {
     let entry_program = entry_program(module)?;
     validate::validate_inputs(entry_program, inputs)?;
     validate::validate_workspace(entry_program, workspace)?;
     validate::validate_outputs(entry_program, outputs)?;
-    execute_in_place_unchecked(module, entry_program, inputs, workspace);
-    workspace::write_outputs(entry_program, workspace, outputs);
+    let wrote_direct_outputs =
+        execute_in_place_unchecked(module, entry_program, inputs, workspace, Some(outputs));
+    if !wrote_direct_outputs {
+        workspace::write_outputs(entry_program, workspace, outputs);
+    }
     Ok(())
 }
 
@@ -272,8 +276,8 @@ pub fn push_forward(
     tangents: &[&[f32]],
     workspace: &mut [f32],
     tangent_workspace: &mut [f32],
-    outputs: &mut [Vec<f32>],
-    tangent_outputs: &mut [Vec<f32>],
+    outputs: &mut [f32],
+    tangent_outputs: &mut [f32],
 ) -> Result<(), RuntimeError> {
     let entry_program = entry_program(module)?;
     validate::validate_inputs(entry_program, inputs)?;
@@ -282,16 +286,20 @@ pub fn push_forward(
     validate::validate_workspace(entry_program, tangent_workspace)?;
     validate::validate_outputs(entry_program, outputs)?;
     validate::validate_outputs(entry_program, tangent_outputs)?;
-    push_forward_in_place_unchecked(
+    let wrote_direct_outputs = push_forward_in_place_unchecked(
         module,
         entry_program,
         inputs,
         tangents,
         workspace,
         tangent_workspace,
+        Some(outputs),
+        Some(tangent_outputs),
     );
-    workspace::write_outputs(entry_program, workspace, outputs);
-    workspace::write_outputs(entry_program, tangent_workspace, tangent_outputs);
+    if !wrote_direct_outputs {
+        workspace::write_outputs(entry_program, workspace, outputs);
+        workspace::write_outputs(entry_program, tangent_workspace, tangent_outputs);
+    }
     Ok(())
 }
 
@@ -303,7 +311,7 @@ pub fn execute_in_place(
     let entry_program = entry_program(module)?;
     validate::validate_inputs(entry_program, inputs)?;
     validate::validate_workspace(entry_program, workspace)?;
-    execute_in_place_unchecked(module, entry_program, inputs, workspace);
+    execute_in_place_unchecked(module, entry_program, inputs, workspace, None);
     Ok(())
 }
 
@@ -326,6 +334,8 @@ pub fn push_forward_in_place(
         tangents,
         workspace,
         tangent_workspace,
+        None,
+        None,
     );
     Ok(())
 }
@@ -335,11 +345,12 @@ fn execute_in_place_unchecked(
     entry_program: &Program,
     inputs: &[&[f32]],
     workspace: &mut [f32],
-) {
+    outputs: Option<&mut [f32]>,
+) -> bool {
     let mut workspace = Workspace::new(workspace);
     workspace.fill(0.0);
     workspace.pack_inputs(&entry_program.input_specs, inputs);
-    execute::execute_program_layers(module, entry_program, &mut workspace);
+    execute::execute_program_layers(module, entry_program, &mut workspace, outputs)
 }
 
 fn push_forward_in_place_unchecked(
@@ -349,7 +360,9 @@ fn push_forward_in_place_unchecked(
     tangents: &[&[f32]],
     workspace: &mut [f32],
     tangent_workspace: &mut [f32],
-) {
+    outputs: Option<&mut [f32]>,
+    tangent_outputs: Option<&mut [f32]>,
+) -> bool {
     let mut workspace = Workspace::new(workspace);
     let mut tangent_workspace = Workspace::new(tangent_workspace);
     workspace.fill(0.0);
@@ -361,7 +374,9 @@ fn push_forward_in_place_unchecked(
         entry_program,
         &mut workspace,
         &mut tangent_workspace,
-    );
+        outputs,
+        tangent_outputs,
+    )
 }
 
 pub fn program_info_from_program(program: &Program) -> ProgramInfo {

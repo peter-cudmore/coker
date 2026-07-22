@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use coker_bytecode::{EvaluateInputBinding, EvaluateOutputBinding, InputSpec, OutputSpec, Program};
 
 pub(crate) struct Workspace<'a> {
@@ -76,12 +75,32 @@ impl<'a> Workspace<'a> {
     }
 }
 
-pub(crate) fn write_outputs(program: &Program, workspace: &[f32], outputs: &mut [Vec<f32>]) {
-    for (output_spec, output_buffer) in program.output_specs.iter().zip(outputs.iter_mut()) {
+pub(crate) fn write_outputs(program: &Program, workspace: &[f32], outputs: &mut [f32]) {
+    let mut output_cursor = 0usize;
+    for output_spec in &program.output_specs {
         let start = output_spec.workspace_offset as usize;
         let stop = start + output_spec.length as usize;
-        output_buffer.copy_from_slice(&workspace[start..stop]);
+        let output_stop = output_cursor + output_spec.length as usize;
+        outputs[output_cursor..output_stop].copy_from_slice(&workspace[start..stop]);
+        output_cursor = output_stop;
     }
+}
+
+pub(crate) fn final_layer_matches_outputs(
+    output_specs: &[OutputSpec],
+    layer_output_offset: u32,
+    layer_output_length: u16,
+) -> bool {
+    let mut expected_offset = layer_output_offset;
+    let mut expected_length = 0u32;
+    for output_spec in output_specs {
+        if output_spec.workspace_offset != expected_offset {
+            return false;
+        }
+        expected_offset += output_spec.length as u32;
+        expected_length += output_spec.length as u32;
+    }
+    expected_length == layer_output_length as u32
 }
 
 pub(crate) fn pack_evaluate_inputs(
