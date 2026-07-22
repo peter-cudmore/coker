@@ -13,7 +13,9 @@ N_CALLS = 2000
 
 
 rng = np.random.default_rng(0)
-WEIGHTS = [rng.normal(size=(N_STATES, N_STATES)) * 0.1 for _ in range(N_LAYERS)]
+WEIGHTS = [
+    rng.normal(size=(N_STATES, N_STATES)) * 0.1 for _ in range(N_LAYERS)
+]
 BIASES = [rng.normal(size=(N_STATES,)) * 0.1 for _ in range(N_LAYERS)]
 
 
