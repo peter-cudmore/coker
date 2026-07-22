@@ -1,4 +1,4 @@
-use alloc::{format, string::ToString};
+use alloc::{format, string::ToString, vec::Vec};
 use coker_bytecode::{
     BilinearLayer, BytecodeModule, EvaluateInputBinding, EvaluateLayer, GenericLayer, Layer,
     Program, RowOp, ScalarOp,
@@ -389,6 +389,33 @@ pub(crate) fn validate_inputs(program: &Program, inputs: &[&[f32]]) -> Result<()
         let actual_count = input_value.len();
         if expected_count != actual_count {
             return Err(RuntimeError::InputSizeMismatch {
+                index,
+                expected: expected_count,
+                actual: actual_count,
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_outputs(
+    program: &Program,
+    outputs: &[Vec<f32>],
+) -> Result<(), RuntimeError> {
+    if outputs.len() != program.output_specs.len() {
+        return Err(RuntimeError::OutputCountMismatch {
+            expected: program.output_specs.len(),
+            actual: outputs.len(),
+        });
+    }
+
+    for (index, (output_spec, output_buffer)) in
+        program.output_specs.iter().zip(outputs.iter()).enumerate()
+    {
+        let expected_count = output_spec.length as usize;
+        let actual_count = output_buffer.len();
+        if expected_count != actual_count {
+            return Err(RuntimeError::OutputSizeMismatch {
                 index,
                 expected: expected_count,
                 actual: actual_count,

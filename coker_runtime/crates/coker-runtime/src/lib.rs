@@ -32,6 +32,14 @@ pub enum RuntimeError {
         expected: usize,
         actual: usize,
     },
+    #[error("output count mismatch: expected {expected}, got {actual}")]
+    OutputCountMismatch { expected: usize, actual: usize },
+    #[error("output {index} size mismatch: expected {expected}, got {actual}")]
+    OutputSizeMismatch {
+        index: usize,
+        expected: usize,
+        actual: usize,
+    },
     #[error("workspace buffer too small: expected at least {expected}, got {actual}")]
     WorkspaceTooSmall { expected: usize, actual: usize },
     #[error("program validation failed: {0}")]
@@ -52,9 +60,20 @@ pub struct ExecutionInputs<'a> {
 }
 
 #[derive(Debug)]
+pub struct ExecutionOutputs<'a> {
+    outputs: &'a mut [Vec<f32>],
+}
+
+#[derive(Debug)]
 pub struct PushForwardInputs<'a> {
     inputs: &'a [&'a [f32]],
     tangents: &'a [&'a [f32]],
+}
+
+#[derive(Debug)]
+pub struct PushForwardOutputs<'a> {
+    outputs: &'a mut [Vec<f32>],
+    tangent_outputs: &'a mut [Vec<f32>],
 }
 
 #[derive(Debug)]
@@ -131,6 +150,14 @@ impl Module {
         Ok(ExecutionInputs { inputs })
     }
 
+    pub fn validate_outputs<'a>(
+        &self,
+        outputs: &'a mut [Vec<f32>],
+    ) -> Result<ExecutionOutputs<'a>, RuntimeError> {
+        validate::validate_outputs(self.entry_program(), outputs)?;
+        Ok(ExecutionOutputs { outputs })
+    }
+
     pub fn validate_push_forward_inputs<'a>(
         &self,
         inputs: &'a [&'a [f32]],
@@ -141,7 +168,24 @@ impl Module {
         Ok(PushForwardInputs { inputs, tangents })
     }
 
-    pub fn execute(&mut self, execution_inputs: ExecutionInputs<'_>) {
+    pub fn validate_push_forward_outputs<'a>(
+        &self,
+        outputs: &'a mut [Vec<f32>],
+        tangent_outputs: &'a mut [Vec<f32>],
+    ) -> Result<PushForwardOutputs<'a>, RuntimeError> {
+        validate::validate_outputs(self.entry_program(), outputs)?;
+        validate::validate_outputs(self.entry_program(), tangent_outputs)?;
+        Ok(PushForwardOutputs {
+            outputs,
+            tangent_outputs,
+        })
+    }
+
+    pub fn execute(
+        &mut self,
+        execution_inputs: ExecutionInputs<'_>,
+        execution_outputs: ExecutionOutputs<'_>,
+    ) {
         let bytecode_module = &self.bytecode_module;
         let entry_program = entry_program_unchecked(bytecode_module);
         let workspace = &mut self.workspace;
@@ -151,9 +195,14 @@ impl Module {
             execution_inputs.inputs,
             workspace,
         );
+        workspace::write_outputs(entry_program, workspace, execution_outputs.outputs);
     }
 
-    pub fn push_forward(&mut self, push_forward_inputs: PushForwardInputs<'_>) {
+    pub fn push_forward(
+        &mut self,
+        push_forward_inputs: PushForwardInputs<'_>,
+        push_forward_outputs: PushForwardOutputs<'_>,
+    ) {
         let bytecode_module = &self.bytecode_module;
         let entry_program = entry_program_unchecked(bytecode_module);
         let workspace = &mut self.workspace;
@@ -166,14 +215,12 @@ impl Module {
             workspace,
             tangent_workspace,
         );
-    }
-
-    pub fn collect_outputs(&self) -> Vec<Vec<f32>> {
-        workspace::collect_outputs(self.entry_program(), &self.workspace)
-    }
-
-    pub fn collect_tangent_outputs(&self) -> Vec<Vec<f32>> {
-        workspace::collect_outputs(self.entry_program(), &self.tangent_workspace)
+        workspace::write_outputs(entry_program, workspace, push_forward_outputs.outputs);
+        workspace::write_outputs(
+            entry_program,
+            tangent_workspace,
+            push_forward_outputs.tangent_outputs,
+        );
     }
 
     pub fn workspace(&self) -> &[f32] {
@@ -208,12 +255,15 @@ pub fn execute(
     module: &BytecodeModule,
     inputs: &[&[f32]],
     workspace: &mut [f32],
-) -> Result<Vec<Vec<f32>>, RuntimeError> {
+    outputs: &mut [Vec<f32>],
+) -> Result<(), RuntimeError> {
     let entry_program = entry_program(module)?;
     validate::validate_inputs(entry_program, inputs)?;
     validate::validate_workspace(entry_program, workspace)?;
+    validate::validate_outputs(entry_program, outputs)?;
     execute_in_place_unchecked(module, entry_program, inputs, workspace);
-    Ok(workspace::collect_outputs(entry_program, workspace))
+    workspace::write_outputs(entry_program, workspace, outputs);
+    Ok(())
 }
 
 pub fn push_forward(
@@ -222,12 +272,16 @@ pub fn push_forward(
     tangents: &[&[f32]],
     workspace: &mut [f32],
     tangent_workspace: &mut [f32],
-) -> Result<(Vec<Vec<f32>>, Vec<Vec<f32>>), RuntimeError> {
+    outputs: &mut [Vec<f32>],
+    tangent_outputs: &mut [Vec<f32>],
+) -> Result<(), RuntimeError> {
     let entry_program = entry_program(module)?;
     validate::validate_inputs(entry_program, inputs)?;
     validate::validate_inputs(entry_program, tangents)?;
     validate::validate_workspace(entry_program, workspace)?;
     validate::validate_workspace(entry_program, tangent_workspace)?;
+    validate::validate_outputs(entry_program, outputs)?;
+    validate::validate_outputs(entry_program, tangent_outputs)?;
     push_forward_in_place_unchecked(
         module,
         entry_program,
@@ -236,10 +290,9 @@ pub fn push_forward(
         workspace,
         tangent_workspace,
     );
-    Ok((
-        workspace::collect_outputs(entry_program, workspace),
-        workspace::collect_outputs(entry_program, tangent_workspace),
-    ))
+    workspace::write_outputs(entry_program, workspace, outputs);
+    workspace::write_outputs(entry_program, tangent_workspace, tangent_outputs);
+    Ok(())
 }
 
 pub fn execute_in_place(
