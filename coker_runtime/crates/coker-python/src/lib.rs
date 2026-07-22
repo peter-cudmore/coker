@@ -16,13 +16,13 @@ impl PyRuntimeProgram {
         program_info_dict(py, &self.module.info())
     }
 
-    fn execute(&mut self, inputs: Vec<Vec<f32>>) -> PyResult<Vec<Vec<f32>>> {
+    fn execute(&mut self, inputs: Vec<Vec<f32>>) -> PyResult<Vec<f32>> {
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
         let execution_inputs = self
             .module
             .validate_inputs(&input_slices)
             .map_err(runtime_error)?;
-        let mut outputs = allocate_output_buffers(&self.output_lengths);
+        let mut outputs = vec![0.0; self.output_lengths.iter().sum()];
         let execution_outputs = self
             .module
             .validate_outputs(&mut outputs)
@@ -35,15 +35,16 @@ impl PyRuntimeProgram {
         &mut self,
         inputs: Vec<Vec<f32>>,
         tangents: Vec<Vec<f32>>,
-    ) -> PyResult<(Vec<Vec<f32>>, Vec<Vec<f32>>)> {
+    ) -> PyResult<(Vec<f32>, Vec<f32>)> {
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
         let tangent_slices: Vec<&[f32]> = tangents.iter().map(|input| input.as_slice()).collect();
         let push_forward_inputs = self
             .module
             .validate_push_forward_inputs(&input_slices, &tangent_slices)
             .map_err(runtime_error)?;
-        let mut outputs = allocate_output_buffers(&self.output_lengths);
-        let mut tangent_outputs = allocate_output_buffers(&self.output_lengths);
+        let output_length: usize = self.output_lengths.iter().sum();
+        let mut outputs = vec![0.0; output_length];
+        let mut tangent_outputs = vec![0.0; output_length];
         let push_forward_outputs = self
             .module
             .validate_push_forward_outputs(&mut outputs, &mut tangent_outputs)
@@ -90,7 +91,7 @@ fn program_info_py<'py>(py: Python<'py>, program: &[u8]) -> PyResult<Bound<'py, 
 }
 
 #[pyfunction]
-fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<Vec<f32>>> {
+fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<f32>> {
     let mut module = ModuleBuilder::new_from_bytes(program)
         .and_then(ModuleBuilder::build)
         .map_err(runtime_error)?;
@@ -98,8 +99,13 @@ fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<Vec<f3
     let execution_inputs = module
         .validate_inputs(&input_slices)
         .map_err(runtime_error)?;
-    let module_info = module.info();
-    let mut outputs = allocate_output_buffers(&output_lengths(&module_info));
+    let output_length: usize = module
+        .info()
+        .output_specs
+        .iter()
+        .map(|output_spec| output_spec.length as usize)
+        .sum();
+    let mut outputs = vec![0.0; output_length];
     let execution_outputs = module
         .validate_outputs(&mut outputs)
         .map_err(runtime_error)?;
@@ -112,7 +118,7 @@ fn push_forward_program(
     program: &[u8],
     inputs: Vec<Vec<f32>>,
     tangents: Vec<Vec<f32>>,
-) -> PyResult<(Vec<Vec<f32>>, Vec<Vec<f32>>)> {
+) -> PyResult<(Vec<f32>, Vec<f32>)> {
     let mut module = ModuleBuilder::new_from_bytes(program)
         .and_then(ModuleBuilder::build)
         .map_err(runtime_error)?;
@@ -121,10 +127,14 @@ fn push_forward_program(
     let push_forward_inputs = module
         .validate_push_forward_inputs(&input_slices, &tangent_slices)
         .map_err(runtime_error)?;
-    let module_info = module.info();
-    let output_lengths = output_lengths(&module_info);
-    let mut outputs = allocate_output_buffers(&output_lengths);
-    let mut tangent_outputs = allocate_output_buffers(&output_lengths);
+    let output_length: usize = module
+        .info()
+        .output_specs
+        .iter()
+        .map(|output_spec| output_spec.length as usize)
+        .sum();
+    let mut outputs = vec![0.0; output_length];
+    let mut tangent_outputs = vec![0.0; output_length];
     let push_forward_outputs = module
         .validate_push_forward_outputs(&mut outputs, &mut tangent_outputs)
         .map_err(runtime_error)?;
@@ -136,13 +146,6 @@ fn output_lengths(info: &ProgramInfo) -> Vec<usize> {
     info.output_specs
         .iter()
         .map(|output_spec| output_spec.length as usize)
-        .collect()
-}
-
-fn allocate_output_buffers(output_lengths: &[usize]) -> Vec<Vec<f32>> {
-    output_lengths
-        .iter()
-        .map(|&output_length| vec![0.0; output_length])
         .collect()
 }
 
