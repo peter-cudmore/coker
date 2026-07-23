@@ -3,6 +3,7 @@ use coker_bytecode::{
     encode_module, BilinearLayer, EvaluateInputBinding, EvaluateLayer, EvaluateOutputBinding,
     GenericLayer, Layer, RowOp, ScalarOp, SparseEntry, SparseTensor,
 };
+use rkyv::util::AlignedVec;
 
 fn build_nested_module() -> BytecodeModule {
     let callee_program = Program::new(
@@ -64,11 +65,12 @@ fn build_nested_module() -> BytecodeModule {
     );
     BytecodeModule::new(vec![entry_program, callee_program])
 }
-fn build_nested_runtime_module() -> Module {
-    ModuleBuilder::new(build_nested_module())
-        .unwrap()
-        .build()
-        .unwrap()
+
+fn encode_into_aligned_bytes(module: &BytecodeModule) -> AlignedVec<16> {
+    let encoded = encode_module(module).unwrap();
+    let mut aligned = AlignedVec::with_capacity(encoded.len());
+    aligned.extend_from_slice(&encoded);
+    aligned
 }
 
 #[test]
@@ -339,13 +341,109 @@ fn execute_overlapping_bilinear_layer_uses_scratch_workspace() {
 
 #[test]
 fn module_builder_allocates_workspace_and_executes() {
-    let mut module = build_nested_runtime_module();
+    let mut module = ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .build()
+        .unwrap();
     let execution_inputs = module.validate_inputs(&[]).unwrap();
     let mut outputs = vec![0.0; 1];
     let execution_outputs = module.validate_outputs(&mut outputs).unwrap();
     module.execute(execution_inputs, execution_outputs);
     assert_eq!(outputs, vec![2.0f32.sin()]);
     assert_eq!(module.workspace().len(), 4);
+}
+
+#[test]
+fn static_module_executes_from_aligned_bytes() {
+    let module = build_nested_module();
+    let aligned_bytes = encode_into_aligned_bytes(&module);
+    let module = StaticModule::new_from_bytes(aligned_bytes.as_slice()).unwrap();
+    let mut workspace = [0.0; 4];
+    let mut outputs = [0.0; 1];
+    module.execute(&[], &mut workspace, &mut outputs).unwrap();
+    assert_eq!(outputs, [2.0f32.sin()]);
+}
+
+#[test]
+fn static_module_push_forward_from_aligned_bytes() {
+    let callee_program = Program::new(
+        1,
+        3,
+        3,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 2,
+            length: 1,
+        }],
+        vec![Layer::Bilinear(BilinearLayer {
+            in_offset: 0,
+            out_offset: 2,
+            in_length: 1,
+            out_length: 1,
+            scratch_offset: 0,
+            scratch_length: 0,
+            quadratic: SparseTensor {
+                shape: (1, 2, 2),
+                entries: vec![
+                    SparseEntry {
+                        index: (0, 0, 1),
+                        value: 1.0,
+                    },
+                    SparseEntry {
+                        index: (0, 1, 1),
+                        value: 1.0,
+                    },
+                ],
+            },
+        })],
+    );
+    let entry_program = Program::new(
+        0,
+        1,
+        4,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![Layer::Evaluate(EvaluateLayer {
+            scratch_offset: 1,
+            callee_function_id: 1,
+            input_bindings: vec![EvaluateInputBinding::WorkspaceSlice {
+                offset: 0,
+                length: 1,
+            }],
+            output_bindings: vec![EvaluateOutputBinding {
+                destination_offset: 0,
+                length: 1,
+            }],
+        })],
+    );
+    let module = BytecodeModule::new(vec![entry_program, callee_program]);
+    let aligned_bytes = encode_into_aligned_bytes(&module);
+    let module = StaticModule::new_from_bytes(aligned_bytes.as_slice()).unwrap();
+    let mut workspace = [0.0; 4];
+    let mut tangent_workspace = [0.0; 4];
+    let mut outputs = [0.0; 1];
+    let mut tangent_outputs = [0.0; 1];
+    module
+        .push_forward(
+            &[&[2.0]],
+            &[&[0.5]],
+            &mut workspace,
+            &mut tangent_workspace,
+            &mut outputs,
+            &mut tangent_outputs,
+        )
+        .unwrap();
+    assert_eq!(outputs, [6.0]);
+    assert_eq!(tangent_outputs, [2.5]);
 }
 
 #[test]
@@ -366,7 +464,10 @@ fn module_builder_rejects_short_workspace() {
 
 #[test]
 fn module_validate_inputs_rejects_wrong_shape_before_execution() {
-    let module = build_nested_runtime_module();
+    let module = ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .build()
+        .unwrap();
     let error = module.validate_inputs(&[&[1.0]]).unwrap_err();
     assert!(matches!(
         error,
@@ -379,7 +480,10 @@ fn module_validate_inputs_rejects_wrong_shape_before_execution() {
 
 #[test]
 fn module_validate_outputs_rejects_wrong_shape_before_execution() {
-    let module = build_nested_runtime_module();
+    let module = ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .build()
+        .unwrap();
     let mut outputs = vec![0.0; 2];
     let error = module.validate_outputs(&mut outputs).unwrap_err();
     assert!(matches!(

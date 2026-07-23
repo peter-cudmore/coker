@@ -15,3 +15,6 @@ std = ["coker-bytecode/std"]
 [dependencies]
 coker-bytecode = { path = "../coker-bytecode", default-features = false }
 thiserror.workspace = true
+
+[dev-dependencies]
+rkyv.workspace = true
