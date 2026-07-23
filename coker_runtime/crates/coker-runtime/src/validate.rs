@@ -154,6 +154,11 @@ fn validate_generic_layer(
         workspace_size,
         "generic output",
     )?;
+    if generic_layer.ops.len() != generic_layer.out_length as usize {
+        return Err(RuntimeError::Validation(
+            "generic layer op count must match output length".to_string(),
+        ));
+    }
     validate_layer_scratch(
         generic_layer.in_offset,
         generic_layer.in_length,

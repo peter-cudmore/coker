@@ -13,6 +13,7 @@ use thiserror::Error;
 
 const MAGIC: [u8; 8] = *b"COKERB03";
 const VERSION: u16 = 3;
+const HEADER_SIZE: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct BytecodeModule {
@@ -100,8 +101,6 @@ pub struct GenericLayer {
 pub struct EvaluateLayer {
     pub scratch_offset: u32,
     pub callee_function_id: u16,
-    pub input_count: u8,
-    pub output_count: u8,
     pub input_bindings: Vec<EvaluateInputBinding>,
     pub output_bindings: Vec<EvaluateOutputBinding>,
 }
@@ -188,23 +187,6 @@ pub struct SparseEntry {
     pub value: f32,
 }
 
-#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
-struct BytecodeEnvelope {
-    magic: [u8; 8],
-    version: u16,
-    module: BytecodeModule,
-}
-
-impl BytecodeEnvelope {
-    fn new(module: &BytecodeModule) -> Self {
-        Self {
-            magic: MAGIC,
-            version: VERSION,
-            module: module.clone(),
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum BytecodeError {
     #[error("failed to encode bytecode module: {0}")]
@@ -214,39 +196,41 @@ pub enum BytecodeError {
 }
 
 pub fn encode_module(module: &BytecodeModule) -> Result<Vec<u8>, BytecodeError> {
-    let bytes = to_bytes::<RkyvError>(&BytecodeEnvelope::new(module))
-        .map_err(|error| BytecodeError::Encode(error.to_string()))?;
-    Ok(bytes.as_slice().to_vec())
+    let archived_module =
+        to_bytes::<RkyvError>(module).map_err(|error| BytecodeError::Encode(error.to_string()))?;
+    let mut bytes = Vec::with_capacity(HEADER_SIZE + archived_module.len());
+    bytes.extend_from_slice(&MAGIC);
+    bytes.extend_from_slice(&VERSION.to_le_bytes());
+    bytes.resize(HEADER_SIZE, 0);
+    bytes.extend_from_slice(archived_module.as_slice());
+    Ok(bytes)
 }
 
 pub fn decode_module(bytes: &[u8]) -> Result<BytecodeModule, BytecodeError> {
-    let mut aligned_bytes: AlignedVec<16> = AlignedVec::with_capacity(bytes.len());
-    aligned_bytes.extend_from_slice(bytes);
-
-    let archived = access::<ArchivedBytecodeEnvelope, RkyvError>(aligned_bytes.as_slice())
-        .map_err(|error| BytecodeError::Decode(error.to_string()))?;
-    if archived.magic != MAGIC {
+    if bytes.len() < HEADER_SIZE {
+        return Err(BytecodeError::Decode(
+            "bytecode header too short".to_string(),
+        ));
+    }
+    if bytes[..MAGIC.len()] != MAGIC {
         return Err(BytecodeError::Decode("bytecode magic mismatch".to_string()));
     }
-    if archived.version != VERSION {
+
+    let version_bytes: [u8; 2] = bytes[MAGIC.len()..MAGIC.len() + 2]
+        .try_into()
+        .expect("header size includes version bytes");
+    if u16::from_le_bytes(version_bytes) != VERSION {
         return Err(BytecodeError::Decode(
             "unsupported bytecode version".to_string(),
         ));
     }
 
-    Ok(module_from_archived(&archived.module))
-}
+    let mut aligned_bytes: AlignedVec<16> = AlignedVec::with_capacity(bytes.len() - HEADER_SIZE);
+    aligned_bytes.extend_from_slice(&bytes[HEADER_SIZE..]);
 
-fn plain_u16(value: impl Into<u16>) -> u16 {
-    value.into()
-}
-
-fn plain_u32(value: impl Into<u32>) -> u32 {
-    value.into()
-}
-
-fn plain_f32(value: impl Into<f32>) -> f32 {
-    value.into()
+    let archived = access::<ArchivedBytecodeModule, RkyvError>(aligned_bytes.as_slice())
+        .map_err(|error| BytecodeError::Decode(error.to_string()))?;
+    Ok(module_from_archived(archived))
 }
 
 fn module_from_archived(module: &ArchivedBytecodeModule) -> BytecodeModule {
@@ -255,9 +239,9 @@ fn module_from_archived(module: &ArchivedBytecodeModule) -> BytecodeModule {
 
 fn program_from_archived(program: &ArchivedProgram) -> Program {
     Program::new(
-        plain_u16(program.function_id),
-        plain_u32(program.workspace_size),
-        plain_u32(program.required_workspace_size),
+        program.function_id.into(),
+        program.workspace_size.into(),
+        program.required_workspace_size.into(),
         program
             .input_specs
             .iter()
@@ -278,15 +262,15 @@ fn program_from_archived(program: &ArchivedProgram) -> Program {
 
 fn input_spec_from_archived(input_spec: &ArchivedInputSpec) -> InputSpec {
     InputSpec {
-        workspace_offset: plain_u32(input_spec.workspace_offset),
-        length: plain_u16(input_spec.length),
+        workspace_offset: input_spec.workspace_offset.into(),
+        length: input_spec.length.into(),
     }
 }
 
 fn output_spec_from_archived(output_spec: &ArchivedOutputSpec) -> OutputSpec {
     OutputSpec {
-        workspace_offset: plain_u32(output_spec.workspace_offset),
-        length: plain_u16(output_spec.length),
+        workspace_offset: output_spec.workspace_offset.into(),
+        length: output_spec.length.into(),
     }
 }
 
@@ -306,34 +290,32 @@ fn layer_from_archived(layer: &ArchivedLayer) -> Layer {
 
 fn bilinear_layer_from_archived(bilinear_layer: &ArchivedBilinearLayer) -> BilinearLayer {
     BilinearLayer {
-        in_offset: plain_u32(bilinear_layer.in_offset),
-        out_offset: plain_u32(bilinear_layer.out_offset),
-        in_length: plain_u16(bilinear_layer.in_length),
-        out_length: plain_u16(bilinear_layer.out_length),
-        scratch_offset: plain_u32(bilinear_layer.scratch_offset),
-        scratch_length: plain_u16(bilinear_layer.scratch_length),
+        in_offset: bilinear_layer.in_offset.into(),
+        out_offset: bilinear_layer.out_offset.into(),
+        in_length: bilinear_layer.in_length.into(),
+        out_length: bilinear_layer.out_length.into(),
+        scratch_offset: bilinear_layer.scratch_offset.into(),
+        scratch_length: bilinear_layer.scratch_length.into(),
         quadratic: sparse_tensor_from_archived(&bilinear_layer.quadratic),
     }
 }
 
 fn generic_layer_from_archived(generic_layer: &ArchivedGenericLayer) -> GenericLayer {
     GenericLayer {
-        in_offset: plain_u32(generic_layer.in_offset),
-        out_offset: plain_u32(generic_layer.out_offset),
-        in_length: plain_u16(generic_layer.in_length),
-        out_length: plain_u16(generic_layer.out_length),
-        scratch_offset: plain_u32(generic_layer.scratch_offset),
-        scratch_length: plain_u16(generic_layer.scratch_length),
+        in_offset: generic_layer.in_offset.into(),
+        out_offset: generic_layer.out_offset.into(),
+        in_length: generic_layer.in_length.into(),
+        out_length: generic_layer.out_length.into(),
+        scratch_offset: generic_layer.scratch_offset.into(),
+        scratch_length: generic_layer.scratch_length.into(),
         ops: generic_layer.ops.iter().map(row_op_from_archived).collect(),
     }
 }
 
 fn evaluate_layer_from_archived(evaluate_layer: &ArchivedEvaluateLayer) -> EvaluateLayer {
     EvaluateLayer {
-        scratch_offset: plain_u32(evaluate_layer.scratch_offset),
-        callee_function_id: plain_u16(evaluate_layer.callee_function_id),
-        input_count: evaluate_layer.input_count,
-        output_count: evaluate_layer.output_count,
+        scratch_offset: evaluate_layer.scratch_offset.into(),
+        callee_function_id: evaluate_layer.callee_function_id.into(),
         input_bindings: evaluate_layer
             .input_bindings
             .iter()
@@ -353,14 +335,14 @@ fn evaluate_input_binding_from_archived(
     match binding {
         ArchivedEvaluateInputBinding::WorkspaceSlice { offset, length } => {
             EvaluateInputBinding::WorkspaceSlice {
-                offset: plain_u32(*offset),
-                length: plain_u16(*length),
+                offset: (*offset).into(),
+                length: (*length).into(),
             }
         }
         ArchivedEvaluateInputBinding::ConstantSlice { length, values } => {
             EvaluateInputBinding::ConstantSlice {
-                length: plain_u16(*length),
-                values: values.iter().map(|value| plain_f32(*value)).collect(),
+                length: (*length).into(),
+                values: values.iter().map(|value| (*value).into()).collect(),
             }
         }
     }
@@ -370,16 +352,16 @@ fn evaluate_output_binding_from_archived(
     binding: &ArchivedEvaluateOutputBinding,
 ) -> EvaluateOutputBinding {
     EvaluateOutputBinding {
-        destination_offset: plain_u32(binding.destination_offset),
-        length: plain_u16(binding.length),
+        destination_offset: binding.destination_offset.into(),
+        length: binding.length.into(),
     }
 }
 
 fn row_op_from_archived(row_op: &ArchivedRowOp) -> RowOp {
     RowOp {
-        first: plain_u16(row_op.first),
-        second: plain_u16(row_op.second),
-        third: plain_u16(row_op.third),
+        first: row_op.first.into(),
+        second: row_op.second.into(),
+        third: row_op.third.into(),
         op: scalar_op_from_archived(&row_op.op),
     }
 }
@@ -412,9 +394,9 @@ fn scalar_op_from_archived(scalar_op: &ArchivedScalarOp) -> ScalarOp {
 fn sparse_tensor_from_archived(tensor: &ArchivedSparseTensor) -> SparseTensor {
     SparseTensor {
         shape: (
-            plain_u16(tensor.shape.0),
-            plain_u16(tensor.shape.1),
-            plain_u16(tensor.shape.2),
+            tensor.shape.0.into(),
+            tensor.shape.1.into(),
+            tensor.shape.2.into(),
         ),
         entries: tensor
             .entries
@@ -427,11 +409,11 @@ fn sparse_tensor_from_archived(tensor: &ArchivedSparseTensor) -> SparseTensor {
 fn sparse_entry_from_archived(entry: &ArchivedSparseEntry) -> SparseEntry {
     SparseEntry {
         index: (
-            plain_u16(entry.index.0),
-            plain_u16(entry.index.1),
-            plain_u16(entry.index.2),
+            entry.index.0.into(),
+            entry.index.1.into(),
+            entry.index.2.into(),
         ),
-        value: plain_f32(entry.value),
+        value: entry.value.into(),
     }
 }
 
@@ -469,8 +451,6 @@ mod tests {
                 Layer::Evaluate(EvaluateLayer {
                     scratch_offset: 6,
                     callee_function_id: 1,
-                    input_count: 1,
-                    output_count: 1,
                     input_bindings: vec![EvaluateInputBinding::WorkspaceSlice {
                         offset: 4,
                         length: 2,
@@ -505,14 +485,14 @@ mod tests {
 
     #[test]
     fn encoded_archive_is_aligned_for_direct_access() {
-        let bytes =
-            to_bytes::<RkyvError>(&BytecodeEnvelope::new(&BytecodeModule::new(vec![]))).unwrap();
+        let module = BytecodeModule::new(vec![]);
+        let archived_module = to_bytes::<RkyvError>(&module).unwrap();
         assert_eq!(
-            bytes.as_ptr() as usize % align_of::<ArchivedBytecodeEnvelope>(),
+            archived_module.as_ptr() as usize % align_of::<ArchivedBytecodeModule>(),
             0
         );
-        let archived = access::<ArchivedBytecodeEnvelope, RkyvError>(bytes.as_slice()).unwrap();
-        assert_eq!(archived.magic, MAGIC);
-        assert_eq!(archived.version, VERSION);
+        let archived =
+            access::<ArchivedBytecodeModule, RkyvError>(archived_module.as_slice()).unwrap();
+        assert!(archived.functions.is_empty());
     }
 }

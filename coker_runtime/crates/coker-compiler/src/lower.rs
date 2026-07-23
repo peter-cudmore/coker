@@ -8,10 +8,7 @@ use crate::{
         ExportedEvaluateInputBinding, ExportedEvaluateOutputBinding, ExportedLayer, ExportedRowOp,
         ExportedSparseEntry, ExportedSparseTensor,
     },
-    util::{
-        checked_add_u32, checked_u16, compile_operand_index, operator_kind, operator_name,
-        required_field,
-    },
+    util::{checked_add_u32, checked_u16, compile_operand_index, required_field, string_field},
     CompileError,
 };
 
@@ -177,9 +174,9 @@ pub(crate) fn compile_evaluate_output_binding(
 
 fn compile_row_op(exported_row_op: ExportedRowOp) -> Result<RowOp, CompileError> {
     let operator_value = exported_row_op.op;
-    let operator_kind = operator_kind(&operator_value)?;
-    let operator_name = operator_name(&operator_value)?;
-    let op = match (operator_kind.as_str(), operator_name.as_str()) {
+    let operator_kind = string_field(&operator_value, "kind", "op.kind")?;
+    let operator_name = string_field(&operator_value, "value", "op.value")?;
+    let op = match (operator_kind, operator_name) {
         ("internal", "identity") => ScalarOp::Identity,
         ("enum", "SIN") => ScalarOp::Sin,
         ("enum", "COS") => ScalarOp::Cos,

@@ -2,16 +2,6 @@ use serde_json::Value;
 
 use crate::{CompileError, UNUSED_OPERAND};
 
-pub(crate) fn checked_u8_length(
-    value: usize,
-    field_name: &'static str,
-) -> Result<u8, CompileError> {
-    u8::try_from(value).map_err(|_| CompileError::InvalidField {
-        field: field_name,
-        reason: "expected u8-sized collection",
-    })
-}
-
 pub(crate) fn checked_u16(value: u32, field_name: &'static str) -> Result<u16, CompileError> {
     u16::try_from(value).map_err(|_| CompileError::InvalidField {
         field: field_name,
@@ -37,22 +27,15 @@ pub(crate) fn required_field<T>(
     field_value.ok_or(CompileError::MissingField { field: field_name })
 }
 
-pub(crate) fn operator_kind(operator_value: &Value) -> Result<String, CompileError> {
-    object_field(operator_value, "kind")?
+pub(crate) fn string_field<'a>(
+    value: &'a Value,
+    field_name: &'static str,
+    error_field: &'static str,
+) -> Result<&'a str, CompileError> {
+    object_field(value, field_name)?
         .as_str()
-        .map(str::to_string)
         .ok_or(CompileError::InvalidField {
-            field: "op.kind",
-            reason: "expected string",
-        })
-}
-
-pub(crate) fn operator_name(operator_value: &Value) -> Result<String, CompileError> {
-    object_field(operator_value, "value")?
-        .as_str()
-        .map(str::to_string)
-        .ok_or(CompileError::InvalidField {
-            field: "op.value",
+            field: error_field,
             reason: "expected string",
         })
 }

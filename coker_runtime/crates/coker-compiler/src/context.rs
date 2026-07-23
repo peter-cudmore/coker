@@ -6,7 +6,7 @@ use crate::{
         compile_generic_layer,
     },
     model::{CompileContext, ExportedLayer, ExportedModule, ExportedProgram},
-    util::{checked_add_u32, checked_u16, checked_u8_length, required_field},
+    util::{checked_add_u32, checked_u16, required_field},
     CompileError,
 };
 
@@ -208,8 +208,6 @@ impl CompileContext {
         Ok(EvaluateLayer {
             scratch_offset,
             callee_function_id,
-            input_count: checked_u8_length(input_bindings.len(), "inputs")?,
-            output_count: checked_u8_length(output_bindings.len(), "outputs")?,
             input_bindings,
             output_bindings,
         })

@@ -188,5 +188,10 @@ fn compile_exported_json_rejects_opaque_programs() {
         "#;
 
     let error = compile_exported_json(exported_module_json.as_bytes()).unwrap_err();
-    assert!(matches!(error, CompileError::NotImplemented(_)));
+
+    assert!(matches!(
+        error,
+        CompileError::NotImplemented(message)
+            if message == "function evaluation and opaque programs"
+    ));
 }

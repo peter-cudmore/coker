@@ -88,7 +88,7 @@ impl ModuleBuilder {
     }
 
     pub fn new_from_bytes(bytes: &[u8]) -> Result<Self, RuntimeError> {
-        Self::new(parse_module(bytes)?)
+        Self::new(decode_module(bytes)?)
     }
 
     pub fn with_workspace(mut self, workspace: Vec<f32>) -> Self {
@@ -102,8 +102,9 @@ impl ModuleBuilder {
     }
 
     pub fn build(self) -> Result<Module, RuntimeError> {
-        let required_workspace_size =
-            entry_program_unchecked(&self.bytecode_module).required_workspace_size as usize;
+        let required_workspace_size = entry_program(&self.bytecode_module)
+            .expect("validated module missing referenced entry function")
+            .required_workspace_size as usize;
         let mut workspace = self
             .workspace
             .unwrap_or_else(|| vec![0.0; required_workspace_size]);
@@ -181,7 +182,8 @@ impl Module {
         execution_outputs: ExecutionOutputs<'_>,
     ) {
         let bytecode_module = &self.bytecode_module;
-        let entry_program = entry_program_unchecked(bytecode_module);
+        let entry_program = entry_program(bytecode_module)
+            .expect("validated module missing referenced entry function");
         let workspace = &mut self.workspace;
         let wrote_direct_outputs = execute_in_place_unchecked(
             bytecode_module,
@@ -201,7 +203,8 @@ impl Module {
         push_forward_outputs: PushForwardOutputs<'_>,
     ) {
         let bytecode_module = &self.bytecode_module;
-        let entry_program = entry_program_unchecked(bytecode_module);
+        let entry_program = entry_program(bytecode_module)
+            .expect("validated module missing referenced entry function");
         let workspace = &mut self.workspace;
         let tangent_workspace = &mut self.tangent_workspace;
         let wrote_direct_outputs = push_forward_in_place_unchecked(
@@ -233,21 +236,18 @@ impl Module {
     }
 
     fn entry_program(&self) -> &Program {
-        entry_program_unchecked(&self.bytecode_module)
+        entry_program(&self.bytecode_module)
+            .expect("validated module missing referenced entry function")
     }
-}
-
-pub fn parse_module(module_bytes: &[u8]) -> Result<BytecodeModule, RuntimeError> {
-    Ok(decode_module(module_bytes)?)
 }
 
 pub fn program_info(module_bytes: &[u8]) -> Result<ProgramInfo, RuntimeError> {
     let module = validate_module(module_bytes)?;
-    Ok(program_info_from_program(entry_program_unchecked(&module)))
+    Ok(program_info_from_program(entry_program(&module)?))
 }
 
 pub fn validate_module(module_bytes: &[u8]) -> Result<BytecodeModule, RuntimeError> {
-    let module = parse_module(module_bytes)?;
+    let module = decode_module(module_bytes)?;
     validate::validate_module_struct(&module)?;
     Ok(module)
 }
@@ -392,11 +392,6 @@ pub fn entry_program(module: &BytecodeModule) -> Result<&Program, RuntimeError> 
     find_function(module, 0)
         .ok_or_else(|| RuntimeError::Validation("missing entry function_id 0".to_string()))
 }
-
-pub(crate) fn entry_program_unchecked(module: &BytecodeModule) -> &Program {
-    find_function_unchecked(module, 0)
-}
-
 pub(crate) fn find_function(module: &BytecodeModule, function_id: u16) -> Option<&Program> {
     module
         .functions
