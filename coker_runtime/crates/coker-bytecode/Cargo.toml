@@ -7,10 +7,8 @@ authors.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = ["rkyv/std"]
 
 [dependencies]
-binrw.workspace = true
-bincode.workspace = true
-serde.workspace = true
+rkyv.workspace = true
 thiserror.workspace = true

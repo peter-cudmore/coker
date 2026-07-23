@@ -3,20 +3,19 @@
 extern crate alloc;
 
 use alloc::{
-    boxed::Box,
     string::{String, ToString},
     vec::Vec,
 };
-use binrw::{binrw, io::Cursor, BinReaderExt, BinWriterExt};
+use rkyv::{
+    access, rancor::Error as RkyvError, to_bytes, util::AlignedVec, Archive, Deserialize, Serialize,
+};
 use thiserror::Error;
 
-#[binrw]
-#[brw(little, magic = b"COKERBC\0")]
-#[derive(Debug, Clone, PartialEq)]
+const MAGIC: [u8; 8] = *b"COKERB03";
+const VERSION: u16 = 3;
+
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct BytecodeModule {
-    #[bw(try_calc(u16::try_from(functions.len())))]
-    pub function_count: u16,
-    #[br(count = function_count)]
     pub functions: Vec<Program>,
 }
 
@@ -26,23 +25,13 @@ impl BytecodeModule {
     }
 }
 
-#[binrw]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct Program {
     pub function_id: u16,
-    #[bw(try_calc(u8::try_from(input_specs.len())))]
-    pub input_space_count: u8,
-    #[bw(try_calc(u8::try_from(output_specs.len())))]
-    pub output_space_count: u8,
-    #[bw(try_calc(u8::try_from(intermediate_layers.len())))]
-    pub intermediate_layer_count: u8,
     pub workspace_size: u32,
     pub required_workspace_size: u32,
-    #[br(count = input_space_count)]
     pub input_specs: Vec<InputSpec>,
-    #[br(count = output_space_count)]
     pub output_specs: Vec<OutputSpec>,
-    #[br(count = intermediate_layer_count)]
     pub intermediate_layers: Vec<Layer>,
 }
 
@@ -66,34 +55,26 @@ impl Program {
     }
 }
 
-#[binrw]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Archive, Serialize, Deserialize)]
 pub struct InputSpec {
     pub workspace_offset: u32,
     pub length: u16,
 }
 
-#[binrw]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Archive, Serialize, Deserialize)]
 pub struct OutputSpec {
     pub workspace_offset: u32,
     pub length: u16,
 }
 
-#[binrw]
-#[brw(little)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub enum Layer {
-    #[brw(magic = 0u8)]
     Bilinear(BilinearLayer),
-    #[brw(magic = 1u8)]
     Generic(GenericLayer),
-    #[brw(magic = 2u8)]
     Evaluate(EvaluateLayer),
 }
 
-#[binrw]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct BilinearLayer {
     pub in_offset: u32,
     pub out_offset: u32,
@@ -104,10 +85,7 @@ pub struct BilinearLayer {
     pub quadratic: SparseTensor,
 }
 
-#[binrw]
-#[brw(little)]
-#[bw(assert(*out_length == ops.len() as u16))]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct GenericLayer {
     pub in_offset: u32,
     pub out_offset: u32,
@@ -115,50 +93,33 @@ pub struct GenericLayer {
     pub out_length: u16,
     pub scratch_offset: u32,
     pub scratch_length: u16,
-    #[br(count = out_length)]
     pub ops: Vec<RowOp>,
 }
 
-#[binrw]
-#[brw(little)]
-#[bw(assert(*input_count == input_bindings.len() as u8))]
-#[bw(assert(*output_count == output_bindings.len() as u8))]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct EvaluateLayer {
     pub scratch_offset: u32,
     pub callee_function_id: u16,
     pub input_count: u8,
     pub output_count: u8,
-    #[br(count = input_count)]
     pub input_bindings: Vec<EvaluateInputBinding>,
-    #[br(count = output_count)]
     pub output_bindings: Vec<EvaluateOutputBinding>,
 }
 
-#[binrw]
-#[brw(little)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub enum EvaluateInputBinding {
-    #[brw(magic = 0u8)]
     WorkspaceSlice { offset: u32, length: u16 },
-    #[brw(magic = 1u8)]
-    ConstantSlice {
-        length: u16,
-        #[br(count = length)]
-        values: Vec<f32>,
-    },
+    ConstantSlice { length: u16, values: Vec<f32> },
 }
 
-#[binrw]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Archive, Serialize, Deserialize)]
 pub struct EvaluateOutputBinding {
     pub destination_offset: u32,
     pub length: u16,
 }
 
-#[binrw]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[brw(little, repr = u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum ScalarOp {
     Identity,
     Sin,
@@ -182,8 +143,7 @@ pub enum ScalarOp {
     Case,
 }
 
-#[binrw]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
 pub struct RowOp {
     pub first: u16,
     pub second: u16,
@@ -191,13 +151,9 @@ pub struct RowOp {
     pub op: ScalarOp,
 }
 
-#[binrw]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct SparseTensor {
     pub shape: (u16, u16, u16),
-    #[bw(try_calc(u32::try_from(entries.len())))]
-    pub entry_count: u32,
-    #[br(count = entry_count)]
     pub entries: Vec<SparseEntry>,
 }
 
@@ -226,11 +182,27 @@ impl SparseTensor {
     }
 }
 
-#[binrw]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct SparseEntry {
     pub index: (u16, u16, u16),
     pub value: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
+struct BytecodeEnvelope {
+    magic: [u8; 8],
+    version: u16,
+    module: BytecodeModule,
+}
+
+impl BytecodeEnvelope {
+    fn new(module: &BytecodeModule) -> Self {
+        Self {
+            magic: MAGIC,
+            version: VERSION,
+            module: module.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -242,23 +214,231 @@ pub enum BytecodeError {
 }
 
 pub fn encode_module(module: &BytecodeModule) -> Result<Vec<u8>, BytecodeError> {
-    let mut stream = Cursor::new(Vec::new());
-    stream
-        .write_le(module)
+    let bytes = to_bytes::<RkyvError>(&BytecodeEnvelope::new(module))
         .map_err(|error| BytecodeError::Encode(error.to_string()))?;
-    Ok(stream.into_inner())
+    Ok(bytes.as_slice().to_vec())
 }
 
 pub fn decode_module(bytes: &[u8]) -> Result<BytecodeModule, BytecodeError> {
-    let mut cursor = Cursor::new(bytes);
-    cursor
-        .read_le()
-        .map_err(|error| BytecodeError::Decode(error.to_string()))
+    let mut aligned_bytes: AlignedVec<16> = AlignedVec::with_capacity(bytes.len());
+    aligned_bytes.extend_from_slice(bytes);
+
+    let archived = access::<ArchivedBytecodeEnvelope, RkyvError>(aligned_bytes.as_slice())
+        .map_err(|error| BytecodeError::Decode(error.to_string()))?;
+    if archived.magic != MAGIC {
+        return Err(BytecodeError::Decode("bytecode magic mismatch".to_string()));
+    }
+    if archived.version != VERSION {
+        return Err(BytecodeError::Decode(
+            "unsupported bytecode version".to_string(),
+        ));
+    }
+
+    Ok(module_from_archived(&archived.module))
+}
+
+fn plain_u16(value: impl Into<u16>) -> u16 {
+    value.into()
+}
+
+fn plain_u32(value: impl Into<u32>) -> u32 {
+    value.into()
+}
+
+fn plain_f32(value: impl Into<f32>) -> f32 {
+    value.into()
+}
+
+fn module_from_archived(module: &ArchivedBytecodeModule) -> BytecodeModule {
+    BytecodeModule::new(module.functions.iter().map(program_from_archived).collect())
+}
+
+fn program_from_archived(program: &ArchivedProgram) -> Program {
+    Program::new(
+        plain_u16(program.function_id),
+        plain_u32(program.workspace_size),
+        plain_u32(program.required_workspace_size),
+        program
+            .input_specs
+            .iter()
+            .map(input_spec_from_archived)
+            .collect(),
+        program
+            .output_specs
+            .iter()
+            .map(output_spec_from_archived)
+            .collect(),
+        program
+            .intermediate_layers
+            .iter()
+            .map(layer_from_archived)
+            .collect(),
+    )
+}
+
+fn input_spec_from_archived(input_spec: &ArchivedInputSpec) -> InputSpec {
+    InputSpec {
+        workspace_offset: plain_u32(input_spec.workspace_offset),
+        length: plain_u16(input_spec.length),
+    }
+}
+
+fn output_spec_from_archived(output_spec: &ArchivedOutputSpec) -> OutputSpec {
+    OutputSpec {
+        workspace_offset: plain_u32(output_spec.workspace_offset),
+        length: plain_u16(output_spec.length),
+    }
+}
+
+fn layer_from_archived(layer: &ArchivedLayer) -> Layer {
+    match layer {
+        ArchivedLayer::Bilinear(bilinear_layer) => {
+            Layer::Bilinear(bilinear_layer_from_archived(bilinear_layer))
+        }
+        ArchivedLayer::Generic(generic_layer) => {
+            Layer::Generic(generic_layer_from_archived(generic_layer))
+        }
+        ArchivedLayer::Evaluate(evaluate_layer) => {
+            Layer::Evaluate(evaluate_layer_from_archived(evaluate_layer))
+        }
+    }
+}
+
+fn bilinear_layer_from_archived(bilinear_layer: &ArchivedBilinearLayer) -> BilinearLayer {
+    BilinearLayer {
+        in_offset: plain_u32(bilinear_layer.in_offset),
+        out_offset: plain_u32(bilinear_layer.out_offset),
+        in_length: plain_u16(bilinear_layer.in_length),
+        out_length: plain_u16(bilinear_layer.out_length),
+        scratch_offset: plain_u32(bilinear_layer.scratch_offset),
+        scratch_length: plain_u16(bilinear_layer.scratch_length),
+        quadratic: sparse_tensor_from_archived(&bilinear_layer.quadratic),
+    }
+}
+
+fn generic_layer_from_archived(generic_layer: &ArchivedGenericLayer) -> GenericLayer {
+    GenericLayer {
+        in_offset: plain_u32(generic_layer.in_offset),
+        out_offset: plain_u32(generic_layer.out_offset),
+        in_length: plain_u16(generic_layer.in_length),
+        out_length: plain_u16(generic_layer.out_length),
+        scratch_offset: plain_u32(generic_layer.scratch_offset),
+        scratch_length: plain_u16(generic_layer.scratch_length),
+        ops: generic_layer.ops.iter().map(row_op_from_archived).collect(),
+    }
+}
+
+fn evaluate_layer_from_archived(evaluate_layer: &ArchivedEvaluateLayer) -> EvaluateLayer {
+    EvaluateLayer {
+        scratch_offset: plain_u32(evaluate_layer.scratch_offset),
+        callee_function_id: plain_u16(evaluate_layer.callee_function_id),
+        input_count: evaluate_layer.input_count,
+        output_count: evaluate_layer.output_count,
+        input_bindings: evaluate_layer
+            .input_bindings
+            .iter()
+            .map(evaluate_input_binding_from_archived)
+            .collect(),
+        output_bindings: evaluate_layer
+            .output_bindings
+            .iter()
+            .map(evaluate_output_binding_from_archived)
+            .collect(),
+    }
+}
+
+fn evaluate_input_binding_from_archived(
+    binding: &ArchivedEvaluateInputBinding,
+) -> EvaluateInputBinding {
+    match binding {
+        ArchivedEvaluateInputBinding::WorkspaceSlice { offset, length } => {
+            EvaluateInputBinding::WorkspaceSlice {
+                offset: plain_u32(*offset),
+                length: plain_u16(*length),
+            }
+        }
+        ArchivedEvaluateInputBinding::ConstantSlice { length, values } => {
+            EvaluateInputBinding::ConstantSlice {
+                length: plain_u16(*length),
+                values: values.iter().map(|value| plain_f32(*value)).collect(),
+            }
+        }
+    }
+}
+
+fn evaluate_output_binding_from_archived(
+    binding: &ArchivedEvaluateOutputBinding,
+) -> EvaluateOutputBinding {
+    EvaluateOutputBinding {
+        destination_offset: plain_u32(binding.destination_offset),
+        length: plain_u16(binding.length),
+    }
+}
+
+fn row_op_from_archived(row_op: &ArchivedRowOp) -> RowOp {
+    RowOp {
+        first: plain_u16(row_op.first),
+        second: plain_u16(row_op.second),
+        third: plain_u16(row_op.third),
+        op: scalar_op_from_archived(&row_op.op),
+    }
+}
+
+fn scalar_op_from_archived(scalar_op: &ArchivedScalarOp) -> ScalarOp {
+    match scalar_op {
+        ArchivedScalarOp::Identity => ScalarOp::Identity,
+        ArchivedScalarOp::Sin => ScalarOp::Sin,
+        ArchivedScalarOp::Cos => ScalarOp::Cos,
+        ArchivedScalarOp::Tan => ScalarOp::Tan,
+        ArchivedScalarOp::Exp => ScalarOp::Exp,
+        ArchivedScalarOp::Sqrt => ScalarOp::Sqrt,
+        ArchivedScalarOp::Log => ScalarOp::Log,
+        ArchivedScalarOp::Neg => ScalarOp::Neg,
+        ArchivedScalarOp::Abs => ScalarOp::Abs,
+        ArchivedScalarOp::Add => ScalarOp::Add,
+        ArchivedScalarOp::Sub => ScalarOp::Sub,
+        ArchivedScalarOp::Mul => ScalarOp::Mul,
+        ArchivedScalarOp::Div => ScalarOp::Div,
+        ArchivedScalarOp::Pow => ScalarOp::Pow,
+        ArchivedScalarOp::IntPow => ScalarOp::IntPow,
+        ArchivedScalarOp::Atan2 => ScalarOp::Atan2,
+        ArchivedScalarOp::Equal => ScalarOp::Equal,
+        ArchivedScalarOp::LessThan => ScalarOp::LessThan,
+        ArchivedScalarOp::LessEqual => ScalarOp::LessEqual,
+        ArchivedScalarOp::Case => ScalarOp::Case,
+    }
+}
+
+fn sparse_tensor_from_archived(tensor: &ArchivedSparseTensor) -> SparseTensor {
+    SparseTensor {
+        shape: (
+            plain_u16(tensor.shape.0),
+            plain_u16(tensor.shape.1),
+            plain_u16(tensor.shape.2),
+        ),
+        entries: tensor
+            .entries
+            .iter()
+            .map(sparse_entry_from_archived)
+            .collect(),
+    }
+}
+
+fn sparse_entry_from_archived(entry: &ArchivedSparseEntry) -> SparseEntry {
+    SparseEntry {
+        index: (
+            plain_u16(entry.index.0),
+            plain_u16(entry.index.1),
+            plain_u16(entry.index.2),
+        ),
+        value: plain_f32(entry.value),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::mem::align_of;
 
     #[test]
     fn encode_decode_round_trip_preserves_module() {
@@ -321,5 +501,18 @@ mod tests {
         let encoded_module = encode_module(&module).unwrap();
         let decoded_module = decode_module(&encoded_module).unwrap();
         assert_eq!(decoded_module, module);
+    }
+
+    #[test]
+    fn encoded_archive_is_aligned_for_direct_access() {
+        let bytes =
+            to_bytes::<RkyvError>(&BytecodeEnvelope::new(&BytecodeModule::new(vec![]))).unwrap();
+        assert_eq!(
+            bytes.as_ptr() as usize % align_of::<ArchivedBytecodeEnvelope>(),
+            0
+        );
+        let archived = access::<ArchivedBytecodeEnvelope, RkyvError>(bytes.as_slice()).unwrap();
+        assert_eq!(archived.magic, MAGIC);
+        assert_eq!(archived.version, VERSION);
     }
 }
