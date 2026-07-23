@@ -4,11 +4,13 @@ extern crate alloc;
 
 mod execute;
 mod ops;
+mod static_module;
 #[cfg(test)]
 mod tests;
 mod validate;
 mod workspace;
 
+pub use crate::static_module::StaticModule;
 use crate::workspace::Workspace;
 use alloc::{
     string::{String, ToString},

@@ -3,9 +3,11 @@
 extern crate alloc;
 
 use alloc::{
+    format,
     string::{String, ToString},
     vec::Vec,
 };
+use core::mem::align_of;
 use rkyv::{
     access, rancor::Error as RkyvError, to_bytes, util::AlignedVec, Archive, Deserialize, Serialize,
 };
@@ -14,6 +16,29 @@ use thiserror::Error;
 const MAGIC: [u8; 8] = *b"COKERB03";
 const VERSION: u16 = 3;
 const HEADER_SIZE: usize = 16;
+
+pub const ARCHIVED_MODULE_ALIGNMENT: usize = align_of::<ArchivedBytecodeModule>();
+
+#[repr(C, align(16))]
+pub struct AlignedModuleBytes<const N: usize> {
+    bytes: [u8; N],
+}
+
+impl<const N: usize> AlignedModuleBytes<N> {
+    pub const fn new(bytes: [u8; N]) -> Self {
+        Self { bytes }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+impl<const N: usize> AsRef<[u8]> for AlignedModuleBytes<N> {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct BytecodeModule {
@@ -195,18 +220,24 @@ pub enum BytecodeError {
     Decode(String),
 }
 
-pub fn encode_module(module: &BytecodeModule) -> Result<Vec<u8>, BytecodeError> {
-    let archived_module =
-        to_bytes::<RkyvError>(module).map_err(|error| BytecodeError::Encode(error.to_string()))?;
-    let mut bytes = Vec::with_capacity(HEADER_SIZE + archived_module.len());
-    bytes.extend_from_slice(&MAGIC);
-    bytes.extend_from_slice(&VERSION.to_le_bytes());
-    bytes.resize(HEADER_SIZE, 0);
-    bytes.extend_from_slice(archived_module.as_slice());
-    Ok(bytes)
+pub fn archived_module(bytes: &[u8]) -> Result<&ArchivedBytecodeModule, BytecodeError> {
+    let payload = archive_payload(bytes)?;
+    if payload.as_ptr() as usize % ARCHIVED_MODULE_ALIGNMENT != 0 {
+        return Err(BytecodeError::Decode(format!(
+            "bytecode archive payload must be {}-byte aligned",
+            ARCHIVED_MODULE_ALIGNMENT
+        )));
+    }
+    access::<ArchivedBytecodeModule, RkyvError>(payload)
+        .map_err(|error| BytecodeError::Decode(error.to_string()))
 }
 
-pub fn decode_module(bytes: &[u8]) -> Result<BytecodeModule, BytecodeError> {
+fn archive_payload(bytes: &[u8]) -> Result<&[u8], BytecodeError> {
+    validate_header(bytes)?;
+    Ok(&bytes[HEADER_SIZE..])
+}
+
+fn validate_header(bytes: &[u8]) -> Result<(), BytecodeError> {
     if bytes.len() < HEADER_SIZE {
         return Err(BytecodeError::Decode(
             "bytecode header too short".to_string(),
@@ -225,8 +256,24 @@ pub fn decode_module(bytes: &[u8]) -> Result<BytecodeModule, BytecodeError> {
         ));
     }
 
-    let mut aligned_bytes: AlignedVec<16> = AlignedVec::with_capacity(bytes.len() - HEADER_SIZE);
-    aligned_bytes.extend_from_slice(&bytes[HEADER_SIZE..]);
+    Ok(())
+}
+
+pub fn encode_module(module: &BytecodeModule) -> Result<Vec<u8>, BytecodeError> {
+    let archived_module =
+        to_bytes::<RkyvError>(module).map_err(|error| BytecodeError::Encode(error.to_string()))?;
+    let mut bytes = Vec::with_capacity(HEADER_SIZE + archived_module.len());
+    bytes.extend_from_slice(&MAGIC);
+    bytes.extend_from_slice(&VERSION.to_le_bytes());
+    bytes.resize(HEADER_SIZE, 0);
+    bytes.extend_from_slice(archived_module.as_slice());
+    Ok(bytes)
+}
+
+pub fn decode_module(bytes: &[u8]) -> Result<BytecodeModule, BytecodeError> {
+    let payload = archive_payload(bytes)?;
+    let mut aligned_bytes: AlignedVec<16> = AlignedVec::with_capacity(payload.len());
+    aligned_bytes.extend_from_slice(payload);
 
     let archived = access::<ArchivedBytecodeModule, RkyvError>(aligned_bytes.as_slice())
         .map_err(|error| BytecodeError::Decode(error.to_string()))?;
@@ -484,15 +531,27 @@ mod tests {
     }
 
     #[test]
-    fn encoded_archive_is_aligned_for_direct_access() {
-        let module = BytecodeModule::new(vec![]);
-        let archived_module = to_bytes::<RkyvError>(&module).unwrap();
-        assert_eq!(
-            archived_module.as_ptr() as usize % align_of::<ArchivedBytecodeModule>(),
-            0
-        );
-        let archived =
-            access::<ArchivedBytecodeModule, RkyvError>(archived_module.as_slice()).unwrap();
-        assert!(archived.functions.is_empty());
+    fn archived_module_accepts_aligned_bytes_without_copy() {
+        let module = BytecodeModule::new(vec![Program::new(0, 0, 0, vec![], vec![], vec![])]);
+        let encoded = encode_module(&module).unwrap();
+        let mut aligned = AlignedVec::<16>::with_capacity(encoded.len());
+        aligned.extend_from_slice(&encoded);
+        let archived = archived_module(aligned.as_slice()).unwrap();
+        assert_eq!(archived.functions.len(), 1);
+        assert_eq!(archived.functions[0].function_id.to_native(), 0);
+    }
+
+    #[test]
+    fn archived_module_rejects_misaligned_payload() {
+        let module = BytecodeModule::new(vec![Program::new(0, 0, 0, vec![], vec![], vec![])]);
+        let encoded = encode_module(&module).unwrap();
+        let mut misaligned = vec![0u8];
+        misaligned.extend_from_slice(&encoded);
+        let error = match archived_module(&misaligned[1..]) {
+            Ok(_) => panic!("expected misaligned archive access to fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, BytecodeError::Decode(_)));
+        assert!(error.to_string().contains("aligned"));
     }
 }
