@@ -84,7 +84,7 @@ fn validate_compiled_program(program: &[u8]) -> PyResult<bool> {
         .map_err(runtime_error)
 }
 
-#[pyfunction]
+#[pyfunction(name = "program_info")]
 fn program_info_py<'py>(py: Python<'py>, program: &[u8]) -> PyResult<Bound<'py, PyDict>> {
     let info = program_info(program).map_err(runtime_error)?;
     program_info_dict(py, &info)

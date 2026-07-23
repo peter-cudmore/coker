@@ -52,8 +52,6 @@ fn build_nested_module() -> BytecodeModule {
         vec![Layer::Evaluate(EvaluateLayer {
             scratch_offset: 1,
             callee_function_id: 1,
-            input_count: 1,
-            output_count: 1,
             input_bindings: vec![EvaluateInputBinding::ConstantSlice {
                 length: 1,
                 values: vec![2.0],
@@ -65,6 +63,12 @@ fn build_nested_module() -> BytecodeModule {
         })],
     );
     BytecodeModule::new(vec![entry_program, callee_program])
+}
+fn build_nested_runtime_module() -> Module {
+    ModuleBuilder::new(build_nested_module())
+        .unwrap()
+        .build()
+        .unwrap()
 }
 
 #[test]
@@ -262,8 +266,6 @@ fn push_forward_evaluate_layer_calls_nested_function() {
         vec![Layer::Evaluate(EvaluateLayer {
             scratch_offset: 1,
             callee_function_id: 1,
-            input_count: 1,
-            output_count: 1,
             input_bindings: vec![EvaluateInputBinding::WorkspaceSlice {
                 offset: 0,
                 length: 1,
@@ -337,10 +339,7 @@ fn execute_overlapping_bilinear_layer_uses_scratch_workspace() {
 
 #[test]
 fn module_builder_allocates_workspace_and_executes() {
-    let mut module = ModuleBuilder::new(build_nested_module())
-        .unwrap()
-        .build()
-        .unwrap();
+    let mut module = build_nested_runtime_module();
     let execution_inputs = module.validate_inputs(&[]).unwrap();
     let mut outputs = vec![0.0; 1];
     let execution_outputs = module.validate_outputs(&mut outputs).unwrap();
@@ -367,10 +366,7 @@ fn module_builder_rejects_short_workspace() {
 
 #[test]
 fn module_validate_inputs_rejects_wrong_shape_before_execution() {
-    let module = ModuleBuilder::new(build_nested_module())
-        .unwrap()
-        .build()
-        .unwrap();
+    let module = build_nested_runtime_module();
     let error = module.validate_inputs(&[&[1.0]]).unwrap_err();
     assert!(matches!(
         error,
@@ -383,10 +379,7 @@ fn module_validate_inputs_rejects_wrong_shape_before_execution() {
 
 #[test]
 fn module_validate_outputs_rejects_wrong_shape_before_execution() {
-    let module = ModuleBuilder::new(build_nested_module())
-        .unwrap()
-        .build()
-        .unwrap();
+    let module = build_nested_runtime_module();
     let mut outputs = vec![0.0; 2];
     let error = module.validate_outputs(&mut outputs).unwrap_err();
     assert!(matches!(
@@ -441,6 +434,51 @@ fn validate_rejects_overlapping_generic_ranges_without_scratch() {
     assert!(error
         .to_string()
         .contains("generic layer scratch length must match input length"));
+}
+
+#[test]
+fn validate_rejects_generic_row_count_mismatch() {
+    let module = BytecodeModule::new(vec![Program::new(
+        0,
+        3,
+        3,
+        vec![InputSpec {
+            workspace_offset: 0,
+            length: 1,
+        }],
+        vec![OutputSpec {
+            workspace_offset: 2,
+            length: 1,
+        }],
+        vec![Layer::Generic(GenericLayer {
+            in_offset: 0,
+            out_offset: 1,
+            in_length: 1,
+            out_length: 1,
+            scratch_offset: 0,
+            scratch_length: 0,
+            ops: vec![
+                RowOp {
+                    first: 0,
+                    second: UNUSED_OPERAND,
+                    third: UNUSED_OPERAND,
+                    op: ScalarOp::Identity,
+                },
+                RowOp {
+                    first: 0,
+                    second: UNUSED_OPERAND,
+                    third: UNUSED_OPERAND,
+                    op: ScalarOp::Sin,
+                },
+            ],
+        })],
+    )]);
+    let encoded = encode_module(&module).unwrap();
+    let error = validate_module(&encoded).unwrap_err();
+    assert!(matches!(error, RuntimeError::Validation(_)));
+    assert!(error
+        .to_string()
+        .contains("generic layer op count must match output length"));
 }
 
 #[test]
