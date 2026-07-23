@@ -1,6 +1,6 @@
 [build-system]
-requires = ["uv_build>=0.9.18,<0.10"]
-build-backend = "uv_build"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
 
 [project]
 name = "coker"
@@ -13,7 +13,6 @@ maintainers = [
     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
 ]
 license = "MPL-2.0"
-license-files = ["LICEN[CS]E.*"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -49,6 +48,7 @@ ci = [
     "pytest-mypy",
     "black==25.1.0",
     "flake8>=7.1.1,<8",
+    "maturin>=1.7,<2",
 ]
 docs = [
     "sphinx>=7.0",
@@ -62,7 +62,16 @@ pythonpath = ["src"]
 testpaths = [
     "tests",
 ]
-
+markers = [
+    "perf: machine-dependent performance assertions run only in the dedicated perf suite",
+]
 [tool.black]
 line-length = 79
 target-version = ["py310", "py311", "py312", "py313"]
+
+[tool.maturin]
+bindings = "pyo3"
+manifest-path = "coker_runtime/crates/coker-python/Cargo.toml"
+python-source = "src"
+python-packages = ["coker"]
+module-name = "coker._coker_runtime"

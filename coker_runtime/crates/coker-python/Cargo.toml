@@ -1,0 +1,16 @@
+[package]
+name = "coker-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "coker_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+coker-compiler = { path = "../coker-compiler" }
+coker-bytecode = { path = "../coker-bytecode" }
+coker-runtime = { path = "../coker-runtime" }
+pyo3.workspace = true
