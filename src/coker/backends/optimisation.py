@@ -163,27 +163,16 @@ def decision_degree(
             default=0,
         )
     elif op.is_bilinear():
-        argument_degrees = [
+        degree = sum(
             decision_degree(argument, tape, decision_indices, memo)
             for argument in arguments
-        ]
-        if any(degree > 1 for degree in argument_degrees):
-            degree = 2
-        else:
-            dependent_argument_count = sum(
-                1 for degree in argument_degrees if degree > 0
-            )
-            degree = (
-                max(argument_degrees, default=0)
-                if dependent_argument_count <= 1
-                else 2
-            )
+        )
     else:
         argument_degrees = [
             decision_degree(argument, tape, decision_indices, memo)
             for argument in arguments
         ]
-        degree = 0 if all(degree == 0 for degree in argument_degrees) else 2
+        degree = 0 if all(degree == 0 for degree in argument_degrees) else 3
 
     memo[tracer.index] = degree
     return degree
