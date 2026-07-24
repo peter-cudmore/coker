@@ -4,6 +4,7 @@ extern crate alloc;
 
 mod execute;
 mod ops;
+mod qp;
 mod static_module;
 #[cfg(test)]
 mod tests;
@@ -11,6 +12,7 @@ mod validate;
 mod workspace;
 
 pub use crate::static_module::StaticModule;
+pub use crate::qp::{QpRuntime, QpSolveResult};
 use crate::workspace::Workspace;
 use alloc::{
     string::{String, ToString},
@@ -40,6 +42,8 @@ pub enum RuntimeError {
     WorkspaceTooSmall { expected: usize, actual: usize },
     #[error("program validation failed: {0}")]
     Validation(String),
+    #[error("QP solver error: {0}")]
+    QpSolver(String),
 }
 
 #[derive(Debug, Clone)]
