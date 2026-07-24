@@ -6,6 +6,7 @@ from typing import Protocol
 import numpy as np
 
 from coker.algebra.kernel import Function, Tape, Tracer, function
+from coker.backends.backend import get_backend_by_name
 from coker.backends.evaluator import evaluate_inner
 from coker.backends.optimisation import (
     InputBinding,
@@ -15,6 +16,8 @@ from coker.backends.optimisation import (
     materialise_tape_inputs,
     normalise_runtime_args,
 )
+
+OSQP_INFINITY = 1.0e30
 
 
 class RuntimeQpProgram(Protocol):
@@ -137,7 +140,11 @@ class CokerSolver:
         )
         return list(
             evaluate_inner(
-                self.tape, tape_inputs, list(self.outputs), self.backend, {}
+                self.tape,
+                tape_inputs,
+                list(self.outputs),
+                get_backend_by_name("numpy", set_current=False),
+                {},
             )
         )
 
@@ -387,13 +394,11 @@ def _build_coefficient_function(
                 )
 
         ordered_px_values = []
-        value_index = 0
         for column in range(decision_dimension):
-            ordered_px_values.append(px_values[value_index])
-            value_index += 1
+            value_index = column * (column + 1) // 2
             for row in range(column):
-                ordered_px_values.append(px_values[value_index])
-                value_index += 1
+                ordered_px_values.append(px_values[value_index + 1 + row])
+            ordered_px_values.append(px_values[value_index])
 
         ax_values: list[object] = []
         lower_values: list[object] = []
@@ -416,6 +421,8 @@ def _build_coefficient_function(
                 )
             )
             row_count = residual_zero.size
+            lower_bound = _osqp_bound(lower_bound)
+            upper_bound = _osqp_bound(upper_bound)
             lower_values.extend(
                 lower_bound - residual_zero[row] for row in range(row_count)
             )
@@ -471,6 +478,14 @@ def _build_output_slices(
         slices[name] = OutputSlice(start=start, length=length)
         start += length
     return slices
+
+
+def _osqp_bound(value: float) -> float:
+    if np.isposinf(value):
+        return OSQP_INFINITY
+    if np.isneginf(value):
+        return -OSQP_INFINITY
+    return float(value)
 
 
 def _evaluate_function(

@@ -23,6 +23,16 @@ pub struct QpRuntime {
     warm_start: bool,
 }
 
+fn empty_csc(nrows: usize, ncols: usize) -> CscMatrix<'static> {
+    CscMatrix {
+        nrows,
+        ncols,
+        indptr: vec![0; ncols + 1].into(),
+        indices: Vec::new().into(),
+        data: Vec::new().into(),
+    }
+}
+
 impl QpRuntime {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, RuntimeError> {
         let archive = decode_qp_program(bytes)?;
@@ -76,7 +86,12 @@ impl QpRuntime {
         let mut a = vec![vec![0.0_f64; self.n]; self.m];
         for ((&row, &col), value) in self.a_rows.iter().zip(&self.a_cols).zip(ax) { a[row][col] = value; }
         let settings = Settings::default().verbose(false);
-        let mut problem = Problem::new(CscMatrix::from(&p[..]), &q, CscMatrix::from(&a[..]), &l, &u, &settings)
+        let a_matrix = if self.m == 0 {
+            empty_csc(0, self.n)
+        } else {
+            CscMatrix::from(&a[..])
+        };
+        let mut problem = Problem::new(CscMatrix::from(&p[..]), &q, a_matrix, &l, &u, &settings)
             .map_err(|error| RuntimeError::QpSolver(error.to_string()))?;
         if self.warm_start { if let Some(value) = warm_start { problem.warm_start_x(value); } }
         let status = problem.solve();
