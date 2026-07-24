@@ -92,3 +92,33 @@ class CompiledGraph:
         if len(restored) == 1:
             return restored[0]
         return restored
+
+
+
+class RuntimeQpProgram:
+    def __init__(self, program: bytes):
+        self.program = bytes(program)
+        self._runtime = coker_runtime.load_qp_program(self.program)
+
+    @classmethod
+    def compile(cls, extracted_qp) -> "RuntimeQpProgram":
+        payload = json.dumps(extracted_qp.export_payload()).encode("utf-8")
+        return cls(bytes(coker_runtime.compile_exported_qp(payload)))
+
+    def solve(self, runtime_args, *, warm_start):
+        inputs = [_flatten_input(arg) for arg in runtime_args]
+        initial = None if warm_start is None else np.asarray(
+            warm_start, dtype=float
+        ).tolist()
+        solution, success, status = self._runtime.solve(inputs, initial)
+        from coker.optimisation import SolveFailure, SolveInfo
+
+        info = SolveInfo(
+            backend="coker",
+            solver="osqp",
+            success=bool(success),
+            return_status=str(status),
+        )
+        if not info.success:
+            raise SolveFailure(f"OSQP solve failed: {status}", info)
+        return np.asarray(solution, dtype=float), info

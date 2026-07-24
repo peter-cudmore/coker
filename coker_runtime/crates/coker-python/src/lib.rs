@@ -1,5 +1,5 @@
-use coker_compiler::{compile_exported_json, CompileError};
-use coker_runtime::{program_info, validate_module, Module, ModuleBuilder, ProgramInfo};
+use coker_compiler::{compile_exported_json, compile_exported_qp_json, CompileError};
+use coker_runtime::{program_info, validate_module, Module, ModuleBuilder, ProgramInfo, QpRuntime};
 use pyo3::exceptions::{PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -8,6 +8,24 @@ use pyo3::types::{PyBytes, PyDict};
 struct PyRuntimeProgram {
     module: Module,
     output_lengths: Vec<usize>,
+}
+
+#[pyclass(name = "RuntimeQpProgram")]
+struct PyRuntimeQpProgram {
+    runtime: QpRuntime,
+}
+
+#[pymethods]
+impl PyRuntimeQpProgram {
+    fn solve(
+        &mut self,
+        inputs: Vec<Vec<f32>>,
+        warm_start: Option<Vec<f64>>,
+    ) -> PyResult<(Vec<f64>, bool, String)> {
+        let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
+        let result = self.runtime.solve(&input_slices, warm_start.as_deref()).map_err(runtime_error)?;
+        Ok((result.solution, result.success, result.status))
+    }
 }
 
 #[pymethods]
@@ -65,6 +83,21 @@ fn compile_exported_graph<'py>(
     Ok(PyBytes::new(py, &module_bytes))
 }
 
+#[pyfunction]
+fn compile_exported_qp<'py>(
+    py: Python<'py>,
+    exported_qp_json: &[u8],
+) -> PyResult<Bound<'py, PyBytes>> {
+    let bytes = compile_exported_qp_json(exported_qp_json).map_err(compile_error_to_python)?;
+    Ok(PyBytes::new(py, &bytes))
+}
+
+#[pyfunction]
+fn load_qp_program(program: &[u8]) -> PyResult<PyRuntimeQpProgram> {
+    Ok(PyRuntimeQpProgram {
+        runtime: QpRuntime::from_bytes(program).map_err(runtime_error)?,
+    })
+}
 #[pyfunction]
 fn load_program(program: &[u8]) -> PyResult<PyRuntimeProgram> {
     let module = ModuleBuilder::new_from_bytes(program)
@@ -183,6 +216,9 @@ fn runtime_error(error: impl core::fmt::Display) -> PyErr {
 #[pyo3(name = "_coker_runtime")]
 fn coker_python(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyRuntimeProgram>()?;
+    module.add_class::<PyRuntimeQpProgram>()?;
+    module.add_function(wrap_pyfunction!(compile_exported_qp, module)?)?;
+    module.add_function(wrap_pyfunction!(load_qp_program, module)?)?;
     module.add_function(wrap_pyfunction!(compile_exported_graph, module)?)?;
     module.add_function(wrap_pyfunction!(load_program, module)?)?;
     module.add_function(wrap_pyfunction!(validate_compiled_program, module)?)?;
