@@ -7,6 +7,9 @@ from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Function, Tracer
 from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP
 from coker.backends.backend import ArrayLike, Backend, get_backend_by_name
+from coker.backends.coker.optimisation import (
+    build_optimisation_problem as build_qp_optimisation_problem,
+)
 from coker.backends.coker.ast_preprocessing import SparseNet
 from coker.backends.coker.layers import (
     IDENTITY_OP,
@@ -83,7 +86,14 @@ class CokerBackend(Backend):
         outputs: List[Tracer],
         initial_conditions: Dict[int, ArrayLike],
     ):
-        raise NotImplementedError
+        return build_qp_optimisation_problem(
+            self,
+            cost,
+            constraints,
+            parameters,
+            outputs,
+            initial_conditions,
+        )
 
 
 def _node_shape(dimension):
