@@ -280,20 +280,18 @@ def compile_qp_problem(
     parameter_bindings: list[InputBinding],
     initial_conditions: dict[int, object],
 ) -> RuntimeQpProgram:
-    _ = (
-        backend,
+    _ = backend, initial_conditions
+    extracted = extract_qp_program(
+        cost,
+        constraints,
         outputs,
-        initial_conditions,
-        extract_qp_program(
-            cost,
-            constraints,
-            outputs,
-            decision_indices,
-            decision_bindings,
-            parameter_bindings,
-        ),
+        decision_indices,
+        decision_bindings,
+        parameter_bindings,
     )
-    raise NotImplementedError("Coker QP runtime bindings are not implemented yet")
+    from coker.backends.coker.runtime import RuntimeQpProgram
+
+    return RuntimeQpProgram.compile(extracted)
 
 
 def _build_coefficient_function(
