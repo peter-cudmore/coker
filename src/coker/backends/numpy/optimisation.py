@@ -6,18 +6,25 @@ from typing import Callable, Iterable, Sequence
 import numpy as np
 import scipy.optimize as optimize
 
-from coker.algebra import Dimension, OP
+from coker.algebra import Dimension
 from coker.algebra.kernel import Tape, Tracer
 from coker.backends.evaluator import evaluate_inner
+from coker.backends.optimisation import (
+    InputBinding,
+    build_initial_guess,
+    build_problem_bindings,
+    coerce_scalar,
+    coerce_vector,
+    decision_degree,
+    make_bindings as shared_make_bindings,
+    flatten_value,
+    is_affine_in_decisions,
+    materialise_tape_inputs,
+    normalise_runtime_args,
+    normalise_value,
+    reshape_flat_slice,
+)
 from coker.optimisation import SolveFailure, solve_info_from_scipy_result
-
-
-@dataclass(frozen=True)
-class InputBinding:
-    index: int
-    dim: Dimension
-    start: int
-    stop: int
 
 
 @dataclass(frozen=True)
@@ -127,42 +134,18 @@ class TrustConstrProblem:
     def _normalise_runtime_args(
         self, runtime_args: Sequence[object]
     ) -> tuple[object, ...]:
-        if len(runtime_args) != len(self.parameter_bindings):
-            raise ValueError(
-                "Expected "
-                f"{len(self.parameter_bindings)} runtime arguments, got "
-                f"{len(runtime_args)}"
-            )
-        return tuple(
-            _normalise_value(value, binding.dim)
-            for value, binding in zip(runtime_args, self.parameter_bindings)
-        )
+        return normalise_runtime_args(runtime_args, self.parameter_bindings)
 
     def _materialise_inputs(
         self, decision_vector: np.ndarray, runtime_args: tuple[object, ...]
     ) -> list[object]:
-        decision_values = {
-            binding.index: _reshape_flat_slice(
-                decision_vector[binding.start : binding.stop], binding.dim
-            )
-            for binding in self.decision_bindings
-        }
-        parameter_values = {
-            binding.index: value
-            for binding, value in zip(self.parameter_bindings, runtime_args)
-        }
-        tape_inputs = []
-        for index in self.tape.input_indicies:
-            if index in decision_values:
-                tape_inputs.append(decision_values[index])
-                continue
-            if index in parameter_values:
-                tape_inputs.append(parameter_values[index])
-                continue
-            raise ValueError(
-                f"Missing optimisation input for tape index {index}"
-            )
-        return tape_inputs
+        return materialise_tape_inputs(
+            self.tape,
+            self.decision_bindings,
+            self.parameter_bindings,
+            decision_vector,
+            runtime_args,
+        )
 
     def _evaluate_tracers(
         self,
@@ -220,17 +203,13 @@ def build_optimisation_problem(
     assert all(parameter.tape == tape for parameter in parameters)
     assert all(output.tape == tape for output in outputs)
 
-    parameter_indices = {parameter.index for parameter in parameters}
-    decision_indices = [
-        index
-        for index in tape.input_indicies
-        if index not in parameter_indices
-    ]
-    parameter_bindings = _make_bindings(
-        [parameter.index for parameter in parameters], tape
+    bindings = build_problem_bindings(
+        tape, [parameter.index for parameter in parameters]
     )
-    decision_bindings = _make_bindings(decision_indices, tape)
-    initial_guess = _build_initial_guess(decision_bindings, initial_conditions)
+    decision_indices = bindings.decision_indices
+    parameter_bindings = bindings.parameter_bindings
+    decision_bindings = bindings.decision_bindings
+    initial_guess = build_initial_guess(decision_bindings, initial_conditions)
 
     constraint_factories = []
     for constraint in constraints:
@@ -260,38 +239,15 @@ def build_optimisation_problem(
     )
 
 
-def _make_bindings(indices: Iterable[int], tape: Tape) -> list[InputBinding]:
-    bindings = []
-    offset = 0
-    for index in indices:
-        dim = tape.dim[index]
-        flat_size = dim.flat()
-        bindings.append(
-            InputBinding(
-                index=index, dim=dim, start=offset, stop=offset + flat_size
-            )
-        )
-        offset += flat_size
-    return bindings
+def _make_bindings(indices, tape):
+    return shared_make_bindings(indices, tape)
 
 
 def _build_initial_guess(
     decision_bindings: list[InputBinding],
     initial_conditions: dict[int, object],
 ) -> np.ndarray:
-    if not decision_bindings:
-        return np.zeros(0, dtype=float)
-    flat_slices = []
-    for binding in decision_bindings:
-        if binding.index not in initial_conditions:
-            raise ValueError(
-                "Missing initial condition for decision "
-                f"variable {binding.index}"
-            )
-        flat_slices.append(
-            _flatten_value(initial_conditions[binding.index], binding.dim)
-        )
-    return np.concatenate(flat_slices)
+    return build_initial_guess(decision_bindings, initial_conditions)
 
 
 def _build_constraint_factory(
@@ -347,9 +303,7 @@ def _build_constraint_factory(
 def _is_affine_in_decisions(
     tracer: Tracer | object, tape: Tape, decision_indices: set[int], memo=None
 ) -> bool:
-    if memo is None:
-        memo = {}
-    return _decision_degree(tracer, tape, decision_indices, memo) <= 1
+    return is_affine_in_decisions(tracer, tape, decision_indices, memo)
 
 
 def _decision_degree(
@@ -358,53 +312,7 @@ def _decision_degree(
     decision_indices: set[int],
     memo: dict[int, int],
 ) -> int:
-    if not isinstance(tracer, Tracer) or tracer.tape is not tape:
-        return 0
-    if tracer.index in memo:
-        return memo[tracer.index]
-
-    node = tape.nodes[tracer.index]
-    if isinstance(node, Tracer):
-        degree = 1 if tracer.index in decision_indices else 0
-        memo[tracer.index] = degree
-        return degree
-
-    op, *arguments = node
-    if op == OP.VALUE:
-        degree = _decision_degree(arguments[0], tape, decision_indices, memo)
-    elif op.is_linear():
-        degree = max(
-            (
-                _decision_degree(argument, tape, decision_indices, memo)
-                for argument in arguments
-            ),
-            default=0,
-        )
-    elif op.is_bilinear():
-        argument_degrees = [
-            _decision_degree(argument, tape, decision_indices, memo)
-            for argument in arguments
-        ]
-        if any(degree > 1 for degree in argument_degrees):
-            degree = 2
-        else:
-            dependent_argument_count = sum(
-                1 for degree in argument_degrees if degree > 0
-            )
-            degree = (
-                max(argument_degrees, default=0)
-                if dependent_argument_count <= 1
-                else 2
-            )
-    else:
-        argument_degrees = [
-            _decision_degree(argument, tape, decision_indices, memo)
-            for argument in arguments
-        ]
-        degree = 0 if all(degree == 0 for degree in argument_degrees) else 2
-
-    memo[tracer.index] = degree
-    return degree
+    return decision_degree(tracer, tape, decision_indices, memo)
 
 
 def _finite_difference_gradient(
@@ -484,14 +392,11 @@ def _finite_difference_steps(decision_vector: np.ndarray) -> np.ndarray:
 
 
 def _coerce_scalar(value: object) -> float:
-    array = np.asarray(value, dtype=float)
-    if array.size != 1:
-        raise TypeError(f"Expected scalar value, got shape {array.shape}")
-    return float(array.reshape(-1)[0])
+    return coerce_scalar(value)
 
 
 def _coerce_vector(value: object) -> np.ndarray:
-    return np.asarray(value, dtype=float).reshape(-1)
+    return coerce_vector(value)
 
 
 def _expand_bound(bound: float, size: int) -> np.ndarray:
@@ -499,30 +404,12 @@ def _expand_bound(bound: float, size: int) -> np.ndarray:
 
 
 def _normalise_value(value: object, dim: Dimension) -> object:
-    array = np.asarray(value, dtype=float)
-    if dim.is_scalar():
-        if array.size != 1:
-            raise ValueError(
-                f"Expected scalar value for {dim}, got shape {array.shape}"
-            )
-        return float(array.reshape(-1)[0])
-    if array.shape != dim.dim:
-        raise ValueError(
-            f"Expected value with shape {dim.dim}, got {array.shape}"
-        )
-    return array
+    return normalise_value(value, dim)
 
 
 def _flatten_value(value: object, dim: Dimension) -> np.ndarray:
-    normalised_value = _normalise_value(value, dim)
-    if dim.is_scalar():
-        return np.array([normalised_value], dtype=float)
-    return np.asarray(normalised_value, dtype=float).reshape(-1)
+    return flatten_value(value, dim)
 
 
 def _reshape_flat_slice(value: np.ndarray, dim: Dimension) -> object:
-    if dim.is_scalar():
-        if value.size != 1:
-            raise ValueError(f"Expected scalar slice, got shape {value.shape}")
-        return float(value[0])
-    return np.asarray(value, dtype=float).reshape(dim.dim)
+    return reshape_flat_slice(value, dim)
