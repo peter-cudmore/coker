@@ -22,6 +22,45 @@ pub(crate) struct ExportedProgram {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ExportedQpProgram {
+    pub(crate) n: usize,
+    pub(crate) m: usize,
+    pub(crate) parameter_inputs: Vec<ExportedQpInput>,
+    pub(crate) p_structure: Vec<ExportedQpEntry>,
+    pub(crate) a_structure: Vec<ExportedQpEntry>,
+    pub(crate) coefficient_outputs: ExportedQpCoefficientOutputs,
+    pub(crate) coefficient_evaluator: Value,
+    pub(crate) warm_start: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ExportedQpInput {
+    pub(crate) length: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ExportedQpEntry {
+    pub(crate) row: usize,
+    pub(crate) col: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ExportedQpCoefficientOutputs {
+    pub(crate) px: ExportedQpOutput,
+    pub(crate) q: ExportedQpOutput,
+    pub(crate) ax: ExportedQpOutput,
+    pub(crate) l: ExportedQpOutput,
+    pub(crate) u: ExportedQpOutput,
+    pub(crate) r: ExportedQpOutput,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ExportedQpOutput {
+    pub(crate) start: usize,
+    pub(crate) length: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ExportedInputLayer {
     pub(crate) inputs: Vec<ExportedInputSpec>,
 }

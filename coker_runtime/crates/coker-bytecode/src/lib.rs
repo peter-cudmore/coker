@@ -16,6 +16,21 @@ use thiserror::Error;
 const MAGIC: [u8; 8] = *b"COKERB03";
 const VERSION: u16 = 3;
 const HEADER_SIZE: usize = 16;
+const QP_MAGIC: [u8; 8] = *b"COKERQ03";
+
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
+pub struct QpProgramArchive {
+    pub n: u32,
+    pub m: u32,
+    pub parameter_lengths: Vec<u32>,
+    pub p_rows: Vec<u32>,
+    pub p_cols: Vec<u32>,
+    pub a_rows: Vec<u32>,
+    pub a_cols: Vec<u32>,
+    pub coefficient_program: Vec<u8>,
+    pub coefficient_lengths: Vec<u32>,
+    pub warm_start: bool,
+}
 
 pub const ARCHIVED_MODULE_ALIGNMENT: usize = align_of::<ArchivedBytecodeModule>();
 
@@ -278,6 +293,45 @@ pub fn decode_module(bytes: &[u8]) -> Result<BytecodeModule, BytecodeError> {
     let archived = access::<ArchivedBytecodeModule, RkyvError>(aligned_bytes.as_slice())
         .map_err(|error| BytecodeError::Decode(error.to_string()))?;
     Ok(module_from_archived(archived))
+}
+
+pub fn encode_qp_program(program: &QpProgramArchive) -> Result<Vec<u8>, BytecodeError> {
+    let archived =
+        to_bytes::<RkyvError>(program).map_err(|error| BytecodeError::Encode(error.to_string()))?;
+    let mut bytes = Vec::with_capacity(HEADER_SIZE + archived.len());
+    bytes.extend_from_slice(&QP_MAGIC);
+    bytes.extend_from_slice(&VERSION.to_le_bytes());
+    bytes.resize(HEADER_SIZE, 0);
+    bytes.extend_from_slice(archived.as_slice());
+    Ok(bytes)
+}
+
+pub fn decode_qp_program(bytes: &[u8]) -> Result<QpProgramArchive, BytecodeError> {
+    if bytes.len() < HEADER_SIZE || bytes[..QP_MAGIC.len()] != QP_MAGIC {
+        return Err(BytecodeError::Decode("QP bytecode magic mismatch".to_string()));
+    }
+    let version: [u8; 2] = bytes[QP_MAGIC.len()..QP_MAGIC.len() + 2]
+        .try_into()
+        .expect("header size includes version bytes");
+    if u16::from_le_bytes(version) != VERSION {
+        return Err(BytecodeError::Decode("unsupported QP bytecode version".to_string()));
+    }
+    let mut payload: AlignedVec<16> = AlignedVec::with_capacity(bytes.len() - HEADER_SIZE);
+    payload.extend_from_slice(&bytes[HEADER_SIZE..]);
+    let archived = access::<ArchivedQpProgramArchive, RkyvError>(payload.as_slice())
+        .map_err(|error| BytecodeError::Decode(error.to_string()))?;
+    Ok(QpProgramArchive {
+        n: archived.n.into(),
+        m: archived.m.into(),
+        parameter_lengths: archived.parameter_lengths.iter().map(|value| (*value).into()).collect(),
+        p_rows: archived.p_rows.iter().map(|value| (*value).into()).collect(),
+        p_cols: archived.p_cols.iter().map(|value| (*value).into()).collect(),
+        a_rows: archived.a_rows.iter().map(|value| (*value).into()).collect(),
+        a_cols: archived.a_cols.iter().map(|value| (*value).into()).collect(),
+        coefficient_program: archived.coefficient_program.iter().copied().collect(),
+        coefficient_lengths: archived.coefficient_lengths.iter().map(|value| (*value).into()).collect(),
+        warm_start: archived.warm_start,
+    })
 }
 
 fn module_from_archived(module: &ArchivedBytecodeModule) -> BytecodeModule {
