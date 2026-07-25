@@ -44,7 +44,9 @@ def build_problem_bindings(
     parameter_index_list = list(parameter_indices)
     parameter_index_set = set(parameter_index_list)
     decision_indices = [
-        index for index in tape.input_indicies if index not in parameter_index_set
+        index
+        for index in tape.input_indicies
+        if index not in parameter_index_set
     ]
     return ProblemBindings(
         tape=tape,
@@ -83,7 +85,9 @@ def build_initial_guess(
                 "Missing initial condition for decision "
                 f"variable {binding.index}"
             )
-        flat_slices.append(flatten_value(initial_conditions[binding.index], binding.dim))
+        flat_slices.append(
+            flatten_value(initial_conditions[binding.index], binding.dim)
+        )
     return np.concatenate(flat_slices)
 
 
@@ -207,7 +211,9 @@ def normalise_value(value: object, dim: Dimension) -> object:
             )
         return float(array.reshape(-1)[0])
     if array.shape != dim.dim:
-        raise ValueError(f"Expected value with shape {dim.dim}, got {array.shape}")
+        raise ValueError(
+            f"Expected value with shape {dim.dim}, got {array.shape}"
+        )
     return array
 
 
