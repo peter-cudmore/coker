@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-
+build = "build.rs"
 [lib]
 crate-type = ["rlib"]
 
@@ -14,8 +14,10 @@ std = ["coker-bytecode/std"]
 
 [dependencies]
 coker-bytecode = { path = "../coker-bytecode", default-features = false }
+coker-osqp-ffi = { path = "../coker-osqp-ffi", package = "coker-osqp-ffi" }
+libm.workspace = true
+rkyv.workspace = true
 thiserror.workspace = true
-osqp.workspace = true
 
 [dev-dependencies]
 rkyv.workspace = true

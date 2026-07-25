@@ -1,5 +1,15 @@
+#![cfg(feature = "std")]
+
+use core::{mem::MaybeUninit, slice};
+
+use coker_bytecode::archived_module;
 use coker_compiler::{compile_exported_json, compile_exported_qp_json, CompileError};
-use coker_runtime::{program_info, validate_module, Module, ModuleBuilder, ProgramInfo, QpRuntime};
+use coker_runtime::{
+    program_info, validate_module, MappedModule, MappedQpProgram, MappedQpPushForwardWorkspace,
+    MappedQpWorkspace, Module, ModuleBuilder, ProgramInfo, QpSolveStatus, QpWorkspaceRequirements,
+    SpecInfo,
+};
+use pyo3::buffer::{Element, PyBuffer};
 use pyo3::exceptions::{PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -7,24 +17,142 @@ use pyo3::types::{PyBytes, PyDict};
 #[pyclass(name = "RuntimeProgram")]
 struct PyRuntimeProgram {
     module: Module,
+    workspace_size: usize,
     output_lengths: Vec<usize>,
 }
 
-#[pyclass(name = "RuntimeQpProgram")]
+#[pyclass(name = "RuntimeQpProgram", unsendable)]
 struct PyRuntimeQpProgram {
-    runtime: QpRuntime,
+    module_bytes: Vec<u8>,
+    function_id: u16,
+    input_lengths: Vec<usize>,
+    output_length: usize,
+    workspace_requirements: QpWorkspaceRequirements,
 }
 
 #[pymethods]
 impl PyRuntimeQpProgram {
+    fn info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let info = PyDict::new(py);
+        info.set_item("function_id", self.function_id)?;
+        info.set_item("input_specs", &self.input_lengths)?;
+        info.set_item("output_spec", self.output_length)?;
+        Ok(info)
+    }
+
+    fn workspace_requirements<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let requirements = PyDict::new(py);
+        requirements.set_item(
+            "evaluator_workspace_size",
+            self.workspace_requirements.evaluator_workspace_size,
+        )?;
+        requirements.set_item(
+            "tangent_workspace_size",
+            self.workspace_requirements.tangent_workspace_size,
+        )?;
+        requirements.set_item(
+            "coefficient_output_size",
+            self.workspace_requirements.coefficient_output_size,
+        )?;
+        requirements.set_item("arena_bytes", self.workspace_requirements.arena_bytes)?;
+        requirements.set_item(
+            "arena_alignment",
+            self.workspace_requirements.arena_alignment,
+        )?;
+        Ok(requirements)
+    }
+
+    #[pyo3(signature = (inputs, arena, evaluator_workspace, coefficient_outputs, warm_start=None))]
     fn solve(
-        &mut self,
+        &self,
+        _py: Python<'_>,
         inputs: Vec<Vec<f32>>,
+        arena: PyBuffer<u8>,
+        evaluator_workspace: PyBuffer<f32>,
+        coefficient_outputs: PyBuffer<f32>,
         warm_start: Option<Vec<f64>>,
     ) -> PyResult<(Vec<f64>, bool, String)> {
+        let arena = writable_c_buffer(&arena, "arena")?;
+        let evaluator_workspace = writable_c_buffer(&evaluator_workspace, "evaluator_workspace")?;
+        let coefficient_outputs = writable_c_buffer(&coefficient_outputs, "coefficient_outputs")?;
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-        let result = self.runtime.solve(&input_slices, warm_start.as_deref()).map_err(runtime_error)?;
-        Ok((result.solution, result.success, result.status))
+        let mapped_qp = self.mapped_qp_program().map_err(runtime_error)?;
+        let workspace = MappedQpWorkspace::new(evaluator_workspace, coefficient_outputs);
+        let mut bound = mapped_qp
+            .bind(arena_as_uninit(arena))
+            .map_err(runtime_error)?;
+        let mut outputs = vec![0.0f32; self.output_length];
+        let diagnostics = bound
+            .execute(
+                &input_slices,
+                warm_start.as_deref(),
+                workspace,
+                &mut outputs,
+            )
+            .map_err(runtime_error)?;
+        let success = solve_success(diagnostics.status);
+        let solution = outputs.into_iter().map(f64::from).collect();
+        Ok((solution, success, format!("{:?}", diagnostics.status)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_forward(
+        &self,
+        _py: Python<'_>,
+        inputs: Vec<Vec<f32>>,
+        tangents: Vec<Vec<f32>>,
+        arena: PyBuffer<u8>,
+        primal_evaluator_workspace: PyBuffer<f32>,
+        primal_coefficient_outputs: PyBuffer<f32>,
+        tangent_evaluator_workspace: PyBuffer<f32>,
+        tangent_coefficient_outputs: PyBuffer<f32>,
+        solution_tangent_workspace: PyBuffer<f32>,
+    ) -> PyResult<(Vec<f64>, Vec<f64>)> {
+        let arena = writable_c_buffer(&arena, "arena")?;
+        let primal_evaluator_workspace =
+            writable_c_buffer(&primal_evaluator_workspace, "primal_evaluator_workspace")?;
+        let primal_coefficient_outputs =
+            writable_c_buffer(&primal_coefficient_outputs, "primal_coefficient_outputs")?;
+        let tangent_evaluator_workspace =
+            writable_c_buffer(&tangent_evaluator_workspace, "tangent_evaluator_workspace")?;
+        let tangent_coefficient_outputs =
+            writable_c_buffer(&tangent_coefficient_outputs, "tangent_coefficient_outputs")?;
+        let solution_tangent_workspace =
+            writable_c_buffer(&solution_tangent_workspace, "solution_tangent_workspace")?;
+        let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
+        let tangent_slices: Vec<&[f32]> = tangents.iter().map(|input| input.as_slice()).collect();
+        let mapped_qp = self.mapped_qp_program().map_err(runtime_error)?;
+        let workspace = MappedQpPushForwardWorkspace::new(
+            primal_evaluator_workspace,
+            primal_coefficient_outputs,
+            tangent_evaluator_workspace,
+            tangent_coefficient_outputs,
+            solution_tangent_workspace,
+        );
+        let mut bound = mapped_qp
+            .bind(arena_as_uninit(arena))
+            .map_err(runtime_error)?;
+        let mut outputs = vec![0.0f32; self.output_length];
+        let mut tangent_outputs = vec![0.0f32; self.output_length];
+        bound
+            .push_forward(
+                &input_slices,
+                &tangent_slices,
+                workspace,
+                &mut outputs,
+                &mut tangent_outputs,
+            )
+            .map_err(runtime_error)?;
+        Ok((
+            outputs.into_iter().map(f64::from).collect(),
+            tangent_outputs.into_iter().map(f64::from).collect(),
+        ))
+    }
+}
+
+impl PyRuntimeQpProgram {
+    fn mapped_qp_program(&self) -> Result<MappedQpProgram<'_>, coker_runtime::RuntimeError> {
+        MappedModule::new_from_bytes(&self.module_bytes)?.qp_program(self.function_id)
     }
 }
 
@@ -36,16 +164,11 @@ impl PyRuntimeProgram {
 
     fn execute(&mut self, inputs: Vec<Vec<f32>>) -> PyResult<Vec<f32>> {
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-        let execution_inputs = self
-            .module
-            .validate_inputs(&input_slices)
-            .map_err(runtime_error)?;
+        let mut workspace = vec![0.0; self.workspace_size];
         let mut outputs = vec![0.0; self.output_lengths.iter().sum()];
-        let execution_outputs = self
-            .module
-            .validate_outputs(&mut outputs)
+        self.module
+            .execute(&input_slices, &mut workspace, &mut outputs)
             .map_err(runtime_error)?;
-        self.module.execute(execution_inputs, execution_outputs);
         Ok(outputs)
     }
 
@@ -56,19 +179,21 @@ impl PyRuntimeProgram {
     ) -> PyResult<(Vec<f32>, Vec<f32>)> {
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
         let tangent_slices: Vec<&[f32]> = tangents.iter().map(|input| input.as_slice()).collect();
-        let push_forward_inputs = self
-            .module
-            .validate_push_forward_inputs(&input_slices, &tangent_slices)
-            .map_err(runtime_error)?;
+        let mut workspace = vec![0.0; self.workspace_size];
+        let mut tangent_workspace = vec![0.0; self.workspace_size];
         let output_length: usize = self.output_lengths.iter().sum();
         let mut outputs = vec![0.0; output_length];
         let mut tangent_outputs = vec![0.0; output_length];
-        let push_forward_outputs = self
-            .module
-            .validate_push_forward_outputs(&mut outputs, &mut tangent_outputs)
-            .map_err(runtime_error)?;
         self.module
-            .push_forward(push_forward_inputs, push_forward_outputs);
+            .push_forward(
+                &input_slices,
+                &tangent_slices,
+                &mut workspace,
+                &mut tangent_workspace,
+                &mut outputs,
+                &mut tangent_outputs,
+            )
+            .map_err(runtime_error)?;
         Ok((outputs, tangent_outputs))
     }
 }
@@ -94,18 +219,29 @@ fn compile_exported_qp<'py>(
 
 #[pyfunction]
 fn load_qp_program(program: &[u8]) -> PyResult<PyRuntimeQpProgram> {
+    let (function_id, input_lengths, output_length, workspace_requirements) =
+        load_qp_program_metadata(program).map_err(runtime_error)?;
     Ok(PyRuntimeQpProgram {
-        runtime: QpRuntime::from_bytes(program).map_err(runtime_error)?,
+        module_bytes: program.to_vec(),
+        function_id,
+        input_lengths,
+        output_length,
+        workspace_requirements,
     })
 }
+
 #[pyfunction]
 fn load_program(program: &[u8]) -> PyResult<PyRuntimeProgram> {
     let module = ModuleBuilder::new_from_bytes(program)
         .and_then(ModuleBuilder::build)
         .map_err(runtime_error)?;
-    let output_lengths = output_lengths(&module.info());
+    let (workspace_size, output_lengths) = {
+        let info = module.info();
+        (info.required_workspace_size, output_lengths(&info))
+    };
     Ok(PyRuntimeProgram {
         module,
+        workspace_size,
         output_lengths,
     })
 }
@@ -119,30 +255,28 @@ fn validate_compiled_program(program: &[u8]) -> PyResult<bool> {
 
 #[pyfunction(name = "program_info")]
 fn program_info_py<'py>(py: Python<'py>, program: &[u8]) -> PyResult<Bound<'py, PyDict>> {
-    let info = program_info(program).map_err(runtime_error)?;
+    let module = validate_module(program).map_err(runtime_error)?;
+    let info = program_info(&module);
     program_info_dict(py, &info)
 }
 
 #[pyfunction]
 fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<f32>> {
-    let mut module = ModuleBuilder::new_from_bytes(program)
+    let module = ModuleBuilder::new_from_bytes(program)
         .and_then(ModuleBuilder::build)
         .map_err(runtime_error)?;
     let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-    let execution_inputs = module
-        .validate_inputs(&input_slices)
-        .map_err(runtime_error)?;
-    let output_length: usize = module
-        .info()
+    let info = module.info();
+    let mut workspace = vec![0.0; info.required_workspace_size];
+    let output_length: usize = info
         .output_specs
         .iter()
         .map(|output_spec| output_spec.length as usize)
         .sum();
     let mut outputs = vec![0.0; output_length];
-    let execution_outputs = module
-        .validate_outputs(&mut outputs)
+    module
+        .execute(&input_slices, &mut workspace, &mut outputs)
         .map_err(runtime_error)?;
-    module.execute(execution_inputs, execution_outputs);
     Ok(outputs)
 }
 
@@ -152,49 +286,112 @@ fn push_forward_program(
     inputs: Vec<Vec<f32>>,
     tangents: Vec<Vec<f32>>,
 ) -> PyResult<(Vec<f32>, Vec<f32>)> {
-    let mut module = ModuleBuilder::new_from_bytes(program)
+    let module = ModuleBuilder::new_from_bytes(program)
         .and_then(ModuleBuilder::build)
         .map_err(runtime_error)?;
     let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
     let tangent_slices: Vec<&[f32]> = tangents.iter().map(|input| input.as_slice()).collect();
-    let push_forward_inputs = module
-        .validate_push_forward_inputs(&input_slices, &tangent_slices)
-        .map_err(runtime_error)?;
-    let output_length: usize = module
-        .info()
+    let info = module.info();
+    let mut workspace = vec![0.0; info.required_workspace_size];
+    let mut tangent_workspace = vec![0.0; info.required_workspace_size];
+    let output_length: usize = info
         .output_specs
         .iter()
         .map(|output_spec| output_spec.length as usize)
         .sum();
     let mut outputs = vec![0.0; output_length];
     let mut tangent_outputs = vec![0.0; output_length];
-    let push_forward_outputs = module
-        .validate_push_forward_outputs(&mut outputs, &mut tangent_outputs)
+    module
+        .push_forward(
+            &input_slices,
+            &tangent_slices,
+            &mut workspace,
+            &mut tangent_workspace,
+            &mut outputs,
+            &mut tangent_outputs,
+        )
         .map_err(runtime_error)?;
-    module.push_forward(push_forward_inputs, push_forward_outputs);
     Ok((outputs, tangent_outputs))
 }
 
-fn output_lengths(info: &ProgramInfo) -> Vec<usize> {
+fn output_lengths<I: SpecInfo, O: SpecInfo>(info: &ProgramInfo<'_, I, O>) -> Vec<usize> {
     info.output_specs
         .iter()
-        .map(|output_spec| output_spec.length as usize)
+        .map(|output_spec| output_spec.length())
         .collect()
 }
 
-fn program_info_dict<'py>(py: Python<'py>, info: &ProgramInfo) -> PyResult<Bound<'py, PyDict>> {
+fn load_qp_program_metadata(
+    program: &[u8],
+) -> Result<(u16, Vec<usize>, usize, QpWorkspaceRequirements), coker_runtime::RuntimeError> {
+    let archived = archived_module(program)?;
+    let mut qp_programs = archived.qp_programs();
+    let (function_id, _sole_qp_program) = qp_programs.next().ok_or_else(|| {
+        coker_runtime::RuntimeError::Validation(
+            "module contains no QP programs; expected exactly one".to_string(),
+        )
+    })?;
+    if qp_programs.next().is_some() {
+        return Err(coker_runtime::RuntimeError::Validation(
+            "module contains multiple QP programs; expected exactly one".to_string(),
+        ));
+    }
+    let mapped = MappedModule::new_from_bytes(program)?;
+    let mapped_qp = mapped.qp_program(function_id)?;
+    let info = mapped_qp.info();
+    Ok((
+        mapped_qp.function_id(),
+        info.input_specs.iter().map(|spec| spec.length()).collect(),
+        info.output_spec.length(),
+        mapped_qp.workspace_requirements(),
+    ))
+}
+
+#[allow(clippy::mut_from_ref)]
+fn writable_c_buffer<'py, T: Element>(
+    buffer: &'py PyBuffer<T>,
+    name: &str,
+) -> PyResult<&'py mut [T]> {
+    if buffer.readonly() {
+        return Err(PyValueError::new_err(format!(
+            "{name} buffer must be writable"
+        )));
+    }
+    if !buffer.is_c_contiguous() {
+        return Err(PyValueError::new_err(format!(
+            "{name} buffer must be C-contiguous"
+        )));
+    }
+    Ok(unsafe { slice::from_raw_parts_mut(buffer.buf_ptr() as *mut T, buffer.item_count()) })
+}
+
+fn arena_as_uninit(arena: &mut [u8]) -> &mut [MaybeUninit<u8>] {
+    unsafe { slice::from_raw_parts_mut(arena.as_mut_ptr().cast::<MaybeUninit<u8>>(), arena.len()) }
+}
+
+fn solve_success(status: QpSolveStatus) -> bool {
+    matches!(
+        status,
+        QpSolveStatus::Solved | QpSolveStatus::SolvedInaccurate
+    )
+}
+
+fn program_info_dict<'py, I: SpecInfo, O: SpecInfo>(
+    py: Python<'py>,
+    info: &ProgramInfo<'_, I, O>,
+) -> PyResult<Bound<'py, PyDict>> {
     let info_dict = PyDict::new(py);
     info_dict.set_item("workspace_size", info.workspace_size)?;
     info_dict.set_item("required_workspace_size", info.required_workspace_size)?;
     let input_specs = info
         .input_specs
         .iter()
-        .map(|input_spec| input_spec.length as usize)
+        .map(|input_spec| input_spec.length())
         .collect::<Vec<_>>();
     let output_specs = info
         .output_specs
         .iter()
-        .map(|output_spec| output_spec.length as usize)
+        .map(|output_spec| output_spec.length())
         .collect::<Vec<_>>();
     info_dict.set_item("input_specs", input_specs)?;
     info_dict.set_item("output_specs", output_specs)?;

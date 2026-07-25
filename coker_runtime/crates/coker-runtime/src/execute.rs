@@ -8,7 +8,7 @@ use crate::{
     },
     workspace::{
         copy_evaluate_outputs, final_layer_matches_outputs, pack_evaluate_inputs,
-        pack_evaluate_tangents, Workspace,
+        pack_evaluate_tangents, prepare_input_range, Workspace,
     },
 };
 
@@ -161,22 +161,6 @@ pub(crate) fn push_forward_program_layers(
         }
     }
     false
-}
-
-fn prepare_input_range(
-    workspace: &mut Workspace<'_>,
-    input_start: usize,
-    input_stop: usize,
-    scratch_offset: u32,
-    scratch_length: u16,
-) -> (usize, usize) {
-    if scratch_length == 0 {
-        return (input_start, input_stop);
-    }
-
-    let scratch_start = scratch_offset as usize;
-    workspace.copy_range_to_scratch(input_start, input_stop, scratch_start);
-    (scratch_start, scratch_start + scratch_length as usize)
 }
 
 fn execute_bilinear_layer(bilinear_layer: &BilinearLayer, workspace: &mut Workspace<'_>) {

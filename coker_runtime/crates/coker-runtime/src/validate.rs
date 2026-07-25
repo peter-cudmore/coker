@@ -4,25 +4,18 @@ use coker_bytecode::{
     Program, RowOp, ScalarOp,
 };
 
-use crate::{entry_program, find_function, RuntimeError, UNUSED_OPERAND};
+use crate::{
+    entry_program, find_function,
+    validation_common::{
+        validate_inputs as validate_spec_inputs, validate_layer_scratch,
+        validate_outputs as validate_spec_outputs, validate_range, validate_workspace_size,
+    },
+    RuntimeError, UNUSED_OPERAND,
+};
 
 pub(crate) fn validate_module_struct(module: &BytecodeModule) -> Result<(), RuntimeError> {
-    if module.functions.is_empty() {
-        return Err(RuntimeError::Validation(
-            "bytecode module must contain at least one function".to_string(),
-        ));
-    }
-    entry_program(module)?;
-
-    for (function_index, function_program) in module.functions.iter().enumerate() {
-        if module.functions[..function_index]
-            .iter()
-            .any(|prior_program| prior_program.function_id == function_program.function_id)
-        {
-            return Err(RuntimeError::Validation(
-                "duplicate function id".to_string(),
-            ));
-        }
+    let _entry_program = entry_program(module)?;
+    for (_, function_program) in module.functions() {
         validate_program_struct(module, function_program)?;
     }
     Ok(())
@@ -284,8 +277,11 @@ fn validate_generic_row_operation(row_operation: &RowOp) -> Result<(), RuntimeEr
         row_operation.second,
         row_operation.third,
     ];
-    for required_index in 0..required_operand_count(row_operation.op) as usize {
-        if operand_indices[required_index] == UNUSED_OPERAND {
+    for operand_index in operand_indices
+        .iter()
+        .take(required_operand_count(row_operation.op) as usize)
+    {
+        if *operand_index == UNUSED_OPERAND {
             return Err(RuntimeError::Validation(format!(
                 "generic operation {:?} missing required operand",
                 row_operation.op
@@ -320,118 +316,14 @@ fn required_operand_count(operation: ScalarOp) -> u8 {
     }
 }
 
-fn validate_layer_scratch(
-    input_offset: u32,
-    input_length: u16,
-    output_offset: u32,
-    output_length: u16,
-    scratch_offset: u32,
-    scratch_length: u16,
-    workspace_size: usize,
-    required_workspace_size: usize,
-    context: &str,
-) -> Result<(), RuntimeError> {
-    let ranges_overlap = range_end(input_offset, input_length) > output_offset as usize
-        && range_end(output_offset, output_length) > input_offset as usize;
-    if !ranges_overlap {
-        if scratch_length != 0 {
-            return Err(RuntimeError::Validation(format!(
-                "{context} scratch storage must be zero when ranges are disjoint"
-            )));
-        }
-        return Ok(());
-    }
-
-    if scratch_length != input_length {
-        return Err(RuntimeError::Validation(format!(
-            "{context} scratch length must match input length"
-        )));
-    }
-    if (scratch_offset as usize) < workspace_size {
-        return Err(RuntimeError::Validation(format!(
-            "{context} scratch storage overlaps primary workspace"
-        )));
-    }
-    validate_range(
-        scratch_offset,
-        scratch_length,
-        required_workspace_size,
-        "layer scratch",
-    )
-}
-
-fn range_end(workspace_offset: u32, length: u16) -> usize {
-    workspace_offset as usize + length as usize
-}
-
-fn validate_range(
-    workspace_offset: u32,
-    length: u16,
-    workspace_size: usize,
-    context: &str,
-) -> Result<(), RuntimeError> {
-    let end = workspace_offset as usize + length as usize;
-    if end > workspace_size {
-        return Err(RuntimeError::Validation(format!(
-            "{context} range exceeds workspace"
-        )));
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_inputs(program: &Program, inputs: &[&[f32]]) -> Result<(), RuntimeError> {
-    if inputs.len() != program.input_specs.len() {
-        return Err(RuntimeError::InputCountMismatch {
-            expected: program.input_specs.len(),
-            actual: inputs.len(),
-        });
-    }
-
-    for (index, (input_spec, input_value)) in
-        program.input_specs.iter().zip(inputs.iter()).enumerate()
-    {
-        let expected_count = input_spec.length as usize;
-        let actual_count = input_value.len();
-        if expected_count != actual_count {
-            return Err(RuntimeError::InputSizeMismatch {
-                index,
-                expected: expected_count,
-                actual: actual_count,
-            });
-        }
-    }
-    Ok(())
+    validate_spec_inputs(&program.input_specs, inputs)
 }
 
 pub(crate) fn validate_outputs(program: &Program, outputs: &[f32]) -> Result<(), RuntimeError> {
-    let expected_size = program
-        .output_specs
-        .iter()
-        .map(|output_spec| output_spec.length as usize)
-        .sum();
-    let actual_size = outputs.len();
-    if actual_size != expected_size {
-        return Err(RuntimeError::OutputBufferSizeMismatch {
-            expected: expected_size,
-            actual: actual_size,
-        });
-    }
-    Ok(())
+    validate_spec_outputs(&program.output_specs, outputs)
 }
 
 pub(crate) fn validate_workspace(program: &Program, workspace: &[f32]) -> Result<(), RuntimeError> {
     validate_workspace_size(program.required_workspace_size as usize, workspace.len())
-}
-
-pub(crate) fn validate_workspace_size(
-    expected_size: usize,
-    actual_size: usize,
-) -> Result<(), RuntimeError> {
-    if actual_size < expected_size {
-        return Err(RuntimeError::WorkspaceTooSmall {
-            expected: expected_size,
-            actual: actual_size,
-        });
-    }
-    Ok(())
 }

@@ -83,7 +83,7 @@ impl CompileContext {
 
         self.visiting[function_index] = true;
         let exported_program = self.exported_programs[function_index].clone();
-        let compiled_program = self.compile_program(function_id, exported_program)?;
+        let compiled_program = self.compile_program(exported_program)?;
         self.visiting[function_index] = false;
         self.compiled_programs[function_index] = Some(compiled_program.clone());
         Ok(compiled_program)
@@ -91,7 +91,6 @@ impl CompileContext {
 
     fn compile_program(
         &mut self,
-        function_id: u16,
         exported_program: ExportedProgram,
     ) -> Result<Program, CompileError> {
         let input_specs = exported_program
@@ -129,7 +128,6 @@ impl CompileContext {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Program::new(
-            function_id,
             workspace_size,
             required_workspace_size,
             input_specs,

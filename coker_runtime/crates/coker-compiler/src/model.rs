@@ -1,19 +1,23 @@
 use coker_bytecode::Program;
 use serde::Deserialize;
 use serde_json::Value;
-
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ExportedModule {
     pub(crate) functions: Vec<ExportedFunction>,
+    #[serde(default)]
+    pub(crate) qp_programs: Vec<ExportedQpProgram>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ExportedFunction {
     pub(crate) function_id: u32,
     pub(crate) program: ExportedProgram,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ExportedProgram {
     pub(crate) workspace: ExportedMemorySpec,
     pub(crate) input_layer: ExportedInputLayer,
@@ -22,29 +26,22 @@ pub(crate) struct ExportedProgram {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ExportedQpProgram {
-    pub(crate) n: usize,
-    pub(crate) m: usize,
-    pub(crate) parameter_inputs: Vec<ExportedQpInput>,
-    pub(crate) p_structure: Vec<ExportedQpEntry>,
-    pub(crate) a_structure: Vec<ExportedQpEntry>,
+    pub(crate) function_id: u32,
+    pub(crate) coefficient_function_id: u32,
+    pub(crate) required_primal_workspace_size: u64,
+    pub(crate) required_tangent_workspace_size: u64,
+    pub(crate) input_specs: Vec<ExportedInputSpec>,
+    pub(crate) output_spec: ExportedOutputSpec,
+    pub(crate) p_pattern: ExportedEmbeddedCscPattern,
+    pub(crate) a_pattern: ExportedEmbeddedCscPattern,
     pub(crate) coefficient_outputs: ExportedQpCoefficientOutputs,
-    pub(crate) coefficient_evaluator: Value,
-    pub(crate) warm_start: bool,
+    pub(crate) embedded_plan: ExportedQpProgramPlan,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ExportedQpInput {
-    pub(crate) length: usize,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ExportedQpEntry {
-    pub(crate) row: usize,
-    pub(crate) col: usize,
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ExportedQpCoefficientOutputs {
     pub(crate) px: ExportedQpOutput,
     pub(crate) q: ExportedQpOutput,
@@ -55,9 +52,144 @@ pub(crate) struct ExportedQpCoefficientOutputs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ExportedQpOutput {
     pub(crate) start: usize,
     pub(crate) length: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub(crate) enum ExportedEmbeddedQpProfile {
+    #[serde(rename = "Osqp063Embedded2Qdldl")]
+    Osqp063Embedded2Qdldl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub(crate) enum ExportedEmbeddedLinsysSolver {
+    Qdldl,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportedQpProgramPlan {
+    pub(crate) abi_version: u64,
+    pub(crate) profile: ExportedEmbeddedQpProfile,
+    pub(crate) version: u64,
+    pub(crate) settings: ExportedEmbeddedOsqpSettings,
+    pub(crate) arena_layout: ExportedQpProgramArenaLayout,
+    pub(crate) qdldl_plan: ExportedQpProgramQdldlPlan,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportedEmbeddedOsqpSettings {
+    pub(crate) rho: f64,
+    pub(crate) sigma: f64,
+    pub(crate) alpha: f64,
+    pub(crate) adaptive_rho: bool,
+    pub(crate) adaptive_rho_interval: u64,
+    pub(crate) adaptive_rho_tolerance: f64,
+    pub(crate) max_iter: u64,
+    pub(crate) eps_abs: f64,
+    pub(crate) eps_rel: f64,
+    pub(crate) eps_prim_inf: f64,
+    pub(crate) eps_dual_inf: f64,
+    pub(crate) scaling: u64,
+    pub(crate) scaled_termination: bool,
+    pub(crate) check_termination: u64,
+    pub(crate) warm_start: bool,
+    pub(crate) linsys_solver: ExportedEmbeddedLinsysSolver,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportedQpProgramQdldlPlan {
+    pub(crate) p_pattern: ExportedEmbeddedCscPattern,
+    pub(crate) a_pattern: ExportedEmbeddedCscPattern,
+    pub(crate) kkt_pattern: ExportedEmbeddedCscPattern,
+    pub(crate) p_diag_indices: Vec<u64>,
+    pub(crate) kkt_permutation: Vec<u64>,
+    pub(crate) p_to_kkt: Vec<u64>,
+    pub(crate) a_to_kkt: Vec<u64>,
+    pub(crate) rho_to_kkt: Vec<u64>,
+    pub(crate) symbolic_l: ExportedQdldlSymbolicL,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportedQdldlSymbolicL {
+    pub(crate) l_pattern: ExportedEmbeddedCscPattern,
+    pub(crate) etree: Vec<u64>,
+    pub(crate) lnz: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportedEmbeddedCscPattern {
+    pub(crate) nrows: u64,
+    pub(crate) ncols: u64,
+    pub(crate) indptr: Vec<u64>,
+    pub(crate) indices: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportedQpProgramArenaLayout {
+    pub(crate) total_bytes: u64,
+    pub(crate) arena_alignment: u64,
+    pub(crate) pdata_x: ExportedQpProgramArenaRegion,
+    pub(crate) pdata: ExportedQpProgramArenaRegion,
+    pub(crate) adata_x: ExportedQpProgramArenaRegion,
+    pub(crate) adata: ExportedQpProgramArenaRegion,
+    pub(crate) qdata: ExportedQpProgramArenaRegion,
+    pub(crate) ldata: ExportedQpProgramArenaRegion,
+    pub(crate) udata: ExportedQpProgramArenaRegion,
+    pub(crate) data: ExportedQpProgramArenaRegion,
+    pub(crate) settings: ExportedQpProgramArenaRegion,
+    pub(crate) xsolution: ExportedQpProgramArenaRegion,
+    pub(crate) ysolution: ExportedQpProgramArenaRegion,
+    pub(crate) solution: ExportedQpProgramArenaRegion,
+    pub(crate) info: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_l_x: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_l: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_kkt_x: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_kkt: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_dinv: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_bp: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_sol: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_rho_inv_vec: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_d: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_iwork: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_bwork: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_fwork: ExportedQpProgramArenaRegion,
+    pub(crate) work_rho_vec: ExportedQpProgramArenaRegion,
+    pub(crate) work_rho_inv_vec: ExportedQpProgramArenaRegion,
+    pub(crate) work_constr_type: ExportedQpProgramArenaRegion,
+    pub(crate) work_x: ExportedQpProgramArenaRegion,
+    pub(crate) work_y: ExportedQpProgramArenaRegion,
+    pub(crate) work_z: ExportedQpProgramArenaRegion,
+    pub(crate) work_xz_tilde: ExportedQpProgramArenaRegion,
+    pub(crate) work_x_prev: ExportedQpProgramArenaRegion,
+    pub(crate) work_z_prev: ExportedQpProgramArenaRegion,
+    pub(crate) work_ax: ExportedQpProgramArenaRegion,
+    pub(crate) work_px: ExportedQpProgramArenaRegion,
+    pub(crate) work_aty: ExportedQpProgramArenaRegion,
+    pub(crate) work_delta_y: ExportedQpProgramArenaRegion,
+    pub(crate) work_atdelta_y: ExportedQpProgramArenaRegion,
+    pub(crate) work_delta_x: ExportedQpProgramArenaRegion,
+    pub(crate) work_pdelta_x: ExportedQpProgramArenaRegion,
+    pub(crate) work_adelta_x: ExportedQpProgramArenaRegion,
+    pub(crate) workspace: ExportedQpProgramArenaRegion,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExportedQpProgramArenaRegion {
+    pub(crate) byte_offset: u64,
+    pub(crate) byte_len: u64,
+    pub(crate) byte_alignment: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

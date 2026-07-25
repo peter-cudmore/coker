@@ -6,24 +6,29 @@ mod execute;
 mod ops;
 mod qp;
 mod static_module;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 mod validate;
+mod validation_common;
 mod workspace;
 
-pub use crate::static_module::StaticModule;
-pub use crate::qp::{QpRuntime, QpSolveResult};
-use crate::workspace::Workspace;
-use alloc::{
-    string::{String, ToString},
-    vec,
-    vec::Vec,
+#[cfg(osqp_embedded)]
+pub use crate::qp::BoundMappedQpProgram;
+pub use crate::qp::{
+    MappedQpProgram, MappedQpPushForwardWorkspace, MappedQpWorkspace, QpSolveDiagnostics,
+    QpSolveStatus, QpWorkspaceRequirements,
 };
+#[cfg(all(feature = "std", not(osqp_embedded)))]
+pub use crate::qp::{QpRuntime, QpSolveResult, QpWorkspaceLayout, QpWorkspaceRegion};
+pub use crate::static_module::{MappedExecutable, MappedModule, MappedProgram};
+use crate::workspace::Workspace;
+use alloc::string::{String, ToString};
 use coker_bytecode::{decode_module, BytecodeModule, InputSpec, OutputSpec, Program};
 use thiserror::Error;
 
 const UNUSED_OPERAND: u16 = u16::MAX;
 
+/// Errors produced while decoding, validating, or executing a bytecode module.
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error("bytecode error: {0}")]
@@ -44,201 +49,178 @@ pub enum RuntimeError {
     Validation(String),
     #[error("QP solver error: {0}")]
     QpSolver(String),
+    #[error(
+        "embedded QP buffers overlap, have an invalid range, or do not match the solver layout"
+    )]
+    EmbeddedQpBuffersInvalid,
+    #[error("embedded QP workspace overlaps or does not match the validated archive")]
+    EmbeddedQpWorkspaceInvalid,
+    #[error("embedded QP evaluator produced non-finite coefficients or invalid bounds")]
+    EmbeddedQpNumericInvalid,
+    #[error("embedded OSQP ABI {operation} failed with status {status}")]
+    EmbeddedQpAbi {
+        operation: &'static str,
+        status: i32,
+    },
+    #[error("QP push-forward is unsupported: {reason}")]
+    QpPushForwardUnsupported { reason: &'static str },
+    #[error("QP push-forward is nondifferentiable at solver status {status:?}: {reason}")]
+    QpPushForwardNondifferentiable {
+        status: crate::qp::QpSolveStatus,
+        reason: &'static str,
+    },
 }
 
-#[derive(Debug, Clone)]
-pub struct ProgramInfo {
+/// Trait implemented by input and output spec views that expose workspace layout metadata.
+pub trait SpecInfo {
+    fn workspace_offset(&self) -> usize;
+    fn length(&self) -> usize;
+}
+
+impl SpecInfo for InputSpec {
+    fn workspace_offset(&self) -> usize {
+        self.workspace_offset as usize
+    }
+
+    fn length(&self) -> usize {
+        self.length as usize
+    }
+}
+
+impl SpecInfo for OutputSpec {
+    fn workspace_offset(&self) -> usize {
+        self.workspace_offset as usize
+    }
+
+    fn length(&self) -> usize {
+        self.length as usize
+    }
+}
+
+/// Static metadata for a plain bytecode program entry point.
+#[derive(Debug, Clone, Copy)]
+pub struct ProgramInfo<'a, I: SpecInfo = InputSpec, O: SpecInfo = OutputSpec> {
     pub workspace_size: usize,
     pub required_workspace_size: usize,
-    pub input_specs: Vec<InputSpec>,
-    pub output_specs: Vec<OutputSpec>,
+    pub input_specs: &'a [I],
+    pub output_specs: &'a [O],
 }
 
-#[derive(Debug)]
-pub struct ExecutionInputs<'a> {
-    inputs: &'a [&'a [f32]],
+/// Static metadata for a QP-backed bytecode entry point.
+#[derive(Debug, Clone, Copy)]
+pub struct QpProgramInfo<'a, I: SpecInfo = InputSpec, O: SpecInfo = OutputSpec> {
+    pub required_primal_workspace_size: usize,
+    pub required_tangent_workspace_size: usize,
+    pub input_specs: &'a [I],
+    pub output_spec: &'a O,
 }
 
-#[derive(Debug)]
-pub struct ExecutionOutputs<'a> {
-    outputs: &'a mut [f32],
+/// Metadata for either a plain program or a QP program entry point.
+#[derive(Debug, Clone, Copy)]
+pub enum ExecutableInfo<'a, I: SpecInfo = InputSpec, O: SpecInfo = OutputSpec> {
+    Program(ProgramInfo<'a, I, O>),
+    QpProgram(QpProgramInfo<'a, I, O>),
 }
 
-#[derive(Debug)]
-pub struct PushForwardInputs<'a> {
-    inputs: &'a [&'a [f32]],
-    tangents: &'a [&'a [f32]],
-}
-
-#[derive(Debug)]
-pub struct PushForwardOutputs<'a> {
-    outputs: &'a mut [f32],
-    tangent_outputs: &'a mut [f32],
-}
-
+/// Validating builder for an owned bytecode module on `std` targets.
+#[cfg(feature = "std")]
 #[derive(Debug)]
 pub struct ModuleBuilder {
     bytecode_module: BytecodeModule,
-    workspace: Option<Vec<f32>>,
-    tangent_workspace: Option<Vec<f32>>,
 }
 
+#[cfg(feature = "std")]
 impl ModuleBuilder {
+    /// Validates an already-decoded module before storing it.
     pub fn new(bytecode_module: BytecodeModule) -> Result<Self, RuntimeError> {
         validate::validate_module_struct(&bytecode_module)?;
-        Ok(Self {
-            bytecode_module,
-            workspace: None,
-            tangent_workspace: None,
-        })
+        Ok(Self { bytecode_module })
     }
 
+    /// Decodes and validates a module from serialized bytes.
     pub fn new_from_bytes(bytes: &[u8]) -> Result<Self, RuntimeError> {
         Self::new(decode_module(bytes)?)
     }
 
-    pub fn with_workspace(mut self, workspace: Vec<f32>) -> Self {
-        self.workspace = Some(workspace);
-        self
-    }
-
-    pub fn with_tangent_workspace(mut self, tangent_workspace: Vec<f32>) -> Self {
-        self.tangent_workspace = Some(tangent_workspace);
-        self
-    }
-
+    /// Finishes validation and returns an executable owned module wrapper.
     pub fn build(self) -> Result<Module, RuntimeError> {
-        let required_workspace_size = entry_program(&self.bytecode_module)
-            .expect("validated module missing referenced entry function")
-            .required_workspace_size as usize;
-        let mut workspace = self
-            .workspace
-            .unwrap_or_else(|| vec![0.0; required_workspace_size]);
-        validate::validate_workspace_size(required_workspace_size, workspace.len())?;
-        workspace.fill(0.0);
-
-        let mut tangent_workspace = self
-            .tangent_workspace
-            .unwrap_or_else(|| vec![0.0; required_workspace_size]);
-        validate::validate_workspace_size(required_workspace_size, tangent_workspace.len())?;
-        tangent_workspace.fill(0.0);
-
         Ok(Module {
             bytecode_module: self.bytecode_module,
-            workspace,
-            tangent_workspace,
         })
     }
 }
 
+/// Owned, validated bytecode module for `std` callers that prefer a single handle.
 #[derive(Debug)]
 pub struct Module {
     bytecode_module: BytecodeModule,
-    workspace: Vec<f32>,
-    tangent_workspace: Vec<f32>,
 }
 
 impl Module {
-    pub fn info(&self) -> ProgramInfo {
+    /// Returns the entry program metadata.
+    pub fn info(&self) -> ProgramInfo<'_, InputSpec, OutputSpec> {
         program_info_from_program(self.entry_program())
     }
 
-    pub fn validate_inputs<'a>(
+    /// Validates borrowed input slices against the entry program signature.
+    pub fn validate_inputs(&self, inputs: &[&[f32]]) -> Result<(), RuntimeError> {
+        validate::validate_inputs(self.entry_program(), inputs)
+    }
+
+    /// Validates borrowed output storage against the entry program signature.
+    pub fn validate_outputs(&self, outputs: &mut [f32]) -> Result<(), RuntimeError> {
+        validate::validate_outputs(self.entry_program(), outputs)
+    }
+
+    /// Validates primal inputs and tangents for push-forward execution.
+    pub fn validate_push_forward_inputs(
         &self,
-        inputs: &'a [&'a [f32]],
-    ) -> Result<ExecutionInputs<'a>, RuntimeError> {
+        inputs: &[&[f32]],
+        tangents: &[&[f32]],
+    ) -> Result<(), RuntimeError> {
         validate::validate_inputs(self.entry_program(), inputs)?;
-        Ok(ExecutionInputs { inputs })
+        validate::validate_inputs(self.entry_program(), tangents)
     }
 
-    pub fn validate_outputs<'a>(
+    /// Validates primal and tangent output storage for push-forward execution.
+    pub fn validate_push_forward_outputs(
         &self,
-        outputs: &'a mut [f32],
-    ) -> Result<ExecutionOutputs<'a>, RuntimeError> {
+        outputs: &mut [f32],
+        tangent_outputs: &mut [f32],
+    ) -> Result<(), RuntimeError> {
         validate::validate_outputs(self.entry_program(), outputs)?;
-        Ok(ExecutionOutputs { outputs })
+        validate::validate_outputs(self.entry_program(), tangent_outputs)
     }
 
-    pub fn validate_push_forward_inputs<'a>(
-        &self,
-        inputs: &'a [&'a [f32]],
-        tangents: &'a [&'a [f32]],
-    ) -> Result<PushForwardInputs<'a>, RuntimeError> {
-        validate::validate_inputs(self.entry_program(), inputs)?;
-        validate::validate_inputs(self.entry_program(), tangents)?;
-        Ok(PushForwardInputs { inputs, tangents })
-    }
-
-    pub fn validate_push_forward_outputs<'a>(
-        &self,
-        outputs: &'a mut [f32],
-        tangent_outputs: &'a mut [f32],
-    ) -> Result<PushForwardOutputs<'a>, RuntimeError> {
-        validate::validate_outputs(self.entry_program(), outputs)?;
-        validate::validate_outputs(self.entry_program(), tangent_outputs)?;
-        Ok(PushForwardOutputs {
-            outputs,
-            tangent_outputs,
-        })
-    }
-
+    /// Executes the entry program and writes its outputs into `outputs`.
     pub fn execute(
-        &mut self,
-        execution_inputs: ExecutionInputs<'_>,
-        execution_outputs: ExecutionOutputs<'_>,
-    ) {
-        let bytecode_module = &self.bytecode_module;
-        let entry_program = entry_program(bytecode_module)
-            .expect("validated module missing referenced entry function");
-        let workspace = &mut self.workspace;
-        let wrote_direct_outputs = execute_in_place_unchecked(
-            bytecode_module,
-            entry_program,
-            execution_inputs.inputs,
-            workspace,
-            Some(execution_outputs.outputs),
-        );
-        if !wrote_direct_outputs {
-            workspace::write_outputs(entry_program, workspace, execution_outputs.outputs);
-        }
+        &self,
+        inputs: &[&[f32]],
+        workspace: &mut [f32],
+        outputs: &mut [f32],
+    ) -> Result<(), RuntimeError> {
+        execute(&self.bytecode_module, inputs, workspace, outputs)
     }
 
+    /// Executes the entry program push-forward and writes primal and tangent outputs.
     pub fn push_forward(
-        &mut self,
-        push_forward_inputs: PushForwardInputs<'_>,
-        push_forward_outputs: PushForwardOutputs<'_>,
-    ) {
-        let bytecode_module = &self.bytecode_module;
-        let entry_program = entry_program(bytecode_module)
-            .expect("validated module missing referenced entry function");
-        let workspace = &mut self.workspace;
-        let tangent_workspace = &mut self.tangent_workspace;
-        let wrote_direct_outputs = push_forward_in_place_unchecked(
-            bytecode_module,
-            entry_program,
-            push_forward_inputs.inputs,
-            push_forward_inputs.tangents,
+        &self,
+        inputs: &[&[f32]],
+        tangents: &[&[f32]],
+        workspace: &mut [f32],
+        tangent_workspace: &mut [f32],
+        outputs: &mut [f32],
+        tangent_outputs: &mut [f32],
+    ) -> Result<(), RuntimeError> {
+        push_forward(
+            &self.bytecode_module,
+            inputs,
+            tangents,
             workspace,
             tangent_workspace,
-            Some(push_forward_outputs.outputs),
-            Some(push_forward_outputs.tangent_outputs),
-        );
-        if !wrote_direct_outputs {
-            workspace::write_outputs(entry_program, workspace, push_forward_outputs.outputs);
-            workspace::write_outputs(
-                entry_program,
-                tangent_workspace,
-                push_forward_outputs.tangent_outputs,
-            );
-        }
-    }
-
-    pub fn workspace(&self) -> &[f32] {
-        &self.workspace
-    }
-
-    pub fn tangent_workspace(&self) -> &[f32] {
-        &self.tangent_workspace
+            outputs,
+            tangent_outputs,
+        )
     }
 
     fn entry_program(&self) -> &Program {
@@ -247,17 +229,19 @@ impl Module {
     }
 }
 
-pub fn program_info(module_bytes: &[u8]) -> Result<ProgramInfo, RuntimeError> {
-    let module = validate_module(module_bytes)?;
-    Ok(program_info_from_program(entry_program(&module)?))
+/// Returns metadata for the validated entry program in `module`.
+pub fn program_info(module: &BytecodeModule) -> ProgramInfo<'_> {
+    program_info_from_program(entry_program(module).expect("validated module missing entry"))
 }
 
+/// Decodes a serialized module and validates its structure and semantics.
 pub fn validate_module(module_bytes: &[u8]) -> Result<BytecodeModule, RuntimeError> {
     let module = decode_module(module_bytes)?;
     validate::validate_module_struct(&module)?;
     Ok(module)
 }
 
+/// Executes the module entry program into a caller-provided workspace and output slice.
 pub fn execute(
     module: &BytecodeModule,
     inputs: &[&[f32]],
@@ -271,11 +255,12 @@ pub fn execute(
     let wrote_direct_outputs =
         execute_in_place_unchecked(module, entry_program, inputs, workspace, Some(outputs));
     if !wrote_direct_outputs {
-        workspace::write_outputs(entry_program, workspace, outputs);
+        workspace::write_outputs(&entry_program.output_specs, workspace, outputs);
     }
     Ok(())
 }
 
+/// Executes the module entry program push-forward using caller-provided workspaces and outputs.
 pub fn push_forward(
     module: &BytecodeModule,
     inputs: &[&[f32]],
@@ -303,12 +288,17 @@ pub fn push_forward(
         Some(tangent_outputs),
     );
     if !wrote_direct_outputs {
-        workspace::write_outputs(entry_program, workspace, outputs);
-        workspace::write_outputs(entry_program, tangent_workspace, tangent_outputs);
+        workspace::write_outputs(&entry_program.output_specs, workspace, outputs);
+        workspace::write_outputs(
+            &entry_program.output_specs,
+            tangent_workspace,
+            tangent_outputs,
+        );
     }
     Ok(())
 }
 
+/// Executes the module entry program in-place, leaving results in the workspace layout.
 pub fn execute_in_place(
     module: &BytecodeModule,
     inputs: &[&[f32]],
@@ -321,6 +311,7 @@ pub fn execute_in_place(
     Ok(())
 }
 
+/// Executes the module entry program push-forward in-place, leaving results in both workspaces.
 pub fn push_forward_in_place(
     module: &BytecodeModule,
     inputs: &[&[f32]],
@@ -359,6 +350,7 @@ fn execute_in_place_unchecked(
     execute::execute_program_layers(module, entry_program, &mut workspace, outputs)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_forward_in_place_unchecked(
     module: &BytecodeModule,
     entry_program: &Program,
@@ -385,24 +377,23 @@ fn push_forward_in_place_unchecked(
     )
 }
 
-pub fn program_info_from_program(program: &Program) -> ProgramInfo {
+/// Builds [`ProgramInfo`] directly from a decoded bytecode program record.
+pub fn program_info_from_program(program: &Program) -> ProgramInfo<'_> {
     ProgramInfo {
         workspace_size: program.workspace_size as usize,
         required_workspace_size: program.required_workspace_size as usize,
-        input_specs: program.input_specs.clone(),
-        output_specs: program.output_specs.clone(),
+        input_specs: &program.input_specs,
+        output_specs: &program.output_specs,
     }
 }
 
+/// Returns the validated entry program (`function_id == 0`) from a decoded module.
 pub fn entry_program(module: &BytecodeModule) -> Result<&Program, RuntimeError> {
     find_function(module, 0)
         .ok_or_else(|| RuntimeError::Validation("missing entry function_id 0".to_string()))
 }
 pub(crate) fn find_function(module: &BytecodeModule, function_id: u16) -> Option<&Program> {
-    module
-        .functions
-        .iter()
-        .find(|program| program.function_id == function_id)
+    module.program(function_id)
 }
 
 pub(crate) fn find_function_unchecked(module: &BytecodeModule, function_id: u16) -> &Program {
