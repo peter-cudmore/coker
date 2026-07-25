@@ -994,6 +994,8 @@ def function(
 def strip_symbols_from_array(array: np.ndarray, float_type=float):
     if not isinstance(array, np.ndarray):
         return array
+    if array.size == 0:
+        return array.astype(float)
 
     symbols = defaultdict(list)
 
