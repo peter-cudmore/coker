@@ -1,4 +1,5 @@
-use coker_bytecode::{EvaluateInputBinding, EvaluateOutputBinding, InputSpec, OutputSpec, Program};
+use crate::SpecInfo;
+use coker_bytecode::{EvaluateInputBinding, EvaluateOutputBinding, InputSpec, OutputSpec};
 
 pub(crate) struct Workspace<'a> {
     values: &'a mut [f32],
@@ -13,10 +14,10 @@ impl<'a> Workspace<'a> {
         self.values.fill(value);
     }
 
-    pub(crate) fn pack_inputs(&mut self, input_specs: &[InputSpec], inputs: &[&[f32]]) {
+    pub(crate) fn pack_inputs<I: SpecInfo>(&mut self, input_specs: &[I], inputs: &[&[f32]]) {
         for (input_spec, input_value) in input_specs.iter().zip(inputs.iter()) {
-            let start = input_spec.workspace_offset as usize;
-            let stop = start + input_spec.length as usize;
+            let start = input_spec.workspace_offset();
+            let stop = start + input_spec.length();
             self.values[start..stop].copy_from_slice(input_value);
         }
     }
@@ -74,33 +75,52 @@ impl<'a> Workspace<'a> {
         self.values
     }
 }
+pub(crate) fn prepare_input_range(
+    workspace: &mut Workspace<'_>,
+    input_start: usize,
+    input_stop: usize,
+    scratch_offset: u32,
+    scratch_length: u16,
+) -> (usize, usize) {
+    if scratch_length == 0 {
+        return (input_start, input_stop);
+    }
 
-pub(crate) fn write_outputs(program: &Program, workspace: &[f32], outputs: &mut [f32]) {
+    let scratch_start = scratch_offset as usize;
+    workspace.copy_range_to_scratch(input_start, input_stop, scratch_start);
+    (scratch_start, scratch_start + scratch_length as usize)
+}
+
+pub(crate) fn write_outputs<O: SpecInfo>(
+    output_specs: &[O],
+    workspace: &[f32],
+    outputs: &mut [f32],
+) {
     let mut output_cursor = 0usize;
-    for output_spec in &program.output_specs {
-        let start = output_spec.workspace_offset as usize;
-        let stop = start + output_spec.length as usize;
-        let output_stop = output_cursor + output_spec.length as usize;
+    for output_spec in output_specs {
+        let start = output_spec.workspace_offset();
+        let stop = start + output_spec.length();
+        let output_stop = output_cursor + output_spec.length();
         outputs[output_cursor..output_stop].copy_from_slice(&workspace[start..stop]);
         output_cursor = output_stop;
     }
 }
 
-pub(crate) fn final_layer_matches_outputs(
-    output_specs: &[OutputSpec],
+pub(crate) fn final_layer_matches_outputs<O: SpecInfo>(
+    output_specs: &[O],
     layer_output_offset: u32,
     layer_output_length: u16,
 ) -> bool {
-    let mut expected_offset = layer_output_offset;
-    let mut expected_length = 0u32;
+    let mut expected_offset = layer_output_offset as usize;
+    let mut expected_length = 0usize;
     for output_spec in output_specs {
-        if output_spec.workspace_offset != expected_offset {
+        if output_spec.workspace_offset() != expected_offset {
             return false;
         }
-        expected_offset += output_spec.length as u32;
-        expected_length += output_spec.length as u32;
+        expected_offset += output_spec.length();
+        expected_length += output_spec.length();
     }
-    expected_length == layer_output_length as u32
+    expected_length == layer_output_length as usize
 }
 
 pub(crate) fn pack_evaluate_inputs(

@@ -9,20 +9,22 @@ pub(crate) fn evaluate_generic_value(row_operation: &RowOp, input_slice: &[f32])
 
     match row_operation.op {
         ScalarOp::Identity => required_operand(first),
-        ScalarOp::Sin => required_operand(first).sin(),
-        ScalarOp::Cos => required_operand(first).cos(),
-        ScalarOp::Tan => required_operand(first).tan(),
-        ScalarOp::Exp => required_operand(first).exp(),
-        ScalarOp::Sqrt => required_operand(first).sqrt(),
-        ScalarOp::Log => required_operand(first).ln(),
+        ScalarOp::Sin => libm::sinf(required_operand(first)),
+        ScalarOp::Cos => libm::cosf(required_operand(first)),
+        ScalarOp::Tan => libm::tanf(required_operand(first)),
+        ScalarOp::Exp => libm::expf(required_operand(first)),
+        ScalarOp::Sqrt => libm::sqrtf(required_operand(first)),
+        ScalarOp::Log => libm::logf(required_operand(first)),
         ScalarOp::Neg => -required_operand(first),
-        ScalarOp::Abs => required_operand(first).abs(),
+        ScalarOp::Abs => libm::fabsf(required_operand(first)),
         ScalarOp::Add => required_operand(first) + required_operand(second),
         ScalarOp::Sub => required_operand(first) - required_operand(second),
         ScalarOp::Mul => required_operand(first) * required_operand(second),
         ScalarOp::Div => divide(required_operand(first), required_operand(second)),
-        ScalarOp::Pow | ScalarOp::IntPow => required_operand(first).powf(required_operand(second)),
-        ScalarOp::Atan2 => required_operand(first).atan2(required_operand(second)),
+        ScalarOp::Pow | ScalarOp::IntPow => {
+            libm::powf(required_operand(first), required_operand(second))
+        }
+        ScalarOp::Atan2 => libm::atan2f(required_operand(first), required_operand(second)),
         ScalarOp::Equal => (required_operand(first) == required_operand(second)) as u8 as f32,
         ScalarOp::LessThan => (required_operand(first) < required_operand(second)) as u8 as f32,
         ScalarOp::LessEqual => (required_operand(first) <= required_operand(second)) as u8 as f32,
@@ -53,37 +55,36 @@ pub(crate) fn evaluate_generic_push_forward(
         ScalarOp::Sin => {
             let value = required_operand(first);
             let tangent = required_operand(first_tangent);
-            (value.sin(), value.cos() * tangent)
+            (libm::sinf(value), libm::cosf(value) * tangent)
         }
         ScalarOp::Cos => {
             let value = required_operand(first);
             let tangent = required_operand(first_tangent);
-            (value.cos(), -value.sin() * tangent)
+            (libm::cosf(value), -libm::sinf(value) * tangent)
         }
         ScalarOp::Tan => {
             let value = required_operand(first);
             let tangent = required_operand(first_tangent);
-            (value.tan(), tangent / (value.cos() * value.cos()))
+            let cos_value = libm::cosf(value);
+            (libm::tanf(value), tangent / (cos_value * cos_value))
         }
         ScalarOp::Exp => {
-            let value = required_operand(first).exp();
+            let value = libm::expf(required_operand(first));
             (value, value * required_operand(first_tangent))
         }
         ScalarOp::Sqrt => {
-            let value = required_operand(first).sqrt();
+            let value = libm::sqrtf(required_operand(first));
             (value, required_operand(first_tangent) / (2.0 * value))
         }
         ScalarOp::Log => {
             let value = required_operand(first);
-            (value.ln(), required_operand(first_tangent) / value)
+            (libm::logf(value), required_operand(first_tangent) / value)
         }
         ScalarOp::Neg => (-required_operand(first), -required_operand(first_tangent)),
         ScalarOp::Abs => {
             let value = required_operand(first);
-            (
-                value.abs(),
-                value.signum() * required_operand(first_tangent),
-            )
+            let sign = if value < 0.0 { -1.0 } else { 1.0 };
+            (libm::fabsf(value), sign * required_operand(first_tangent))
         }
         ScalarOp::Add => (
             required_operand(first) + required_operand(second),
@@ -120,14 +121,14 @@ pub(crate) fn evaluate_generic_push_forward(
         ScalarOp::Pow | ScalarOp::IntPow => {
             let base = required_operand(first);
             let exponent = required_operand(second);
-            let value = base.powf(exponent);
+            let value = libm::powf(base, exponent);
             if base == 0.0 {
                 return (value, 0.0);
             }
             (
                 value,
                 value
-                    * (required_operand(second_tangent) * base.ln()
+                    * (required_operand(second_tangent) * libm::logf(base)
                         + exponent * required_operand(first_tangent) / base),
             )
         }
@@ -136,7 +137,7 @@ pub(crate) fn evaluate_generic_push_forward(
             let second_value = required_operand(second);
             let denominator = first_value * first_value + second_value * second_value;
             (
-                first_value.atan2(second_value),
+                libm::atan2f(first_value, second_value),
                 (second_value * required_operand(first_tangent)
                     - first_value * required_operand(second_tangent))
                     / denominator,
@@ -164,6 +165,28 @@ pub(crate) fn evaluate_generic_push_forward(
     }
 }
 
+pub(crate) fn homogeneous_value(input_slice: &[f32], operand_index: u16) -> f32 {
+    if operand_index == 0 {
+        1.0
+    } else {
+        input_slice
+            .get(operand_index as usize - 1)
+            .copied()
+            .unwrap_or(1.0)
+    }
+}
+
+pub(crate) fn homogeneous_tangent(input_slice: &[f32], operand_index: u16) -> f32 {
+    if operand_index == 0 {
+        0.0
+    } else {
+        input_slice
+            .get(operand_index as usize - 1)
+            .copied()
+            .unwrap_or(0.0)
+    }
+}
+
 fn operand_value(operand_index: u16, input_slice: &[f32]) -> Option<f32> {
     if operand_index == UNUSED_OPERAND {
         return None;
@@ -182,26 +205,6 @@ fn required_operand(operand_value: Option<f32>) -> f32 {
     operand_value.expect("validated generic operation missing required operand")
 }
 
-pub(crate) fn homogeneous_value(input_slice: &[f32], index: u16) -> f32 {
-    if index == 0 {
-        return 1.0;
-    }
-    let offset = index as usize - 1;
-    input_slice[offset]
-}
-
-pub(crate) fn homogeneous_tangent(tangent_input_slice: &[f32], index: u16) -> f32 {
-    if index == 0 {
-        return 0.0;
-    }
-    let offset = index as usize - 1;
-    tangent_input_slice[offset]
-}
-
-fn divide(numerator: f32, denominator: f32) -> f32 {
-    if denominator == 0.0 {
-        f32::NAN
-    } else {
-        numerator / denominator
-    }
+fn divide(num: f32, den: f32) -> f32 {
+    num / den
 }

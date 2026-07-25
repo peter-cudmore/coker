@@ -8,9 +8,13 @@ authors.workspace = true
 [lib]
 name = "coker_python"
 crate-type = ["cdylib"]
+[features]
+default = ["std"]
+std = ["dep:pyo3"]
+
 
 [dependencies]
 coker-compiler = { path = "../coker-compiler" }
 coker-bytecode = { path = "../coker-bytecode" }
 coker-runtime = { path = "../coker-runtime" }
-pyo3.workspace = true
+pyo3 = { workspace = true, optional = true }

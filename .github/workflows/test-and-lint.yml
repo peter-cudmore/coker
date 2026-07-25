@@ -58,8 +58,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Run Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: coker_runtime
       - name: Run Rust tests
         run: cargo test --workspace
+        working-directory: coker_runtime
+      - name: Run no_std clippy
+        run: cargo clippy -p coker-runtime --no-default-features -- -D warnings
         working-directory: coker_runtime
       - name: Check no_std runtime
         run: cargo check -p coker-runtime --no-default-features
