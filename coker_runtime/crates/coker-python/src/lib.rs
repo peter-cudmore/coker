@@ -69,6 +69,7 @@ impl PyRuntimeQpProgram {
         Ok(requirements)
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (inputs, arena, evaluator_workspace, coefficient_outputs, solution, warm_start=None))]
     fn solve_into(
         &mut self,
