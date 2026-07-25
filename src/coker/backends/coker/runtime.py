@@ -152,7 +152,9 @@ class RuntimeQpProgram:
             dtype=np.float32,
         )
         self._solution = np.empty(self._output_length, dtype=np.float64)
-        self._tangent_solution = np.empty(self._output_length, dtype=np.float64)
+        self._tangent_solution = np.empty(
+            self._output_length, dtype=np.float64
+        )
 
     @classmethod
     def compile(cls, extracted_qp) -> "RuntimeQpProgram":
@@ -164,7 +166,9 @@ class RuntimeQpProgram:
         initial = (
             None
             if warm_start is None
-            else np.asarray(warm_start, dtype=np.float64).reshape(-1, order="C")
+            else np.asarray(warm_start, dtype=np.float64).reshape(
+                -1, order="C"
+            )
         )
         success, status = self._runtime.solve_into(
             inputs,
