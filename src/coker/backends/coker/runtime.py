@@ -1,5 +1,5 @@
 import json
-from typing import List, Sequence
+from typing import Sequence
 
 import numpy as np
 
@@ -7,11 +7,11 @@ from coker.backends.coker.ast_preprocessing import SparseNet
 import coker._coker_runtime as coker_runtime
 
 
-def _flatten_input(arg) -> List[float]:
+def _runtime_input_buffer(arg) -> np.ndarray:
     if isinstance(arg, (int, float, bool, np.bool_)):
-        return [float(arg)]
+        return np.asarray([arg], dtype=np.float32)
     if isinstance(arg, np.ndarray):
-        return np.asarray(arg, dtype=float).reshape(-1, order="C").tolist()
+        return np.asarray(arg, dtype=np.float32).reshape(-1, order="C")
     raise TypeError(f"Unsupported runtime input {type(arg)}")
 
 
@@ -59,6 +59,9 @@ class CompiledGraph:
         self._output_shapes = list(
             output_shapes or [None] * len(self._output_lengths)
         )
+        output_length = sum(self._output_lengths)
+        self._outputs = np.empty(output_length, dtype=np.float32)
+        self._tangent_outputs = np.empty(output_length, dtype=np.float32)
 
     @staticmethod
     def compile(graph: SparseNet) -> "CompiledGraph":
@@ -78,22 +81,25 @@ class CompiledGraph:
 
     def __call__(self, *args):
         assert len(args) == len(self._input_lengths)
-        flat_inputs = [_flatten_input(arg) for arg in args]
-        outputs = self._runtime.execute(flat_inputs)
-        return self._restore_outputs(outputs)
+        inputs = [_runtime_input_buffer(arg) for arg in args]
+        self._runtime.execute_into(inputs, self._outputs)
+        return self._restore_outputs(self._outputs)
 
     def push_forward(self, *tangent_spaces):
         n_args = len(self._input_lengths)
         x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
         assert len(x) == n_args
         assert len(dx) == n_args
-        flat_inputs = [_flatten_input(arg) for arg in x]
-        flat_tangents = [_flatten_input(arg) for arg in dx]
-        outputs, tangent_outputs = self._runtime.push_forward(
-            flat_inputs, flat_tangents
+        inputs = [_runtime_input_buffer(arg) for arg in x]
+        tangents = [_runtime_input_buffer(arg) for arg in dx]
+        self._runtime.push_forward_into(
+            inputs,
+            tangents,
+            self._outputs,
+            self._tangent_outputs,
         )
-        return self._restore_outputs(outputs), self._restore_outputs(
-            tangent_outputs
+        return self._restore_outputs(self._outputs), self._restore_outputs(
+            self._tangent_outputs
         )
 
     def _restore_outputs(self, flat_outputs):
@@ -118,6 +124,7 @@ class RuntimeQpProgram:
         self._runtime = coker_runtime.load_qp_program(self.program)
         self._info = self._runtime.info()
         self._input_lengths = list(self._info["input_specs"])
+        self._output_length = int(self._info["output_spec"])
         requirements = self._runtime.workspace_requirements()
         self._tangent_workspace_size = int(
             requirements.get("tangent_workspace_size", 0)
@@ -144,6 +151,8 @@ class RuntimeQpProgram:
             self._tangent_workspace_size,
             dtype=np.float32,
         )
+        self._solution = np.empty(self._output_length, dtype=np.float64)
+        self._tangent_solution = np.empty(self._output_length, dtype=np.float64)
 
     @classmethod
     def compile(cls, extracted_qp) -> "RuntimeQpProgram":
@@ -151,19 +160,18 @@ class RuntimeQpProgram:
         return cls(coker_runtime.compile_exported_qp(payload))
 
     def solve(self, runtime_args, *, warm_start):
-        inputs = [_flatten_input(arg) for arg in runtime_args]
+        inputs = [_runtime_input_buffer(arg) for arg in runtime_args]
         initial = (
             None
             if warm_start is None
-            else np.asarray(warm_start, dtype=float)
-            .reshape(-1, order="C")
-            .tolist()
+            else np.asarray(warm_start, dtype=np.float64).reshape(-1, order="C")
         )
-        solution, success, status = self._runtime.solve(
+        success, status = self._runtime.solve_into(
             inputs,
             self._arena,
             self._evaluator_workspace,
             self._coefficient_outputs,
+            self._solution,
             initial,
         )
         from coker.optimisation import SolveInfo
@@ -174,25 +182,25 @@ class RuntimeQpProgram:
             success=bool(success),
             return_status=str(status),
         )
-        return np.asarray(solution, dtype=float), info
+        return self._solution.copy(), info
 
     def push_forward(self, *tangent_spaces):
         n_args = len(self._input_lengths)
         x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
         assert len(x) == n_args
         assert len(dx) == n_args
-        flat_inputs = [_flatten_input(arg) for arg in x]
-        flat_tangents = [_flatten_input(arg) for arg in dx]
-        outputs, tangent_outputs = self._runtime.push_forward(
-            flat_inputs,
-            flat_tangents,
+        inputs = [_runtime_input_buffer(arg) for arg in x]
+        tangents = [_runtime_input_buffer(arg) for arg in dx]
+        self._runtime.push_forward_into(
+            inputs,
+            tangents,
             self._arena,
             self._evaluator_workspace,
             self._coefficient_outputs,
             self._tangent_evaluator_workspace,
             self._tangent_coefficient_outputs,
             self._solution_tangent_workspace,
+            self._solution,
+            self._tangent_solution,
         )
-        return np.asarray(outputs, dtype=float), np.asarray(
-            tangent_outputs, dtype=float
-        )
+        return self._solution.copy(), self._tangent_solution.copy()
