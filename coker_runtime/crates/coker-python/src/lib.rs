@@ -5,8 +5,8 @@ use core::{mem::MaybeUninit, slice};
 use coker_bytecode::archived_module;
 use coker_compiler::{compile_exported_json, compile_exported_qp_json, CompileError};
 use coker_runtime::{
-    MappedModule, MappedQpProgram, MappedQpPushForwardWorkspace, MappedQpWorkspace, Module,
-    ModuleBuilder, ProgramInfo, QpSolveStatus, QpWorkspaceRequirements, SpecInfo,
+    MappedModule, MappedQpProgram, MappedQpWorkspace, Module, ModuleBuilder, ProgramInfo,
+    QpSolveStatus, QpWorkspaceRequirements, SpecInfo,
 };
 use pyo3::buffer::{Element, PyBuffer};
 use pyo3::exceptions::{PyNotImplementedError, PyValueError};
@@ -34,7 +34,6 @@ struct PyRuntimeQpProgram {
     output_length: usize,
     workspace_requirements: QpWorkspaceRequirements,
     output_scratch: Vec<f32>,
-    tangent_output_scratch: Vec<f32>,
 }
 
 #[pymethods]
@@ -95,7 +94,7 @@ impl PyRuntimeQpProgram {
         let mapped_qp = mapped_qp_program(module_bytes, self.function_id).map_err(runtime_error)?;
         let workspace = MappedQpWorkspace::new(evaluator_workspace, coefficient_outputs);
         let mut bound = mapped_qp
-            .bind(arena_as_uninit(arena))
+            .bind_host(arena_as_uninit(arena))
             .map_err(runtime_error)?;
         let diagnostics = bound
             .execute(&input_slices, warm_start, workspace, output_scratch)
@@ -107,63 +106,6 @@ impl PyRuntimeQpProgram {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn push_forward_into(
-        &mut self,
-        _py: Python<'_>,
-        inputs: Vec<PyBuffer<f32>>,
-        tangents: Vec<PyBuffer<f32>>,
-        arena: PyBuffer<u8>,
-        primal_evaluator_workspace: PyBuffer<f32>,
-        primal_coefficient_outputs: PyBuffer<f32>,
-        tangent_evaluator_workspace: PyBuffer<f32>,
-        tangent_coefficient_outputs: PyBuffer<f32>,
-        solution_tangent_workspace: PyBuffer<f32>,
-        outputs: PyBuffer<f64>,
-        tangent_outputs: PyBuffer<f64>,
-    ) -> PyResult<()> {
-        let arena = writable_c_buffer(&arena, "arena")?;
-        let primal_evaluator_workspace =
-            writable_c_buffer(&primal_evaluator_workspace, "primal_evaluator_workspace")?;
-        let primal_coefficient_outputs =
-            writable_c_buffer(&primal_coefficient_outputs, "primal_coefficient_outputs")?;
-        let tangent_evaluator_workspace =
-            writable_c_buffer(&tangent_evaluator_workspace, "tangent_evaluator_workspace")?;
-        let tangent_coefficient_outputs =
-            writable_c_buffer(&tangent_coefficient_outputs, "tangent_coefficient_outputs")?;
-        let solution_tangent_workspace =
-            writable_c_buffer(&solution_tangent_workspace, "solution_tangent_workspace")?;
-        let outputs = writable_c_buffer(&outputs, "outputs")?;
-        let tangent_outputs = writable_c_buffer(&tangent_outputs, "tangent_outputs")?;
-        let input_slices = borrowed_input_slices(&inputs, "inputs")?;
-        let tangent_slices = borrowed_input_slices(&tangents, "tangents")?;
-        let module_bytes = &self.module_bytes;
-        let (output_scratch, tangent_output_scratch) =
-            (&mut self.output_scratch, &mut self.tangent_output_scratch);
-        let mapped_qp = mapped_qp_program(module_bytes, self.function_id).map_err(runtime_error)?;
-        let workspace = MappedQpPushForwardWorkspace::new(
-            primal_evaluator_workspace,
-            primal_coefficient_outputs,
-            tangent_evaluator_workspace,
-            tangent_coefficient_outputs,
-            solution_tangent_workspace,
-        );
-        let mut bound = mapped_qp
-            .bind(arena_as_uninit(arena))
-            .map_err(runtime_error)?;
-        bound
-            .push_forward(
-                &input_slices,
-                &tangent_slices,
-                workspace,
-                output_scratch,
-                tangent_output_scratch,
-            )
-            .map_err(runtime_error)?;
-        copy_f32_slice_into_f64(output_scratch, outputs, "outputs")?;
-        copy_f32_slice_into_f64(tangent_output_scratch, tangent_outputs, "tangent_outputs")?;
-        Ok(())
-    }
 
     #[pyo3(signature = (inputs, arena, evaluator_workspace, coefficient_outputs, warm_start=None))]
     fn solve(
@@ -184,7 +126,7 @@ impl PyRuntimeQpProgram {
         let mapped_qp = mapped_qp_program(module_bytes, self.function_id).map_err(runtime_error)?;
         let workspace = MappedQpWorkspace::new(evaluator_workspace, coefficient_outputs);
         let mut bound = mapped_qp
-            .bind(arena_as_uninit(arena))
+            .bind_host(arena_as_uninit(arena))
             .map_err(runtime_error)?;
         let diagnostics = bound
             .execute(&input_slices, warm_start.as_deref(), workspace, output_scratch)
@@ -194,64 +136,6 @@ impl PyRuntimeQpProgram {
         Ok((solution, success, format!("{:?}", diagnostics.status)))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn push_forward(
-        &mut self,
-        _py: Python<'_>,
-        inputs: Vec<Vec<f32>>,
-        tangents: Vec<Vec<f32>>,
-        arena: PyBuffer<u8>,
-        primal_evaluator_workspace: PyBuffer<f32>,
-        primal_coefficient_outputs: PyBuffer<f32>,
-        tangent_evaluator_workspace: PyBuffer<f32>,
-        tangent_coefficient_outputs: PyBuffer<f32>,
-        solution_tangent_workspace: PyBuffer<f32>,
-    ) -> PyResult<(Vec<f64>, Vec<f64>)> {
-        let arena = writable_c_buffer(&arena, "arena")?;
-        let primal_evaluator_workspace =
-            writable_c_buffer(&primal_evaluator_workspace, "primal_evaluator_workspace")?;
-        let primal_coefficient_outputs =
-            writable_c_buffer(&primal_coefficient_outputs, "primal_coefficient_outputs")?;
-        let tangent_evaluator_workspace =
-            writable_c_buffer(&tangent_evaluator_workspace, "tangent_evaluator_workspace")?;
-        let tangent_coefficient_outputs =
-            writable_c_buffer(&tangent_coefficient_outputs, "tangent_coefficient_outputs")?;
-        let solution_tangent_workspace =
-            writable_c_buffer(&solution_tangent_workspace, "solution_tangent_workspace")?;
-        let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-        let tangent_slices: Vec<&[f32]> = tangents.iter().map(|input| input.as_slice()).collect();
-        let module_bytes = &self.module_bytes;
-        let (output_scratch, tangent_output_scratch) =
-            (&mut self.output_scratch, &mut self.tangent_output_scratch);
-        let mapped_qp = mapped_qp_program(module_bytes, self.function_id).map_err(runtime_error)?;
-        let workspace = MappedQpPushForwardWorkspace::new(
-            primal_evaluator_workspace,
-            primal_coefficient_outputs,
-            tangent_evaluator_workspace,
-            tangent_coefficient_outputs,
-            solution_tangent_workspace,
-        );
-        let mut bound = mapped_qp
-            .bind(arena_as_uninit(arena))
-            .map_err(runtime_error)?;
-        bound
-            .push_forward(
-                &input_slices,
-                &tangent_slices,
-                workspace,
-                output_scratch,
-                tangent_output_scratch,
-            )
-            .map_err(runtime_error)?;
-        Ok((
-            output_scratch.iter().copied().map(f64::from).collect(),
-            tangent_output_scratch
-                .iter()
-                .copied()
-                .map(f64::from)
-                .collect(),
-        ))
-    }
 }
 
 #[pymethods]
@@ -380,7 +264,6 @@ fn load_qp_program(program: &[u8]) -> PyResult<PyRuntimeQpProgram> {
         output_length,
         workspace_requirements,
         output_scratch: vec![0.0; output_length],
-        tangent_output_scratch: vec![0.0; output_length],
     })
 }
 
@@ -488,14 +371,14 @@ fn load_qp_program_metadata(
 ) -> Result<(u16, Vec<usize>, usize, QpWorkspaceRequirements), coker_runtime::RuntimeError> {
     let archived = archived_module(program)?;
     let mut qp_programs = archived.qp_programs();
-    let (function_id, _sole_qp_program) = qp_programs.next().ok_or_else(|| {
+    let (function_id, _sole_qp_program) = qp_programs.next().ok_or(
         coker_runtime::RuntimeError::Validation(
-            "module contains no QP programs; expected exactly one".to_string(),
-        )
-    })?;
+            "module contains no QP programs; expected exactly one",
+        ),
+    )?;
     if qp_programs.next().is_some() {
         return Err(coker_runtime::RuntimeError::Validation(
-            "module contains multiple QP programs; expected exactly one".to_string(),
+            "module contains multiple QP programs; expected exactly one",
         ));
     }
     let mapped_qp = mapped_qp_program(program, function_id)?;

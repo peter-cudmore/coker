@@ -1,5 +1,3 @@
-use alloc::format;
-
 use crate::{RuntimeError, SpecInfo};
 
 #[allow(clippy::too_many_arguments)]
@@ -12,28 +10,31 @@ pub(crate) fn validate_layer_scratch(
     scratch_length: u16,
     workspace_size: usize,
     required_workspace_size: usize,
-    context: &str,
+    context: &'static str,
 ) -> Result<(), RuntimeError> {
     let ranges_overlap = range_end(input_offset, input_length) > output_offset as usize
         && range_end(output_offset, output_length) > input_offset as usize;
     if !ranges_overlap {
         if scratch_length != 0 {
-            return Err(RuntimeError::Validation(format!(
-                "{context} scratch storage must be zero when ranges are disjoint"
-            )));
+            return Err(RuntimeError::ValidationContext {
+                context,
+                problem: "scratch storage must be zero when ranges are disjoint",
+            });
         }
         return Ok(());
     }
 
     if scratch_length != input_length {
-        return Err(RuntimeError::Validation(format!(
-            "{context} scratch length must match input length"
-        )));
+        return Err(RuntimeError::ValidationContext {
+            context,
+            problem: "scratch length must match input length",
+        });
     }
     if (scratch_offset as usize) < workspace_size {
-        return Err(RuntimeError::Validation(format!(
-            "{context} scratch storage overlaps primary workspace"
-        )));
+        return Err(RuntimeError::ValidationContext {
+            context,
+            problem: "scratch storage overlaps primary workspace",
+        });
     }
     validate_range(
         scratch_offset,
@@ -51,13 +52,14 @@ pub(crate) fn validate_range(
     workspace_offset: u32,
     length: u16,
     workspace_size: usize,
-    context: &str,
+    context: &'static str,
 ) -> Result<(), RuntimeError> {
     let end = workspace_offset as usize + length as usize;
     if end > workspace_size {
-        return Err(RuntimeError::Validation(format!(
-            "{context} range exceeds workspace"
-        )));
+        return Err(RuntimeError::ValidationContext {
+            context,
+            problem: "range exceeds workspace",
+        });
     }
     Ok(())
 }

@@ -1,4 +1,3 @@
-use alloc::{format, string::ToString};
 
 use coker_bytecode::{
     archived_module, ArchivedBilinearLayer, ArchivedBytecodeModule, ArchivedEvaluateInputBinding,
@@ -135,9 +134,10 @@ impl<'a> MappedModule<'a> {
     }
 
     pub fn program(&self, function_id: u16) -> Result<MappedProgram<'a>, RuntimeError> {
-        let program = find_function(self.bytecode_module, function_id).ok_or_else(|| {
-            RuntimeError::Validation(format!("missing function_id {function_id}"))
-        })?;
+        let program =
+            find_function(self.bytecode_module, function_id).ok_or(RuntimeError::MissingFunction {
+                function_id,
+            })?;
         Ok(MappedProgram {
             function_id,
             bytecode_module: self.bytecode_module,
@@ -159,9 +159,7 @@ impl<'a> MappedModule<'a> {
                 function_id,
             )?));
         }
-        Err(RuntimeError::Validation(format!(
-            "missing executable function_id {function_id}"
-        )))
+        Err(RuntimeError::MissingExecutable { function_id })
     }
 
     pub fn execute(

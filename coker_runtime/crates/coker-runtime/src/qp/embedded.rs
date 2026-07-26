@@ -44,7 +44,7 @@ impl<'a> MappedQpProgram<'a> {
 impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
     fn invalid_instance_error() -> RuntimeError {
         RuntimeError::Validation(
-            "embedded mapped QP instance is invalid after a prior update failure".to_string(),
+            "embedded mapped QP instance is invalid after a prior update failure",
         )
     }
 
@@ -164,21 +164,6 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
             primal_residual: solution.primal_residual,
             dual_residual: solution.dual_residual,
         })
-    }
-    pub fn push_forward(
-        &mut self,
-        parameters: &[&[f32]],
-        parameter_tangents: &[&[f32]],
-        workspace: MappedQpPushForwardWorkspace<'_>,
-        outputs: &mut [f32],
-        tangent_outputs: &mut [f32],
-    ) -> Result<QpSolveDiagnostics, RuntimeError> {
-        self.program.validate_parameters(parameters)?;
-        self.program.validate_tangents(parameter_tangents)?;
-        workspace.validate_for(self.program.workspace_requirements)?;
-        self.program
-            .validate_push_forward_outputs(outputs, tangent_outputs)?;
-        Err(MappedQpProgram::push_forward_unsupported_error())
     }
 }
 

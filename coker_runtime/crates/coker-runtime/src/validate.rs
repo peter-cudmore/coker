@@ -1,4 +1,5 @@
-use alloc::{format, string::ToString};
+#![cfg_attr(not(feature = "std"), allow(dead_code))]
+
 use coker_bytecode::{
     BilinearLayer, BytecodeModule, EvaluateInputBinding, EvaluateLayer, GenericLayer, Layer,
     Program, RowOp, ScalarOp,
@@ -26,7 +27,7 @@ fn validate_program_struct(module: &BytecodeModule, program: &Program) -> Result
     let required_workspace_size = program.required_workspace_size as usize;
     if required_workspace_size < workspace_size {
         return Err(RuntimeError::Validation(
-            "required workspace smaller than primary workspace".to_string(),
+            "required workspace smaller than primary workspace",
         ));
     }
 
@@ -96,15 +97,15 @@ fn validate_bilinear_layer(
         bilinear_layer
             .in_length
             .checked_add(1)
-            .ok_or_else(|| RuntimeError::Validation("bilinear input too large".to_string()))?,
+            .ok_or(RuntimeError::Validation("bilinear input too large"))?,
         bilinear_layer
             .in_length
             .checked_add(1)
-            .ok_or_else(|| RuntimeError::Validation("bilinear input too large".to_string()))?,
+            .ok_or(RuntimeError::Validation("bilinear input too large"))?,
     );
     if bilinear_layer.quadratic.shape != expected_shape {
         return Err(RuntimeError::Validation(
-            "bilinear tensor shape does not match layer dimensions".to_string(),
+            "bilinear tensor shape does not match layer dimensions",
         ));
     }
 
@@ -112,17 +113,17 @@ fn validate_bilinear_layer(
         let (row_index, left_index, right_index) = entry.index;
         if row_index >= expected_shape.0 {
             return Err(RuntimeError::Validation(
-                "bilinear tensor row index out of bounds".to_string(),
+                "bilinear tensor row index out of bounds",
             ));
         }
         if left_index >= expected_shape.1 {
             return Err(RuntimeError::Validation(
-                "bilinear tensor left index out of bounds".to_string(),
+                "bilinear tensor left index out of bounds",
             ));
         }
         if right_index >= expected_shape.2 {
             return Err(RuntimeError::Validation(
-                "bilinear tensor right index out of bounds".to_string(),
+                "bilinear tensor right index out of bounds",
             ));
         }
     }
@@ -149,7 +150,7 @@ fn validate_generic_layer(
     )?;
     if generic_layer.ops.len() != generic_layer.out_length as usize {
         return Err(RuntimeError::Validation(
-            "generic layer op count must match output length".to_string(),
+            "generic layer op count must match output length",
         ));
     }
     validate_layer_scratch(
@@ -181,23 +182,23 @@ fn validate_evaluate_layer(
     caller_workspace_size: usize,
 ) -> Result<(), RuntimeError> {
     let callee_program =
-        find_function(module, evaluate_layer.callee_function_id).ok_or_else(|| {
-            RuntimeError::Validation("evaluate callee function id missing".to_string())
-        })?;
+        find_function(module, evaluate_layer.callee_function_id).ok_or(RuntimeError::Validation(
+            "evaluate callee function id missing",
+        ))?;
 
     if evaluate_layer.input_bindings.len() != callee_program.input_specs.len() {
         return Err(RuntimeError::Validation(
-            "evaluate input binding count does not match callee inputs".to_string(),
+            "evaluate input binding count does not match callee inputs",
         ));
     }
     if evaluate_layer.output_bindings.len() != callee_program.output_specs.len() {
         return Err(RuntimeError::Validation(
-            "evaluate output binding count does not match callee outputs".to_string(),
+            "evaluate output binding count does not match callee outputs",
         ));
     }
     if (evaluate_layer.scratch_offset as usize) < caller_workspace_size {
         return Err(RuntimeError::Validation(
-            "evaluate scratch offset overlaps caller workspace".to_string(),
+            "evaluate scratch offset overlaps caller workspace",
         ));
     }
 
@@ -205,7 +206,7 @@ fn validate_evaluate_layer(
         evaluate_layer.scratch_offset as usize + callee_program.required_workspace_size as usize;
     if scratch_end > caller_program.required_workspace_size as usize {
         return Err(RuntimeError::Validation(
-            "evaluate scratch range exceeds caller required workspace".to_string(),
+            "evaluate scratch range exceeds caller required workspace",
         ));
     }
 
@@ -223,7 +224,7 @@ fn validate_evaluate_layer(
     {
         if binding.length != output_spec.length {
             return Err(RuntimeError::Validation(
-                "evaluate output binding length mismatch".to_string(),
+                "evaluate output binding length mismatch",
             ));
         }
         validate_range(
@@ -246,7 +247,7 @@ fn validate_evaluate_input_binding(
         EvaluateInputBinding::WorkspaceSlice { offset, length } => {
             if *length != expected_length {
                 return Err(RuntimeError::Validation(
-                    "evaluate input binding length mismatch".to_string(),
+                    "evaluate input binding length mismatch",
                 ));
             }
             validate_range(*offset, *length, caller_workspace_size, "evaluate input")
@@ -254,7 +255,7 @@ fn validate_evaluate_input_binding(
         EvaluateInputBinding::ConstantSlice { length, values } => {
             if *length != expected_length || values.len() != *length as usize {
                 return Err(RuntimeError::Validation(
-                    "evaluate constant input length mismatch".to_string(),
+                    "evaluate constant input length mismatch",
                 ));
             }
             Ok(())
@@ -265,7 +266,7 @@ fn validate_evaluate_input_binding(
 fn validate_generic_operand(operand_index: u16, input_length: u16) -> Result<(), RuntimeError> {
     if operand_index != UNUSED_OPERAND && operand_index >= input_length {
         return Err(RuntimeError::Validation(
-            "generic operand index out of bounds".to_string(),
+            "generic operand index out of bounds",
         ));
     }
     Ok(())
@@ -282,10 +283,9 @@ fn validate_generic_row_operation(row_operation: &RowOp) -> Result<(), RuntimeEr
         .take(required_operand_count(row_operation.op) as usize)
     {
         if *operand_index == UNUSED_OPERAND {
-            return Err(RuntimeError::Validation(format!(
-                "generic operation {:?} missing required operand",
-                row_operation.op
-            )));
+            return Err(RuntimeError::Validation(
+                "generic operation missing required operand",
+            ));
         }
     }
     Ok(())

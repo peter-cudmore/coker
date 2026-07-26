@@ -8,9 +8,7 @@ pub(super) fn validate_mapped_qp_program(
     let coefficient_output_size = validate_embedded_evaluator(qp_program, evaluator)?;
     let n = checked_embedded_osqp_index(qp_program.p_pattern().ncols.to_native(), "QP n")?;
     if qp_program.output_spec().length() != n {
-        return Err(RuntimeError::Validation(
-            "QP output spec length must equal n".to_string(),
-        ));
+        return Err(RuntimeError::Validation("QP output spec length must equal n"));
     }
     let m = checked_embedded_osqp_index(qp_program.a_pattern().nrows.to_native(), "QP m")?;
     let p_nnz = checked_embedded_slice_len(qp_program.p_pattern().indices.len(), "QP P nnz")?;
@@ -52,7 +50,7 @@ pub(super) fn validate_mapped_qp_program(
     };
     if requirements.arena_alignment == 0 || !requirements.arena_alignment.is_power_of_two() {
         return Err(RuntimeError::Validation(
-            "QP arena alignment must be a nonzero power of two".to_string(),
+            "QP arena alignment must be a nonzero power of two",
         ));
     }
     Ok((n, m, p_nnz, a_nnz, requirements))
@@ -65,13 +63,12 @@ pub(super) fn validate_embedded_evaluator(
     let info = evaluator.info();
     let expected_output_len = expected_output_length(qp_program.coefficient_outputs())?;
     let actual_output_len = info.output_specs.iter().try_fold(0usize, |total, spec| {
-        total.checked_add(spec.length()).ok_or_else(|| {
-            RuntimeError::Validation("QP evaluator output lengths overflow".to_string())
-        })
+        total.checked_add(spec.length())
+            .ok_or(RuntimeError::Validation("QP evaluator output lengths overflow"))
     })?;
     if actual_output_len != expected_output_len {
         return Err(RuntimeError::Validation(
-            "QP evaluator output lengths do not match coefficient slices".to_string(),
+            "QP evaluator output lengths do not match coefficient slices",
         ));
     }
     if info.input_specs.len() != qp_program.input_specs().len()
@@ -85,7 +82,7 @@ pub(super) fn validate_embedded_evaluator(
             })
     {
         return Err(RuntimeError::Validation(
-            "QP input specs must match the referenced coefficient evaluator inputs".to_string(),
+            "QP input specs must match the referenced coefficient evaluator inputs",
         ));
     }
     Ok(expected_output_len)
@@ -94,7 +91,7 @@ pub(super) fn validate_embedded_evaluator(
 pub(super) fn validate_mapped_qp_target() -> Result<(), RuntimeError> {
     if !cfg!(target_endian = "little") {
         return Err(RuntimeError::Validation(
-            "mapped embedded QP runtime requires a little-endian target".to_string(),
+            "mapped embedded QP runtime requires a little-endian target",
         ));
     }
     Ok(())
@@ -105,9 +102,10 @@ pub(super) fn checked_embedded_osqp_index(
     field: &'static str,
 ) -> Result<usize, RuntimeError> {
     if value > i32::MAX as u32 {
-        return Err(RuntimeError::Validation(format!(
-            "{field} exceeds the embedded OSQP i32 index range"
-        )));
+        return Err(RuntimeError::ValidationField {
+            field,
+            problem: "exceeds the embedded OSQP i32 index range",
+        });
     }
     Ok(value as usize)
 }
@@ -116,8 +114,9 @@ pub(super) fn checked_embedded_slice_len(
     length: usize,
     field: &'static str,
 ) -> Result<usize, RuntimeError> {
-    let value = u32::try_from(length).map_err(|_| {
-        RuntimeError::Validation(format!("{field} exceeds the embedded OSQP i32 index range"))
+    let value = u32::try_from(length).map_err(|_| RuntimeError::ValidationField {
+        field,
+        problem: "exceeds the embedded OSQP i32 index range",
     })?;
     checked_embedded_osqp_index(value, field)
 }
@@ -127,7 +126,10 @@ pub(super) fn checked_embedded_usize(
     value: u32,
     field: &'static str,
 ) -> Result<usize, RuntimeError> {
-    usize::try_from(value).map_err(|_| RuntimeError::Validation(format!("{field} exceeds usize")))
+    usize::try_from(value).map_err(|_| RuntimeError::ValidationField {
+        field,
+        problem: "exceeds usize",
+    })
 }
 
 #[cfg(osqp_embedded)]
@@ -138,9 +140,10 @@ pub(super) fn checked_embedded_ffi_length(length: usize) -> Result<i32, RuntimeE
 #[cfg(osqp_embedded)]
 pub(super) fn checked_f32_setting(value: f64, field: &'static str) -> Result<f32, RuntimeError> {
     if !value.is_finite() || value < -(f32::MAX as f64) || value > f32::MAX as f64 {
-        return Err(RuntimeError::Validation(format!(
-            "{field} must be finite and representable as f32"
-        )));
+        return Err(RuntimeError::ValidationField {
+            field,
+            problem: "must be finite and representable as f32",
+        });
     }
     Ok(value as f32)
 }
@@ -149,8 +152,10 @@ pub(super) fn checked_host_ffi_length(
     length: usize,
     field: &'static str,
 ) -> Result<ffi::c_int, RuntimeError> {
-    ffi::c_int::try_from(length)
-        .map_err(|_| RuntimeError::Validation(format!("{field} exceeds OSQP index range")))
+    ffi::c_int::try_from(length).map_err(|_| RuntimeError::ValidationField {
+        field,
+        problem: "exceeds OSQP index range",
+    })
 }
 
 #[cfg(all(feature = "std", not(osqp_embedded)))]
@@ -166,8 +171,9 @@ pub(super) fn collect_host_osqp_indices(
             if size_of::<ffi::c_int>() > size_of::<u32>() {
                 Ok(value.into())
             } else {
-                ffi::c_int::try_from(value).map_err(|_| {
-                    RuntimeError::Validation(format!("{field} exceeds OSQP index range"))
+                ffi::c_int::try_from(value).map_err(|_| RuntimeError::ValidationField {
+                    field,
+                    problem: "exceeds OSQP index range",
                 })
             }
         })
@@ -185,7 +191,7 @@ pub(super) fn ffi_plan_from_program(
     let m = checked_embedded_osqp_index(qp_program.a_pattern().nrows.to_native(), "QP m")?;
     let n_plus_m = n
         .checked_add(m)
-        .ok_or_else(|| RuntimeError::Validation("QP dimensions overflow".to_string()))?;
+        .ok_or(RuntimeError::Validation("QP dimensions overflow"))?;
     Ok(ffi::CokerOsqpPlan {
         abi_version: u32::from(plan.abi_version()),
         n: checked_embedded_ffi_length(n)?,
@@ -240,22 +246,17 @@ pub(super) fn ffi_settings_from_archived(
         rho: checked_f32_setting(settings.rho.to_native(), "embedded QP rho")?,
         sigma: checked_f32_setting(settings.sigma.to_native(), "embedded QP sigma")?,
         scaling: i32::try_from(settings.scaling.to_native())
-            .map_err(|_| RuntimeError::Validation("embedded QP scaling exceeds i32".to_string()))?,
+            .map_err(|_| RuntimeError::Validation("embedded QP scaling exceeds i32"))?,
         adaptive_rho: if settings.adaptive_rho { 1 } else { 0 },
         adaptive_rho_interval: i32::try_from(settings.adaptive_rho_interval.to_native()).map_err(
-            |_| {
-                RuntimeError::Validation(
-                    "embedded QP adaptive_rho_interval exceeds i32".to_string(),
-                )
-            },
+            |_| RuntimeError::Validation("embedded QP adaptive_rho_interval exceeds i32"),
         )?,
         adaptive_rho_tolerance: checked_f32_setting(
             settings.adaptive_rho_tolerance.to_native(),
             "embedded QP adaptive_rho_tolerance",
         )?,
-        max_iter: i32::try_from(settings.max_iter.to_native()).map_err(|_| {
-            RuntimeError::Validation("embedded QP max_iter exceeds i32".to_string())
-        })?,
+        max_iter: i32::try_from(settings.max_iter.to_native())
+            .map_err(|_| RuntimeError::Validation("embedded QP max_iter exceeds i32"))?,
         eps_abs: checked_f32_setting(settings.eps_abs.to_native(), "embedded QP eps_abs")?,
         eps_rel: checked_f32_setting(settings.eps_rel.to_native(), "embedded QP eps_rel")?,
         eps_prim_inf: checked_f32_setting(
@@ -269,9 +270,8 @@ pub(super) fn ffi_settings_from_archived(
         alpha: checked_f32_setting(settings.alpha.to_native(), "embedded QP alpha")?,
         linsys_solver,
         scaled_termination: if settings.scaled_termination { 1 } else { 0 },
-        check_termination: i32::try_from(settings.check_termination.to_native()).map_err(|_| {
-            RuntimeError::Validation("embedded QP check_termination exceeds i32".to_string())
-        })?,
+        check_termination: i32::try_from(settings.check_termination.to_native())
+            .map_err(|_| RuntimeError::Validation("embedded QP check_termination exceeds i32"))?,
         warm_start: if settings.warm_start { 1 } else { 0 },
     })
 }
@@ -388,5 +388,5 @@ pub(super) fn expected_output_length(
 ) -> Result<usize, RuntimeError> {
     (outputs.r.start.to_native() as usize)
         .checked_add(outputs.r.length.to_native() as usize)
-        .ok_or_else(|| RuntimeError::Validation("QP output offsets overflow".to_string()))
+        .ok_or(RuntimeError::Validation("QP output offsets overflow"))
 }

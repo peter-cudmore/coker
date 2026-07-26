@@ -14,8 +14,7 @@ pub(super) fn program_info_from_program(
 pub(super) fn entry_program(
     module: &ArchivedBytecodeModule,
 ) -> Result<&ArchivedProgram, RuntimeError> {
-    find_function(module, 0)
-        .ok_or_else(|| RuntimeError::Validation("missing entry function_id 0".to_string()))
+    find_function(module, 0).ok_or(RuntimeError::Validation("missing entry function_id 0"))
 }
 
 pub(super) fn find_function(

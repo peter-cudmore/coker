@@ -98,7 +98,7 @@ pub(super) fn checked_add_region(
 ) -> Result<QpWorkspaceRegion, RuntimeError> {
     let end = start
         .checked_add(len)
-        .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow".to_string()))?;
+        .ok_or(RuntimeError::Validation("QP workspace layout overflow"))?;
     Ok(QpWorkspaceRegion {
         start,
         len: end - start,
@@ -121,7 +121,7 @@ impl QpWorkspaceLayout {
             evaluator_workspace
                 .checked_mul(size_of::<f32>())
                 .ok_or_else(|| {
-                    RuntimeError::Validation("QP workspace layout overflow".to_string())
+                    RuntimeError::Validation("QP workspace layout overflow")
                 })?,
         )?;
         offset = evaluator_workspace.start + evaluator_workspace.len;
@@ -131,7 +131,7 @@ impl QpWorkspaceLayout {
             coefficient_output_len
                 .checked_mul(size_of::<f32>())
                 .ok_or_else(|| {
-                    RuntimeError::Validation("QP workspace layout overflow".to_string())
+                    RuntimeError::Validation("QP workspace layout overflow")
                 })?,
         )?;
         offset = coefficient_outputs.start + coefficient_outputs.len;
@@ -140,7 +140,7 @@ impl QpWorkspaceLayout {
         let p_x = checked_add_region(
             offset,
             p_nnz.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow".to_string())
+                RuntimeError::Validation("QP workspace layout overflow")
             })?,
         )?;
         offset = p_x.start + p_x.len;
@@ -148,7 +148,7 @@ impl QpWorkspaceLayout {
         let a_x = checked_add_region(
             offset,
             a_nnz.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow".to_string())
+                RuntimeError::Validation("QP workspace layout overflow")
             })?,
         )?;
         offset = a_x.start + a_x.len;
@@ -156,7 +156,7 @@ impl QpWorkspaceLayout {
         let q = checked_add_region(
             offset,
             n.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow".to_string())
+                RuntimeError::Validation("QP workspace layout overflow")
             })?,
         )?;
         offset = q.start + q.len;
@@ -164,7 +164,7 @@ impl QpWorkspaceLayout {
         let l = checked_add_region(
             offset,
             m.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow".to_string())
+                RuntimeError::Validation("QP workspace layout overflow")
             })?,
         )?;
         offset = l.start + l.len;
@@ -172,7 +172,7 @@ impl QpWorkspaceLayout {
         let u = checked_add_region(
             offset,
             m.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow".to_string())
+                RuntimeError::Validation("QP workspace layout overflow")
             })?,
         )?;
         offset = u.start + u.len;
@@ -180,7 +180,7 @@ impl QpWorkspaceLayout {
         let primal_warm_start = checked_add_region(
             offset,
             n.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow".to_string())
+                RuntimeError::Validation("QP workspace layout overflow")
             })?,
         )?;
         offset = primal_warm_start.start + primal_warm_start.len;
@@ -188,7 +188,7 @@ impl QpWorkspaceLayout {
         let dual_warm_start = checked_add_region(
             offset,
             m.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow".to_string())
+                RuntimeError::Validation("QP workspace layout overflow")
             })?,
         )?;
         offset = dual_warm_start.start + dual_warm_start.len;
@@ -196,7 +196,7 @@ impl QpWorkspaceLayout {
         let total_bytes = offset;
         let required_f64_capacity = total_bytes
             .checked_add(size_of::<f64>() - 1)
-            .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow".to_string()))?
+            .ok_or(RuntimeError::Validation("QP workspace layout overflow"))?
             / size_of::<f64>();
 
         Ok(Self {

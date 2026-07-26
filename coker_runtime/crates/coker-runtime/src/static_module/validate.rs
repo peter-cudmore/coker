@@ -21,7 +21,7 @@ pub(super) fn validate_program_struct(
     let required_workspace_size = us32(program.required_workspace_size);
     if required_workspace_size < workspace_size {
         return Err(RuntimeError::Validation(
-            "required workspace smaller than primary workspace".to_string(),
+            "required workspace smaller than primary workspace",
         ));
     }
 
@@ -92,10 +92,10 @@ pub(super) fn validate_bilinear_layer(
         out_length,
         in_length
             .checked_add(1)
-            .ok_or_else(|| RuntimeError::Validation("bilinear input too large".to_string()))?,
+            .ok_or(RuntimeError::Validation("bilinear input too large"))?,
         in_length
             .checked_add(1)
-            .ok_or_else(|| RuntimeError::Validation("bilinear input too large".to_string()))?,
+            .ok_or(RuntimeError::Validation("bilinear input too large"))?,
     );
     let shape = (
         u16n(bilinear_layer.quadratic.shape.0),
@@ -104,7 +104,7 @@ pub(super) fn validate_bilinear_layer(
     );
     if shape != expected_shape {
         return Err(RuntimeError::Validation(
-            "bilinear tensor shape does not match layer dimensions".to_string(),
+            "bilinear tensor shape does not match layer dimensions",
         ));
     }
 
@@ -114,17 +114,17 @@ pub(super) fn validate_bilinear_layer(
         let right_index = u16n(entry.index.2);
         if row_index >= expected_shape.0 {
             return Err(RuntimeError::Validation(
-                "bilinear tensor row index out of bounds".to_string(),
+                "bilinear tensor row index out of bounds",
             ));
         }
         if left_index >= expected_shape.1 {
             return Err(RuntimeError::Validation(
-                "bilinear tensor left index out of bounds".to_string(),
+                "bilinear tensor left index out of bounds",
             ));
         }
         if right_index >= expected_shape.2 {
             return Err(RuntimeError::Validation(
-                "bilinear tensor right index out of bounds".to_string(),
+                "bilinear tensor right index out of bounds",
             ));
         }
     }
@@ -151,7 +151,7 @@ pub(super) fn validate_generic_layer(
     )?;
     if generic_layer.ops.len() != us16(generic_layer.out_length) {
         return Err(RuntimeError::Validation(
-            "generic layer op count must match output length".to_string(),
+            "generic layer op count must match output length",
         ));
     }
     validate_layer_scratch(
@@ -184,23 +184,21 @@ pub(super) fn validate_evaluate_layer(
     caller_workspace_size: usize,
 ) -> Result<(), RuntimeError> {
     let callee_program = find_function(module, u16n(evaluate_layer.callee_function_id))
-        .ok_or_else(|| {
-            RuntimeError::Validation("evaluate callee function id missing".to_string())
-        })?;
+        .ok_or(RuntimeError::Validation("evaluate callee function id missing"))?;
 
     if evaluate_layer.input_bindings.len() != callee_program.input_specs.len() {
         return Err(RuntimeError::Validation(
-            "evaluate input binding count does not match callee inputs".to_string(),
+            "evaluate input binding count does not match callee inputs",
         ));
     }
     if evaluate_layer.output_bindings.len() != callee_program.output_specs.len() {
         return Err(RuntimeError::Validation(
-            "evaluate output binding count does not match callee outputs".to_string(),
+            "evaluate output binding count does not match callee outputs",
         ));
     }
     if us32(evaluate_layer.scratch_offset) < caller_workspace_size {
         return Err(RuntimeError::Validation(
-            "evaluate scratch offset overlaps caller workspace".to_string(),
+            "evaluate scratch offset overlaps caller workspace",
         ));
     }
 
@@ -208,7 +206,7 @@ pub(super) fn validate_evaluate_layer(
         us32(evaluate_layer.scratch_offset) + us32(callee_program.required_workspace_size);
     if scratch_end > us32(caller_program.required_workspace_size) {
         return Err(RuntimeError::Validation(
-            "evaluate scratch range exceeds caller required workspace".to_string(),
+            "evaluate scratch range exceeds caller required workspace",
         ));
     }
 
@@ -226,7 +224,7 @@ pub(super) fn validate_evaluate_layer(
     {
         if u16n(binding.length) != u16n(output_spec.length) {
             return Err(RuntimeError::Validation(
-                "evaluate output binding length mismatch".to_string(),
+                "evaluate output binding length mismatch",
             ));
         }
         validate_range(
@@ -250,7 +248,7 @@ pub(super) fn validate_evaluate_input_binding(
             let length = u16n(*length);
             if length != expected_length {
                 return Err(RuntimeError::Validation(
-                    "evaluate input binding length mismatch".to_string(),
+                    "evaluate input binding length mismatch",
                 ));
             }
             validate_range(
@@ -264,7 +262,7 @@ pub(super) fn validate_evaluate_input_binding(
             let length = u16n(*length);
             if length != expected_length || values.len() != length as usize {
                 return Err(RuntimeError::Validation(
-                    "evaluate constant input length mismatch".to_string(),
+                    "evaluate constant input length mismatch",
                 ));
             }
             Ok(())
@@ -278,7 +276,7 @@ pub(super) fn validate_generic_operand(
 ) -> Result<(), RuntimeError> {
     if operand_index != UNUSED_OPERAND && operand_index >= input_length {
         return Err(RuntimeError::Validation(
-            "generic operand index out of bounds".to_string(),
+            "generic operand index out of bounds",
         ));
     }
     Ok(())
@@ -298,7 +296,7 @@ pub(super) fn validate_generic_row_operation(
     {
         if *operand_index == UNUSED_OPERAND {
             return Err(RuntimeError::Validation(
-                "generic operation missing required operand".to_string(),
+                "generic operation missing required operand",
             ));
         }
     }

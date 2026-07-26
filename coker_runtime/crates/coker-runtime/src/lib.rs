@@ -1,7 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
 mod execute;
 mod ops;
 mod qp;
@@ -15,15 +13,16 @@ mod workspace;
 #[cfg(osqp_embedded)]
 pub use crate::qp::BoundMappedQpProgram;
 pub use crate::qp::{
-    MappedQpProgram, MappedQpPushForwardWorkspace, MappedQpWorkspace, QpSolveDiagnostics,
-    QpSolveStatus, QpWorkspaceRequirements,
+    MappedQpProgram, MappedQpWorkspace, QpSolveDiagnostics, QpSolveStatus,
+    QpWorkspaceRequirements,
 };
 #[cfg(all(feature = "std", not(osqp_embedded)))]
 pub use crate::qp::{QpRuntime, QpSolveResult, QpWorkspaceLayout, QpWorkspaceRegion};
 pub use crate::static_module::{MappedExecutable, MappedModule, MappedProgram};
 use crate::workspace::Workspace;
-use alloc::string::{String, ToString};
-use coker_bytecode::{decode_module, BytecodeModule, InputSpec, OutputSpec, Program};
+#[cfg(feature = "std")]
+use coker_bytecode::decode_module;
+use coker_bytecode::{BytecodeModule, InputSpec, OutputSpec, Program};
 use thiserror::Error;
 
 const UNUSED_OPERAND: u16 = u16::MAX;
@@ -46,9 +45,30 @@ pub enum RuntimeError {
     #[error("workspace buffer too small: expected at least {expected}, got {actual}")]
     WorkspaceTooSmall { expected: usize, actual: usize },
     #[error("program validation failed: {0}")]
-    Validation(String),
+    Validation(&'static str),
+    #[error("program validation failed: {context} {problem}")]
+    ValidationContext {
+        context: &'static str,
+        problem: &'static str,
+    },
+    #[error("program validation failed: {field} {problem}")]
+    ValidationField {
+        field: &'static str,
+        problem: &'static str,
+    },
+    #[error("program validation failed: missing function_id {function_id}")]
+    MissingFunction { function_id: u16 },
+    #[error("program validation failed: missing QP function_id {function_id}")]
+    MissingQpFunction { function_id: u16 },
+    #[error("program validation failed: missing executable function_id {function_id}")]
+    MissingExecutable { function_id: u16 },
+    #[error("QP solver {operation} failed with status {status}")]
+    QpSolverStatus {
+        operation: &'static str,
+        status: i32,
+    },
     #[error("QP solver error: {0}")]
-    QpSolver(String),
+    QpSolver(&'static str),
     #[error(
         "embedded QP buffers overlap, have an invalid range, or do not match the solver layout"
     )]
@@ -61,13 +81,6 @@ pub enum RuntimeError {
     EmbeddedQpAbi {
         operation: &'static str,
         status: i32,
-    },
-    #[error("QP push-forward is unsupported: {reason}")]
-    QpPushForwardUnsupported { reason: &'static str },
-    #[error("QP push-forward is nondifferentiable at solver status {status:?}: {reason}")]
-    QpPushForwardNondifferentiable {
-        status: crate::qp::QpSolveStatus,
-        reason: &'static str,
     },
 }
 
@@ -151,11 +164,13 @@ impl ModuleBuilder {
 }
 
 /// Owned, validated bytecode module for `std` callers that prefer a single handle.
+#[cfg(feature = "std")]
 #[derive(Debug)]
 pub struct Module {
     bytecode_module: BytecodeModule,
 }
 
+#[cfg(feature = "std")]
 impl Module {
     /// Returns the entry program metadata.
     pub fn info(&self) -> ProgramInfo<'_, InputSpec, OutputSpec> {
@@ -235,6 +250,7 @@ pub fn program_info(module: &BytecodeModule) -> ProgramInfo<'_> {
 }
 
 /// Decodes a serialized module and validates its structure and semantics.
+#[cfg(feature = "std")]
 pub fn validate_module(module_bytes: &[u8]) -> Result<BytecodeModule, RuntimeError> {
     let module = decode_module(module_bytes)?;
     validate::validate_module_struct(&module)?;
@@ -389,8 +405,7 @@ pub fn program_info_from_program(program: &Program) -> ProgramInfo<'_> {
 
 /// Returns the validated entry program (`function_id == 0`) from a decoded module.
 pub fn entry_program(module: &BytecodeModule) -> Result<&Program, RuntimeError> {
-    find_function(module, 0)
-        .ok_or_else(|| RuntimeError::Validation("missing entry function_id 0".to_string()))
+    find_function(module, 0).ok_or(RuntimeError::Validation("missing entry function_id 0"))
 }
 pub(crate) fn find_function(module: &BytecodeModule, function_id: u16) -> Option<&Program> {
     module.program(function_id)
