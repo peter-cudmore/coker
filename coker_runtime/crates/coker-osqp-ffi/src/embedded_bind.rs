@@ -16,7 +16,8 @@ pub struct EmbeddedArena<'a> {
 
 impl<'a> EmbeddedArena<'a> {
     pub fn new(storage: &'a mut [MaybeUninit<u8>]) -> Self {
-        let base = NonNull::new(storage.as_mut_ptr().cast::<u8>()).unwrap_or_else(NonNull::dangling);
+        let base =
+            NonNull::new(storage.as_mut_ptr().cast::<u8>()).unwrap_or_else(NonNull::dangling);
         Self {
             base,
             bytes: storage.len(),
@@ -26,6 +27,10 @@ impl<'a> EmbeddedArena<'a> {
 
     pub fn len(&self) -> usize {
         self.bytes
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes == 0
     }
 
     pub fn zero_region(&mut self, offset: usize, len: usize) -> bool {
@@ -58,11 +63,7 @@ impl<'a> EmbeddedArena<'a> {
         NonNull::new(ptr.cast::<T>())
     }
 
-    pub fn region_value_mut<T>(
-        &mut self,
-        offset: usize,
-        alignment: usize,
-    ) -> Option<&mut T> {
+    pub fn region_value_mut<T>(&mut self, offset: usize, alignment: usize) -> Option<&mut T> {
         let ptr = self.region_ptr::<T>(offset, size_of::<T>(), alignment)?;
         Some(unsafe { ptr.as_ptr().as_mut()? })
     }
@@ -96,7 +97,11 @@ pub fn bind_vectorf(
     vector.length = length;
 }
 
-pub fn bind_vectori(vector: &mut raw::OSQPVectori, values: *mut raw::OSQPInt, length: raw::OSQPInt) {
+pub fn bind_vectori(
+    vector: &mut raw::OSQPVectori,
+    values: *mut raw::OSQPInt,
+    length: raw::OSQPInt,
+) {
     vector.values = values;
     vector.length = length;
 }
@@ -126,6 +131,10 @@ pub struct EmbeddedSolver {
 }
 
 impl EmbeddedSolver {
+    /// # Safety
+    ///
+    /// `solver` must be a valid, non-null pointer to a live `OSQPSolver`
+    /// whose pointees remain valid for the lifetime of the returned wrapper.
     pub unsafe fn from_ptr(solver: *mut raw::OSQPSolver) -> Option<Self> {
         Some(Self {
             solver: NonNull::new(solver)?,
@@ -136,6 +145,10 @@ impl EmbeddedSolver {
         self.solver.as_ptr()
     }
 
+    /// # Safety
+    ///
+    /// `self` must wrap a valid live `OSQPSolver` with initialized `work`
+    /// and `data` pointers.
     pub unsafe fn dimensions(&self) -> Option<(usize, usize)> {
         let work = self.solver.as_ref().work.as_ref()?;
         let data = work.data.as_ref()?;
@@ -144,18 +157,25 @@ impl EmbeddedSolver {
         Some((n, m))
     }
 
+    /// # Safety
+    ///
+    /// `self` must wrap a valid live `OSQPSolver` prepared for `osqp_solve`.
     pub unsafe fn solve(&mut self) -> raw::OSQPInt {
         raw::osqp_solve(self.as_ptr())
     }
 
+    /// # Safety
+    ///
+    /// `self` must wrap a valid live `OSQPSolver`. Any provided warm-start
+    /// slices must match the solver dimensions.
     pub unsafe fn warm_start(
         &mut self,
         primal: Option<&[raw::OSQPFloat]>,
         dual: Option<&[raw::OSQPFloat]>,
     ) -> Option<raw::OSQPInt> {
         let (n, m) = self.dimensions()?;
-        if primal.is_some_and(|values| values.len() != n)
-            || dual.is_some_and(|values| values.len() != m)
+        if primal.map_or(false, |values| values.len() != n)
+            || dual.map_or(false, |values| values.len() != m)
         {
             return None;
         }
@@ -166,6 +186,10 @@ impl EmbeddedSolver {
         ))
     }
 
+    /// # Safety
+    ///
+    /// `self` must wrap a valid live `OSQPSolver`. The provided slices must
+    /// match the solver dimensions.
     pub unsafe fn update_data_vec(
         &mut self,
         q: &[raw::OSQPFloat],
@@ -184,6 +208,10 @@ impl EmbeddedSolver {
         ))
     }
 
+    /// # Safety
+    ///
+    /// `self` must wrap a valid live `OSQPSolver`. The provided slices must
+    /// match the bound `P` and `A` nonzero counts.
     pub unsafe fn update_data_mat(
         &mut self,
         px: &[raw::OSQPFloat],
@@ -209,6 +237,10 @@ impl EmbeddedSolver {
         ))
     }
 
+    /// # Safety
+    ///
+    /// `self` must wrap a valid live `OSQPSolver` whose solution and info
+    /// pointers are initialized.
     pub unsafe fn solution<'a>(&'a self) -> Option<EmbeddedSolutionView<'a>> {
         let solver = self.solver.as_ref();
         let info = solver.info.as_ref()?;

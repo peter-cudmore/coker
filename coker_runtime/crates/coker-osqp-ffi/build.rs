@@ -135,7 +135,6 @@ fn compile_embedded_bridge(src_dir: &Path, build_dir: &Path) {
         .compile("osqp_embedded_bridge");
 }
 
-
 fn generate_embedded_bindings(src_dir: &Path, build_dir: &Path, out_dir: &Path) {
     let builder = bindgen::Builder::default()
         .header("embedded_bindings_wrapper.h")

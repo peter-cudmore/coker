@@ -25,26 +25,25 @@ pub enum OSQPTimer {}
 #[cfg(test)]
 extern crate std;
 
+#[cfg(not(osqp_embedded))]
+mod bindings;
 #[cfg(osqp_embedded)]
 mod bindings_embedded;
 #[cfg(osqp_embedded)]
-pub mod raw_embedded;
-#[cfg(osqp_embedded)]
 pub mod embedded_bind;
-#[cfg(not(osqp_embedded))]
-mod bindings;
-
 #[cfg(osqp_embedded)]
-pub use bindings_embedded::*;
+pub mod raw_embedded;
+
 #[cfg(not(osqp_embedded))]
 pub use bindings::*;
+#[cfg(osqp_embedded)]
+pub use bindings_embedded::*;
 mod generated_solver_contract;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::mem;
-    use std::ptr;
     #[test]
     fn abi_types_match_c_config() {
         #[cfg(osqp_embedded)]
@@ -54,7 +53,10 @@ mod tests {
         assert_eq!(mem::size_of::<c_float>(), mem::size_of::<f64>());
 
         #[cfg(osqp_dlong)]
-        assert_eq!(mem::size_of::<c_int>(), mem::size_of::<core::ffi::c_longlong>());
+        assert_eq!(
+            mem::size_of::<c_int>(),
+            mem::size_of::<core::ffi::c_longlong>()
+        );
 
         #[cfg(not(osqp_dlong))]
         assert_eq!(mem::size_of::<c_int>(), mem::size_of::<core::ffi::c_int>());
@@ -66,15 +68,30 @@ mod tests {
             generated_solver_contract::GENERATED_SOLVER_ENV,
             "COKER_OSQP_GENERATED_SOLVER_DIR"
         );
-        assert_eq!(generated_solver_contract::GENERATED_SOLVER_INCLUDE_DIR, "include");
-        assert_eq!(generated_solver_contract::GENERATED_SOLVER_CONFIGURE_DIR, "configure");
-        assert_eq!(generated_solver_contract::GENERATED_SOLVER_SOURCE_DIR, "src/osqp");
-        assert_eq!(generated_solver_contract::GENERATED_SOLVER_WORKSPACE_HEADER, "workspace.h");
+        assert_eq!(
+            generated_solver_contract::GENERATED_SOLVER_INCLUDE_DIR,
+            "include"
+        );
+        assert_eq!(
+            generated_solver_contract::GENERATED_SOLVER_CONFIGURE_DIR,
+            "configure"
+        );
+        assert_eq!(
+            generated_solver_contract::GENERATED_SOLVER_SOURCE_DIR,
+            "src/osqp"
+        );
+        assert_eq!(
+            generated_solver_contract::GENERATED_SOLVER_WORKSPACE_HEADER,
+            "workspace.h"
+        );
         assert_eq!(
             generated_solver_contract::GENERATED_SOLVER_WORKSPACE_SOURCE,
             "src/osqp/workspace.c"
         );
-        assert_eq!(generated_solver_contract::GENERATED_SOLVER_TYPES_HEADER, "types.h");
+        assert_eq!(
+            generated_solver_contract::GENERATED_SOLVER_TYPES_HEADER,
+            "types.h"
+        );
         assert_eq!(
             generated_solver_contract::GENERATED_SOLVER_QDLDL_INTERFACE_HEADER,
             "qdldl_interface.h"
@@ -151,14 +168,23 @@ mod tests {
         let mut work: *mut OSQPWorkspace = ptr::null_mut();
         let exitflag = osqp_setup(&mut work, &data, &settings);
         assert_eq!(exitflag, 0);
-        assert!(!work.is_null(), "successful setup must initialize a workspace");
+        assert!(
+            !work.is_null(),
+            "successful setup must initialize a workspace"
+        );
         assert_eq!(osqp_solve(work), 0);
-        assert_eq!((*work).info.as_ref().unwrap().status_val, OSQP_SOLVED as c_int);
+        assert_eq!(
+            (*work).info.as_ref().unwrap().status_val,
+            OSQP_SOLVED as c_int
+        );
         let solution = (*work)
             .solution
             .as_ref()
             .expect("solved workspace must contain a solution");
-        assert!(!solution.x.is_null(), "solved workspace must contain primal values");
+        assert!(
+            !solution.x.is_null(),
+            "solved workspace must contain primal values"
+        );
         let x = core::slice::from_raw_parts(solution.x, data.n as usize);
         let solution_tolerance = 2.0e-3 as c_float;
         assert!(

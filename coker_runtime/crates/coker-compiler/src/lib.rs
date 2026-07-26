@@ -7,6 +7,7 @@ mod util;
 
 use core::mem::{align_of, size_of};
 
+use crate::util::checked_u16;
 use coker_bytecode::{
     encode_module, BytecodeModule, EmbeddedCscPattern, EmbeddedLinsysSolver, EmbeddedOsqpSettings,
     EmbeddedQpProfile, Executable, InputSpec, OutputSpec, Program, QdldlSymbolicL,
@@ -15,7 +16,6 @@ use coker_bytecode::{
 };
 use coker_osqp_ffi::raw_embedded as ffi_raw;
 use thiserror::Error;
-use crate::util::checked_u16;
 
 pub(crate) const UNUSED_OPERAND: u16 = u16::MAX;
 
@@ -447,113 +447,284 @@ fn compute_qp_program_arena_layout(
     let m = a_pattern.nrows as usize;
     let p_nnz = p_pattern.indices.len();
     let a_nnz = a_pattern.indices.len();
-    let n_plus_m =
-        n.checked_add(m)
-            .ok_or(CompileError::InvalidField {
-                field: "embedded_plan.arena_layout.total_bytes",
-                reason: "arena layout dimensions overflow usize",
-            })?;
+    let n_plus_m = n.checked_add(m).ok_or(CompileError::InvalidField {
+        field: "embedded_plan.arena_layout.total_bytes",
+        reason: "arena layout dimensions overflow usize",
+    })?;
     let kkt_nnz = qdldl_plan.kkt_pattern.indices.len();
     let l_nnz = qdldl_plan.symbolic_l.l_pattern.indices.len();
-    let iwork_count =
-        n_plus_m
-            .checked_mul(3)
-            .ok_or(CompileError::InvalidField {
-                field: "embedded_plan.arena_layout.qdldl_iwork",
-                reason: "arena layout dimensions overflow usize",
-            })?;
+    let iwork_count = n_plus_m.checked_mul(3).ok_or(CompileError::InvalidField {
+        field: "embedded_plan.arena_layout.qdldl_iwork",
+        reason: "arena layout dimensions overflow usize",
+    })?;
 
     let mut offset = 0usize;
     let mut arena_alignment = 1usize;
 
-    let pdata_x =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, p_nnz, "embedded_plan.arena_layout.pdata_x")?;
-    let pdata =
-        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.pdata")?;
-    let adata_x =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, a_nnz, "embedded_plan.arena_layout.adata_x")?;
-    let adata =
-        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.adata")?;
-    let qdata =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.qdata")?;
-    let ldata =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.ldata")?;
-    let udata =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.udata")?;
-    let data =
-        push_qp_arena_region::<ffi_raw::OSQPData>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.data")?;
-    let settings =
-        push_qp_arena_region::<ffi_raw::OSQPSettings>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.settings")?;
-    let xsolution =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.xsolution")?;
-    let ysolution =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.ysolution")?;
-    let solution =
-        push_qp_arena_region::<ffi_raw::OSQPSolution>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.solution")?;
-    let info =
-        push_qp_arena_region::<ffi_raw::OSQPInfo>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.info")?;
-    let qdldl_l_x =
-        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, l_nnz, "embedded_plan.arena_layout.qdldl_l_x")?;
-    let qdldl_l =
-        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.qdldl_l")?;
-    let qdldl_kkt_x =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, kkt_nnz, "embedded_plan.arena_layout.qdldl_kkt_x")?;
-    let qdldl_kkt =
-        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.qdldl_kkt")?;
-    let qdldl =
-        push_qp_arena_region::<ffi_raw::qdldl_solver>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.qdldl")?;
-    let qdldl_dinv =
-        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_dinv")?;
-    let qdldl_bp =
-        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_bp")?;
-    let qdldl_sol =
-        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_sol")?;
-    let qdldl_rho_inv_vec =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.qdldl_rho_inv_vec")?;
-    let qdldl_d =
-        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_d")?;
-    let qdldl_iwork =
-        push_qp_arena_region::<ffi_raw::QDLDL_int>(&mut offset, &mut arena_alignment, iwork_count, "embedded_plan.arena_layout.qdldl_iwork")?;
-    let qdldl_bwork =
-        push_qp_arena_region::<ffi_raw::QDLDL_bool>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_bwork")?;
-    let qdldl_fwork =
-        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_fwork")?;
-    let work_rho_vec =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_rho_vec")?;
-    let work_rho_inv_vec =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_rho_inv_vec")?;
-    let work_constr_type =
-        push_qp_arena_region::<ffi_raw::OSQPInt>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_constr_type")?;
-    let work_x =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_x")?;
-    let work_y =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_y")?;
-    let work_z =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_z")?;
-    let work_xz_tilde =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.work_xz_tilde")?;
-    let work_x_prev =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_x_prev")?;
-    let work_z_prev =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_z_prev")?;
-    let work_ax =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_ax")?;
-    let work_px =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_px")?;
-    let work_aty =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_aty")?;
-    let work_delta_y =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_delta_y")?;
-    let work_atdelta_y =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_atdelta_y")?;
-    let work_delta_x =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_delta_x")?;
-    let work_pdelta_x =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_pdelta_x")?;
-    let work_adelta_x =
-        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_adelta_x")?;
-    let workspace =
-        push_qp_arena_region::<ffi_raw::OSQPWorkspace>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.workspace")?;
+    let pdata_x = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        p_nnz,
+        "embedded_plan.arena_layout.pdata_x",
+    )?;
+    let pdata = push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.pdata",
+    )?;
+    let adata_x = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        a_nnz,
+        "embedded_plan.arena_layout.adata_x",
+    )?;
+    let adata = push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.adata",
+    )?;
+    let qdata = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.qdata",
+    )?;
+    let ldata = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.ldata",
+    )?;
+    let udata = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.udata",
+    )?;
+    let data = push_qp_arena_region::<ffi_raw::OSQPData>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.data",
+    )?;
+    let settings = push_qp_arena_region::<ffi_raw::OSQPSettings>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.settings",
+    )?;
+    let xsolution = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.xsolution",
+    )?;
+    let ysolution = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.ysolution",
+    )?;
+    let solution = push_qp_arena_region::<ffi_raw::OSQPSolution>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.solution",
+    )?;
+    let info = push_qp_arena_region::<ffi_raw::OSQPInfo>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.info",
+    )?;
+    let qdldl_l_x = push_qp_arena_region::<ffi_raw::QDLDL_float>(
+        &mut offset,
+        &mut arena_alignment,
+        l_nnz,
+        "embedded_plan.arena_layout.qdldl_l_x",
+    )?;
+    let qdldl_l = push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.qdldl_l",
+    )?;
+    let qdldl_kkt_x = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        kkt_nnz,
+        "embedded_plan.arena_layout.qdldl_kkt_x",
+    )?;
+    let qdldl_kkt = push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.qdldl_kkt",
+    )?;
+    let qdldl = push_qp_arena_region::<ffi_raw::qdldl_solver>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.qdldl",
+    )?;
+    let qdldl_dinv = push_qp_arena_region::<ffi_raw::QDLDL_float>(
+        &mut offset,
+        &mut arena_alignment,
+        n_plus_m,
+        "embedded_plan.arena_layout.qdldl_dinv",
+    )?;
+    let qdldl_bp = push_qp_arena_region::<ffi_raw::QDLDL_float>(
+        &mut offset,
+        &mut arena_alignment,
+        n_plus_m,
+        "embedded_plan.arena_layout.qdldl_bp",
+    )?;
+    let qdldl_sol = push_qp_arena_region::<ffi_raw::QDLDL_float>(
+        &mut offset,
+        &mut arena_alignment,
+        n_plus_m,
+        "embedded_plan.arena_layout.qdldl_sol",
+    )?;
+    let qdldl_rho_inv_vec = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.qdldl_rho_inv_vec",
+    )?;
+    let qdldl_d = push_qp_arena_region::<ffi_raw::QDLDL_float>(
+        &mut offset,
+        &mut arena_alignment,
+        n_plus_m,
+        "embedded_plan.arena_layout.qdldl_d",
+    )?;
+    let qdldl_iwork = push_qp_arena_region::<ffi_raw::QDLDL_int>(
+        &mut offset,
+        &mut arena_alignment,
+        iwork_count,
+        "embedded_plan.arena_layout.qdldl_iwork",
+    )?;
+    let qdldl_bwork = push_qp_arena_region::<ffi_raw::QDLDL_bool>(
+        &mut offset,
+        &mut arena_alignment,
+        n_plus_m,
+        "embedded_plan.arena_layout.qdldl_bwork",
+    )?;
+    let qdldl_fwork = push_qp_arena_region::<ffi_raw::QDLDL_float>(
+        &mut offset,
+        &mut arena_alignment,
+        n_plus_m,
+        "embedded_plan.arena_layout.qdldl_fwork",
+    )?;
+    let work_rho_vec = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_rho_vec",
+    )?;
+    let work_rho_inv_vec = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_rho_inv_vec",
+    )?;
+    let work_constr_type = push_qp_arena_region::<ffi_raw::OSQPInt>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_constr_type",
+    )?;
+    let work_x = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.work_x",
+    )?;
+    let work_y = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_y",
+    )?;
+    let work_z = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_z",
+    )?;
+    let work_xz_tilde = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n_plus_m,
+        "embedded_plan.arena_layout.work_xz_tilde",
+    )?;
+    let work_x_prev = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.work_x_prev",
+    )?;
+    let work_z_prev = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_z_prev",
+    )?;
+    let work_ax = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_ax",
+    )?;
+    let work_px = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.work_px",
+    )?;
+    let work_aty = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.work_aty",
+    )?;
+    let work_delta_y = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_delta_y",
+    )?;
+    let work_atdelta_y = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.work_atdelta_y",
+    )?;
+    let work_delta_x = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.work_delta_x",
+    )?;
+    let work_pdelta_x = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        n,
+        "embedded_plan.arena_layout.work_pdelta_x",
+    )?;
+    let work_adelta_x = push_qp_arena_region::<ffi_raw::OSQPFloat>(
+        &mut offset,
+        &mut arena_alignment,
+        m,
+        "embedded_plan.arena_layout.work_adelta_x",
+    )?;
+    let workspace = push_qp_arena_region::<ffi_raw::OSQPWorkspace>(
+        &mut offset,
+        &mut arena_alignment,
+        1,
+        "embedded_plan.arena_layout.workspace",
+    )?;
 
     let total_bytes = align_up_checked(
         offset,
@@ -621,10 +792,12 @@ fn push_qp_arena_region<T>(
     field: &'static str,
 ) -> Result<QpProgramArenaRegion, CompileError> {
     let alignment = align_of::<T>();
-    let byte_len = count.checked_mul(size_of::<T>()).ok_or(CompileError::InvalidField {
-        field,
-        reason: "arena region length overflow",
-    })?;
+    let byte_len = count
+        .checked_mul(size_of::<T>())
+        .ok_or(CompileError::InvalidField {
+            field,
+            reason: "arena region length overflow",
+        })?;
     *arena_alignment = (*arena_alignment).max(alignment);
     let byte_offset = align_up_checked(*offset, alignment, field)?;
     *offset = byte_offset

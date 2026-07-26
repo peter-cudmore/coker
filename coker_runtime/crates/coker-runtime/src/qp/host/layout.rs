@@ -122,9 +122,7 @@ impl QpWorkspaceLayout {
             offset,
             evaluator_workspace
                 .checked_mul(size_of::<f32>())
-                .ok_or_else(|| {
-                    RuntimeError::Validation("QP workspace layout overflow")
-                })?,
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = evaluator_workspace.start + evaluator_workspace.len;
 
@@ -132,66 +130,59 @@ impl QpWorkspaceLayout {
             offset,
             coefficient_output_len
                 .checked_mul(size_of::<f32>())
-                .ok_or_else(|| {
-                    RuntimeError::Validation("QP workspace layout overflow")
-                })?,
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = coefficient_outputs.start + coefficient_outputs.len;
 
         offset = align_up(offset, align_of::<f64>());
         let p_x = checked_add_region(
             offset,
-            p_nnz.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow")
-            })?,
+            p_nnz
+                .checked_mul(size_of::<f64>())
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = p_x.start + p_x.len;
 
         let a_x = checked_add_region(
             offset,
-            a_nnz.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow")
-            })?,
+            a_nnz
+                .checked_mul(size_of::<f64>())
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = a_x.start + a_x.len;
 
         let q = checked_add_region(
             offset,
-            n.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow")
-            })?,
+            n.checked_mul(size_of::<f64>())
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = q.start + q.len;
 
         let l = checked_add_region(
             offset,
-            m.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow")
-            })?,
+            m.checked_mul(size_of::<f64>())
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = l.start + l.len;
 
         let u = checked_add_region(
             offset,
-            m.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow")
-            })?,
+            m.checked_mul(size_of::<f64>())
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = u.start + u.len;
 
         let primal_warm_start = checked_add_region(
             offset,
-            n.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow")
-            })?,
+            n.checked_mul(size_of::<f64>())
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = primal_warm_start.start + primal_warm_start.len;
 
         let dual_warm_start = checked_add_region(
             offset,
-            m.checked_mul(size_of::<f64>()).ok_or_else(|| {
-                RuntimeError::Validation("QP workspace layout overflow")
-            })?,
+            m.checked_mul(size_of::<f64>())
+                .ok_or_else(|| RuntimeError::Validation("QP workspace layout overflow"))?,
         )?;
         offset = dual_warm_start.start + dual_warm_start.len;
 

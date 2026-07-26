@@ -181,10 +181,9 @@ fn validate_evaluate_layer(
     caller_program: &Program,
     caller_workspace_size: usize,
 ) -> Result<(), RuntimeError> {
-    let callee_program =
-        find_function(module, evaluate_layer.callee_function_id).ok_or(RuntimeError::Validation(
-            "evaluate callee function id missing",
-        ))?;
+    let callee_program = find_function(module, evaluate_layer.callee_function_id).ok_or(
+        RuntimeError::Validation("evaluate callee function id missing"),
+    )?;
 
     if evaluate_layer.input_bindings.len() != callee_program.input_specs.len() {
         return Err(RuntimeError::Validation(

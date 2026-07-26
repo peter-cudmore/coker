@@ -38,7 +38,6 @@ pub struct QpCoefficientOutputs {
     pub r: QpOutputSlice,
 }
 
-
 /// Serialized host QP problem payload used by tooling and host-side execution.
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct QpProgramArchive {
@@ -892,12 +891,12 @@ mod codec;
 mod convert;
 mod validate;
 
+#[cfg(feature = "std")]
+pub use self::codec::{decode_module, decode_qp_program};
 pub use self::{
     archived::{archived_embedded_qp_plan, archived_module, archived_qp_program},
     codec::{decode_embedded_qp_plan, encode_embedded_qp_plan, encode_module, encode_qp_program},
 };
-#[cfg(feature = "std")]
-pub use self::codec::{decode_module, decode_qp_program};
 
 #[allow(unused_imports)]
 use self::{codec::*, convert::*, validate::*};

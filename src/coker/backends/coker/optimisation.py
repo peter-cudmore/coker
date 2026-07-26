@@ -331,12 +331,19 @@ class CokerSolver:
             runtime_args_tuple, warm_start=warm_start
         )
         if self.warm_start and solve_info.success:
-            refined_solution, refined_info = self.runtime_qp.solve(
-                runtime_args_tuple, warm_start=solution
-            )
-            if refined_info.success:
+            for _ in range(8):
+                refined_solution, refined_info = self.runtime_qp.solve(
+                    runtime_args_tuple, warm_start=solution
+                )
+                if not refined_info.success:
+                    break
+                previous_solution = solution
                 solution = refined_solution
                 solve_info = refined_info
+                if np.allclose(
+                    solution, previous_solution, atol=1.0e-6, rtol=0.0
+                ):
+                    break
         self.last_solve_info = solve_info
         if not solve_info.success:
             from coker.optimisation import SolveFailure

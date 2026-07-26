@@ -1,6 +1,5 @@
 use super::*;
 
-
 pub(super) fn validate_mapped_qp_program(
     qp_program: &ArchivedQpProgram,
     evaluator: MappedProgram<'_>,
@@ -9,7 +8,9 @@ pub(super) fn validate_mapped_qp_program(
     let coefficient_output_size = validate_embedded_evaluator(qp_program, evaluator)?;
     let n = checked_embedded_osqp_index(qp_program.p_pattern().ncols.to_native(), "QP n")?;
     if qp_program.output_spec().length() != n {
-        return Err(RuntimeError::Validation("QP output spec length must equal n"));
+        return Err(RuntimeError::Validation(
+            "QP output spec length must equal n",
+        ));
     }
     let m = checked_embedded_osqp_index(qp_program.a_pattern().nrows.to_native(), "QP m")?;
     let p_nnz = checked_embedded_slice_len(qp_program.p_pattern().indices.len(), "QP P nnz")?;
@@ -40,8 +41,11 @@ pub(super) fn validate_embedded_evaluator(
     let info = evaluator.info();
     let expected_output_len = expected_output_length(qp_program.coefficient_outputs())?;
     let actual_output_len = info.output_specs.iter().try_fold(0usize, |total, spec| {
-        total.checked_add(spec.length())
-            .ok_or(RuntimeError::Validation("QP evaluator output lengths overflow"))
+        total
+            .checked_add(spec.length())
+            .ok_or(RuntimeError::Validation(
+                "QP evaluator output lengths overflow",
+            ))
     })?;
     if actual_output_len != expected_output_len {
         return Err(RuntimeError::Validation(
@@ -121,7 +125,6 @@ pub(super) fn checked_f32_setting(value: f64, field: &'static str) -> Result<f32
     }
     Ok(value as f32)
 }
-
 
 pub(super) fn qp_program_info_from_program(
     qp_program: &ArchivedQpProgram,

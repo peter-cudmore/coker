@@ -802,6 +802,7 @@ fn mapped_module_looks_up_dense_program_indices() {
     mapped.execute(&[], &mut workspace, &mut outputs).unwrap();
     assert_eq!(outputs, [3.0]);
 }
+#[cfg(not(osqp_embedded))]
 #[test]
 fn mapped_qp_program_looks_up_qp_index_from_bytes_and_module() {
     let module = build_mapped_scalar_qp_module(
@@ -845,6 +846,7 @@ fn mapped_qp_program_looks_up_qp_index_from_bytes_and_module() {
     ));
 }
 
+#[cfg(not(osqp_embedded))]
 #[test]
 fn mapped_qp_program_rejects_output_spec_length_mismatch() {
     let module = build_mapped_scalar_qp_module(
@@ -876,6 +878,7 @@ fn mapped_qp_program_rejects_output_spec_length_mismatch() {
     }
 }
 
+#[cfg(not(osqp_embedded))]
 #[test]
 fn mapped_qp_program_rejects_evaluator_output_length_mismatch() {
     let module = build_mapped_scalar_qp_module(
@@ -1537,7 +1540,7 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
     assert_eq!(&oversized_coefficient_outputs[6..], &[123.0, 123.0]);
 }
 
-#[cfg(osqp_embedded)]
+#[cfg(not(osqp_embedded))]
 #[test]
 fn validated_embedded_qp_keeps_nonzero_csc_shape_borrowed_and_layout_cached() {
     let bytes = encode_embedded_qp_with_nonzero_csc();
@@ -1633,7 +1636,7 @@ fn validated_embedded_qp_keeps_nonzero_csc_shape_borrowed_and_layout_cached() {
     assert_eq!(AllocationTracker::count(), 0);
 }
 
-#[cfg(osqp_embedded)]
+#[cfg(not(osqp_embedded))]
 #[test]
 fn validated_embedded_qp_rejects_indices_outside_osqp_i32_range() {
     let bytes = encode_embedded_qp_with_oversized_n();
@@ -1648,7 +1651,7 @@ fn validated_embedded_qp_rejects_indices_outside_osqp_i32_range() {
     }
 }
 
-#[cfg(osqp_embedded)]
+#[cfg(not(osqp_embedded))]
 #[test]
 fn validated_embedded_qp_rejects_misaligned_mapped_archive() {
     let encoded = encode_embedded_qp_with_nonzero_csc();

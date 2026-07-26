@@ -70,12 +70,6 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
 }
 
 impl PreparedQpProgram {
-    fn invalid_instance_error() -> RuntimeError {
-        RuntimeError::Validation(
-            "detached prepared QP instance is invalid after a prior update failure",
-        )
-    }
-
     pub fn execute(
         &mut self,
         program: MappedQpProgram<'_>,
@@ -267,6 +261,10 @@ fn execute_qp_program(
     })
 }
 
+fn is_aligned(value: usize, alignment: usize) -> bool {
+    value.checked_rem(alignment) == Some(0)
+}
+
 impl<'a> BoundQpArena<'a> {
     fn new(
         arena: &'a mut [MaybeUninit<u8>],
@@ -276,7 +274,7 @@ impl<'a> BoundQpArena<'a> {
         if arena.len() < requirements.arena_bytes
             || requirements.arena_alignment == 0
             || !requirements.arena_alignment.is_power_of_two()
-            || (base.as_ptr() as usize) % requirements.arena_alignment != 0
+            || !is_aligned(base.as_ptr() as usize, requirements.arena_alignment)
         {
             return Err(RuntimeError::EmbeddedQpWorkspaceInvalid);
         }
