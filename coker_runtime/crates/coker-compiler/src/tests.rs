@@ -1,8 +1,11 @@
+use core::mem::{align_of, size_of};
+
 use super::*;
 use coker_bytecode::{
     decode_module, EmbeddedCscPattern, EmbeddedLinsysSolver, EmbeddedOsqpSettings,
-    EmbeddedQpProfile, Layer, QdldlSymbolicL, QpProgramArenaRegion, QpProgramQdldlPlan, ScalarOp,
+    EmbeddedQpProfile, Layer, QdldlSymbolicL, QpProgramQdldlPlan, ScalarOp,
 };
+use coker_osqp_ffi::raw_embedded as ffi_raw;
 use serde_json::{json, Value};
 
 const QP_ARENA_REGION_NAMES: &[&str] = &[
@@ -438,14 +441,16 @@ fn compile_exported_qp_json_builds_single_module_with_qp_program() {
             },
         }
     );
+    let qdldl_l = qp_program.embedded_plan.arena_layout.qdldl_l;
     assert_eq!(
-        qp_program.embedded_plan.arena_layout.qdldl_l,
-        QpProgramArenaRegion {
-            byte_offset: 14,
-            byte_len: 1,
-            byte_alignment: 1,
-        }
+        qdldl_l.byte_len as usize,
+        size_of::<ffi_raw::OSQPCscMatrix>()
     );
+    assert_eq!(
+        qdldl_l.byte_alignment as usize,
+        align_of::<ffi_raw::OSQPCscMatrix>()
+    );
+    assert_eq!(qdldl_l.byte_offset % qdldl_l.byte_alignment, 0);
 }
 
 #[test]
