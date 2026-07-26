@@ -1,5 +1,5 @@
 #include "coker_osqp_abi.h"
-#include "lin_sys/direct/qdldl/qdldl_interface.h"
+#include "algebra/_common/lin_sys/qdldl/qdldl_interface.h"
 #include "auxil.h"
 #include "kkt.h"
 #include "osqp.h"
@@ -18,23 +18,22 @@
 #if !defined(EMBEDDED) || (EMBEDDED != 2)
 #error "coker_osqp_abi.c requires EMBEDDED=2"
 #endif
-#ifdef DLONG
-#error "coker_osqp_abi.c requires DLONG to be disabled"
+#ifdef OSQP_USE_LONG
+#error "coker_osqp_abi.c requires OSQP_USE_LONG to be disabled"
 #endif
-#ifndef DFLOAT
-#error "coker_osqp_abi.c requires DFLOAT"
+#ifndef OSQP_USE_FLOAT
+#error "coker_osqp_abi.c requires OSQP_USE_FLOAT"
 #endif
-#ifdef ENABLE_MKL_PARDISO
+#ifdef OSQP_ALGEBRA_MKL
 #error "coker_osqp_abi.c requires MKL to be disabled"
 #endif
-#ifdef PRINTING
+#ifdef OSQP_ENABLE_PRINTING
 #error "coker_osqp_abi.c requires printing to be disabled"
 #endif
-#ifdef PROFILING
+#ifdef OSQP_ENABLE_PROFILING
 #error "coker_osqp_abi.c requires profiling to be disabled"
 #endif
 
-COKER_STATIC_ASSERT(pointer_width, sizeof(void *) == 4);
 COKER_STATIC_ASSERT(c_float_width, sizeof(c_float) == 4);
 COKER_STATIC_ASSERT(c_int_width, sizeof(c_int) == 4);
 COKER_STATIC_ASSERT(abi_float_width, sizeof(float) == sizeof(c_float));
@@ -42,19 +41,6 @@ COKER_STATIC_ASSERT(abi_index_width, sizeof(int32_t) == sizeof(c_int));
 COKER_STATIC_ASSERT(abi_status_width, sizeof(CokerOsqpStatus) == sizeof(c_int));
 COKER_STATIC_ASSERT(abi_solve_status_width,
                     sizeof(CokerOsqpSolveStatus) == sizeof(c_int));
-COKER_STATIC_ASSERT(csc_align, COKER_ALIGNOF(csc) == 4);
-COKER_STATIC_ASSERT(csc_column_pointer_offset, offsetof(csc, p) == 3 * sizeof(c_int));
-COKER_STATIC_ASSERT(csc_row_index_offset,
-                    offsetof(csc, i) == offsetof(csc, p) + sizeof(c_int *));
-COKER_STATIC_ASSERT(csc_value_offset,
-                    offsetof(csc, x) == offsetof(csc, i) + sizeof(c_int *));
-COKER_STATIC_ASSERT(osqp_data_align, COKER_ALIGNOF(OSQPData) == 4);
-COKER_STATIC_ASSERT(osqp_scaling_align, COKER_ALIGNOF(OSQPScaling) == 4);
-COKER_STATIC_ASSERT(osqp_solution_align, COKER_ALIGNOF(OSQPSolution) == 4);
-COKER_STATIC_ASSERT(osqp_info_align, COKER_ALIGNOF(OSQPInfo) == 4);
-COKER_STATIC_ASSERT(linsys_solver_align, COKER_ALIGNOF(LinSysSolver) == 4);
-COKER_STATIC_ASSERT(qdldl_solver_align, COKER_ALIGNOF(qdldl_solver) == 4);
-COKER_STATIC_ASSERT(osqp_workspace_align, COKER_ALIGNOF(OSQPWorkspace) == 4);
 
 static int coker_osqp_checked_add(coker_osqp_size_t left,
                                   coker_osqp_size_t right,

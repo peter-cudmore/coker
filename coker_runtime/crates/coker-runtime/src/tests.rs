@@ -1491,6 +1491,7 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
     let valid = [2.0f32, -4.0, 1.0, 0.0, 10.0, 0.0];
     let short_error = match bound.execute(
         &[&valid],
+        None,
         MappedQpWorkspace::new(&mut evaluator_workspace, &mut short_coefficient_outputs),
         &mut outputs,
     ) {
@@ -1508,6 +1509,7 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
     let invalid = [-1.0f32, -4.0, 1.0, 0.0, 10.0, 0.0];
     let error = match bound.execute(
         &[&invalid],
+        None,
         MappedQpWorkspace::new(&mut evaluator_workspace, &mut exact_coefficient_outputs),
         &mut outputs,
     ) {
@@ -1525,6 +1527,7 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
     let diagnostics = bound
         .execute(
             &[&valid],
+            None,
             MappedQpWorkspace::new(&mut evaluator_workspace, &mut oversized_coefficient_outputs),
             &mut outputs,
         )

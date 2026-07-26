@@ -1,6 +1,5 @@
 use core::ffi::c_char;
-
-use {c_float, c_int, OSQPTimer};
+use {c_float, c_int};
 
 pub const QDLDL_SOLVER: linsys_solver_type = 0;
 pub const MKL_PARDISO_SOLVER: linsys_solver_type = 1;
@@ -566,6 +565,8 @@ extern "C" {
         instance: *mut CokerOsqpInstance,
         solve_status: *mut CokerOsqpSolveStatus,
     ) -> CokerOsqpStatus;
+    pub fn osqp_warm_start_x(work: *mut OSQPWorkspace, x: *const c_float) -> c_int;
+    pub fn osqp_warm_start_y(work: *mut OSQPWorkspace, y: *const c_float) -> c_int;
     pub fn coker_osqp_solution(
         instance: *const CokerOsqpInstance,
         solution: *mut CokerOsqpSolution,

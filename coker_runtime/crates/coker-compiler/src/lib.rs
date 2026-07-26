@@ -5,14 +5,16 @@ mod model;
 mod tests;
 mod util;
 
+use core::mem::{align_of, size_of};
+
 use coker_bytecode::{
     encode_module, BytecodeModule, EmbeddedCscPattern, EmbeddedLinsysSolver, EmbeddedOsqpSettings,
     EmbeddedQpProfile, Executable, InputSpec, OutputSpec, Program, QdldlSymbolicL,
     QpCoefficientOutputs, QpOutputSlice, QpProgram, QpProgramArenaLayout, QpProgramArenaRegion,
     QpProgramPlan, QpProgramQdldlPlan,
 };
+use coker_osqp_ffi::raw_embedded as ffi_raw;
 use thiserror::Error;
-
 use crate::util::checked_u16;
 
 pub(crate) const UNUSED_OPERAND: u16 = u16::MAX;
@@ -151,7 +153,7 @@ fn build_exported_qp_program(
         "a_pattern.indices",
     )?;
     let coefficient_outputs = lower_qp_coefficient_outputs(&exported_qp.coefficient_outputs)?;
-    let embedded_plan = lower_qp_program_plan(exported_qp.embedded_plan)?;
+    let embedded_plan = lower_qp_program_plan(exported_qp.embedded_plan, &p_pattern, &a_pattern)?;
 
     let coefficient_program =
         functions
@@ -338,6 +340,8 @@ fn lower_qp_coefficient_outputs(
 
 fn lower_qp_program_plan(
     exported_plan: model::ExportedQpProgramPlan,
+    p_pattern: &EmbeddedCscPattern,
+    a_pattern: &EmbeddedCscPattern,
 ) -> Result<QpProgramPlan, CompileError> {
     if exported_plan.profile != model::ExportedEmbeddedQpProfile::Osqp063Embedded2Qdldl {
         return Err(CompileError::InvalidField {
@@ -361,13 +365,17 @@ fn lower_qp_program_plan(
         });
     }
 
+    let settings = lower_embedded_osqp_settings(exported_plan.settings)?;
+    let qdldl_plan = lower_qp_program_qdldl_plan(exported_plan.qdldl_plan)?;
+    let arena_layout = compute_qp_program_arena_layout(p_pattern, a_pattern, &qdldl_plan)?;
+
     Ok(QpProgramPlan {
         abi_version,
         profile: EmbeddedQpProfile::Osqp063Embedded2Qdldl,
         version,
-        settings: lower_embedded_osqp_settings(exported_plan.settings)?,
-        arena_layout: lower_qp_program_arena_layout(exported_plan.arena_layout)?,
-        qdldl_plan: lower_qp_program_qdldl_plan(exported_plan.qdldl_plan)?,
+        settings,
+        arena_layout,
+        qdldl_plan,
     })
 }
 
@@ -430,173 +438,226 @@ fn lower_qdldl_symbolic_l(
     })
 }
 
-fn lower_qp_program_arena_layout(
-    layout: model::ExportedQpProgramArenaLayout,
+fn compute_qp_program_arena_layout(
+    p_pattern: &EmbeddedCscPattern,
+    a_pattern: &EmbeddedCscPattern,
+    qdldl_plan: &QpProgramQdldlPlan,
 ) -> Result<QpProgramArenaLayout, CompileError> {
+    let n = p_pattern.ncols as usize;
+    let m = a_pattern.nrows as usize;
+    let p_nnz = p_pattern.indices.len();
+    let a_nnz = a_pattern.indices.len();
+    let n_plus_m =
+        n.checked_add(m)
+            .ok_or(CompileError::InvalidField {
+                field: "embedded_plan.arena_layout.total_bytes",
+                reason: "arena layout dimensions overflow usize",
+            })?;
+    let kkt_nnz = qdldl_plan.kkt_pattern.indices.len();
+    let l_nnz = qdldl_plan.symbolic_l.l_pattern.indices.len();
+    let iwork_count =
+        n_plus_m
+            .checked_mul(3)
+            .ok_or(CompileError::InvalidField {
+                field: "embedded_plan.arena_layout.qdldl_iwork",
+                reason: "arena layout dimensions overflow usize",
+            })?;
+
+    let mut offset = 0usize;
+    let mut arena_alignment = 1usize;
+
+    let pdata_x =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, p_nnz, "embedded_plan.arena_layout.pdata_x")?;
+    let pdata =
+        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.pdata")?;
+    let adata_x =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, a_nnz, "embedded_plan.arena_layout.adata_x")?;
+    let adata =
+        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.adata")?;
+    let qdata =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.qdata")?;
+    let ldata =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.ldata")?;
+    let udata =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.udata")?;
+    let data =
+        push_qp_arena_region::<ffi_raw::OSQPData>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.data")?;
+    let settings =
+        push_qp_arena_region::<ffi_raw::OSQPSettings>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.settings")?;
+    let xsolution =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.xsolution")?;
+    let ysolution =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.ysolution")?;
+    let solution =
+        push_qp_arena_region::<ffi_raw::OSQPSolution>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.solution")?;
+    let info =
+        push_qp_arena_region::<ffi_raw::OSQPInfo>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.info")?;
+    let qdldl_l_x =
+        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, l_nnz, "embedded_plan.arena_layout.qdldl_l_x")?;
+    let qdldl_l =
+        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.qdldl_l")?;
+    let qdldl_kkt_x =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, kkt_nnz, "embedded_plan.arena_layout.qdldl_kkt_x")?;
+    let qdldl_kkt =
+        push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.qdldl_kkt")?;
+    let qdldl =
+        push_qp_arena_region::<ffi_raw::qdldl_solver>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.qdldl")?;
+    let qdldl_dinv =
+        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_dinv")?;
+    let qdldl_bp =
+        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_bp")?;
+    let qdldl_sol =
+        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_sol")?;
+    let qdldl_rho_inv_vec =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.qdldl_rho_inv_vec")?;
+    let qdldl_d =
+        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_d")?;
+    let qdldl_iwork =
+        push_qp_arena_region::<ffi_raw::QDLDL_int>(&mut offset, &mut arena_alignment, iwork_count, "embedded_plan.arena_layout.qdldl_iwork")?;
+    let qdldl_bwork =
+        push_qp_arena_region::<ffi_raw::QDLDL_bool>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_bwork")?;
+    let qdldl_fwork =
+        push_qp_arena_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.qdldl_fwork")?;
+    let work_rho_vec =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_rho_vec")?;
+    let work_rho_inv_vec =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_rho_inv_vec")?;
+    let work_constr_type =
+        push_qp_arena_region::<ffi_raw::OSQPInt>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_constr_type")?;
+    let work_x =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_x")?;
+    let work_y =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_y")?;
+    let work_z =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_z")?;
+    let work_xz_tilde =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n_plus_m, "embedded_plan.arena_layout.work_xz_tilde")?;
+    let work_x_prev =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_x_prev")?;
+    let work_z_prev =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_z_prev")?;
+    let work_ax =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_ax")?;
+    let work_px =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_px")?;
+    let work_aty =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_aty")?;
+    let work_delta_y =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_delta_y")?;
+    let work_atdelta_y =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_atdelta_y")?;
+    let work_delta_x =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_delta_x")?;
+    let work_pdelta_x =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, n, "embedded_plan.arena_layout.work_pdelta_x")?;
+    let work_adelta_x =
+        push_qp_arena_region::<ffi_raw::OSQPFloat>(&mut offset, &mut arena_alignment, m, "embedded_plan.arena_layout.work_adelta_x")?;
+    let workspace =
+        push_qp_arena_region::<ffi_raw::OSQPWorkspace>(&mut offset, &mut arena_alignment, 1, "embedded_plan.arena_layout.workspace")?;
+
+    let total_bytes = align_up_checked(
+        offset,
+        arena_alignment,
+        "embedded_plan.arena_layout.total_bytes",
+    )?;
+
     Ok(QpProgramArenaLayout {
-        total_bytes: checked_embedded_qp_u32(
-            layout.total_bytes,
-            "embedded_plan.arena_layout.total_bytes",
-        )?,
-        arena_alignment: checked_embedded_qp_u32(
-            layout.arena_alignment,
+        total_bytes: checked_qp_u32(total_bytes, "embedded_plan.arena_layout.total_bytes")?,
+        arena_alignment: checked_qp_u32(
+            arena_alignment,
             "embedded_plan.arena_layout.arena_alignment",
         )?,
-        pdata_x: lower_qp_program_arena_region(
-            layout.pdata_x,
-            "embedded_plan.arena_layout.pdata_x",
-        )?,
-        pdata: lower_qp_program_arena_region(layout.pdata, "embedded_plan.arena_layout.pdata")?,
-        adata_x: lower_qp_program_arena_region(
-            layout.adata_x,
-            "embedded_plan.arena_layout.adata_x",
-        )?,
-        adata: lower_qp_program_arena_region(layout.adata, "embedded_plan.arena_layout.adata")?,
-        qdata: lower_qp_program_arena_region(layout.qdata, "embedded_plan.arena_layout.qdata")?,
-        ldata: lower_qp_program_arena_region(layout.ldata, "embedded_plan.arena_layout.ldata")?,
-        udata: lower_qp_program_arena_region(layout.udata, "embedded_plan.arena_layout.udata")?,
-        data: lower_qp_program_arena_region(layout.data, "embedded_plan.arena_layout.data")?,
-        settings: lower_qp_program_arena_region(
-            layout.settings,
-            "embedded_plan.arena_layout.settings",
-        )?,
-        xsolution: lower_qp_program_arena_region(
-            layout.xsolution,
-            "embedded_plan.arena_layout.xsolution",
-        )?,
-        ysolution: lower_qp_program_arena_region(
-            layout.ysolution,
-            "embedded_plan.arena_layout.ysolution",
-        )?,
-        solution: lower_qp_program_arena_region(
-            layout.solution,
-            "embedded_plan.arena_layout.solution",
-        )?,
-        info: lower_qp_program_arena_region(layout.info, "embedded_plan.arena_layout.info")?,
-        qdldl_l_x: lower_qp_program_arena_region(
-            layout.qdldl_l_x,
-            "embedded_plan.arena_layout.qdldl_l_x",
-        )?,
-        qdldl_l: lower_qp_program_arena_region(
-            layout.qdldl_l,
-            "embedded_plan.arena_layout.qdldl_l",
-        )?,
-        qdldl_kkt_x: lower_qp_program_arena_region(
-            layout.qdldl_kkt_x,
-            "embedded_plan.arena_layout.qdldl_kkt_x",
-        )?,
-        qdldl_kkt: lower_qp_program_arena_region(
-            layout.qdldl_kkt,
-            "embedded_plan.arena_layout.qdldl_kkt",
-        )?,
-        qdldl: lower_qp_program_arena_region(layout.qdldl, "embedded_plan.arena_layout.qdldl")?,
-        qdldl_dinv: lower_qp_program_arena_region(
-            layout.qdldl_dinv,
-            "embedded_plan.arena_layout.qdldl_dinv",
-        )?,
-        qdldl_bp: lower_qp_program_arena_region(
-            layout.qdldl_bp,
-            "embedded_plan.arena_layout.qdldl_bp",
-        )?,
-        qdldl_sol: lower_qp_program_arena_region(
-            layout.qdldl_sol,
-            "embedded_plan.arena_layout.qdldl_sol",
-        )?,
-        qdldl_rho_inv_vec: lower_qp_program_arena_region(
-            layout.qdldl_rho_inv_vec,
-            "embedded_plan.arena_layout.qdldl_rho_inv_vec",
-        )?,
-        qdldl_d: lower_qp_program_arena_region(
-            layout.qdldl_d,
-            "embedded_plan.arena_layout.qdldl_d",
-        )?,
-        qdldl_iwork: lower_qp_program_arena_region(
-            layout.qdldl_iwork,
-            "embedded_plan.arena_layout.qdldl_iwork",
-        )?,
-        qdldl_bwork: lower_qp_program_arena_region(
-            layout.qdldl_bwork,
-            "embedded_plan.arena_layout.qdldl_bwork",
-        )?,
-        qdldl_fwork: lower_qp_program_arena_region(
-            layout.qdldl_fwork,
-            "embedded_plan.arena_layout.qdldl_fwork",
-        )?,
-        work_rho_vec: lower_qp_program_arena_region(
-            layout.work_rho_vec,
-            "embedded_plan.arena_layout.work_rho_vec",
-        )?,
-        work_rho_inv_vec: lower_qp_program_arena_region(
-            layout.work_rho_inv_vec,
-            "embedded_plan.arena_layout.work_rho_inv_vec",
-        )?,
-        work_constr_type: lower_qp_program_arena_region(
-            layout.work_constr_type,
-            "embedded_plan.arena_layout.work_constr_type",
-        )?,
-        work_x: lower_qp_program_arena_region(layout.work_x, "embedded_plan.arena_layout.work_x")?,
-        work_y: lower_qp_program_arena_region(layout.work_y, "embedded_plan.arena_layout.work_y")?,
-        work_z: lower_qp_program_arena_region(layout.work_z, "embedded_plan.arena_layout.work_z")?,
-        work_xz_tilde: lower_qp_program_arena_region(
-            layout.work_xz_tilde,
-            "embedded_plan.arena_layout.work_xz_tilde",
-        )?,
-        work_x_prev: lower_qp_program_arena_region(
-            layout.work_x_prev,
-            "embedded_plan.arena_layout.work_x_prev",
-        )?,
-        work_z_prev: lower_qp_program_arena_region(
-            layout.work_z_prev,
-            "embedded_plan.arena_layout.work_z_prev",
-        )?,
-        work_ax: lower_qp_program_arena_region(
-            layout.work_ax,
-            "embedded_plan.arena_layout.work_ax",
-        )?,
-        work_px: lower_qp_program_arena_region(
-            layout.work_px,
-            "embedded_plan.arena_layout.work_px",
-        )?,
-        work_aty: lower_qp_program_arena_region(
-            layout.work_aty,
-            "embedded_plan.arena_layout.work_aty",
-        )?,
-        work_delta_y: lower_qp_program_arena_region(
-            layout.work_delta_y,
-            "embedded_plan.arena_layout.work_delta_y",
-        )?,
-        work_atdelta_y: lower_qp_program_arena_region(
-            layout.work_atdelta_y,
-            "embedded_plan.arena_layout.work_atdelta_y",
-        )?,
-        work_delta_x: lower_qp_program_arena_region(
-            layout.work_delta_x,
-            "embedded_plan.arena_layout.work_delta_x",
-        )?,
-        work_pdelta_x: lower_qp_program_arena_region(
-            layout.work_pdelta_x,
-            "embedded_plan.arena_layout.work_pdelta_x",
-        )?,
-        work_adelta_x: lower_qp_program_arena_region(
-            layout.work_adelta_x,
-            "embedded_plan.arena_layout.work_adelta_x",
-        )?,
-        workspace: lower_qp_program_arena_region(
-            layout.workspace,
-            "embedded_plan.arena_layout.workspace",
-        )?,
+        pdata_x,
+        pdata,
+        adata_x,
+        adata,
+        qdata,
+        ldata,
+        udata,
+        data,
+        settings,
+        xsolution,
+        ysolution,
+        solution,
+        info,
+        qdldl_l_x,
+        qdldl_l,
+        qdldl_kkt_x,
+        qdldl_kkt,
+        qdldl,
+        qdldl_dinv,
+        qdldl_bp,
+        qdldl_sol,
+        qdldl_rho_inv_vec,
+        qdldl_d,
+        qdldl_iwork,
+        qdldl_bwork,
+        qdldl_fwork,
+        work_rho_vec,
+        work_rho_inv_vec,
+        work_constr_type,
+        work_x,
+        work_y,
+        work_z,
+        work_xz_tilde,
+        work_x_prev,
+        work_z_prev,
+        work_ax,
+        work_px,
+        work_aty,
+        work_delta_y,
+        work_atdelta_y,
+        work_delta_x,
+        work_pdelta_x,
+        work_adelta_x,
+        workspace,
     })
 }
 
-fn lower_qp_program_arena_region(
-    region: model::ExportedQpProgramArenaRegion,
+fn push_qp_arena_region<T>(
+    offset: &mut usize,
+    arena_alignment: &mut usize,
+    count: usize,
     field: &'static str,
 ) -> Result<QpProgramArenaRegion, CompileError> {
+    let alignment = align_of::<T>();
+    let byte_len = count.checked_mul(size_of::<T>()).ok_or(CompileError::InvalidField {
+        field,
+        reason: "arena region length overflow",
+    })?;
+    *arena_alignment = (*arena_alignment).max(alignment);
+    let byte_offset = align_up_checked(*offset, alignment, field)?;
+    *offset = byte_offset
+        .checked_add(byte_len)
+        .ok_or(CompileError::InvalidField {
+            field,
+            reason: "arena region end overflow",
+        })?;
     Ok(QpProgramArenaRegion {
-        byte_offset: checked_embedded_qp_u32(region.byte_offset, field)?,
-        byte_len: checked_embedded_qp_u32(region.byte_len, field)?,
-        byte_alignment: checked_embedded_qp_u32(region.byte_alignment, field)?,
+        byte_offset: checked_qp_u32(byte_offset, field)?,
+        byte_len: checked_qp_u32(byte_len, field)?,
+        byte_alignment: checked_qp_u32(alignment, field)?,
     })
+}
+
+fn align_up_checked(
+    value: usize,
+    alignment: usize,
+    field: &'static str,
+) -> Result<usize, CompileError> {
+    if alignment == 0 || !alignment.is_power_of_two() {
+        return Err(CompileError::InvalidField {
+            field,
+            reason: "alignment must be a nonzero power of two",
+        });
+    }
+    value
+        .checked_add(alignment - 1)
+        .map(|aligned| aligned & !(alignment - 1))
+        .ok_or(CompileError::InvalidField {
+            field,
+            reason: "arena layout overflow",
+        })
 }
 
 fn lower_embedded_osqp_settings(

@@ -1,12 +1,7 @@
 #![cfg_attr(not(any(feature = "std", osqp_embedded)), allow(dead_code))]
 
 #[cfg(any(osqp_embedded, feature = "std"))]
-use core::{
-    marker::PhantomData,
-    mem::{align_of, size_of, MaybeUninit},
-    ptr::NonNull,
-    slice,
-};
+use core::{convert::TryFrom, marker::PhantomData, mem::MaybeUninit, ptr::NonNull, slice};
 
 #[cfg(all(feature = "std", not(osqp_embedded)))]
 use coker_bytecode::ArchivedQpOutputSlice;
@@ -14,9 +9,7 @@ use coker_bytecode::{
     archived_module, ArchivedInputSpec, ArchivedOutputSpec, ArchivedQpCoefficientOutputs,
     ArchivedQpProgram,
 };
-use coker_osqp_ffi as ffi;
-#[cfg(any(osqp_embedded, feature = "std"))]
-use rkyv::rend::u32_le;
+use coker_osqp_ffi::{self as ffi, raw_embedded as raw};
 
 use crate::{MappedModule, MappedProgram, QpProgramInfo, RuntimeError, SpecInfo};
 #[cfg(all(feature = "std", not(osqp_embedded)))]
@@ -77,23 +70,6 @@ impl QpSolveStatus {
             x if x == ffi::OSQP_TIME_LIMIT_REACHED as ffi::c_int => Self::TimeLimitReached,
             x if x == ffi::OSQP_UNSOLVED as ffi::c_int => Self::Unsolved,
             other => Self::Other(other as i32),
-        }
-    }
-    #[cfg(osqp_embedded)]
-    fn from_embedded_raw(status: ffi::CokerOsqpSolveStatus) -> Self {
-        match status {
-            ffi::COKER_OSQP_SOLVE_SOLVED => Self::Solved,
-            ffi::COKER_OSQP_SOLVE_SOLVED_INACCURATE => Self::SolvedInaccurate,
-            ffi::COKER_OSQP_SOLVE_MAX_ITER_REACHED => Self::MaxIterReached,
-            ffi::COKER_OSQP_SOLVE_PRIMAL_INFEASIBLE => Self::PrimalInfeasible,
-            ffi::COKER_OSQP_SOLVE_PRIMAL_INFEASIBLE_INACCURATE => Self::PrimalInfeasibleInaccurate,
-            ffi::COKER_OSQP_SOLVE_DUAL_INFEASIBLE => Self::DualInfeasible,
-            ffi::COKER_OSQP_SOLVE_DUAL_INFEASIBLE_INACCURATE => Self::DualInfeasibleInaccurate,
-            ffi::COKER_OSQP_SOLVE_NON_CONVEX => Self::NonCvx,
-            ffi::COKER_OSQP_SOLVE_INTERRUPTED => Self::SigInt,
-            ffi::COKER_OSQP_SOLVE_TIME_LIMIT_REACHED => Self::TimeLimitReached,
-            ffi::COKER_OSQP_SOLVE_UNSOLVED => Self::Unsolved,
-            other => Self::Other(other),
         }
     }
 }
@@ -181,7 +157,7 @@ impl<'a> core::fmt::Debug for MappedQpProgram<'a> {
 pub struct BoundMappedQpProgram<'module, 'arena> {
     program: MappedQpProgram<'module>,
     arena: BoundQpArena<'arena>,
-    instance: Option<ffi::CokerOsqpInstance>,
+    instance: Option<EmbeddedOsqpInstance>,
 }
 
 #[cfg(osqp_embedded)]
@@ -189,6 +165,455 @@ struct BoundQpArena<'a> {
     base: NonNull<u8>,
     bytes: usize,
     _borrowed: PhantomData<&'a mut [MaybeUninit<u8>]>,
+}
+/// Detached prepared QP solver state whose arena lifetime is managed externally.
+///
+/// # Safety
+///
+/// The caller must keep the arena passed to [`MappedQpProgram::prepare_detached`] alive,
+/// writable, and at a stable address for the full lifetime of this struct.
+#[cfg(osqp_embedded)]
+pub struct PreparedQpProgram {
+    function_id: u16,
+    instance: Option<EmbeddedOsqpInstance>,
+    arena_base: NonNull<u8>,
+    arena_bytes: usize,
+}
+
+#[cfg(osqp_embedded)]
+#[derive(Debug)]
+struct EmbeddedOsqpInstance {
+    solver: raw::OSQPSolver,
+    data: raw::OSQPData,
+    settings: raw::OSQPSettings,
+    solution: raw::OSQPSolution,
+    info: raw::OSQPInfo,
+    workspace: raw::OSQPWorkspace,
+    pdata_csc: raw::OSQPCscMatrix,
+    adata_csc: raw::OSQPCscMatrix,
+    qdldl_l_csc: raw::OSQPCscMatrix,
+    qdldl_kkt_csc: raw::OSQPCscMatrix,
+    pdata_matrix: raw::OSQPMatrix,
+    adata_matrix: raw::OSQPMatrix,
+    q_vector: raw::OSQPVectorf,
+    l_vector: raw::OSQPVectorf,
+    u_vector: raw::OSQPVectorf,
+    rho_vec: raw::OSQPVectorf,
+    rho_inv_vec: raw::OSQPVectorf,
+    constr_type: raw::OSQPVectori,
+    x: raw::OSQPVectorf,
+    y: raw::OSQPVectorf,
+    z: raw::OSQPVectorf,
+    xz_tilde: raw::OSQPVectorf,
+    xtilde_view: raw::OSQPVectorf,
+    ztilde_view: raw::OSQPVectorf,
+    x_prev: raw::OSQPVectorf,
+    z_prev: raw::OSQPVectorf,
+    ax: raw::OSQPVectorf,
+    px: raw::OSQPVectorf,
+    aty: raw::OSQPVectorf,
+    delta_y: raw::OSQPVectorf,
+    atdelta_y: raw::OSQPVectorf,
+    delta_x: raw::OSQPVectorf,
+    pdelta_x: raw::OSQPVectorf,
+    adelta_x: raw::OSQPVectorf,
+    qdldl: raw::qdldl,
+}
+
+#[cfg(osqp_embedded)]
+impl EmbeddedOsqpInstance {
+    fn solver(&mut self) -> ffi::embedded_bind::EmbeddedSolver {
+        unsafe { ffi::embedded_bind::EmbeddedSolver::from_ptr(&mut self.solver).unwrap() }
+    }
+
+    fn numeric_slices_mut(
+        &mut self,
+        p_nnz: usize,
+        a_nnz: usize,
+        n: usize,
+        m: usize,
+    ) -> Result<(&mut [f32], &mut [f32], &mut [f32], &mut [f32], &mut [f32]), RuntimeError> {
+        let p = &mut self.pdata_csc;
+        let a = &mut self.adata_csc;
+        if (p_nnz != 0 && p.x.is_null())
+            || (a_nnz != 0 && a.x.is_null())
+            || (n != 0 && (self.q_vector.values.is_null()))
+            || (m != 0
+                && (self.l_vector.values.is_null() || self.u_vector.values.is_null()))
+        {
+            return Err(RuntimeError::EmbeddedQpWorkspaceInvalid);
+        }
+        Ok(unsafe {
+            (
+                slice::from_raw_parts_mut(p.x, p_nnz),
+                slice::from_raw_parts_mut(a.x, a_nnz),
+                slice::from_raw_parts_mut(self.q_vector.values, n),
+                slice::from_raw_parts_mut(self.l_vector.values, m),
+                slice::from_raw_parts_mut(self.u_vector.values, m),
+            )
+        })
+    }
+
+    fn apply_settings(
+        &mut self,
+        settings: &coker_bytecode::ArchivedEmbeddedOsqpSettings,
+    ) -> Result<(), RuntimeError> {
+        unsafe { raw::osqp_set_default_settings(&mut self.settings) };
+        self.settings.device = 0;
+        self.settings.allocate_solution = 0;
+        self.settings.verbose = 0;
+        self.settings.profiler_level = 0;
+        self.settings.polishing = 0;
+        self.settings.rho = checked_f32_setting(settings.rho.into(), "QP rho")?;
+        self.settings.sigma = checked_f32_setting(settings.sigma.into(), "QP sigma")?;
+        self.settings.alpha = checked_f32_setting(settings.alpha.into(), "QP alpha")?;
+        self.settings.adaptive_rho = if settings.adaptive_rho { 1 } else { 0 };
+        self.settings.adaptive_rho_interval =
+            i32::try_from(settings.adaptive_rho_interval.to_native())
+                .map_err(|_| RuntimeError::EmbeddedQpWorkspaceInvalid)?;
+        self.settings.adaptive_rho_tolerance = checked_f32_setting(
+            settings.adaptive_rho_tolerance.into(),
+            "QP adaptive_rho_tolerance",
+        )?;
+        self.settings.max_iter = i32::try_from(settings.max_iter.to_native())
+            .map_err(|_| RuntimeError::EmbeddedQpWorkspaceInvalid)?;
+        self.settings.eps_abs = checked_f32_setting(settings.eps_abs.into(), "QP eps_abs")?;
+        self.settings.eps_rel = checked_f32_setting(settings.eps_rel.into(), "QP eps_rel")?;
+        self.settings.eps_prim_inf =
+            checked_f32_setting(settings.eps_prim_inf.into(), "QP eps_prim_inf")?;
+        self.settings.eps_dual_inf =
+            checked_f32_setting(settings.eps_dual_inf.into(), "QP eps_dual_inf")?;
+        self.settings.scaling = i32::try_from(settings.scaling.to_native())
+            .map_err(|_| RuntimeError::EmbeddedQpWorkspaceInvalid)?;
+        self.settings.scaled_termination = if settings.scaled_termination { 1 } else { 0 };
+        self.settings.check_termination = i32::try_from(settings.check_termination.to_native())
+            .map_err(|_| RuntimeError::EmbeddedQpWorkspaceInvalid)?;
+        self.settings.warm_starting = if settings.warm_start { 1 } else { 0 };
+        self.settings.linsys_solver = raw::osqp_linsys_solver_type_OSQP_DIRECT_SOLVER;
+        self.settings.rho_is_vec = 1;
+        Ok(())
+    }
+    fn refresh_self_pointers(&mut self) {
+        ffi::embedded_bind::bind_matrix(
+            &mut self.pdata_matrix,
+            &mut self.pdata_csc,
+            raw::OSQPMatrix_symmetry_type_TRIU,
+        );
+        ffi::embedded_bind::bind_matrix(
+            &mut self.adata_matrix,
+            &mut self.adata_csc,
+            raw::OSQPMatrix_symmetry_type_NONE,
+        );
+        self.data.P = &mut self.pdata_matrix;
+        self.data.A = &mut self.adata_matrix;
+        self.data.q = &mut self.q_vector;
+        self.data.l = &mut self.l_vector;
+        self.data.u = &mut self.u_vector;
+        self.qdldl.L = &mut self.qdldl_l_csc;
+        self.qdldl.KKT = &mut self.qdldl_kkt_csc;
+        self.qdldl.sigma = self.settings.sigma;
+        self.workspace.data = &mut self.data;
+        self.workspace.linsys_solver = (&mut self.qdldl as *mut raw::qdldl).cast();
+        self.workspace.rho_vec = &mut self.rho_vec;
+        self.workspace.rho_inv_vec = &mut self.rho_inv_vec;
+        self.workspace.constr_type = &mut self.constr_type;
+        self.workspace.x = &mut self.x;
+        self.workspace.y = &mut self.y;
+        self.workspace.z = &mut self.z;
+        self.workspace.xz_tilde = &mut self.xz_tilde;
+        self.workspace.xtilde_view = &mut self.xtilde_view;
+        self.workspace.ztilde_view = &mut self.ztilde_view;
+        self.workspace.x_prev = &mut self.x_prev;
+        self.workspace.z_prev = &mut self.z_prev;
+        self.workspace.Ax = &mut self.ax;
+        self.workspace.Px = &mut self.px;
+        self.workspace.Aty = &mut self.aty;
+        self.workspace.delta_y = &mut self.delta_y;
+        self.workspace.Atdelta_y = &mut self.atdelta_y;
+        self.workspace.delta_x = &mut self.delta_x;
+        self.workspace.Pdelta_x = &mut self.pdelta_x;
+        self.workspace.Adelta_x = &mut self.adelta_x;
+        self.solver.settings = &mut self.settings;
+        self.solver.solution = &mut self.solution;
+        self.solution.prim_inf_cert = self.delta_y.values;
+        self.solution.dual_inf_cert = self.delta_x.values;
+        self.solver.info = &mut self.info;
+        self.solver.work = &mut self.workspace;
+    }
+
+    fn bind(
+        qp_program: &ArchivedQpProgram,
+        arena: &BoundQpArena<'_>,
+    ) -> Result<Self, RuntimeError> {
+        let plan = qp_program.embedded_plan();
+        let layout = plan.arena_layout();
+        let qdldl_plan = plan.qdldl_plan();
+        let symbolic_l = qdldl_plan.symbolic_l();
+        let n = checked_embedded_ffi_length(qp_program.p_pattern().ncols.to_native() as usize)?;
+        let m = checked_embedded_ffi_length(qp_program.a_pattern().nrows.to_native() as usize)?;
+        let n_plus_m = n
+            .checked_add(m)
+            .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?;
+        let p_nnz = checked_embedded_ffi_length(qp_program.p_pattern().indices.len())?;
+        let a_nnz = checked_embedded_ffi_length(qp_program.a_pattern().indices.len())?;
+        let kkt_nnz = checked_embedded_ffi_length(qdldl_plan.kkt_pattern().indices.len())?;
+        let l_nnz = checked_embedded_ffi_length(symbolic_l.l_pattern().indices.len())?;
+        let storage = unsafe {
+            slice::from_raw_parts_mut(arena.base.as_ptr().cast::<MaybeUninit<u8>>(), arena.bytes)
+        };
+        let mut embedded_arena = ffi::embedded_bind::EmbeddedArena::new(storage);
+        if !embedded_arena.zero_region(0, arena.bytes) {
+            return Err(RuntimeError::EmbeddedQpWorkspaceInvalid);
+        }
+        macro_rules! region_ptr {
+            ($ty:ty, $region:expr) => {{
+                embedded_arena
+                    .region_ptr::<$ty>(
+                        checked_embedded_usize(($region).byte_offset(), "QP arena offset")?,
+                        checked_embedded_usize(($region).byte_len(), "QP arena length")?,
+                        checked_embedded_usize(($region).byte_alignment(), "QP arena alignment")?,
+                    )
+                    .map(NonNull::as_ptr)
+                    .ok_or(RuntimeError::Validation(concat!(
+                        "embedded OSQP arena region is invalid for ",
+                        stringify!($region)
+                    )))?
+            }};
+        }
+        let mut instance: Self = unsafe { core::mem::zeroed() };
+        ffi::embedded_bind::bind_csc_matrix(
+            &mut instance.pdata_csc,
+            n,
+            n,
+            p_nnz,
+            qp_program.p_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
+            qp_program.p_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            region_ptr!(f32, layout.pdata_x()),
+        );
+        ffi::embedded_bind::bind_csc_matrix(
+            &mut instance.adata_csc,
+            m,
+            n,
+            a_nnz,
+            qp_program.a_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
+            qp_program.a_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            region_ptr!(f32, layout.adata_x()),
+        );
+        ffi::embedded_bind::bind_csc_matrix(
+            &mut instance.qdldl_l_csc,
+            n_plus_m,
+            n_plus_m,
+            l_nnz,
+            symbolic_l.l_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
+            symbolic_l.l_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            region_ptr!(f32, layout.qdldl_l_x()),
+        );
+        ffi::embedded_bind::bind_csc_matrix(
+            &mut instance.qdldl_kkt_csc,
+            n_plus_m,
+            n_plus_m,
+            kkt_nnz,
+            qdldl_plan.kkt_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
+            qdldl_plan.kkt_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            region_ptr!(f32, layout.qdldl_kkt_x()),
+        );
+        ffi::embedded_bind::bind_matrix(
+            &mut instance.pdata_matrix,
+            &mut instance.pdata_csc,
+            raw::OSQPMatrix_symmetry_type_TRIU,
+        );
+        ffi::embedded_bind::bind_matrix(
+            &mut instance.adata_matrix,
+            &mut instance.adata_csc,
+            raw::OSQPMatrix_symmetry_type_NONE,
+        );
+        ffi::embedded_bind::bind_vectorf(&mut instance.q_vector, region_ptr!(f32, layout.qdata()), n);
+        ffi::embedded_bind::bind_vectorf(&mut instance.l_vector, region_ptr!(f32, layout.ldata()), m);
+        ffi::embedded_bind::bind_vectorf(&mut instance.u_vector, region_ptr!(f32, layout.udata()), m);
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.rho_vec,
+            region_ptr!(f32, layout.work_rho_vec()),
+            m,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.rho_inv_vec,
+            region_ptr!(f32, layout.work_rho_inv_vec()),
+            m,
+        );
+        ffi::embedded_bind::bind_vectori(
+            &mut instance.constr_type,
+            region_ptr!(i32, layout.work_constr_type()),
+            m,
+        );
+        ffi::embedded_bind::bind_vectorf(&mut instance.x, region_ptr!(f32, layout.work_x()), n);
+        ffi::embedded_bind::bind_vectorf(&mut instance.y, region_ptr!(f32, layout.work_y()), m);
+        ffi::embedded_bind::bind_vectorf(&mut instance.z, region_ptr!(f32, layout.work_z()), m);
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.xz_tilde,
+            region_ptr!(f32, layout.work_xz_tilde()),
+            n_plus_m,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.xtilde_view,
+            instance.xz_tilde.values,
+            n,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.ztilde_view,
+            unsafe { instance.xz_tilde.values.add(n as usize) },
+            m,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.x_prev,
+            region_ptr!(f32, layout.work_x_prev()),
+            n,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.z_prev,
+            region_ptr!(f32, layout.work_z_prev()),
+            m,
+        );
+        ffi::embedded_bind::bind_vectorf(&mut instance.ax, region_ptr!(f32, layout.work_ax()), m);
+        ffi::embedded_bind::bind_vectorf(&mut instance.px, region_ptr!(f32, layout.work_px()), n);
+        ffi::embedded_bind::bind_vectorf(&mut instance.aty, region_ptr!(f32, layout.work_aty()), n);
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.delta_y,
+            region_ptr!(f32, layout.work_delta_y()),
+            m,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.atdelta_y,
+            region_ptr!(f32, layout.work_atdelta_y()),
+            n,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.delta_x,
+            region_ptr!(f32, layout.work_delta_x()),
+            n,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.pdelta_x,
+            region_ptr!(f32, layout.work_pdelta_x()),
+            n,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.adelta_x,
+            region_ptr!(f32, layout.work_adelta_x()),
+            m,
+        );
+        instance.data.n = n;
+        instance.data.m = m;
+        instance.data.P = &mut instance.pdata_matrix;
+        instance.data.A = &mut instance.adata_matrix;
+        instance.data.q = &mut instance.q_vector;
+        instance.data.l = &mut instance.l_vector;
+        instance.data.u = &mut instance.u_vector;
+        instance.apply_settings(plan.settings())?;
+        instance.solution.x = region_ptr!(f32, layout.xsolution());
+        instance.solution.y = region_ptr!(f32, layout.ysolution());
+        instance.qdldl.type_ = raw::osqp_linsys_solver_type_OSQP_DIRECT_SOLVER;
+        instance.qdldl.name = Some(raw::name_qdldl);
+        instance.qdldl.solve = Some(raw::solve_linsys_qdldl);
+        instance.qdldl.update_settings = Some(raw::update_settings_linsys_solver_qdldl);
+        instance.qdldl.warm_start = Some(raw::warm_start_linsys_solver_qdldl);
+        instance.qdldl.update_matrices = Some(raw::update_linsys_solver_matrices_qdldl);
+        instance.qdldl.update_rho_vec = Some(raw::update_linsys_solver_rho_vec_qdldl);
+        instance.qdldl.nthreads = 1;
+        instance.qdldl.L = &mut instance.qdldl_l_csc;
+        instance.qdldl.Dinv = region_ptr!(f32, layout.qdldl_dinv());
+        instance.qdldl.P = qdldl_plan.kkt_permutation.as_ptr().cast::<i32>().cast_mut();
+        instance.qdldl.bp = region_ptr!(f32, layout.qdldl_bp());
+        instance.qdldl.sol = region_ptr!(f32, layout.qdldl_sol());
+        instance.qdldl.rho_inv_vec = region_ptr!(f32, layout.qdldl_rho_inv_vec());
+        instance.qdldl.sigma = instance.settings.sigma;
+        instance.qdldl.rho_inv = 0.0;
+        instance.qdldl.n = n;
+        instance.qdldl.m = m;
+        instance.qdldl.KKT = &mut instance.qdldl_kkt_csc;
+        instance.qdldl.PtoKKT = qdldl_plan.p_to_kkt.as_ptr().cast::<i32>().cast_mut();
+        instance.qdldl.AtoKKT = qdldl_plan.a_to_kkt.as_ptr().cast::<i32>().cast_mut();
+        instance.qdldl.rhotoKKT = qdldl_plan.rho_to_kkt.as_ptr().cast::<i32>().cast_mut();
+        instance.qdldl.D = region_ptr!(f32, layout.qdldl_d());
+        instance.qdldl.etree = symbolic_l.etree().as_ptr().cast::<i32>().cast_mut();
+        instance.qdldl.Lnz = symbolic_l.lnz().as_ptr().cast::<i32>().cast_mut();
+        instance.qdldl.iwork = region_ptr!(i32, layout.qdldl_iwork());
+        instance.qdldl.bwork = region_ptr!(u8, layout.qdldl_bwork());
+        instance.qdldl.fwork = region_ptr!(f32, layout.qdldl_fwork());
+        instance.qdldl.adj = core::ptr::null_mut();
+        instance.workspace.data = &mut instance.data;
+        instance.workspace.linsys_solver = (&mut instance.qdldl as *mut raw::qdldl).cast();
+        instance.workspace.rho_vec = &mut instance.rho_vec;
+        instance.workspace.rho_inv_vec = &mut instance.rho_inv_vec;
+        instance.workspace.constr_type = &mut instance.constr_type;
+        instance.workspace.x = &mut instance.x;
+        instance.workspace.y = &mut instance.y;
+        instance.workspace.z = &mut instance.z;
+        instance.workspace.xz_tilde = &mut instance.xz_tilde;
+        instance.workspace.xtilde_view = &mut instance.xtilde_view;
+        instance.workspace.ztilde_view = &mut instance.ztilde_view;
+        instance.workspace.x_prev = &mut instance.x_prev;
+        instance.workspace.z_prev = &mut instance.z_prev;
+        instance.workspace.Ax = &mut instance.ax;
+        instance.workspace.Px = &mut instance.px;
+        instance.workspace.Aty = &mut instance.aty;
+        instance.workspace.delta_y = &mut instance.delta_y;
+        instance.workspace.Atdelta_y = &mut instance.atdelta_y;
+        instance.workspace.delta_x = &mut instance.delta_x;
+        instance.workspace.Pdelta_x = &mut instance.pdelta_x;
+        instance.workspace.Adelta_x = &mut instance.adelta_x;
+        instance.workspace.D_temp = core::ptr::null_mut();
+        instance.workspace.D_temp_A = core::ptr::null_mut();
+        instance.workspace.E_temp = core::ptr::null_mut();
+        instance.solution.prim_inf_cert = instance.delta_y.values;
+        instance.solution.dual_inf_cert = instance.delta_x.values;
+        instance.workspace.scaled_dual_res = 0.0;
+        instance.workspace.rho_inv = 0.0;
+        instance.workspace.rho_updated = 0;
+        instance.workspace.last_rel_kkt = 0.0;
+        instance.solver.settings = &mut instance.settings;
+        instance.solver.solution = &mut instance.solution;
+        instance.solver.info = &mut instance.info;
+        instance.solver.work = &mut instance.workspace;
+        instance.reset_solution_state();
+        unsafe {
+            raw::set_rho_vec(&mut instance.solver);
+            if m != 0 {
+                let rho_inv = slice::from_raw_parts(instance.rho_inv_vec.values, m as usize);
+                let qdldl_rho_inv =
+                    slice::from_raw_parts_mut(instance.qdldl.rho_inv_vec, m as usize);
+                qdldl_rho_inv.copy_from_slice(rho_inv);
+                raw::update_KKT_param2(
+                    instance.qdldl.KKT,
+                    instance.qdldl.rho_inv_vec,
+                    instance.qdldl.rho_inv,
+                    instance.qdldl.rhotoKKT,
+                    m,
+                );
+            }
+            let update_status = raw::update_linsys_solver_matrices_qdldl(
+                &mut instance.qdldl,
+                &instance.pdata_matrix,
+                core::ptr::null(),
+                p_nnz,
+                &instance.adata_matrix,
+                core::ptr::null(),
+                a_nnz,
+            );
+            if update_status != 0 {
+                return Err(RuntimeError::Validation(
+                    "embedded QDLDL factorization failed during Rust binder setup",
+                ));
+            }
+        }
+        Ok(instance)
+    }
+
+    fn reset_solution_state(&mut self) {
+        self.solution.prim_inf_cert = self.delta_y.values;
+        self.solution.dual_inf_cert = self.delta_x.values;
+        unsafe { raw::reset_info(&mut self.info) };
+        self.info.rho_estimate = self.settings.rho;
+    }
 }
 /// Bound host QP program paired with a reusable host-side runtime workspace.
 #[cfg(all(feature = "std", not(osqp_embedded)))]

@@ -17,7 +17,7 @@ mod validation_common;
 mod workspace;
 
 #[cfg(osqp_embedded)]
-pub use crate::qp::BoundMappedQpProgram;
+pub use crate::qp::{BoundMappedQpProgram, PreparedQpProgram};
 pub use crate::qp::{
     MappedQpProgram, MappedQpWorkspace, QpSolveDiagnostics, QpSolveStatus,
     QpWorkspaceRequirements,
