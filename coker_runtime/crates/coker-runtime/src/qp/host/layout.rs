@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(all(feature = "std", not(osqp_embedded)))]
+use alloc::vec::Vec;
 
 #[cfg(all(feature = "std", not(osqp_embedded)))]
 /// Byte range for one region inside a packed host QP workspace.
