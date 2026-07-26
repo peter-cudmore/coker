@@ -70,6 +70,7 @@ pub(crate) enum ExportedEmbeddedLinsysSolver {
     Qdldl,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ExportedQpProgramPlan {
@@ -133,6 +134,7 @@ pub(crate) struct ExportedEmbeddedCscPattern {
     pub(crate) indices: Vec<u64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ExportedQpProgramArenaLayout {
@@ -184,6 +186,7 @@ pub(crate) struct ExportedQpProgramArenaLayout {
     pub(crate) workspace: ExportedQpProgramArenaRegion,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ExportedQpProgramArenaRegion {

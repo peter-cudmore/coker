@@ -1,8 +1,8 @@
 use super::*;
 use core::mem::align_of;
-use rkyv::{rancor::Error as RkyvError, to_bytes};
 #[cfg(feature = "std")]
 use rkyv::{access, util::AlignedVec};
+use rkyv::{rancor::Error as RkyvError, to_bytes};
 pub(crate) fn archive_payload<'a>(
     bytes: &'a [u8],
     magic: &[u8; 8],

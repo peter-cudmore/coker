@@ -149,8 +149,9 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
                     view.dual_warm_start.copy_from_slice(values);
                 }
             }
-            let primal =
-                primal.ok_or(RuntimeError::QpSolver("OSQP solve returned no primal solution"))?;
+            let primal = primal.ok_or(RuntimeError::QpSolver(
+                "OSQP solve returned no primal solution",
+            ))?;
             for (destination, value) in outputs.iter_mut().zip(primal.iter()) {
                 *destination = *value as f32;
             }
@@ -163,7 +164,6 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
         })?;
         Ok(diagnostics)
     }
-
 }
 
 #[cfg(all(feature = "std", not(osqp_embedded)))]
@@ -237,7 +237,9 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
                     status: exitflag as i32,
                 });
             }
-            NonNull::new(work).ok_or(RuntimeError::QpSolver("OSQP setup returned a null workspace"))
+            NonNull::new(work).ok_or(RuntimeError::QpSolver(
+                "OSQP setup returned a null workspace",
+            ))
         })?;
 
         Ok(Self {

@@ -160,7 +160,8 @@ pub struct qdldl {
             c_int,
         ) -> c_int,
     >,
-    pub update_rho_vec: Option<unsafe extern "C" fn(*mut qdldl_solver, *const OSQPVectorf) -> c_int>,
+    pub update_rho_vec:
+        Option<unsafe extern "C" fn(*mut qdldl_solver, *const OSQPVectorf) -> c_int>,
     pub nthreads: c_int,
     pub L: *mut csc,
     pub Dinv: *mut QDLDL_float,
@@ -488,7 +489,6 @@ pub struct CokerOsqpPlan {
     pub arena_layout: CokerOsqpArenaLayout,
 }
 
-
 #[repr(C)]
 pub struct CokerOsqpInstance {
     pub pdata: *mut csc,
@@ -555,7 +555,6 @@ extern "C" {
         arena: CokerOsqpArena,
         instance: *mut CokerOsqpInstance,
     ) -> CokerOsqpStatus;
-
 
     pub fn coker_osqp_update(
         instance: *mut CokerOsqpInstance,

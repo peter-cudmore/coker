@@ -41,6 +41,7 @@ pub enum QpSolveStatus {
     Other(i32),
 }
 
+#[cfg(all(feature = "std", not(osqp_embedded)))]
 /// Host-side solve outputs borrowed from the live OSQP workspace.
 #[derive(Debug, Clone)]
 pub struct QpSolveResult<'a> {
@@ -69,7 +70,7 @@ impl QpSolveStatus {
             x if x == ffi::OSQP_SIGINT as ffi::c_int => Self::SigInt,
             x if x == ffi::OSQP_TIME_LIMIT_REACHED as ffi::c_int => Self::TimeLimitReached,
             x if x == ffi::OSQP_UNSOLVED as ffi::c_int => Self::Unsolved,
-            other => Self::Other(other as i32),
+            other => Self::Other(other),
         }
     }
 }
@@ -83,6 +84,15 @@ pub struct QpWorkspaceRequirements {
     pub arena_bytes: usize,
     pub arena_alignment: usize,
 }
+
+#[cfg(osqp_embedded)]
+type EmbeddedNumericSlices<'a> = (
+    &'a mut [f32],
+    &'a mut [f32],
+    &'a mut [f32],
+    &'a mut [f32],
+    &'a mut [f32],
+);
 
 /// Caller-owned primal workspace for evaluating QP coefficients.
 #[derive(Debug)]
@@ -116,7 +126,6 @@ impl<'a> MappedQpWorkspace<'a> {
         Ok(())
     }
 }
-
 
 /// Lightweight diagnostics returned after a successful QP solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -232,14 +241,13 @@ impl EmbeddedOsqpInstance {
         a_nnz: usize,
         n: usize,
         m: usize,
-    ) -> Result<(&mut [f32], &mut [f32], &mut [f32], &mut [f32], &mut [f32]), RuntimeError> {
+    ) -> Result<EmbeddedNumericSlices<'_>, RuntimeError> {
         let p = &mut self.pdata_csc;
         let a = &mut self.adata_csc;
         if (p_nnz != 0 && p.x.is_null())
             || (a_nnz != 0 && a.x.is_null())
             || (n != 0 && (self.q_vector.values.is_null()))
-            || (m != 0
-                && (self.l_vector.values.is_null() || self.u_vector.values.is_null()))
+            || (m != 0 && (self.l_vector.values.is_null() || self.u_vector.values.is_null()))
         {
             return Err(RuntimeError::EmbeddedQpWorkspaceInvalid);
         }
@@ -386,8 +394,18 @@ impl EmbeddedOsqpInstance {
             n,
             n,
             p_nnz,
-            qp_program.p_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
-            qp_program.p_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            qp_program
+                .p_pattern()
+                .indptr
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
+            qp_program
+                .p_pattern()
+                .indices
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
             region_ptr!(f32, layout.pdata_x()),
         );
         ffi::embedded_bind::bind_csc_matrix(
@@ -395,8 +413,18 @@ impl EmbeddedOsqpInstance {
             m,
             n,
             a_nnz,
-            qp_program.a_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
-            qp_program.a_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            qp_program
+                .a_pattern()
+                .indptr
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
+            qp_program
+                .a_pattern()
+                .indices
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
             region_ptr!(f32, layout.adata_x()),
         );
         ffi::embedded_bind::bind_csc_matrix(
@@ -404,8 +432,18 @@ impl EmbeddedOsqpInstance {
             n_plus_m,
             n_plus_m,
             l_nnz,
-            symbolic_l.l_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
-            symbolic_l.l_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            symbolic_l
+                .l_pattern()
+                .indptr
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
+            symbolic_l
+                .l_pattern()
+                .indices
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
             region_ptr!(f32, layout.qdldl_l_x()),
         );
         ffi::embedded_bind::bind_csc_matrix(
@@ -413,8 +451,18 @@ impl EmbeddedOsqpInstance {
             n_plus_m,
             n_plus_m,
             kkt_nnz,
-            qdldl_plan.kkt_pattern().indptr.as_ptr().cast::<i32>().cast_mut(),
-            qdldl_plan.kkt_pattern().indices.as_ptr().cast::<i32>().cast_mut(),
+            qdldl_plan
+                .kkt_pattern()
+                .indptr
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
+            qdldl_plan
+                .kkt_pattern()
+                .indices
+                .as_ptr()
+                .cast::<i32>()
+                .cast_mut(),
             region_ptr!(f32, layout.qdldl_kkt_x()),
         );
         ffi::embedded_bind::bind_matrix(
@@ -427,9 +475,21 @@ impl EmbeddedOsqpInstance {
             &mut instance.adata_csc,
             raw::OSQPMatrix_symmetry_type_NONE,
         );
-        ffi::embedded_bind::bind_vectorf(&mut instance.q_vector, region_ptr!(f32, layout.qdata()), n);
-        ffi::embedded_bind::bind_vectorf(&mut instance.l_vector, region_ptr!(f32, layout.ldata()), m);
-        ffi::embedded_bind::bind_vectorf(&mut instance.u_vector, region_ptr!(f32, layout.udata()), m);
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.q_vector,
+            region_ptr!(f32, layout.qdata()),
+            n,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.l_vector,
+            region_ptr!(f32, layout.ldata()),
+            m,
+        );
+        ffi::embedded_bind::bind_vectorf(
+            &mut instance.u_vector,
+            region_ptr!(f32, layout.udata()),
+            m,
+        );
         ffi::embedded_bind::bind_vectorf(
             &mut instance.rho_vec,
             region_ptr!(f32, layout.work_rho_vec()),
@@ -453,11 +513,7 @@ impl EmbeddedOsqpInstance {
             region_ptr!(f32, layout.work_xz_tilde()),
             n_plus_m,
         );
-        ffi::embedded_bind::bind_vectorf(
-            &mut instance.xtilde_view,
-            instance.xz_tilde.values,
-            n,
-        );
+        ffi::embedded_bind::bind_vectorf(&mut instance.xtilde_view, instance.xz_tilde.values, n);
         ffi::embedded_bind::bind_vectorf(
             &mut instance.ztilde_view,
             unsafe { instance.xz_tilde.values.add(n as usize) },

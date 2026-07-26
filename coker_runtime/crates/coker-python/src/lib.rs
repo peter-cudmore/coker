@@ -34,7 +34,9 @@ struct PyRuntimeQpProgram {
     output_length: usize,
     workspace_requirements: QpWorkspaceRequirements,
     prepared: PreparedQpProgram,
+    #[allow(dead_code)]
     arena_backing: Vec<MaybeUninit<u8>>,
+    #[allow(dead_code)]
     arena_offset: usize,
     evaluator_workspace: Vec<f32>,
     coefficient_outputs: Vec<f32>,
@@ -104,10 +106,18 @@ impl PyRuntimeQpProgram {
             None => None,
         };
         let mapped_qp = mapped_qp_program(module_bytes, *function_id).map_err(runtime_error)?;
-        let workspace =
-            MappedQpWorkspace::new(evaluator_workspace.as_mut_slice(), coefficient_outputs.as_mut_slice());
+        let workspace = MappedQpWorkspace::new(
+            evaluator_workspace.as_mut_slice(),
+            coefficient_outputs.as_mut_slice(),
+        );
         let diagnostics = prepared
-            .execute(mapped_qp, &input_slices, warm_start, workspace, output_scratch.as_mut_slice())
+            .execute(
+                mapped_qp,
+                &input_slices,
+                warm_start,
+                workspace,
+                output_scratch.as_mut_slice(),
+            )
             .map_err(runtime_error)?;
         copy_f32_slice_into_f64(output_scratch, solution, "solution")?;
         Ok((
@@ -143,10 +153,18 @@ impl PyRuntimeQpProgram {
             None => None,
         };
         let mapped_qp = mapped_qp_program(module_bytes, *function_id).map_err(runtime_error)?;
-        let workspace =
-            MappedQpWorkspace::new(evaluator_workspace.as_mut_slice(), coefficient_outputs.as_mut_slice());
+        let workspace = MappedQpWorkspace::new(
+            evaluator_workspace.as_mut_slice(),
+            coefficient_outputs.as_mut_slice(),
+        );
         let diagnostics = prepared
-            .execute(mapped_qp, &input_slices, warm_start, workspace, output_scratch.as_mut_slice())
+            .execute(
+                mapped_qp,
+                &input_slices,
+                warm_start,
+                workspace,
+                output_scratch.as_mut_slice(),
+            )
             .map_err(runtime_error)?;
         let success = solve_success(diagnostics.status);
         let solution = output_scratch.iter().copied().map(f64::from).collect();
@@ -359,7 +377,6 @@ fn load_program(program: &[u8]) -> PyResult<PyRuntimeProgram> {
     })
 }
 
-
 #[pyfunction]
 fn validate_compiled_program(program: &[u8]) -> PyResult<bool> {
     mapped_module(program).map(|_| true).map_err(runtime_error)
@@ -377,7 +394,11 @@ fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<f32>> 
     let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
     let info = module.info();
     let mut workspace = vec![0.0; info.required_workspace_size];
-    let output_length: usize = info.output_specs.iter().map(|output_spec| output_spec.length()).sum();
+    let output_length: usize = info
+        .output_specs
+        .iter()
+        .map(|output_spec| output_spec.length())
+        .sum();
     let mut outputs = vec![0.0; output_length];
     module
         .execute(&input_slices, &mut workspace, &mut outputs)
@@ -397,7 +418,11 @@ fn push_forward_program(
     let info = module.info();
     let mut workspace = vec![0.0; info.required_workspace_size];
     let mut tangent_workspace = vec![0.0; info.required_workspace_size];
-    let output_length: usize = info.output_specs.iter().map(|output_spec| output_spec.length()).sum();
+    let output_length: usize = info
+        .output_specs
+        .iter()
+        .map(|output_spec| output_spec.length())
+        .sum();
     let mut outputs = vec![0.0; output_length];
     let mut tangent_outputs = vec![0.0; output_length];
     module
@@ -436,11 +461,12 @@ fn load_qp_program_metadata(
 ) -> Result<(u16, Vec<usize>, usize, QpWorkspaceRequirements), coker_runtime::RuntimeError> {
     let archived = archived_module(program)?;
     let mut qp_programs = archived.qp_programs();
-    let (function_id, _sole_qp_program) = qp_programs.next().ok_or(
-        coker_runtime::RuntimeError::Validation(
-            "module contains no QP programs; expected exactly one",
-        ),
-    )?;
+    let (function_id, _sole_qp_program) =
+        qp_programs
+            .next()
+            .ok_or(coker_runtime::RuntimeError::Validation(
+                "module contains no QP programs; expected exactly one",
+            ))?;
     if qp_programs.next().is_some() {
         return Err(coker_runtime::RuntimeError::Validation(
             "module contains multiple QP programs; expected exactly one",
@@ -545,7 +571,6 @@ fn aligned_buffer_offset(base: usize, alignment: usize) -> usize {
     }
     (alignment - (base % alignment)) % alignment
 }
-
 
 fn solve_success(status: QpSolveStatus) -> bool {
     matches!(

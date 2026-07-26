@@ -22,8 +22,6 @@ def _restore_output(flat_output: Sequence[float], shape):
     return np.asarray(flat_output, dtype=float).reshape(shape, order="C")
 
 
-
-
 class CompiledGraph:
 
     def __init__(

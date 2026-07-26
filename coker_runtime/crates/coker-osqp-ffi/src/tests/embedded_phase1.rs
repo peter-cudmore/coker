@@ -47,7 +47,10 @@ fn generated_raw_bindings_expose_osqp_1_solver_split() {
     assert!(size_of::<raw::OSQPData>() > 0);
     assert!(size_of::<raw::OSQPSettings>() > 0);
     assert_eq!(offset_of!(raw::OSQPSolver, settings), 0);
-    assert_eq!(offset_of!(raw::OSQPSolver, solution), size_of::<*mut raw::OSQPSettings>());
+    assert_eq!(
+        offset_of!(raw::OSQPSolver, solution),
+        size_of::<*mut raw::OSQPSettings>()
+    );
     assert_eq!(
         offset_of!(raw::OSQPSolver, info),
         size_of::<*mut raw::OSQPSettings>() + size_of::<*mut raw::OSQPSolution>()

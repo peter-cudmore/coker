@@ -19,8 +19,7 @@ mod workspace;
 #[cfg(osqp_embedded)]
 pub use crate::qp::{BoundMappedQpProgram, PreparedQpProgram};
 pub use crate::qp::{
-    MappedQpProgram, MappedQpWorkspace, QpSolveDiagnostics, QpSolveStatus,
-    QpWorkspaceRequirements,
+    MappedQpProgram, MappedQpWorkspace, QpSolveDiagnostics, QpSolveStatus, QpWorkspaceRequirements,
 };
 #[cfg(all(feature = "std", not(osqp_embedded)))]
 pub use crate::qp::{QpRuntime, QpSolveResult, QpWorkspaceLayout, QpWorkspaceRegion};
