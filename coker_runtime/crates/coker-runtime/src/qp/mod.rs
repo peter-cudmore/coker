@@ -1,8 +1,5 @@
 #![cfg_attr(not(any(feature = "std", osqp_embedded)), allow(dead_code))]
 
-#[cfg(all(feature = "std", not(osqp_embedded)))]
-use alloc::vec::Vec;
-use alloc::{format, string::ToString};
 #[cfg(any(osqp_embedded, feature = "std"))]
 use core::{
     marker::PhantomData,
@@ -144,45 +141,6 @@ impl<'a> MappedQpWorkspace<'a> {
     }
 }
 
-/// Caller-owned primal and tangent workspaces for QP push-forward evaluation.
-#[derive(Debug)]
-pub struct MappedQpPushForwardWorkspace<'a> {
-    pub primal: MappedQpWorkspace<'a>,
-    pub tangent: MappedQpWorkspace<'a>,
-    pub solution_tangent_workspace: &'a mut [f32],
-}
-
-impl<'a> MappedQpPushForwardWorkspace<'a> {
-    /// Wraps caller-owned primal, tangent, and solution-tangent buffers.
-    pub fn new(
-        primal_evaluator_workspace: &'a mut [f32],
-        primal_coefficient_outputs: &'a mut [f32],
-        tangent_evaluator_workspace: &'a mut [f32],
-        tangent_coefficient_outputs: &'a mut [f32],
-        solution_tangent_workspace: &'a mut [f32],
-    ) -> Self {
-        Self {
-            primal: MappedQpWorkspace::new(primal_evaluator_workspace, primal_coefficient_outputs),
-            tangent: MappedQpWorkspace::new(
-                tangent_evaluator_workspace,
-                tangent_coefficient_outputs,
-            ),
-            solution_tangent_workspace,
-        }
-    }
-
-    fn validate_for(&self, requirements: QpWorkspaceRequirements) -> Result<(), RuntimeError> {
-        self.primal.validate_for(requirements)?;
-        self.tangent.validate_for(requirements)?;
-        if self.solution_tangent_workspace.len() < requirements.tangent_workspace_size {
-            return Err(RuntimeError::WorkspaceTooSmall {
-                expected: requirements.tangent_workspace_size,
-                actual: self.solution_tangent_workspace.len(),
-            });
-        }
-        Ok(())
-    }
-}
 
 /// Lightweight diagnostics returned after a successful QP solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -242,7 +200,7 @@ pub struct BoundMappedQpProgram<'module, 'arena> {
 impl<'a> MappedModule<'a> {
     /// Returns the validated QP program for `function_id`.
     pub fn qp_program(&self, function_id: u16) -> Result<MappedQpProgram<'a>, RuntimeError> {
-        MappedQpProgram::new(*self, function_id)
+        MappedQpProgram::from_validated_module(*self, function_id)
     }
 }
 
@@ -250,16 +208,22 @@ impl<'a> MappedQpProgram<'a> {
     /// Maps a serialized bytecode module and returns its validated QP entry point.
     pub fn new_from_bytes(bytes: &'a [u8], function_id: u16) -> Result<Self, RuntimeError> {
         let module = MappedModule::from_archived_unchecked(archived_module(bytes)?);
-        Self::new(module, function_id)
+        Self::from_validated_module(module, function_id)
     }
 
     /// Binds a validated mapped module plus QP function id into a QP program view.
     pub fn new(module: MappedModule<'a>, function_id: u16) -> Result<Self, RuntimeError> {
+        Self::from_validated_module(module, function_id)
+    }
+
+    fn from_validated_module(
+        module: MappedModule<'a>,
+        function_id: u16,
+    ) -> Result<Self, RuntimeError> {
         let bytecode_module = module.bytecode_module();
-        bytecode_module.validate_semantics()?;
-        let qp_program = bytecode_module.qp_program(function_id).ok_or_else(|| {
-            RuntimeError::Validation(format!("missing QP function_id {function_id}"))
-        })?;
+        let qp_program = bytecode_module
+            .qp_program(function_id)
+            .ok_or(RuntimeError::MissingQpFunction { function_id })?;
         let evaluator = module.program(qp_program.coefficient_function_id())?;
         let (n, m, p_nnz, a_nnz, workspace_requirements) =
             validate_mapped_qp_program(qp_program, evaluator)?;
@@ -301,25 +265,6 @@ impl<'a> MappedQpProgram<'a> {
             self.m,
         )
     }
-    fn validate_tangents(&self, tangents: &[&[f32]]) -> Result<(), RuntimeError> {
-        self.validate_parameters(tangents)
-    }
-
-    fn validate_push_forward_outputs(
-        &self,
-        outputs: &[f32],
-        tangent_outputs: &[f32],
-    ) -> Result<(), RuntimeError> {
-        self.validate_output_buffer(outputs)?;
-        self.validate_output_buffer(tangent_outputs)
-    }
-
-    fn push_forward_unsupported_error() -> RuntimeError {
-        RuntimeError::QpPushForwardUnsupported {
-            reason: "differentiated KKT solve support is not implemented",
-        }
-    }
-
     fn validate_parameters(&self, parameters: &[&[f32]]) -> Result<(), RuntimeError> {
         let info = self.info();
         if parameters.len() != info.input_specs.len() {

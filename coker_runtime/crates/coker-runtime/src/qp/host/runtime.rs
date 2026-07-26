@@ -57,18 +57,20 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
                 )
             };
             if update_p_a != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP matrix update failed with status {update_p_a}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "matrix update",
+                    status: update_p_a as i32,
+                });
             }
 
             let update_q = unsafe {
                 ffi::osqp_update_lin_cost(problem, view.q.as_ptr() as *const ffi::c_float)
             };
             if update_q != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP linear cost update failed with status {update_q}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "linear cost update",
+                    status: update_q as i32,
+                });
             }
 
             let update_bounds = unsafe {
@@ -79,16 +81,17 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
                 )
             };
             if update_bounds != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP bounds update failed with status {update_bounds}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "bounds update",
+                    status: update_bounds as i32,
+                });
             }
 
             if warm_start_enabled {
                 if let Some(initial) = warm_start {
                     if initial.len() != n {
                         return Err(RuntimeError::Validation(
-                            "QP warm start length does not match decision dimension".to_string(),
+                            "QP warm start length does not match decision dimension",
                         ));
                     }
                     view.primal_warm_start.copy_from_slice(initial);
@@ -100,9 +103,10 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
                     )
                 };
                 if warm_start_x != 0 {
-                    return Err(RuntimeError::QpSolver(format!(
-                        "OSQP primal warm start failed with status {warm_start_x}"
-                    )));
+                    return Err(RuntimeError::QpSolverStatus {
+                        operation: "primal warm start",
+                        status: warm_start_x as i32,
+                    });
                 }
                 let warm_start_y = unsafe {
                     ffi::osqp_warm_start_y(
@@ -111,17 +115,19 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
                     )
                 };
                 if warm_start_y != 0 {
-                    return Err(RuntimeError::QpSolver(format!(
-                        "OSQP dual warm start failed with status {warm_start_y}"
-                    )));
+                    return Err(RuntimeError::QpSolverStatus {
+                        operation: "dual warm start",
+                        status: warm_start_y as i32,
+                    });
                 }
             }
 
             let solve_status = unsafe { ffi::osqp_solve(problem) };
             if solve_status != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP solve failed with status {solve_status}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "solve",
+                    status: solve_status as i32,
+                });
             }
 
             let info = unsafe { (*problem).info.as_ref() };
@@ -143,9 +149,8 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
                     view.dual_warm_start.copy_from_slice(values);
                 }
             }
-            let primal = primal.ok_or_else(|| {
-                RuntimeError::QpSolver("OSQP solve returned no primal solution".to_string())
-            })?;
+            let primal =
+                primal.ok_or(RuntimeError::QpSolver("OSQP solve returned no primal solution"))?;
             for (destination, value) in outputs.iter_mut().zip(primal.iter()) {
                 *destination = *value as f32;
             }
@@ -159,27 +164,13 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
         Ok(diagnostics)
     }
 
-    /// Placeholder push-forward entry point for host QP solves.
-    pub fn push_forward(
-        &mut self,
-        parameters: &[&[f32]],
-        parameter_tangents: &[&[f32]],
-        workspace: MappedQpPushForwardWorkspace<'_>,
-        outputs: &mut [f32],
-        tangent_outputs: &mut [f32],
-    ) -> Result<QpSolveDiagnostics, RuntimeError> {
-        self.program.validate_parameters(parameters)?;
-        self.program.validate_tangents(parameter_tangents)?;
-        workspace.validate_for(self.program.workspace_requirements)?;
-        self.program
-            .validate_push_forward_outputs(outputs, tangent_outputs)?;
-        Err(MappedQpProgram::push_forward_unsupported_error())
-    }
 }
 
 #[cfg(all(feature = "std", not(osqp_embedded)))]
 impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
-    /// Creates a reusable host QP runtime over caller-provided workspace storage.
+    /// Creates a reusable host-only QP convenience runtime over caller-provided workspace storage.
+    ///
+    /// This path keeps copied sparsity indices and an OSQP-owned setup allocation.
     pub fn new(
         program: MappedQpProgram<'module>,
         workspace: &'workspace mut [f64],
@@ -229,7 +220,6 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
             unsafe {
                 ffi::osqp_set_default_settings(&mut settings);
             }
-            let _ = settings_source;
             settings.verbose = 0;
             settings.warm_start = if settings_source.warm_start { 1 } else { 0 };
             settings.polish = 1;
@@ -242,13 +232,12 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
                         let _ = ffi::osqp_cleanup(work);
                     }
                 }
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP setup failed with status {exitflag}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "setup",
+                    status: exitflag as i32,
+                });
             }
-            NonNull::new(work).ok_or_else(|| {
-                RuntimeError::QpSolver("OSQP setup returned a null workspace".to_string())
-            })
+            NonNull::new(work).ok_or(RuntimeError::QpSolver("OSQP setup returned a null workspace"))
         })?;
 
         Ok(Self {
@@ -291,14 +280,14 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
         let result = self.workspace.with_view(|view| {
             if view.evaluator_workspace.len() != program.evaluator.info().required_workspace_size {
                 return Err(RuntimeError::Validation(
-                    "QP evaluator workspace size does not match program metadata".to_string(),
+                    "QP evaluator workspace size does not match program metadata",
                 ));
             }
             if view.coefficient_outputs.len()
                 != program.workspace_requirements.coefficient_output_size
             {
                 return Err(RuntimeError::Validation(
-                    "QP evaluator output length does not match program metadata".to_string(),
+                    "QP evaluator output length does not match program metadata",
                 ));
             }
 
@@ -329,18 +318,20 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
                 )
             };
             if update_p_a != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP matrix update failed with status {update_p_a}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "matrix update",
+                    status: update_p_a as i32,
+                });
             }
 
             let update_q = unsafe {
                 ffi::osqp_update_lin_cost(problem, view.q.as_ptr() as *const ffi::c_float)
             };
             if update_q != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP linear cost update failed with status {update_q}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "linear cost update",
+                    status: update_q as i32,
+                });
             }
 
             let update_bounds = unsafe {
@@ -351,16 +342,17 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
                 )
             };
             if update_bounds != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP bounds update failed with status {update_bounds}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "bounds update",
+                    status: update_bounds as i32,
+                });
             }
 
             if warm_start_enabled {
                 if let Some(initial) = warm_start {
                     if initial.len() != n {
                         return Err(RuntimeError::Validation(
-                            "QP warm start length does not match decision dimension".to_string(),
+                            "QP warm start length does not match decision dimension",
                         ));
                     }
                     view.primal_warm_start.copy_from_slice(initial);
@@ -372,9 +364,10 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
                     )
                 };
                 if warm_start_x != 0 {
-                    return Err(RuntimeError::QpSolver(format!(
-                        "OSQP primal warm start failed with status {warm_start_x}"
-                    )));
+                    return Err(RuntimeError::QpSolverStatus {
+                        operation: "primal warm start",
+                        status: warm_start_x as i32,
+                    });
                 }
                 let warm_start_y = unsafe {
                     ffi::osqp_warm_start_y(
@@ -383,17 +376,19 @@ impl<'module, 'workspace> QpRuntime<'module, 'workspace> {
                     )
                 };
                 if warm_start_y != 0 {
-                    return Err(RuntimeError::QpSolver(format!(
-                        "OSQP dual warm start failed with status {warm_start_y}"
-                    )));
+                    return Err(RuntimeError::QpSolverStatus {
+                        operation: "dual warm start",
+                        status: warm_start_y as i32,
+                    });
                 }
             }
 
             let solve_status = unsafe { ffi::osqp_solve(problem) };
             if solve_status != 0 {
-                return Err(RuntimeError::QpSolver(format!(
-                    "OSQP solve failed with status {solve_status}"
-                )));
+                return Err(RuntimeError::QpSolverStatus {
+                    operation: "solve",
+                    status: solve_status as i32,
+                });
             }
 
             let info = unsafe { (*problem).info.as_ref() };
@@ -467,10 +462,10 @@ fn scatter_output_slice(
     let length = slice.length.to_native() as usize;
     let end = start
         .checked_add(length)
-        .ok_or_else(|| RuntimeError::Validation("QP coefficient output overflow".to_string()))?;
+        .ok_or(RuntimeError::Validation("QP coefficient output overflow"))?;
     if end > source.len() || length != destination.len() {
         return Err(RuntimeError::Validation(
-            "QP coefficient output length mismatch".to_string(),
+            "QP coefficient output length mismatch",
         ));
     }
     for (dst, src) in destination.iter_mut().zip(&source[start..end]) {

@@ -15,8 +15,12 @@ use super::*;
 
 #[cfg(all(feature = "std", not(osqp_embedded)))]
 impl<'a> MappedQpProgram<'a> {
-    /// Binds this host QP program to caller-provided arena storage.
-    pub fn bind<'arena>(
+    /// Binds this host-only QP convenience runtime to caller-provided arena storage.
+    ///
+    /// This path copies archived sparsity indices into host vectors and lets the
+    /// OSQP C workspace keep its own setup allocation. It is not the embedded
+    /// caller-owned runtime contract.
+    pub fn bind_host<'arena>(
         &self,
         arena: &'arena mut [MaybeUninit<u8>],
     ) -> Result<BoundMappedQpProgram<'a, 'arena>, RuntimeError> {

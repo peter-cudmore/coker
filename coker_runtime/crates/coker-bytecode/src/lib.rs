@@ -38,11 +38,6 @@ pub struct QpCoefficientOutputs {
     pub r: QpOutputSlice,
 }
 
-/// Host-only QP archive settings stored alongside a serialized QP program payload.
-#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
-pub struct QpSettingsArchive {
-    pub verbose: bool,
-}
 
 /// Serialized host QP problem payload used by tooling and host-side execution.
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
@@ -59,7 +54,6 @@ pub struct QpProgramArchive {
     pub coefficient_program: BytecodeModule,
     pub coefficient_outputs: QpCoefficientOutputs,
     pub warm_start: bool,
-    pub settings: QpSettingsArchive,
 }
 
 /// Embedded solver profile encoded in a pointer-free QP plan.
@@ -389,6 +383,7 @@ fn version_from_header(bytes: &[u8], magic: &[u8; 8]) -> u16 {
     u16::from_le_bytes(version_bytes)
 }
 
+#[cfg(feature = "std")]
 fn payload_alignment_from_header(bytes: &[u8], magic: &[u8; 8]) -> Result<usize, BytecodeError> {
     let alignment_bytes: [u8; 2] = bytes[magic.len() + 2..magic.len() + 4]
         .try_into()
@@ -396,6 +391,7 @@ fn payload_alignment_from_header(bytes: &[u8], magic: &[u8; 8]) -> Result<usize,
     Ok(u16::from_le_bytes(alignment_bytes) as usize)
 }
 
+#[cfg(feature = "std")]
 fn decode_archived_with_legacy_fallback<T, F>(
     bytes: &[u8],
     payload_start: usize,
@@ -898,11 +894,10 @@ mod validate;
 
 pub use self::{
     archived::{archived_embedded_qp_plan, archived_module, archived_qp_program},
-    codec::{
-        decode_embedded_qp_plan, decode_module, decode_qp_program, encode_embedded_qp_plan,
-        encode_module, encode_qp_program,
-    },
+    codec::{decode_embedded_qp_plan, encode_embedded_qp_plan, encode_module, encode_qp_program},
 };
+#[cfg(feature = "std")]
+pub use self::codec::{decode_module, decode_qp_program};
 
 #[allow(unused_imports)]
 use self::{codec::*, convert::*, validate::*};

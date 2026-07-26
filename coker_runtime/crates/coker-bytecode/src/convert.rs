@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), allow(dead_code))]
+
 use super::*;
 
 pub(crate) fn embedded_qp_plan_from_archived(archived: &ArchivedEmbeddedQpPlan) -> EmbeddedQpPlan {

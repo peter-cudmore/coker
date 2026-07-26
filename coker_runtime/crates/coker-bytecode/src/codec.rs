@@ -1,7 +1,8 @@
 use super::*;
 use core::mem::align_of;
-use rkyv::{access, rancor::Error as RkyvError, to_bytes, util::AlignedVec};
-
+use rkyv::{rancor::Error as RkyvError, to_bytes};
+#[cfg(feature = "std")]
+use rkyv::{access, util::AlignedVec};
 pub(crate) fn archive_payload<'a>(
     bytes: &'a [u8],
     magic: &[u8; 8],
@@ -69,6 +70,7 @@ pub(crate) fn validate_mapped_header(
     Ok(payload_start)
 }
 
+#[cfg(feature = "std")]
 pub(crate) fn validate_header(bytes: &[u8]) -> Result<(), BytecodeError> {
     validate_mapped_header(bytes, &MAGIC, VERSION, align_of::<ArchivedBytecodeModule>())?;
     Ok(())
@@ -89,6 +91,7 @@ pub fn encode_module(module: &BytecodeModule) -> Result<Vec<u8>, BytecodeError> 
     Ok(bytes)
 }
 
+#[cfg(feature = "std")]
 /// Decodes a serialized bytecode module into an owned representation.
 pub fn decode_module(bytes: &[u8]) -> Result<BytecodeModule, BytecodeError> {
     validate_header(bytes)?;
@@ -137,6 +140,7 @@ pub fn encode_qp_program(program: &QpProgramArchive) -> Result<Vec<u8>, Bytecode
     Ok(bytes)
 }
 
+#[cfg(feature = "std")]
 /// Decodes a serialized host QP payload into an owned representation.
 pub fn decode_qp_program(bytes: &[u8]) -> Result<QpProgramArchive, BytecodeError> {
     let archived = archived_qp_program(bytes)?;
@@ -181,9 +185,6 @@ pub fn decode_qp_program(bytes: &[u8]) -> Result<QpProgramArchive, BytecodeError
         coefficient_program: module_from_archived(&archived.coefficient_program),
         coefficient_outputs: qp_coefficient_outputs_from_archived(&archived.coefficient_outputs),
         warm_start: archived.warm_start,
-        settings: QpSettingsArchive {
-            verbose: archived.settings.verbose,
-        },
     })
 }
 

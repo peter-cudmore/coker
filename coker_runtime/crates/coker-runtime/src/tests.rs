@@ -793,7 +793,7 @@ fn mapped_module_looks_up_dense_program_indices() {
     assert_eq!(mapped.program(1).unwrap().function_id(), 1);
     assert!(matches!(
         mapped.program(2),
-        Err(RuntimeError::Validation(message)) if message.contains("missing function_id 2")
+        Err(RuntimeError::MissingFunction { function_id: 2 })
     ));
 
     let mut workspace = [0.0; 2];
@@ -836,11 +836,11 @@ fn mapped_qp_program_looks_up_qp_index_from_bytes_and_module() {
     );
     assert!(matches!(
         MappedQpProgram::new_from_bytes(aligned_bytes.as_slice(), 0),
-        Err(RuntimeError::Validation(message)) if message.contains("missing QP function_id 0")
+        Err(RuntimeError::MissingQpFunction { function_id: 0 })
     ));
     assert!(matches!(
         mapped.qp_program(0),
-        Err(RuntimeError::Validation(message)) if message.contains("missing QP function_id 0")
+        Err(RuntimeError::MissingQpFunction { function_id: 0 })
     ));
 }
 
@@ -1130,10 +1130,13 @@ fn validate_rejects_overlapping_generic_ranges_without_scratch() {
     )]);
     let encoded = encode_module(&module).unwrap();
     let error = validate_module(&encoded).unwrap_err();
-    assert!(matches!(error, RuntimeError::Validation(_)));
-    assert!(error
-        .to_string()
-        .contains("generic layer scratch length must match input length"));
+    assert!(matches!(
+        error,
+        RuntimeError::ValidationContext {
+            context: "generic layer",
+            problem: "scratch length must match input length",
+        }
+    ));
 }
 
 #[test]
@@ -1529,142 +1532,6 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
     assert!((outputs[0] - 2.0).abs() < 1e-4);
     assert_eq!(&oversized_coefficient_outputs[6..], &[123.0, 123.0]);
 }
-#[cfg(osqp_embedded)]
-#[test]
-fn bound_mapped_qp_program_push_forward_rejects_tangent_size_mismatch() {
-    let module = build_mapped_scalar_qp_module(41, 17, 6, 1, true);
-    let aligned_bytes = encode_into_aligned_bytes(&module);
-    let mapped = MappedModule::new_from_bytes(aligned_bytes.as_slice()).unwrap();
-    let qp_program = mapped.qp_program(41).unwrap();
-    let requirements = qp_program.workspace_requirements();
-    let mut arena = vec![core::mem::MaybeUninit::<u8>::uninit(); requirements.arena_bytes];
-    let mut bound = qp_program.bind(&mut arena).unwrap();
-    let mut primal_evaluator_workspace = [0.0; 6];
-    let mut primal_coefficient_outputs = [0.0; 6];
-    let mut tangent_evaluator_workspace = [0.0; 6];
-    let mut tangent_coefficient_outputs = [0.0; 6];
-    let mut solution_tangent_workspace = [0.0; 1];
-    let mut outputs = [0.0; 1];
-    let mut tangent_outputs = [0.0; 1];
-    let parameters = [2.0f32, -4.0, 1.0, 0.0, 10.0, 0.0];
-    let short_tangents = [0.1f32; 5];
-
-    let error = bound
-        .push_forward(
-            &[&parameters],
-            &[&short_tangents],
-            MappedQpPushForwardWorkspace::new(
-                &mut primal_evaluator_workspace,
-                &mut primal_coefficient_outputs,
-                &mut tangent_evaluator_workspace,
-                &mut tangent_coefficient_outputs,
-                &mut solution_tangent_workspace,
-            ),
-            &mut outputs,
-            &mut tangent_outputs,
-        )
-        .unwrap_err();
-
-    assert!(matches!(
-        error,
-        RuntimeError::InputSizeMismatch {
-            index: 0,
-            expected: 6,
-            actual: 5,
-        }
-    ));
-}
-
-#[cfg(osqp_embedded)]
-#[test]
-fn bound_mapped_qp_program_push_forward_rejects_short_solution_tangent_workspace() {
-    let module = build_mapped_scalar_qp_module(41, 17, 6, 1, true);
-    let aligned_bytes = encode_into_aligned_bytes(&module);
-    let mapped = MappedModule::new_from_bytes(aligned_bytes.as_slice()).unwrap();
-    let qp_program = mapped.qp_program(41).unwrap();
-    let requirements = qp_program.workspace_requirements();
-    let mut arena = vec![core::mem::MaybeUninit::<u8>::uninit(); requirements.arena_bytes];
-    let mut bound = qp_program.bind(&mut arena).unwrap();
-    let mut primal_evaluator_workspace = [0.0; 6];
-    let mut primal_coefficient_outputs = [0.0; 6];
-    let mut tangent_evaluator_workspace = [0.0; 6];
-    let mut tangent_coefficient_outputs = [0.0; 6];
-    let mut solution_tangent_workspace = [0.0; 0];
-    let mut outputs = [0.0; 1];
-    let mut tangent_outputs = [0.0; 1];
-    let parameters = [2.0f32, -4.0, 1.0, 0.0, 10.0, 0.0];
-    let tangents = [0.1f32; 6];
-
-    let error = bound
-        .push_forward(
-            &[&parameters],
-            &[&tangents],
-            MappedQpPushForwardWorkspace::new(
-                &mut primal_evaluator_workspace,
-                &mut primal_coefficient_outputs,
-                &mut tangent_evaluator_workspace,
-                &mut tangent_coefficient_outputs,
-                &mut solution_tangent_workspace,
-            ),
-            &mut outputs,
-            &mut tangent_outputs,
-        )
-        .unwrap_err();
-
-    assert!(matches!(
-        error,
-        RuntimeError::WorkspaceTooSmall {
-            expected: 1,
-            actual: 0,
-        }
-    ));
-}
-
-#[cfg(osqp_embedded)]
-#[test]
-fn bound_mapped_qp_program_push_forward_returns_explicit_unsupported_error() {
-    let module = build_mapped_scalar_qp_module(41, 17, 6, 1, true);
-    let aligned_bytes = encode_into_aligned_bytes(&module);
-    let mapped = MappedModule::new_from_bytes(aligned_bytes.as_slice()).unwrap();
-    let qp_program = mapped.qp_program(41).unwrap();
-    let requirements = qp_program.workspace_requirements();
-    let mut arena = vec![core::mem::MaybeUninit::<u8>::uninit(); requirements.arena_bytes];
-    let mut bound = qp_program.bind(&mut arena).unwrap();
-    let mut primal_evaluator_workspace = [0.0; 6];
-    let mut primal_coefficient_outputs = [0.0; 6];
-    let mut tangent_evaluator_workspace = [0.0; 6];
-    let mut tangent_coefficient_outputs = [0.0; 6];
-    let mut solution_tangent_workspace = [0.0; 1];
-    let mut outputs = [7.0; 1];
-    let mut tangent_outputs = [11.0; 1];
-    let parameters = [2.0f32, -4.0, 1.0, 0.0, 10.0, 0.0];
-    let tangents = [0.1f32; 6];
-
-    let error = bound
-        .push_forward(
-            &[&parameters],
-            &[&tangents],
-            MappedQpPushForwardWorkspace::new(
-                &mut primal_evaluator_workspace,
-                &mut primal_coefficient_outputs,
-                &mut tangent_evaluator_workspace,
-                &mut tangent_coefficient_outputs,
-                &mut solution_tangent_workspace,
-            ),
-            &mut outputs,
-            &mut tangent_outputs,
-        )
-        .unwrap_err();
-
-    assert!(matches!(
-        error,
-        RuntimeError::QpPushForwardUnsupported {
-            reason: "differentiated KKT solve support is not implemented",
-        }
-    ));
-    assert_eq!(outputs, [7.0]);
-    assert_eq!(tangent_outputs, [11.0]);
-}
 
 #[cfg(osqp_embedded)]
 #[test]
@@ -1768,9 +1635,10 @@ fn validated_embedded_qp_rejects_indices_outside_osqp_i32_range() {
     let bytes = encode_embedded_qp_with_oversized_n();
 
     match ValidatedEmbeddedQp::parse(bytes.as_slice()) {
-        Err(RuntimeError::Validation(message)) => {
-            assert!(message.contains("QP n exceeds the embedded OSQP i32 index range"));
-        }
+        Err(RuntimeError::ValidationField {
+            field: "QP n",
+            problem: "exceeds the embedded OSQP i32 index range",
+        }) => {}
         Err(other) => panic!("unexpected error: {other:?}"),
         Ok(_) => panic!("oversized OSQP index must be rejected"),
     }
