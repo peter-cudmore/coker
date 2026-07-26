@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(all(feature = "std", not(osqp_embedded)))]
+use alloc::vec::Vec;
 
 pub(super) fn validate_mapped_qp_program(
     qp_program: &ArchivedQpProgram,

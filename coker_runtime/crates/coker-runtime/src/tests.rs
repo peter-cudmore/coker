@@ -8,6 +8,7 @@ use rkyv::util::AlignedVec;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
+    string::ToString,
 };
 #[cfg(not(osqp_embedded))]
 const HOST_QP_FUNCTION_ID: u16 = 2;
