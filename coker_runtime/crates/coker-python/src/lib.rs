@@ -5,8 +5,8 @@ use core::{mem::MaybeUninit, slice};
 use coker_bytecode::archived_module;
 use coker_compiler::{compile_exported_json, compile_exported_qp_json, CompileError};
 use coker_runtime::{
-    MappedModule, MappedQpProgram, MappedQpWorkspace, Module, ModuleBuilder, ProgramInfo,
-    QpSolveStatus, QpWorkspaceRequirements, SpecInfo,
+    MappedModule, MappedQpProgram, MappedQpWorkspace, Module, ModuleBuilder, PreparedQpProgram,
+    ProgramInfo, QpSolveStatus, QpWorkspaceRequirements, SpecInfo,
 };
 use pyo3::buffer::{Element, PyBuffer};
 use pyo3::exceptions::{PyNotImplementedError, PyValueError};
@@ -33,6 +33,12 @@ struct PyRuntimeQpProgram {
     input_lengths: Vec<usize>,
     output_length: usize,
     workspace_requirements: QpWorkspaceRequirements,
+    prepared: PreparedQpProgram,
+    arena_backing: Vec<MaybeUninit<u8>>,
+    arena_offset: usize,
+    evaluator_workspace: Vec<f32>,
+    coefficient_outputs: Vec<f32>,
+    warm_start_scratch: Vec<f32>,
     output_scratch: Vec<f32>,
 }
 
@@ -68,36 +74,40 @@ impl PyRuntimeQpProgram {
         Ok(requirements)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (inputs, arena, evaluator_workspace, coefficient_outputs, solution, warm_start=None))]
+    #[pyo3(signature = (inputs, solution, warm_start=None))]
     fn solve_into(
         &mut self,
         _py: Python<'_>,
         inputs: Vec<PyBuffer<f32>>,
-        arena: PyBuffer<u8>,
-        evaluator_workspace: PyBuffer<f32>,
-        coefficient_outputs: PyBuffer<f32>,
         solution: PyBuffer<f64>,
         warm_start: Option<PyBuffer<f64>>,
     ) -> PyResult<(bool, String)> {
-        let arena = writable_c_buffer(&arena, "arena")?;
-        let evaluator_workspace = writable_c_buffer(&evaluator_workspace, "evaluator_workspace")?;
-        let coefficient_outputs = writable_c_buffer(&coefficient_outputs, "coefficient_outputs")?;
         let solution = writable_c_buffer(&solution, "solution")?;
         let input_slices = borrowed_input_slices(&inputs, "inputs")?;
+        let Self {
+            module_bytes,
+            function_id,
+            prepared,
+            evaluator_workspace,
+            coefficient_outputs,
+            warm_start_scratch,
+            output_scratch,
+            ..
+        } = self;
         let warm_start = match warm_start.as_ref() {
-            Some(buffer) => Some(readable_c_buffer(buffer, "warm_start")?),
+            Some(buffer) => {
+                let source = readable_c_buffer(buffer, "warm_start")?;
+                let destination = &mut warm_start_scratch[..];
+                copy_f64_slice_into_f32(source, destination, "warm_start")?;
+                Some(&destination[..source.len()])
+            }
             None => None,
         };
-        let module_bytes = &self.module_bytes;
-        let output_scratch = &mut self.output_scratch;
-        let mapped_qp = mapped_qp_program(module_bytes, self.function_id).map_err(runtime_error)?;
-        let workspace = MappedQpWorkspace::new(evaluator_workspace, coefficient_outputs);
-        let mut bound = mapped_qp
-            .bind_host(arena_as_uninit(arena))
-            .map_err(runtime_error)?;
-        let diagnostics = bound
-            .execute(&input_slices, warm_start, workspace, output_scratch)
+        let mapped_qp = mapped_qp_program(module_bytes, *function_id).map_err(runtime_error)?;
+        let workspace =
+            MappedQpWorkspace::new(evaluator_workspace.as_mut_slice(), coefficient_outputs.as_mut_slice());
+        let diagnostics = prepared
+            .execute(mapped_qp, &input_slices, warm_start, workspace, output_scratch.as_mut_slice())
             .map_err(runtime_error)?;
         copy_f32_slice_into_f64(output_scratch, solution, "solution")?;
         Ok((
@@ -106,36 +116,68 @@ impl PyRuntimeQpProgram {
         ))
     }
 
-
-    #[pyo3(signature = (inputs, arena, evaluator_workspace, coefficient_outputs, warm_start=None))]
+    #[pyo3(signature = (inputs, warm_start=None))]
     fn solve(
         &mut self,
         _py: Python<'_>,
         inputs: Vec<Vec<f32>>,
-        arena: PyBuffer<u8>,
-        evaluator_workspace: PyBuffer<f32>,
-        coefficient_outputs: PyBuffer<f32>,
         warm_start: Option<Vec<f64>>,
     ) -> PyResult<(Vec<f64>, bool, String)> {
-        let arena = writable_c_buffer(&arena, "arena")?;
-        let evaluator_workspace = writable_c_buffer(&evaluator_workspace, "evaluator_workspace")?;
-        let coefficient_outputs = writable_c_buffer(&coefficient_outputs, "coefficient_outputs")?;
         let input_slices: Vec<&[f32]> = inputs.iter().map(|input| input.as_slice()).collect();
-        let module_bytes = &self.module_bytes;
-        let output_scratch = &mut self.output_scratch;
-        let mapped_qp = mapped_qp_program(module_bytes, self.function_id).map_err(runtime_error)?;
-        let workspace = MappedQpWorkspace::new(evaluator_workspace, coefficient_outputs);
-        let mut bound = mapped_qp
-            .bind_host(arena_as_uninit(arena))
-            .map_err(runtime_error)?;
-        let diagnostics = bound
-            .execute(&input_slices, warm_start.as_deref(), workspace, output_scratch)
+        let Self {
+            module_bytes,
+            function_id,
+            prepared,
+            evaluator_workspace,
+            coefficient_outputs,
+            warm_start_scratch,
+            output_scratch,
+            ..
+        } = self;
+        let warm_start = match warm_start.as_deref() {
+            Some(source) => {
+                let destination = &mut warm_start_scratch[..];
+                copy_f64_slice_into_f32(source, destination, "warm_start")?;
+                Some(&destination[..source.len()])
+            }
+            None => None,
+        };
+        let mapped_qp = mapped_qp_program(module_bytes, *function_id).map_err(runtime_error)?;
+        let workspace =
+            MappedQpWorkspace::new(evaluator_workspace.as_mut_slice(), coefficient_outputs.as_mut_slice());
+        let diagnostics = prepared
+            .execute(mapped_qp, &input_slices, warm_start, workspace, output_scratch.as_mut_slice())
             .map_err(runtime_error)?;
         let success = solve_success(diagnostics.status);
         let solution = output_scratch.iter().copied().map(f64::from).collect();
         Ok((solution, success, format!("{:?}", diagnostics.status)))
     }
 
+    #[pyo3(signature = (_inputs, _tangents, _solution, _tangent_solution))]
+    fn push_forward_into(
+        &mut self,
+        _py: Python<'_>,
+        _inputs: Vec<PyBuffer<f32>>,
+        _tangents: Vec<PyBuffer<f32>>,
+        _solution: PyBuffer<f64>,
+        _tangent_solution: PyBuffer<f64>,
+    ) -> PyResult<()> {
+        Err(PyValueError::new_err(
+            "QP push-forward is unsupported: differentiated KKT solve support is not implemented",
+        ))
+    }
+
+    #[pyo3(signature = (_inputs, _tangents))]
+    fn push_forward(
+        &mut self,
+        _py: Python<'_>,
+        _inputs: Vec<Vec<f32>>,
+        _tangents: Vec<Vec<f32>>,
+    ) -> PyResult<(Vec<f64>, Vec<f64>)> {
+        Err(PyValueError::new_err(
+            "QP push-forward is unsupported: differentiated KKT solve support is not implemented",
+        ))
+    }
 }
 
 #[pymethods]
@@ -257,12 +299,34 @@ fn compile_exported_qp<'py>(
 fn load_qp_program(program: &[u8]) -> PyResult<PyRuntimeQpProgram> {
     let (function_id, input_lengths, output_length, workspace_requirements) =
         load_qp_program_metadata(program).map_err(runtime_error)?;
+    let mut arena_backing = aligned_uninit_backing(
+        workspace_requirements.arena_bytes,
+        workspace_requirements.arena_alignment,
+    )?;
+    let arena_offset = aligned_buffer_offset(
+        arena_backing.as_mut_ptr().cast::<u8>() as usize,
+        workspace_requirements.arena_alignment,
+    );
+    let mapped_qp = mapped_qp_program(program, function_id).map_err(runtime_error)?;
+    let prepared = unsafe {
+        mapped_qp
+            .prepare_detached(
+                &mut arena_backing[arena_offset..arena_offset + workspace_requirements.arena_bytes],
+            )
+            .map_err(runtime_error)?
+    };
     Ok(PyRuntimeQpProgram {
         module_bytes: program.to_vec(),
         function_id,
         input_lengths,
         output_length,
         workspace_requirements,
+        prepared,
+        arena_backing,
+        arena_offset,
+        evaluator_workspace: vec![0.0; workspace_requirements.evaluator_workspace_size],
+        coefficient_outputs: vec![0.0; workspace_requirements.coefficient_output_size],
+        warm_start_scratch: vec![0.0; output_length],
         output_scratch: vec![0.0; output_length],
     })
 }
@@ -294,6 +358,7 @@ fn load_program(program: &[u8]) -> PyResult<PyRuntimeProgram> {
         tangent_output_scratch: vec![0.0; output_length],
     })
 }
+
 
 #[pyfunction]
 fn validate_compiled_program(program: &[u8]) -> PyResult<bool> {
@@ -429,6 +494,25 @@ fn writable_c_buffer<'py, T: Element>(
     Ok(unsafe { slice::from_raw_parts_mut(buffer.buf_ptr() as *mut T, buffer.item_count()) })
 }
 
+fn copy_f64_slice_into_f32(source: &[f64], destination: &mut [f32], name: &str) -> PyResult<()> {
+    if source.len() > destination.len() {
+        return Err(PyValueError::new_err(format!(
+            "{name} length mismatch: expected at most {}, got {}",
+            destination.len(),
+            source.len()
+        )));
+    }
+    for (dst, src) in destination.iter_mut().zip(source.iter().copied()) {
+        if !src.is_finite() || src < -(f32::MAX as f64) || src > f32::MAX as f64 {
+            return Err(PyValueError::new_err(format!(
+                "{name} contains a value not representable as float32"
+            )));
+        }
+        *dst = src as f32;
+    }
+    Ok(())
+}
+
 fn copy_f32_slice_into_f64(source: &[f32], destination: &mut [f64], name: &str) -> PyResult<()> {
     if source.len() != destination.len() {
         return Err(PyValueError::new_err(format!(
@@ -443,9 +527,25 @@ fn copy_f32_slice_into_f64(source: &[f32], destination: &mut [f64], name: &str) 
     Ok(())
 }
 
-fn arena_as_uninit(arena: &mut [u8]) -> &mut [MaybeUninit<u8>] {
-    unsafe { slice::from_raw_parts_mut(arena.as_mut_ptr().cast::<MaybeUninit<u8>>(), arena.len()) }
+fn aligned_uninit_backing(size: usize, alignment: usize) -> PyResult<Vec<MaybeUninit<u8>>> {
+    if alignment == 0 || !alignment.is_power_of_two() {
+        return Err(PyValueError::new_err(format!(
+            "arena alignment must be a positive power of two, got {alignment}"
+        )));
+    }
+    let total = size
+        .checked_add(alignment.saturating_sub(1))
+        .ok_or_else(|| PyValueError::new_err("arena size overflow"))?;
+    Ok(vec![MaybeUninit::uninit(); total])
 }
+
+fn aligned_buffer_offset(base: usize, alignment: usize) -> usize {
+    if alignment == 0 {
+        return 0;
+    }
+    (alignment - (base % alignment)) % alignment
+}
+
 
 fn solve_success(status: QpSolveStatus) -> bool {
     matches!(

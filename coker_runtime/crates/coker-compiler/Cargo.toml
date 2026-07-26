@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 coker-bytecode = { path = "../coker-bytecode" }
+coker-osqp-ffi = { path = "../coker-osqp-ffi" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

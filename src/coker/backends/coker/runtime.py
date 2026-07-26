@@ -22,22 +22,6 @@ def _restore_output(flat_output: Sequence[float], shape):
     return np.asarray(flat_output, dtype=float).reshape(shape, order="C")
 
 
-def _aligned_u8_buffer(size: int, alignment: int):
-    if size < 0:
-        raise ValueError(f"buffer size must be nonnegative, got {size}")
-    if alignment <= 0 or alignment & (alignment - 1):
-        raise ValueError(
-            "buffer alignment must be a positive power of two, got "
-            f"{alignment}"
-        )
-    if size == 0:
-        backing = np.empty(0, dtype=np.uint8)
-        return backing, backing
-    backing = np.empty(size + alignment - 1, dtype=np.uint8)
-    offset = (-int(backing.ctypes.data)) % alignment
-    aligned = backing[offset : offset + size]
-    assert int(aligned.ctypes.data) % alignment == 0
-    return backing, aligned
 
 
 class CompiledGraph:
@@ -125,32 +109,6 @@ class RuntimeQpProgram:
         self._info = self._runtime.info()
         self._input_lengths = list(self._info["input_specs"])
         self._output_length = int(self._info["output_spec"])
-        requirements = self._runtime.workspace_requirements()
-        self._tangent_workspace_size = int(
-            requirements.get("tangent_workspace_size", 0)
-        )
-        self._arena_backing, self._arena = _aligned_u8_buffer(
-            int(requirements["arena_bytes"]),
-            int(requirements["arena_alignment"]),
-        )
-        self._evaluator_workspace = np.zeros(
-            int(requirements["evaluator_workspace_size"]),
-            dtype=np.float32,
-        )
-        self._coefficient_outputs = np.zeros(
-            int(requirements["coefficient_output_size"]),
-            dtype=np.float32,
-        )
-        self._tangent_evaluator_workspace = np.zeros_like(
-            self._evaluator_workspace
-        )
-        self._tangent_coefficient_outputs = np.zeros_like(
-            self._coefficient_outputs
-        )
-        self._solution_tangent_workspace = np.zeros(
-            self._tangent_workspace_size,
-            dtype=np.float32,
-        )
         self._solution = np.empty(self._output_length, dtype=np.float64)
         self._tangent_solution = np.empty(
             self._output_length, dtype=np.float64
@@ -172,9 +130,6 @@ class RuntimeQpProgram:
         )
         success, status = self._runtime.solve_into(
             inputs,
-            self._arena,
-            self._evaluator_workspace,
-            self._coefficient_outputs,
             self._solution,
             initial,
         )
@@ -189,22 +144,7 @@ class RuntimeQpProgram:
         return self._solution.copy(), info
 
     def push_forward(self, *tangent_spaces):
-        n_args = len(self._input_lengths)
-        x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
-        assert len(x) == n_args
-        assert len(dx) == n_args
-        inputs = [_runtime_input_buffer(arg) for arg in x]
-        tangents = [_runtime_input_buffer(arg) for arg in dx]
-        self._runtime.push_forward_into(
-            inputs,
-            tangents,
-            self._arena,
-            self._evaluator_workspace,
-            self._coefficient_outputs,
-            self._tangent_evaluator_workspace,
-            self._tangent_coefficient_outputs,
-            self._solution_tangent_workspace,
-            self._solution,
-            self._tangent_solution,
+        raise ValueError(
+            "QP push-forward is unsupported: differentiated "
+            "KKT solve support is not implemented"
         )
-        return self._solution.copy(), self._tangent_solution.copy()

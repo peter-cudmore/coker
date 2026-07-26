@@ -1,46 +1,48 @@
-#[cfg(osqp_embedded)]
 use super::*;
 
-#[cfg(osqp_embedded)]
 impl<'a> MappedQpProgram<'a> {
-    fn bind_instance(
+    fn bind_instance_in_arena(
         &self,
         arena: &BoundQpArena<'_>,
-    ) -> Result<ffi::CokerOsqpInstance, RuntimeError> {
-        let plan = ffi_plan_from_program(self.qp_program)?;
-        let mut instance = MaybeUninit::<ffi::CokerOsqpInstance>::zeroed();
-        let bind_status = unsafe {
-            ffi::coker_osqp_bind_plan(
-                &plan,
-                arena.as_ffi(self.workspace_requirements),
-                instance.as_mut_ptr(),
-            )
-        };
-        if bind_status != ffi::COKER_OSQP_OK {
-            return Err(RuntimeError::EmbeddedQpAbi {
-                operation: "bind",
-                status: bind_status,
-            });
-        }
-        Ok(unsafe { instance.assume_init() })
+    ) -> Result<EmbeddedOsqpInstance, RuntimeError> {
+        EmbeddedOsqpInstance::bind(self.qp_program, arena)
     }
 
-    /// Binds this embedded QP program to a caller-provided aligned OSQP arena.
+    /// Binds this QP program to a caller-provided aligned OSQP arena.
     pub fn bind<'arena>(
         &self,
         arena: &'arena mut [MaybeUninit<u8>],
     ) -> Result<BoundMappedQpProgram<'a, 'arena>, RuntimeError> {
         let arena = BoundQpArena::new(arena, self.workspace_requirements)?;
-        let instance = self.bind_instance(&arena)?;
+        let instance = self.bind_instance_in_arena(&arena)?;
         Ok(BoundMappedQpProgram {
             program: *self,
             arena,
             instance: Some(instance),
         })
     }
+
+    /// Prepares detached solver state over an externally-owned arena.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep `arena` alive, writable, and at a stable address for the
+    /// full lifetime of the returned solver state.
+    pub unsafe fn prepare_detached(
+        &self,
+        arena: &mut [MaybeUninit<u8>],
+    ) -> Result<PreparedQpProgram, RuntimeError> {
+        let arena = BoundQpArena::new(arena, self.workspace_requirements)?;
+        let instance = self.bind_instance_in_arena(&arena)?;
+        Ok(PreparedQpProgram {
+            function_id: self.function_id,
+            instance: Some(instance),
+            arena_base: arena.base,
+            arena_bytes: arena.bytes,
+        })
+    }
 }
 
-#[cfg(osqp_embedded)]
 impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
     fn invalid_instance_error() -> RuntimeError {
         RuntimeError::Validation(
@@ -51,34 +53,88 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
     pub fn execute(
         &mut self,
         parameters: &[&[f32]],
+        warm_start: Option<&[f32]>,
         workspace: MappedQpWorkspace<'_>,
         outputs: &mut [f32],
     ) -> Result<QpSolveDiagnostics, RuntimeError> {
-        self.program.validate_parameters(parameters)?;
-        workspace.validate_for(self.program.workspace_requirements)?;
-        self.program.validate_output_buffer(outputs)?;
+        execute_qp_program(
+            self.program,
+            &self.arena,
+            &mut self.instance,
+            parameters,
+            warm_start,
+            workspace,
+            outputs,
+        )
+    }
+}
 
-        let coefficient_output_size = self.program.workspace_requirements.coefficient_output_size;
-        let MappedQpWorkspace {
-            evaluator_workspace,
-            coefficient_outputs,
-        } = workspace;
-        let coefficient_outputs = &mut coefficient_outputs[..coefficient_output_size];
-        self.program
-            .evaluator
-            .execute(parameters, evaluator_workspace, coefficient_outputs)?;
+impl PreparedQpProgram {
+    fn invalid_instance_error() -> RuntimeError {
+        RuntimeError::Validation(
+            "detached prepared QP instance is invalid after a prior update failure",
+        )
+    }
 
-        let arena_layout = self.program.qp_program.embedded_plan().arena_layout();
-        let base = self.arena.base.as_ptr();
-        let bytes = self.arena.bytes;
-        let p_x = unsafe { arena_region_slice_mut::<f32>(base, bytes, arena_layout.pdata_x())? };
-        let a_x = unsafe { arena_region_slice_mut::<f32>(base, bytes, arena_layout.adata_x())? };
-        let q = unsafe { arena_region_slice_mut::<f32>(base, bytes, arena_layout.qdata())? };
-        let l = unsafe { arena_region_slice_mut::<f32>(base, bytes, arena_layout.ldata())? };
-        let u = unsafe { arena_region_slice_mut::<f32>(base, bytes, arena_layout.udata())? };
+    pub fn execute(
+        &mut self,
+        program: MappedQpProgram<'_>,
+        parameters: &[&[f32]],
+        warm_start: Option<&[f32]>,
+        workspace: MappedQpWorkspace<'_>,
+        outputs: &mut [f32],
+    ) -> Result<QpSolveDiagnostics, RuntimeError> {
+        if program.function_id() != self.function_id {
+            return Err(RuntimeError::Validation(
+                "prepared QP instance function_id does not match the mapped program",
+            ));
+        }
+        let arena = unsafe { BoundQpArena::from_raw(self.arena_base, self.arena_bytes) };
+        execute_qp_program(
+            program,
+            &arena,
+            &mut self.instance,
+            parameters,
+            warm_start,
+            workspace,
+            outputs,
+        )
+    }
+}
+
+fn execute_qp_program(
+    program: MappedQpProgram<'_>,
+    arena: &BoundQpArena<'_>,
+    instance: &mut Option<EmbeddedOsqpInstance>,
+    parameters: &[&[f32]],
+    warm_start: Option<&[f32]>,
+    workspace: MappedQpWorkspace<'_>,
+    outputs: &mut [f32],
+) -> Result<QpSolveDiagnostics, RuntimeError> {
+    program.validate_parameters(parameters)?;
+    workspace.validate_for(program.workspace_requirements)?;
+    program.validate_output_buffer(outputs)?;
+
+    let coefficient_output_size = program.workspace_requirements.coefficient_output_size;
+    let MappedQpWorkspace {
+        evaluator_workspace,
+        coefficient_outputs,
+    } = workspace;
+    let coefficient_outputs = &mut coefficient_outputs[..coefficient_output_size];
+    program
+        .evaluator
+        .execute(parameters, evaluator_workspace, coefficient_outputs)?;
+
+    {
+        let instance_ref = instance
+            .as_mut()
+            .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
+        instance_ref.refresh_self_pointers();
+        let (p_x, a_x, q, l, u) =
+            instance_ref.numeric_slices_mut(program.p_nnz, program.a_nnz, program.n, program.m)?;
 
         scatter_embedded_qp_coefficients(
-            self.program.qp_program.coefficient_outputs(),
+            program.qp_program.coefficient_outputs(),
             coefficient_outputs,
             p_x,
             q,
@@ -87,87 +143,130 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
             u,
         )?;
         validate_embedded_numeric_update(p_x, a_x, q, l, u)?;
+    }
 
-        let update = ffi::CokerOsqpNumericUpdate {
-            p_x: p_x.as_ptr(),
-            p_nnz: checked_embedded_ffi_length(self.program.p_nnz)?,
-            a_x: a_x.as_ptr(),
-            a_nnz: checked_embedded_ffi_length(self.program.a_nnz)?,
-            q: q.as_ptr(),
-            q_len: checked_embedded_ffi_length(self.program.n)?,
-            l: l.as_ptr(),
-            l_len: checked_embedded_ffi_length(self.program.m)?,
-            u: u.as_ptr(),
-            u_len: checked_embedded_ffi_length(self.program.m)?,
-        };
-        let update_status = {
-            let instance = self
-                .instance
+    if program.qp_program.embedded_plan().settings().warm_start {
+        if let Some(initial) = warm_start {
+            if initial.len() != program.n {
+                return Err(RuntimeError::Validation(
+                    "QP warm start length does not match decision dimension",
+                ));
+            }
+            let instance_ref = instance
                 .as_mut()
-                .ok_or_else(Self::invalid_instance_error)?;
-            unsafe { ffi::coker_osqp_update(instance, &update) }
-        };
-        if update_status != ffi::COKER_OSQP_OK {
-            self.instance = self.program.bind_instance(&self.arena).ok();
-            return Err(RuntimeError::EmbeddedQpAbi {
-                operation: "update",
-                status: update_status,
-            });
+                .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
+            let mut solver = instance_ref.solver();
+            let warm_start_status = unsafe {
+                solver
+                    .warm_start(Some(initial), None)
+                    .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?
+            };
+            if warm_start_status != 0 {
+                return Err(RuntimeError::EmbeddedQpAbi {
+                    operation: "warm_start",
+                    status: warm_start_status,
+                });
+            }
         }
+    }
 
-        let mut solve_status = ffi::COKER_OSQP_SOLVE_UNSOLVED;
-        let solve_abi_status = {
-            let instance = self
-                .instance
-                .as_mut()
-                .ok_or_else(Self::invalid_instance_error)?;
-            unsafe { ffi::coker_osqp_solve(instance, &mut solve_status) }
-        };
-        if solve_abi_status != ffi::COKER_OSQP_OK {
+    let (q_ptr, l_ptr, u_ptr) = {
+        let instance_ref = instance
+            .as_mut()
+            .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
+        let (_, _, q, l, u) =
+            instance_ref.numeric_slices_mut(program.p_nnz, program.a_nnz, program.n, program.m)?;
+        (q.as_ptr(), l.as_ptr(), u.as_ptr())
+    };
+    let update_vec_status = {
+        let instance_ref = instance
+            .as_mut()
+            .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
+        let mut solver = instance_ref.solver();
+        unsafe {
+            solver
+                .update_data_vec(
+                    slice::from_raw_parts(q_ptr, program.n),
+                    slice::from_raw_parts(l_ptr, program.m),
+                    slice::from_raw_parts(u_ptr, program.m),
+                )
+                .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?
+        }
+    };
+    if update_vec_status != 0 {
+        *instance = program.bind_instance_in_arena(arena).ok();
+        return Err(RuntimeError::EmbeddedQpAbi {
+            operation: "update_data_vec",
+            status: update_vec_status,
+        });
+    }
+
+    let (p_x_ptr, a_x_ptr) = {
+        let instance_ref = instance
+            .as_mut()
+            .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
+        let (p_x, a_x, _, _, _) =
+            instance_ref.numeric_slices_mut(program.p_nnz, program.a_nnz, program.n, program.m)?;
+        (p_x.as_ptr(), a_x.as_ptr())
+    };
+    let update_mat_status = {
+        let instance_ref = instance
+            .as_mut()
+            .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
+        let mut solver = instance_ref.solver();
+        unsafe {
+            solver
+                .update_data_mat(
+                    slice::from_raw_parts(p_x_ptr, program.p_nnz),
+                    slice::from_raw_parts(a_x_ptr, program.a_nnz),
+                )
+                .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?
+        }
+    };
+    if update_mat_status != 0 {
+        *instance = program.bind_instance_in_arena(arena).ok();
+        return Err(RuntimeError::EmbeddedQpAbi {
+            operation: "update_data_mat",
+            status: update_mat_status,
+        });
+    }
+
+    let (status, iterations, primal_residual, dual_residual) = {
+        let instance_ref = instance
+            .as_mut()
+            .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
+        let mut solver = instance_ref.solver();
+        let solve_status = unsafe { solver.solve() };
+        if solve_status != 0 {
             return Err(RuntimeError::EmbeddedQpAbi {
                 operation: "solve",
-                status: solve_abi_status,
+                status: solve_status,
             });
         }
-
-        let mut solution = MaybeUninit::<ffi::CokerOsqpSolution>::zeroed();
-        let solution_status = {
-            let instance = self
-                .instance
-                .as_ref()
-                .ok_or_else(Self::invalid_instance_error)?;
-            unsafe { ffi::coker_osqp_solution(instance, solution.as_mut_ptr()) }
+        let solution = unsafe {
+            solver
+                .solution()
+                .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?
         };
-        if solution_status != ffi::COKER_OSQP_OK {
-            return Err(RuntimeError::EmbeddedQpAbi {
-                operation: "solution",
-                status: solution_status,
-            });
+        if solution.primal.len() != program.n || solution.dual.len() != program.m {
+            return Err(RuntimeError::EmbeddedQpWorkspaceInvalid);
         }
-        let solution = unsafe { solution.assume_init() };
-        if solution.primal_len != checked_embedded_ffi_length(self.program.n)?
-            || solution.dual_len != checked_embedded_ffi_length(self.program.m)?
-            || (self.program.n != 0 && solution.primal.is_null())
-            || (self.program.m != 0 && solution.dual.is_null())
-        {
-            return Err(RuntimeError::EmbeddedQpAbi {
-                operation: "solution",
-                status: ffi::COKER_OSQP_INVALID_ARGUMENT,
-            });
-        }
-
-        let primal = unsafe { slice::from_raw_parts(solution.primal, self.program.n) };
-        outputs.copy_from_slice(primal);
-        Ok(QpSolveDiagnostics {
-            status: QpSolveStatus::from_embedded_raw(solve_status),
-            iterations: solution.iterations,
-            primal_residual: solution.primal_residual,
-            dual_residual: solution.dual_residual,
-        })
-    }
+        outputs.copy_from_slice(solution.primal);
+        (
+            QpSolveStatus::from_raw(solution.status),
+            solution.iterations,
+            solution.primal_residual,
+            solution.dual_residual,
+        )
+    };
+    Ok(QpSolveDiagnostics {
+        status,
+        iterations,
+        primal_residual,
+        dual_residual,
+    })
 }
 
-#[cfg(osqp_embedded)]
 impl<'a> BoundQpArena<'a> {
     fn new(
         arena: &'a mut [MaybeUninit<u8>],
@@ -188,11 +287,65 @@ impl<'a> BoundQpArena<'a> {
         })
     }
 
-    fn as_ffi(&self, requirements: QpWorkspaceRequirements) -> ffi::CokerOsqpArena {
-        ffi::CokerOsqpArena {
-            base: self.base.as_ptr().cast(),
-            bytes: self.bytes,
-            alignment: requirements.arena_alignment,
+    unsafe fn from_raw(base: NonNull<u8>, bytes: usize) -> Self {
+        Self {
+            base,
+            bytes,
+            _borrowed: PhantomData,
         }
     }
+}
+
+fn scatter_embedded_qp_coefficients(
+    outputs: &ArchivedQpCoefficientOutputs,
+    coefficient_outputs: &[f32],
+    p_x: &mut [f32],
+    q: &mut [f32],
+    a_x: &mut [f32],
+    l: &mut [f32],
+    u: &mut [f32],
+) -> Result<(), RuntimeError> {
+    scatter_embedded_output_slice(&outputs.px, coefficient_outputs, p_x)?;
+    scatter_embedded_output_slice(&outputs.q, coefficient_outputs, q)?;
+    scatter_embedded_output_slice(&outputs.ax, coefficient_outputs, a_x)?;
+    scatter_embedded_output_slice(&outputs.l, coefficient_outputs, l)?;
+    scatter_embedded_output_slice(&outputs.u, coefficient_outputs, u)
+}
+
+fn scatter_embedded_output_slice(
+    output: &coker_bytecode::ArchivedQpOutputSlice,
+    source: &[f32],
+    destination: &mut [f32],
+) -> Result<(), RuntimeError> {
+    let start = output.start.to_native() as usize;
+    let length = output.length.to_native() as usize;
+    let end = start
+        .checked_add(length)
+        .ok_or(RuntimeError::EmbeddedQpNumericInvalid)?;
+    if end > source.len() || length != destination.len() {
+        return Err(RuntimeError::EmbeddedQpNumericInvalid);
+    }
+    destination.copy_from_slice(&source[start..end]);
+    Ok(())
+}
+
+fn validate_embedded_numeric_update(
+    p_x: &[f32],
+    a_x: &[f32],
+    q: &[f32],
+    l: &[f32],
+    u: &[f32],
+) -> Result<(), RuntimeError> {
+    if p_x
+        .iter()
+        .chain(a_x)
+        .chain(q)
+        .chain(l)
+        .chain(u)
+        .any(|value| !value.is_finite())
+        || l.iter().zip(u).any(|(lower, upper)| lower > upper)
+    {
+        return Err(RuntimeError::EmbeddedQpNumericInvalid);
+    }
+    Ok(())
 }

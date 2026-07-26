@@ -27,6 +27,10 @@ extern crate std;
 
 #[cfg(osqp_embedded)]
 mod bindings_embedded;
+#[cfg(osqp_embedded)]
+pub mod raw_embedded;
+#[cfg(osqp_embedded)]
+pub mod embedded_bind;
 #[cfg(not(osqp_embedded))]
 mod bindings;
 
