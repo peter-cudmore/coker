@@ -1,9 +1,10 @@
 Coker
 =====
 
-Coker is a mathematical programming toolkit and compiler pipeline: define
-computations in Python, compile them to an optimised representation, and run
-them efficiently on embedded or bare-metal hardware.
+Coker is a mathematical programming toolkit and compiler pipeline for
+technical computing in Python. Define computations as ordinary Python
+callables, compile them to a symbolic representation, and lower them to
+multiple execution backends.
 
 .. toctree::
    :maxdepth: 1

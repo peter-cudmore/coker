@@ -8,16 +8,19 @@ Installation
 
    pip install coker
 
-To use the CasADi backend (required for trajectory optimisation)::
+Optional extras are available for backend-specific dependencies:
 
-   pip install coker casadi
+.. code-block:: bash
+
+   pip install "coker[casadi]"
+   pip install "coker[jax]"
 
 Basic usage
 -----------
 
-Define a function by decorating a Python callable with :func:`coker.function`,
-providing the argument spaces. Coker traces the implementation and compiles it
-for the chosen backend.
+Compile a Python callable with :func:`coker.function`, providing the argument
+spaces explicitly. Coker traces the implementation and compiles it for the
+chosen backend.
 
 .. code-block:: python
 
@@ -57,4 +60,5 @@ the ``backend`` argument:
        backend="casadi",
    )
 
-Available backends: ``"numpy"``, ``"casadi"``, ``"sympy"``, ``"coker"``.
+Available backend names in the current package are ``"numpy"``, ``"casadi"``,
+``"sympy"``, ``"coker"``, and ``"jax"``.

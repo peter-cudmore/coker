@@ -9,3 +9,10 @@ Python callables into Coker functions.
 .. autoclass:: coker.algebra.kernel.Function
    :members:
    :special-members: __call__
+
+Tensor helpers
+--------------
+
+.. autofunction:: coker.zeros
+
+.. autoclass:: coker.SymbolicVector
