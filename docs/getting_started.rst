@@ -62,3 +62,11 @@ the ``backend`` argument:
 
 Available backend names in the current package are ``"numpy"``, ``"casadi"``,
 ``"sympy"``, ``"coker"``, and ``"jax"``.
+
+Next steps
+----------
+
+- :doc:`backends` for backend-selection guidance and the capability matrix.
+- :doc:`dynamics` for ODE construction and variational optimisation.
+- :doc:`toolkits` for robotics, system modelling, and codesign helpers.
+- :doc:`examples` for the main repository entry points.

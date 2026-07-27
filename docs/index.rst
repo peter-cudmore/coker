@@ -14,6 +14,15 @@ multiple execution backends.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Guides
+
+   backends
+   dynamics
+   toolkits
+   examples
+
+.. toctree::
+   :maxdepth: 1
    :caption: Internals
 
    backend_architecture
