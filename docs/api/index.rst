@@ -7,3 +7,4 @@ API Reference
    functions
    spaces
    conditional
+   optimisation
