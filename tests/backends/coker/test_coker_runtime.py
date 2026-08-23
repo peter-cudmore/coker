@@ -172,3 +172,19 @@ def test_runtime_matches_mixed_constant_workspace_graph():
         args=(np.array([4.0, -1.0, 0.25]),),
         tangents=(np.array([0.5, 1.5, -0.5]),),
     )
+
+
+def test_function_compile_bytecode_exports_mapped_runtime_artifact():
+    symbolic_function = function(
+        [VectorSpace("x", 3)],
+        implementation=lambda x: np.cross(x, np.array([1.0, -2.0, 0.5])),
+    )
+
+    program = symbolic_function.compile_bytecode()
+
+    assert isinstance(program, bytes)
+    assert program
+    assert (
+        CompiledGraph.compile(create_opgraph(symbolic_function)).program
+        == program
+    )

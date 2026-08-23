@@ -638,7 +638,7 @@ def _build_coefficient_function(
                 ordered_px_values.append(px_values[value_index + 1 + row])
             ordered_px_values.append(px_values[value_index])
 
-        ax_values: list[object] = []
+        ax_rows: list[list[object]] = []
         lower_values: list[object] = []
         upper_values: list[object] = []
         for _residual, lower_bound, upper_bound in constraint_data:
@@ -662,6 +662,7 @@ def _build_coefficient_function(
                 upper_bound - residual_zero[row] for row in range(row_count)
             )
 
+            row_coefficients = [[] for _ in range(row_count)]
             for column in range(decision_dimension):
                 basis = basis_vectors[column]
                 residual_basis = _flatten_symbolic_vector(
@@ -674,10 +675,17 @@ def _build_coefficient_function(
                         runtime_args,
                     )
                 )
-                ax_values.extend(
-                    residual_basis[row] - residual_zero[row]
-                    for row in range(row_count)
-                )
+                for row in range(row_count):
+                    row_coefficients[row].append(
+                        residual_basis[row] - residual_zero[row]
+                    )
+            ax_rows.extend(row_coefficients)
+
+        ax_values = [
+            row_values[column]
+            for column in range(decision_dimension)
+            for row_values in ax_rows
+        ]
 
         if not parameter_bindings:
             return [
@@ -754,6 +762,11 @@ def _evaluate_function(
 
 
 def _flatten_symbolic_vector(value) -> np.ndarray:
+    if isinstance(value, Tracer) and not value.dim.is_scalar():
+        return np.asarray(
+            [value[index] for index in range(value.dim.flat())],
+            dtype=object,
+        )
     return np.asarray(value, dtype=object).reshape(-1, order="C")
 
 
