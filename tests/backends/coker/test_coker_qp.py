@@ -310,6 +310,71 @@ def test_coker_qp_solves_parameterized_problem():
     assert problem.solve_info.success
 
 
+def test_coker_qp_parameterized_box_coefficients_and_solution():
+    from coker.backends.coker.optimisation import _build_coefficient_function
+
+    with ProblemBuilder(
+        arguments=[
+            VectorSpace("target", 2),
+            VectorSpace("lower", 2),
+            VectorSpace("upper", 2),
+        ]
+    ) as builder:
+        target, lower, upper = builder.arguments
+        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
+        cost = np.dot(x - target, x - target)
+        constraints = [x >= lower, x <= upper]
+        bindings = _build_bindings(cost, [target, lower, upper])
+        coefficient_function, slices = _build_coefficient_function(
+            cost.tape,
+            cost,
+            constraints,
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+
+    parameters = (
+        np.array([3.0, -4.0]),
+        np.array([-1.0, -2.0]),
+        np.array([2.0, 1.0]),
+    )
+    coefficients = np.asarray(coefficient_function(*parameters), dtype=float)
+    lower_slice = slices["l"]
+    upper_slice = slices["u"]
+    assert np.allclose(
+        coefficients[
+            lower_slice.start : lower_slice.start + lower_slice.length
+        ],
+        [-1.0, -2.0, -2.0, -1.0],
+    )
+    assert np.allclose(
+        coefficients[
+            upper_slice.start : upper_slice.start + upper_slice.length
+        ],
+        [1.0e30, 1.0e30, 1.0e30, 1.0e30],
+    )
+    matrix_slice = slices["ax"]
+    assert np.allclose(
+        coefficients[
+            matrix_slice.start : matrix_slice.start + matrix_slice.length
+        ],
+        [1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0],
+    )
+    runtime_qp = RuntimeQpProgram.compile(
+        extract_qp_program(
+            cost,
+            constraints,
+            [x],
+            bindings.decision_indices,
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+    )
+    solution, info = runtime_qp.solve(parameters, warm_start=np.zeros(2))
+    assert info.success
+    assert np.allclose(solution, [2.0, -2.0], atol=1.0e-3)
+
+
 def test_coker_qp_updates_warm_start_between_solves():
     with ProblemBuilder(arguments=[VectorSpace("target", 2)]) as builder:
         (target,) = builder.arguments

@@ -840,6 +840,29 @@ class Function:
         backend = get_backend_by_name(self.backend)
         return backend.lower(self)
 
+    def compile_bytecode(self) -> bytes:
+        """Compile this fixed-shape numeric function to a Coker bytecode module.
+
+        The returned artifact is executable through ``coker-runtime``'s mapped
+        runtime; it contains no Python callback or interpreter dependency.
+        """
+        from coker.algebra.dimensions import FunctionSpace
+        from coker.backends.coker.core import create_opgraph
+        from coker.backends.coker.runtime import CompiledGraph
+
+        if any(
+            isinstance(self.tape.dim[input_index], FunctionSpace)
+            for input_index in self.tape.input_indicies
+        ):
+            raise NotImplementedError(
+                "bytecode compilation does not support FunctionSpace inputs"
+            )
+        if any(output is None for output in self.output):
+            raise NotImplementedError(
+                "bytecode compilation does not support None outputs"
+            )
+        return bytes(CompiledGraph.compile(create_opgraph(self)).program)
+
     def compile(self, backend: str):
         raise NotImplementedError("Not yet implemented")
 

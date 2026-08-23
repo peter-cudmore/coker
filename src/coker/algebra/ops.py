@@ -376,6 +376,7 @@ numpy_atomics = {
     np.abs: OP.ABS,
     np.arctan2: OP.ARCTAN2,
     np.log: OP.LOG,
+    np.less_equal: OP.LESS_EQUAL,
 }
 
 
