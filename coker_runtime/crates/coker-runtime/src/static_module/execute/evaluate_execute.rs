@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn execute_evaluate_layer(
+pub(crate) fn execute_evaluate_layer(
     module: &ArchivedBytecodeModule,
     evaluate_layer: &ArchivedEvaluateLayer,
     workspace: &mut Workspace<'_>,

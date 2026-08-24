@@ -23,6 +23,8 @@ pub use crate::qp::{
 };
 #[cfg(all(feature = "std", not(osqp_embedded)))]
 pub use crate::qp::{QpRuntime, QpSolveResult, QpWorkspaceLayout, QpWorkspaceRegion};
+#[cfg(osqp_embedded)]
+pub use crate::static_module::QpCallContext;
 pub use crate::static_module::{MappedExecutable, MappedModule, MappedProgram};
 use crate::workspace::Workspace;
 #[cfg(feature = "std")]

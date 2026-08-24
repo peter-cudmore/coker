@@ -61,7 +61,7 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
             self.program,
             &self.arena,
             &mut self.instance,
-            parameters,
+            QpParameters::Slices(parameters),
             warm_start,
             workspace,
             outputs,
@@ -88,24 +88,51 @@ impl PreparedQpProgram {
             program,
             &arena,
             &mut self.instance,
-            parameters,
+            QpParameters::Slices(parameters),
             warm_start,
+            workspace,
+            outputs,
+        )
+    }
+    pub(crate) fn execute_flat(
+        &mut self,
+        program: MappedQpProgram<'_>,
+        parameters: &[f32],
+        workspace: MappedQpWorkspace<'_>,
+        outputs: &mut [f32],
+    ) -> Result<QpSolveDiagnostics, RuntimeError> {
+        if program.function_id() != self.function_id {
+            return Err(RuntimeError::Validation(
+                "prepared QP instance function_id does not match the mapped program",
+            ));
+        }
+        let arena = unsafe { BoundQpArena::from_raw(self.arena_base, self.arena_bytes) };
+        execute_qp_program(
+            program,
+            &arena,
+            &mut self.instance,
+            QpParameters::Flat(parameters),
+            None,
             workspace,
             outputs,
         )
     }
 }
 
+enum QpParameters<'a> {
+    Slices(&'a [&'a [f32]]),
+    Flat(&'a [f32]),
+}
+
 fn execute_qp_program(
     program: MappedQpProgram<'_>,
     arena: &BoundQpArena<'_>,
     instance: &mut Option<EmbeddedOsqpInstance>,
-    parameters: &[&[f32]],
+    parameters: QpParameters<'_>,
     warm_start: Option<&[f32]>,
     workspace: MappedQpWorkspace<'_>,
     outputs: &mut [f32],
 ) -> Result<QpSolveDiagnostics, RuntimeError> {
-    program.validate_parameters(parameters)?;
     workspace.validate_for(program.workspace_requirements)?;
     program.validate_output_buffer(outputs)?;
 
@@ -115,9 +142,19 @@ fn execute_qp_program(
         coefficient_outputs,
     } = workspace;
     let coefficient_outputs = &mut coefficient_outputs[..coefficient_output_size];
-    program
-        .evaluator
-        .execute(parameters, evaluator_workspace, coefficient_outputs)?;
+    match parameters {
+        QpParameters::Slices(parameters) => {
+            program.validate_parameters(parameters)?;
+            program
+                .evaluator
+                .execute(parameters, evaluator_workspace, coefficient_outputs)?;
+        }
+        QpParameters::Flat(parameters) => program.evaluator.execute_flat_inputs(
+            parameters,
+            evaluator_workspace,
+            coefficient_outputs,
+        )?,
+    }
 
     {
         let instance_ref = instance

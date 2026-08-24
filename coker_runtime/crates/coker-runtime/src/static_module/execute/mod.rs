@@ -5,7 +5,7 @@ mod evaluate_execute;
 mod layer_execute;
 
 #[allow(unused_imports)]
-use self::{evaluate_execute::*, layer_execute::*};
+pub(super) use self::{evaluate_execute::*, layer_execute::*};
 
 pub(super) use crate::workspace::prepare_input_range;
 
@@ -95,7 +95,7 @@ pub(super) fn execute_program_layers(
                         );
                     })
                     .is_some(),
-                ArchivedLayer::Evaluate(_) => false,
+                ArchivedLayer::Evaluate(_) | ArchivedLayer::QpCall(_) => false,
             }
         } else {
             false
@@ -115,6 +115,7 @@ pub(super) fn execute_program_layers(
             ArchivedLayer::Evaluate(evaluate_layer) => {
                 execute_evaluate_layer(module, evaluate_layer, workspace)
             }
+            ArchivedLayer::QpCall(_) => {}
         }
     }
     false
@@ -179,7 +180,7 @@ pub(super) fn push_forward_program_layers(
                     }
                     _ => false,
                 },
-                ArchivedLayer::Evaluate(_) => false,
+                ArchivedLayer::Evaluate(_) | ArchivedLayer::QpCall(_) => false,
             }
         } else {
             false
@@ -199,6 +200,7 @@ pub(super) fn push_forward_program_layers(
             ArchivedLayer::Evaluate(evaluate_layer) => {
                 execute_evaluate_push_forward(module, evaluate_layer, workspace, tangent_workspace)
             }
+            ArchivedLayer::QpCall(_) => {}
         }
     }
     false

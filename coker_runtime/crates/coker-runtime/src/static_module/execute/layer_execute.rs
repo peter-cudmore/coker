@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn execute_bilinear_layer(
+pub(crate) fn execute_bilinear_layer(
     bilinear_layer: &ArchivedBilinearLayer,
     workspace: &mut Workspace<'_>,
 ) {
@@ -159,7 +159,7 @@ pub(super) fn execute_bilinear_push_forward_into_slices(
     }
 }
 
-pub(super) fn execute_generic_layer(
+pub(crate) fn execute_generic_layer(
     generic_layer: &ArchivedGenericLayer,
     workspace: &mut Workspace<'_>,
 ) {
