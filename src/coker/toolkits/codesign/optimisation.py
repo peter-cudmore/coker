@@ -4,6 +4,17 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 
+from coker.algebra.kernel import Tracer
+
+
+@dataclass(frozen=True)
+class WeightedNorm:
+    """Structured squared norm objective retained for QP lowering."""
+
+    weight: Tracer
+    residual: Tracer
+
+
 @dataclass(frozen=True)
 class BoundedConstraint:
     """A residual constrained by explicit lower and upper bounds.
@@ -30,6 +41,16 @@ def bounded(
 ) -> BoundedConstraint:
     """Constrain a residual within explicit lower and upper bounds."""
     return BoundedConstraint(residual, lower_bound, upper_bound)
+
+def weighted_norm(weight: Tracer, residual: Tracer) -> Tracer:
+    """Return a structured squared weighted residual.
+
+    The returned scalar is mathematically ``||weight @ residual||²`` and
+    retains the factors required by exact QP lowering.
+    """
+    expression = (weight @ residual).T @ (weight @ residual)
+    expression.weighted_norm = WeightedNorm(weight, residual)
+    return expression
 
 
 @dataclass(frozen=True)
@@ -93,12 +114,13 @@ def solve_info_from_scipy_result(
         iteration_count=iteration_count,
     )
 
-
 __all__ = [
+    "WeightedNorm",
     "BoundedConstraint",
     "SolveFailure",
     "SolveInfo",
     "bounded",
+    "weighted_norm",
     "solve_info_from_casadi_stats",
     "solve_info_from_scipy_result",
 ]
