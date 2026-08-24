@@ -203,6 +203,11 @@ def test_coker_program_composes_as_numerical_module():
         builder.objective = Minimise((x - target) ** 2)
         builder.outputs = [x]
         program = builder.build("coker")
+    from coker.backends.coker.module import CokerModule
+
+    assert isinstance(program.impl, CokerModule)
+    solver = program.impl._solver
+
 
     from coker import function
 
@@ -213,3 +218,4 @@ def test_coker_program_composes_as_numerical_module():
     )
 
     assert post_solve(2.0) == pytest.approx(4.0, abs=1e-6)
+    assert program.impl._solver is solver
