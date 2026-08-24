@@ -28,11 +28,7 @@ class Minimise:
 
 
 class MathematicalProgram:
-    """A numerical optimisation module mapping parameters to objective and outputs.
-
-    Calling a program returns a tuple whose first element is the solved scalar
-    objective and whose remaining elements are the declared program outputs.
-    """
+    """A numerical optimisation module mapping parameters to outputs."""
 
     def __init__(
         self,
@@ -115,6 +111,7 @@ class MathematicalProgram:
                 "Coker artifact payload"
             )
         return exporter()
+
 
 class ProblemBuilder:
     def __init__(self, arguments: Optional[List[VectorSpace | Scalar]] = None):

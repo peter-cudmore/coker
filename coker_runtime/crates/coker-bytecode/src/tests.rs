@@ -347,7 +347,9 @@ fn archived_module_rejects_version_mismatch() {
     };
     assert!(matches!(
         error,
-        BytecodeError::Header(BytecodeHeaderError::UnsupportedVersion { found: 4 })
+        BytecodeError::Header(BytecodeHeaderError::UnsupportedVersion {
+            found
+        }) if found == VERSION + 1
     ));
 }
 
