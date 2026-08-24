@@ -89,6 +89,28 @@ def test_sub():
     assert np.allclose(result, expected)
 
 
+def test_left_sparse_tensor_contraction_skips_zero_selector_entries():
+    tensor = dok_ndarray(
+        (2, 2, 2),
+        {(0, 0, 1): 2.0, (1, 1, 0): -3.0, (1, 0, 1): 4.0},
+    )
+    selector = np.array([[0.0, 5.0], [7.0, 0.0], [0.0, -2.0]])
+
+    result = tensor.__rmatmul__(selector)
+
+    assert isinstance(result, dok_ndarray)
+    assert np.allclose(
+        result.toarray(), np.tensordot(selector, tensor.toarray(), axes=1)
+    )
+    assert set(result.keys) == {
+        (0, 1, 0),
+        (0, 0, 1),
+        (1, 0, 1),
+        (2, 1, 0),
+        (2, 0, 1),
+    }
+
+
 def test_swap_indices_adjacent():
     # Swapping axes 0 and 1 of a (2, 3) matrix should give its transpose
     a = dok_ndarray((2, 3), {(0, 1): 1.0, (1, 2): 2.0})

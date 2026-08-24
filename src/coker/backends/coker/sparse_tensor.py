@@ -248,12 +248,17 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             assert (
                 other.shape == self.shape
             ), f"Cannot add tensors of shape {other.shape} to {self.shape}"
-            keys = self.keys.copy()
-            for k, v in other.keys.items():
-                if k in keys:
-                    keys[k] += v
+            if len(self.keys) < len(other.keys):
+                base, updates = other, self
+            else:
+                base, updates = self, other
+            keys = base.keys.copy()
+            for key, value in updates.keys.items():
+                result = keys.get(key, 0.0) + value
+                if result:
+                    keys[key] = result
                 else:
-                    keys[k] = v
+                    keys.pop(key, None)
             return dok_ndarray(self.shape, keys)
 
         raise NotImplementedError(
@@ -338,28 +343,37 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
             return tensor_sum(self, other, l_index=len(self.shape) - 1)
 
     def __rmatmul__(self, other):
-        try:
-            assert (
-                other.shape[-1] == self.shape[0]
-            ), f"Can't multiple {other.shape} x {self.shape}"
-        except AssertionError as ex:
-            raise ex
+        if other.shape[-1] != self.shape[0]:
+            raise TypeError(f"Cannot multiply {other.shape} x {self.shape}")
+
+        if isinstance(other, np.ndarray):
+            selector_entries = (
+                (tuple(index), other[tuple(index)])
+                for index in zip(*np.nonzero(other), strict=True)
+            )
+        elif isinstance(other, dok_ndarray):
+            selector_entries = other.keys.items()
+        else:
+            return NotImplemented
+
+        selector_columns = {}
+        for selector_index, value in selector_entries:
+            selector_columns.setdefault(selector_index[-1], []).append(
+                (selector_index[:-1], value)
+            )
 
         shape = (*other.shape[:-1], *self.shape[1:])
         data = {}
-        with np.nditer(
-            other, flags=["multi_index"], op_flags=["readonly"]
-        ) as it:
-            for v in it:
-                *key_1, i_1 = it.multi_index
-                for (i_2, *key_2), v_2 in self.keys.items():
-                    if i_1 != i_2:
-                        continue
-                    key = (*key_1, *key_2)
-                    if key in data:
-                        data[key] += v_2 * float(v)
-                    else:
-                        data[key] = v_2 * float(v)
+        for (contracted_index, *tail), value in self.keys.items():
+            for prefix, selector_value in selector_columns.get(
+                contracted_index, ()
+            ):
+                key = (*prefix, *tail)
+                result = data.get(key, 0.0) + value * selector_value
+                if result:
+                    data[key] = result
+                else:
+                    data.pop(key, None)
         return dok_ndarray(shape, data)
 
     def __eq__(self, other):
