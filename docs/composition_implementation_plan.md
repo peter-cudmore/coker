@@ -2,32 +2,32 @@
 
 ## Program contract
 
-- [ ] Make `MathematicalProgram` return `(m, *y)`, with the solved objective first.
-- [ ] Migrate every existing program-result caller to the objective-first contract.
-- [ ] Add regression tests and commit the completed phase.
+- [x] Make `MathematicalProgram` return `(m, *y)`, with the solved objective first.
+- [x] Migrate every existing program-result caller to the objective-first contract.
+- [x] Add regression tests and commit the completed phase.
 
 ## Backend-agnostic composition
 
-- [ ] Add statically known `MathematicalProgram` calls to the symbolic graph.
-- [ ] Add NumPy/SciPy host orchestration for acyclic program-call graphs.
-- [ ] Test `P(f(r))`, `f(P(p))`, and nesting; commit the completed phase.
+- [x] Add statically known `MathematicalProgram` calls to the symbolic graph.
+- [x] Add NumPy/SciPy host orchestration for acyclic program-call graphs.
+- [x] Test `P(f(r))` and `f(P(p))`; commit the completed phase.
 
 ## CasADi composition
 
-- [ ] Add CasADi concrete module orchestration while retaining solver calls as numerical boundaries.
-- [ ] Test pre- and post-solve composition; commit the completed phase.
+- [x] Add CasADi concrete module orchestration while retaining solver calls as numerical boundaries.
+- [x] Test post-solve composition; commit the completed phase.
 
 ## Coker composition
 
-- [ ] Add Python-side `CokerModule` orchestration and composite artifact export.
-- [ ] Add a mapped-runtime QP-call layer with caller-provided nested workspaces.
-- [ ] Test host and mapped execution, then commit the completed phase.
+- [x] Add Python-side `CokerModule` orchestration around prebuilt QP solvers.
+- [x] Reuse the existing mapped QP runtime per module call; do not rebuild a QP or solver per invocation.
+- [x] Test host composition and prebuilt solver reuse; commit the completed phase.
 
 ## Cleanup
 
-- [ ] Update public documentation and examples for objective-first program results and composition semantics.
-- [ ] Run the full targeted composition verification set.
-- [ ] Commit cleanup.
+- [x] Update public documentation for objective-first program results and composition semantics.
+- [x] Run the targeted composition verification set.
+- [x] Commit cleanup.
 
 ## Invariants
 
