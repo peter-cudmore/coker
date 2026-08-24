@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from coker import VectorSpace
+from coker import SparseMatrixBuilder, VectorSpace
 from coker.backends.coker.core import CokerBackend
 from coker.backends.coker import optimisation as coker_qp_optimisation
 from coker.backends.coker.optimisation import extract_qp_program
@@ -13,6 +13,7 @@ from coker.toolkits.codesign import (
     SolveFailure,
     SolveInfo,
     bounded,
+    weighted_norm,
 )
 
 
@@ -383,6 +384,136 @@ def test_coker_qp_parameterized_box_coefficients_and_solution():
     solution, info = runtime_qp.solve(parameters, warm_start=np.zeros(2))
     assert info.success
     assert np.allclose(solution, [2.0, -2.0], atol=1.0e-3)
+
+
+def test_coker_qp_extracts_sparse_weighted_norm_coefficients():
+    from coker.backends.coker.optimisation import _build_coefficient_function
+
+    weights = SparseMatrixBuilder(
+        np.array([[True, True], [False, True], [True, False]])
+    )
+    with ProblemBuilder(
+        arguments=[weights.data_space("weight_data"), VectorSpace("target", 2)]
+    ) as builder:
+        weight_data, target = builder.arguments
+        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
+        cost = weighted_norm(weights.matrix(weight_data), x - target)
+        bindings = _build_bindings(cost, [weight_data, target])
+        coefficient_function, slices = _build_coefficient_function(
+            cost.tape,
+            cost,
+            [],
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+
+    coefficients = np.asarray(
+        coefficient_function(
+            np.array([2.0, 3.0, 5.0, 7.0]), np.array([11.0, 13.0])
+        ),
+        dtype=float,
+    )
+    px = slices["px"]
+    q = slices["q"]
+    r = slices["r"]
+    assert np.allclose(
+        coefficients[px.start : px.start + px.length], [26.0, 20.0, 148.0]
+    )
+    assert np.allclose(
+        coefficients[q.start : q.start + q.length], [-546.0, -2144.0]
+    )
+    assert np.allclose(coefficients[r.start : r.start + r.length], [16939.0])
+
+
+def test_coker_qp_rejects_dense_weighted_norm():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
+        cost = weighted_norm(np.eye(2), x)
+        bindings = _build_bindings(cost, [])
+
+    with pytest.raises(ValueError, match="SparseMatrixBuilder"):
+        extract_qp_program(
+            cost,
+            [],
+            [x],
+            bindings.decision_indices,
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+
+
+def test_coker_qp_weighted_norm_avoids_dense_cost_fusion(monkeypatch):
+    from coker.backends.coker import core
+
+    pattern = SparseMatrixBuilder(
+        np.vstack([np.eye(48, dtype=bool), np.ones((1, 48), dtype=bool)])
+    )
+    with ProblemBuilder(
+        arguments=[pattern.data_space("weight_data")]
+    ) as builder:
+        (weight_data,) = builder.arguments
+        x = builder.new_variable("x", shape=(48,), initial_value=np.zeros(48))
+        cost = weighted_norm(pattern.matrix(weight_data), x)
+        bindings = _build_bindings(cost, [weight_data])
+
+        original_create_opgraph = core.create_opgraph
+
+        def create_opgraph(function):
+            if function.output[0] is cost:
+                raise AssertionError("weighted objective must not be fused")
+            return original_create_opgraph(function)
+
+        monkeypatch.setattr(core, "create_opgraph", create_opgraph)
+        extracted = extract_qp_program(
+            cost,
+            [],
+            [x],
+            bindings.decision_indices,
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+
+    assert extracted.coefficient_slices["px"].length == 1176
+
+
+def test_coker_qp_affine_residual_adjusts_parameterized_bounds():
+    from coker.backends.coker.optimisation import _build_coefficient_function
+
+    with ProblemBuilder(
+        arguments=[
+            VectorSpace("target", 2),
+            VectorSpace("offset", 2),
+            VectorSpace("lower", 2),
+            VectorSpace("upper", 2),
+        ]
+    ) as builder:
+        target, offset, lower, upper = builder.arguments
+        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
+        cost = np.dot(x - target, x - target)
+        constraints = [x + offset >= lower, x + offset <= upper]
+        bindings = _build_bindings(cost, [target, offset, lower, upper])
+        coefficient_function, slices = _build_coefficient_function(
+            cost.tape,
+            cost,
+            constraints,
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+
+    parameters = (
+        np.array([0.0, 0.0]),
+        np.array([3.0, -4.0]),
+        np.array([1.0, -7.0]),
+        np.array([8.0, 2.0]),
+    )
+    coefficients = np.asarray(coefficient_function(*parameters), dtype=float)
+    lower_slice = slices["l"]
+    assert np.allclose(
+        coefficients[
+            lower_slice.start : lower_slice.start + lower_slice.length
+        ],
+        [-2.0, -3.0, -5.0, -6.0],
+    )
 
 
 def test_coker_qp_updates_warm_start_between_solves():
