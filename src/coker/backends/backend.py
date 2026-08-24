@@ -43,6 +43,10 @@ class Backend(metaclass=ABCMeta):
     ):
         raise NotImplementedError
 
+    def make_optimisation_module(self, implementation):
+        """Wrap a backend solver for use as a numerical program module."""
+        return implementation
+
     def create_variational_solver(
         self, problem: VariationalProblem
     ) -> "VariationalSolver":

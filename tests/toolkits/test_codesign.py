@@ -194,3 +194,22 @@ def test_casadi_program_composes_as_numerical_module():
     )
 
     assert post_solve(2.0) == pytest.approx(6.0, abs=1e-6)
+
+
+def test_coker_program_composes_as_numerical_module():
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        (target,) = builder.arguments
+        x = builder.new_variable(name="x", initial_value=0.0)
+        builder.objective = Minimise((x - target) ** 2)
+        builder.outputs = [x]
+        program = builder.build("coker")
+
+    from coker import function
+
+    post_solve = function(
+        [Scalar("p")],
+        lambda p: 2.0 * program(p)[1],
+        backend="coker",
+    )
+
+    assert post_solve(2.0) == pytest.approx(4.0, abs=1e-6)

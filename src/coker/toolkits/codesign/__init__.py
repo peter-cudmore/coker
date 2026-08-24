@@ -180,13 +180,14 @@ class ProblemBuilder:
             else get_current_backend()
         )
 
-        impl = backend.build_optimisation_problem(
+        implementation = backend.build_optimisation_problem(
             self.objective.expression,
             self.constraints,
             self.arguments,
             [self.objective.expression, *self.outputs],
             self._normalise_initial_conditions(),
         )
+        impl = backend.make_optimisation_module(implementation)
 
         return MathematicalProgram(self.input_shape, self.output_shape, impl)
 
