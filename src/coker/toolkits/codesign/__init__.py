@@ -7,7 +7,13 @@ import numpy as np
 from coker.algebra.dimensions import Dimension
 from coker.algebra.kernel import Tape, Tracer, VectorSpace, Scalar
 from coker.algebra.ops import ModuleCallOP, ModuleOutputOP
-from .optimisation import BoundedConstraint, SolveFailure, SolveInfo, bounded
+from .optimisation import (
+    BoundedConstraint,
+    SolveFailure,
+    SolveInfo,
+    bounded,
+    weighted_norm,
+)
 
 
 @dataclasses.dataclass

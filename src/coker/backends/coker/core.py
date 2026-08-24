@@ -319,6 +319,42 @@ def create_opgraph(function: Function):
     return _FunctionTableBuilder().build(function)
 
 
+def _generic_layer_weights(layer: GenericVectorLayer):
+    """Represent an exactly bilinear generic layer as a workspace mapping."""
+    if layer.opaque_programs:
+        return None
+
+    def operand(ref):
+        if ref == UNUSED_REF:
+            return None
+        return BilinearWeights.project(
+            layer.memory_in, MemorySpec(ref, 1), (1,)
+        )
+
+    rows = []
+    for operation, first, second, third in layer.ops:
+        if operation == IDENTITY_OP:
+            value = operand(first)
+        elif operation in ops:
+            arguments = [
+                value
+                for value in (operand(first), operand(second), operand(third))
+                if value is not None
+            ]
+            try:
+                value = ops[operation](*arguments)
+            except (AssertionError, TypeError, NotImplementedError):
+                return None
+        else:
+            return None
+        if not isinstance(value, BilinearWeights):
+            return None
+        rows.append(value)
+    return _concatenate_bilinear_operands(
+        layer.memory_in, rows, axis=0
+    )
+
+
 def _raw_output_weights(graph: SparseNet, output_weights):
     """Compose graph outputs back through workspace relocation layers."""
     from coker.backends.coker.weights import compose_bilinear_weights
@@ -342,23 +378,9 @@ def _raw_output_weights(graph: SparseNet, output_weights):
             weights = composed
             continue
         if isinstance(layer, GenericVectorLayer):
-            if layer.opaque_programs or any(
-                operation != IDENTITY_OP for operation, *_refs in layer.ops
-            ):
+            mapping = _generic_layer_weights(layer)
+            if mapping is None:
                 return None
-            mapping = BilinearWeights.from_trusted_dok(
-                layer.memory_in,
-                (layer.memory_out.count,),
-                linear=dok_ndarray(
-                    (layer.memory_out.count, layer.memory_in.count),
-                    {
-                        (row, first): 1
-                        for row, (_op, first, _second, _third) in enumerate(
-                            layer.ops
-                        )
-                    },
-                ),
-            )
             composed = []
             for weight in weights:
                 if weight is None:
@@ -385,8 +407,24 @@ def _create_opgraph(
 ):
     tape = function.tape
     numpy_backend = get_backend_by_name("numpy", set_current=False)
+    required_nodes = {
+        output.index for output in function.output if output is not None
+    }
+    pending_nodes = list(required_nodes)
+    while pending_nodes:
+        node_index = pending_nodes.pop()
+        if node_index in tape.input_indicies:
+            continue
+        _operation, *arguments = tape.nodes[node_index]
+        for argument in arguments:
+            if not isinstance(argument, Tracer):
+                continue
+            if argument.index not in required_nodes:
+                required_nodes.add(argument.index)
+                pending_nodes.append(argument.index)
+
     remaining_uses: Dict[int, int] = {}
-    for node_index in range(len(tape)):
+    for node_index in required_nodes:
         if node_index in tape.input_indicies:
             continue
         _operation, *arguments = tape.nodes[node_index]
@@ -400,7 +438,6 @@ def _create_opgraph(
             remaining_uses[output.index] = (
                 remaining_uses.get(output.index, 0) + 1
             )
-
     input_layer = InputLayer()
     node_values = {}
     node_specs: Dict[int, MemorySpec] = {}
@@ -780,6 +817,8 @@ def _create_opgraph(
         if node_index in tape.input_indicies:
             continue
 
+        if node_index not in required_nodes:
+            continue
         operation, *arguments = tape.nodes[node_index]
         try:
             if operation == OP.VALUE:
