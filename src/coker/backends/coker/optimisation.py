@@ -115,18 +115,34 @@ def _arena_layout_dict():
     return layout
 
 
-def _dense_symbolic_l(kkt_size: int):
-    indptr = [0]
-    indices: list[int] = []
+def _symbolic_l_from_kkt(kkt_size: int, indptr: list[int], indices: list[int]):
+    """Build natural-order LDL fill from upper-triangular KKT CSC."""
+    adjacency = [set() for _ in range(kkt_size)]
+    for column in range(kkt_size):
+        for row in indices[indptr[column] : indptr[column + 1]]:
+            if row == column:
+                continue
+            adjacency[row].add(column)
+            adjacency[column].add(row)
+
+    l_indptr = [0]
+    l_indices: list[int] = []
+    etree: list[int] = []
     lnz: list[int] = []
-    for col in range(kkt_size):
-        rows = list(range(col + 1, kkt_size))
-        indices.extend(rows)
-        indptr.append(len(indices))
-        lnz.append(len(rows))
-    etree = [col + 1 for col in range(kkt_size - 1)] + [2**32 - 1]
+    for column in range(kkt_size):
+        later = sorted(row for row in adjacency[column] if row > column)
+        l_indices.extend(later)
+        l_indptr.append(len(l_indices))
+        lnz.append(len(later))
+        etree.append(later[0] if later else 2**32 - 1)
+        for index, left in enumerate(later):
+            adjacency[left].discard(column)
+            adjacency[left].update(later[index + 1 :])
+
     return {
-        "l_pattern": _csc_pattern_dict(kkt_size, kkt_size, indptr, indices),
+        "l_pattern": _csc_pattern_dict(
+            kkt_size, kkt_size, l_indptr, l_indices
+        ),
         "etree": etree,
         "lnz": lnz,
     }
@@ -200,7 +216,7 @@ def _build_qdldl_plan_payload(
         "p_to_kkt": p_to_kkt,
         "a_to_kkt": a_to_kkt,
         "rho_to_kkt": rho_to_kkt,
-        "symbolic_l": _dense_symbolic_l(kkt_size),
+        "symbolic_l": _symbolic_l_from_kkt(kkt_size, indptr, indices),
     }
 
 
@@ -494,19 +510,21 @@ def extract_qp_program(
     for row_count in constraint_rows:
         row_offsets.append(row_offsets[-1] + row_count)
     m = row_offsets[-1]
-    coefficient_function, coefficient_slices = _build_coefficient_function(
-        tape,
-        cost,
-        constraints,
-        decision_bindings,
-        parameter_bindings,
+    coefficient_function, coefficient_slices, p_pattern, a_pattern = (
+        _build_coefficient_function(
+            tape,
+            cost,
+            constraints,
+            decision_bindings,
+            parameter_bindings,
+            include_structure=True,
+        )
     )
     from coker.backends.coker.core import create_opgraph
 
     coefficient_graph = create_opgraph(coefficient_function)
-
-    p_indptr, p_indices = _pack_csc_upper_triangular(n)
-    a_indptr, a_indices = _pack_csc_rectangular(m, n)
+    p_indptr, p_indices = p_pattern
+    a_indptr, a_indices = a_pattern
     return ExtractedQpProgram(
         n=n,
         m=m,
@@ -525,24 +543,17 @@ def extract_qp_program(
     )
 
 
-def _pack_csc_upper_triangular(n: int) -> tuple[list[int], list[int]]:
-    indptr = [0]
-    indices: list[int] = []
-    for col in range(n):
-        for row in range(col + 1):
-            indices.append(row)
-        indptr.append(len(indices))
-    return indptr, indices
-
-
-def _pack_csc_rectangular(
-    nrows: int, ncols: int
+def _pack_csc(
+    nrows: int, ncols: int, entries: set[tuple[int, int]]
 ) -> tuple[list[int], list[int]]:
     indptr = [0]
     indices: list[int] = []
-    for _col in range(ncols):
-        for row in range(nrows):
-            indices.append(row)
+    for column in range(ncols):
+        indices.extend(
+            row
+            for row, entry_column in sorted(entries)
+            if entry_column == column
+        )
         indptr.append(len(indices))
     return indptr, indices
 
@@ -582,16 +593,18 @@ def _bilinear_coefficient_function(
     """Extract QP coefficients without materialising weighted products."""
     from coker.backends.coker.core import create_opgraph
 
-    def graph_for(tracer):
-        return create_opgraph(Function(tape, [tracer], backend="numpy"))
-
     weighted_norm = getattr(cost, "weighted_norm", None)
     weighted_pattern = None
-    weighted_residual_weights = None
-    weighted_data_weights = None
+    coefficient_tracers = []
+    coefficient_indices = set()
+
+    def include(tracer):
+        if tracer.index not in coefficient_indices:
+            coefficient_indices.add(tracer.index)
+            coefficient_tracers.append(tracer)
+
     if weighted_norm is None:
-        cost_graph = graph_for(cost)
-        cost_weights = cost_graph.output_weights[0]
+        include(cost)
     else:
         weighted_pattern = getattr(
             weighted_norm.weight, "sparse_matrix_pattern", None
@@ -605,75 +618,70 @@ def _bilinear_coefficient_function(
             raise ValueError(
                 "Coker weighted-norm weight and residual dimensions differ"
             )
-        residual_graph = graph_for(weighted_norm.residual)
-        data_graph = graph_for(weighted_pattern.data)
-        weighted_residual_weights = residual_graph.output_weights[0]
-        weighted_data_weights = data_graph.output_weights[0]
-        if (
-            not getattr(residual_graph, "output_weights_are_raw", False)
-            or not getattr(data_graph, "output_weights_are_raw", False)
-            or weighted_residual_weights is None
-            or weighted_data_weights is None
-        ):
-            raise ValueError(
-                "Coker weighted-norm QP inputs must have raw "
-                "bilinear provenance"
-            )
-        cost_graph = None
-        cost_weights = None
+        include(weighted_norm.residual)
+        include(weighted_pattern.data)
 
-    residual_weights = []
-    residual_graphs = []
-    for residual, _lower, _upper in constraint_data:
-        residual_graph = graph_for(residual)
-        residual_graphs.append(residual_graph)
-        residual_weights.append(residual_graph.output_weights[0])
+    for residual, lower_bound, upper_bound in constraint_data:
+        include(residual)
+        for bound in (lower_bound, upper_bound):
+            if isinstance(bound, Tracer):
+                include(bound)
+
+    coefficient_graph = create_opgraph(
+        Function(tape, coefficient_tracers, backend="numpy")
+    )
+    weights_by_index = dict(
+        zip(
+            (tracer.index for tracer in coefficient_tracers),
+            coefficient_graph.output_weights,
+            strict=True,
+        )
+    )
     input_memory_count = sum(
         tape.dim[index].flat() for index in tape.input_indicies
     )
+
+    def weights_for(tracer):
+        weight = weights_by_index[tracer.index]
+        if weight is None or weight.memory.count != input_memory_count:
+            # Workspace relocation or an opaque lowered operation changes the
+            # coordinate system. Never interpret it as tape-input coordinates.
+            return None
+        return weight
+
+    if weighted_norm is None:
+        cost_weights = weights_for(cost)
+        weighted_residual_weights = None
+        weighted_data_weights = None
+    else:
+        cost_weights = None
+        weighted_residual_weights = weights_for(weighted_norm.residual)
+        weighted_data_weights = weights_for(weighted_pattern.data)
+
+    residual_weights = [
+        weights_for(residual) for residual, _lower, _upper in constraint_data
+    ]
     if (
-        (
-            cost_graph is not None
-            and not getattr(cost_graph, "output_weights_are_raw", False)
+        (weighted_norm is None and cost_weights is None)
+        or (
+            weighted_norm is not None
+            and (
+                weighted_residual_weights is None
+                or weighted_data_weights is None
+            )
         )
-        or any(
-            not getattr(graph, "output_weights_are_raw", False)
-            for graph in residual_graphs
-        )
-        or (cost_weights is None and weighted_norm is None)
         or any(weight is None for weight in residual_weights)
-        or (
-            cost_weights is not None
-            and cost_weights.memory.count != input_memory_count
-        )
-        or (
-            weighted_residual_weights is not None
-            and weighted_residual_weights.memory.count != input_memory_count
-        )
-        or (
-            weighted_data_weights is not None
-            and weighted_data_weights.memory.count != input_memory_count
-        )
-        or any(
-            weight.memory.count != input_memory_count
-            for weight in residual_weights
-        )
     ):
-        # Workspace relocation or an opaque lowered operation changes the
-        # coordinate system.  Never interpret those coordinates as tape inputs.
         return None
+
     bound_weights = {}
     for _residual, lower_bound, upper_bound in constraint_data:
         for bound in (lower_bound, upper_bound):
-            if not isinstance(bound, Tracer):
-                continue
-            bound_graph = graph_for(bound)
-            if not getattr(bound_graph, "output_weights_are_raw", False):
-                return None
-            weight = bound_graph.output_weights[0]
-            if weight is None or weight.memory.count != input_memory_count:
-                return None
-            bound_weights[id(bound)] = weight
+            if isinstance(bound, Tracer):
+                weight = weights_for(bound)
+                if weight is None:
+                    return None
+                bound_weights[id(bound)] = weight
     memory_offsets = {}
     offset = 0
     for index in tape.input_indicies:
@@ -748,12 +756,41 @@ def _bilinear_coefficient_function(
     residual_rows = [
         residual.dim.flat() for residual, _l, _u in constraint_data
     ]
-    pairs = [
-        (column, row)
-        for column in range(len(decision_memory))
-        for row in range(column + 1)
-    ]
-    if weighted_pattern is not None:
+    constraint_offsets = [0]
+    for row_count in residual_rows:
+        constraint_offsets.append(constraint_offsets[-1] + row_count)
+    decision_positions = {
+        coordinate: position
+        for position, coordinate in enumerate(decision_memory)
+    }
+
+    def decision_support(weights, row):
+        support = {
+            decision_positions[index]
+            for (out_row, index) in weights.linear.keys
+            if out_row == row and index in decision_positions
+        }
+        for out_row, left, right in weights.quadratic.keys:
+            if out_row != row:
+                continue
+            if left in decision_positions:
+                support.add(decision_positions[left])
+            if right in decision_positions:
+                support.add(decision_positions[right])
+        return support
+
+    if weighted_pattern is None:
+        p_entries = {
+            (
+                min(decision_positions[left], decision_positions[right]),
+                max(decision_positions[left], decision_positions[right]),
+            )
+            for (out_row, left, right) in cost_weights.quadratic.keys
+            if out_row == 0
+            and left in decision_positions
+            and right in decision_positions
+        }
+    else:
         weighted_rows = [[] for _ in range(weighted_pattern.shape[0])]
         for column in range(weighted_pattern.shape[1]):
             for data_index in range(
@@ -763,6 +800,50 @@ def _bilinear_coefficient_function(
                 weighted_rows[weighted_pattern.indices[data_index]].append(
                     (column, data_index)
                 )
+        p_entries = set()
+        for row in weighted_rows:
+            support = set().union(
+                *(
+                    decision_support(weighted_residual_weights, column)
+                    for column, _ in row
+                )
+            )
+            p_entries.update(
+                (min(left, right), max(left, right))
+                for left in support
+                for right in support
+            )
+    pairs = [(column, row) for row, column in sorted(p_entries)]
+    a_entries = {
+        (constraint_offsets[constraint_index] + row, decision)
+        for constraint_index, (weights, row_count) in enumerate(
+            zip(residual_weights, residual_rows, strict=True)
+        )
+        for row in range(row_count)
+        for decision in decision_support(weights, row)
+    }
+    a_pairs = [
+        (column, row)
+        for row, column in sorted(
+            a_entries, key=lambda entry: (entry[1], entry[0])
+        )
+    ]
+    a_components = [
+        (
+            decision_memory[column],
+            next(
+                (
+                    weights,
+                    row - constraint_offsets[constraint_index],
+                )
+                for constraint_index, weights in enumerate(residual_weights)
+                if constraint_offsets[constraint_index]
+                <= row
+                < constraint_offsets[constraint_index + 1]
+            ),
+        )
+        for column, row in a_pairs
+    ]
 
     def implementation(*runtime_params):
         params = {
@@ -794,23 +875,52 @@ def _bilinear_coefficient_function(
             objective_offset = expression(cost_weights, 0, params)
         else:
 
-            def weighted_component(row, decision=None):
-                return sum(
-                    expression(weighted_data_weights, data_index, params)
-                    * expression(
+            data_values = {
+                data_index: expression(
+                    weighted_data_weights, data_index, params
+                )
+                for row in weighted_rows
+                for _, data_index in row
+            }
+            residual_offsets = [
+                expression(weighted_residual_weights, column, params)
+                for column in range(weighted_pattern.shape[1])
+            ]
+            residual_jacobian = [
+                [
+                    expression(
                         weighted_residual_weights,
                         column,
                         params,
                         decision=decision,
                     )
-                    for column, data_index in weighted_rows[row]
+                    for decision in decision_memory
+                ]
+                for column in range(weighted_pattern.shape[1])
+            ]
+            weighted_offsets = [
+                sum(
+                    data_values[data_index] * residual_offsets[column]
+                    for column, data_index in row
                 )
-
+                for row in weighted_rows
+            ]
+            weighted_jacobian = [
+                [
+                    sum(
+                        data_values[data_index]
+                        * residual_jacobian[column][decision_index]
+                        for column, data_index in row
+                    )
+                    for decision_index in range(len(decision_memory))
+                ]
+                for row in weighted_rows
+            ]
             px = [
                 2.0
                 * sum(
-                    weighted_component(row, decision_memory[column])
-                    * weighted_component(row, decision_memory[inner_row])
+                    weighted_jacobian[row][column]
+                    * weighted_jacobian[row][inner_row]
                     for row in range(weighted_pattern.shape[0])
                 )
                 for column, inner_row in pairs
@@ -818,22 +928,16 @@ def _bilinear_coefficient_function(
             q = [
                 2.0
                 * sum(
-                    weighted_component(row, decision) * weighted_component(row)
+                    weighted_jacobian[row][decision_index]
+                    * weighted_offsets[row]
                     for row in range(weighted_pattern.shape[0])
                 )
-                for decision in decision_memory
+                for decision_index in range(len(decision_memory))
             ]
-            objective_offset = sum(
-                weighted_component(row) ** 2
-                for row in range(weighted_pattern.shape[0])
-            )
+            objective_offset = sum(value**2 for value in weighted_offsets)
         ax = [
             expression(weights, row, params, decision=decision)
-            for decision in decision_memory
-            for weights, row_count in zip(
-                residual_weights, residual_rows, strict=True
-            )
-            for row in range(row_count)
+            for decision, (weights, row) in a_components
         ]
 
         def bound_values(bound, weight, row_count):
@@ -874,11 +978,22 @@ def _bilinear_coefficient_function(
     function_outputs = function(
         parameter_spaces, implementation, backend="numpy"
     )
-    return function_outputs, _build_output_slices(
-        px_length=len(decision_memory) * (len(decision_memory) + 1) // 2,
-        q_length=len(decision_memory),
-        ax_length=sum(rows * len(decision_memory) for rows in residual_rows),
-        bound_length=sum(rows for rows in residual_rows),
+    p_pattern = _pack_csc(
+        len(decision_memory), len(decision_memory), p_entries
+    )
+    a_pattern = _pack_csc(
+        constraint_offsets[-1], len(decision_memory), a_entries
+    )
+    return (
+        function_outputs,
+        _build_output_slices(
+            px_length=len(pairs),
+            q_length=len(decision_memory),
+            ax_length=len(a_pairs),
+            bound_length=sum(rows for rows in residual_rows),
+        ),
+        p_pattern,
+        a_pattern,
     )
 
 
@@ -888,7 +1003,17 @@ def _build_coefficient_function(
     constraints: list[Tracer],
     decision_bindings: list[InputBinding],
     parameter_bindings: list[InputBinding],
-) -> tuple[Function, dict[str, OutputSlice]]:
+    *,
+    include_structure: bool = False,
+) -> (
+    tuple[Function, dict[str, OutputSlice]]
+    | tuple[
+        Function,
+        dict[str, OutputSlice],
+        tuple[list[int], list[int]],
+        tuple[list[int], list[int]],
+    ]
+):
     constraint_data = [
         constraint.as_halfplane_bound() for constraint in constraints
     ]
@@ -901,11 +1026,175 @@ def _build_coefficient_function(
         constraint_data,
     )
     if direct is None:
-        raise ValueError(
-            "Coker QP coefficients must be exactly representable "
-            "as raw bilinear weights"
+        fallback = _generic_coefficient_function(
+            tape,
+            cost,
+            constraints,
+            decision_bindings,
+            parameter_bindings,
+            constraint_data,
         )
-    return direct
+        if include_structure:
+            return fallback
+        return fallback[:2]
+    if include_structure:
+        return direct
+    function_outputs, coefficient_slices, _p_pattern, _a_pattern = direct
+    return function_outputs, coefficient_slices
+
+
+def _generic_coefficient_function(
+    tape: Tape,
+    cost: Tracer,
+    constraints: list[Tracer],
+    decision_bindings: list[InputBinding],
+    parameter_bindings: list[InputBinding],
+    constraint_data,
+):
+    """Probe a QP graph when raw bilinear provenance is unavailable.
+
+    This intentionally remains a compatibility path for opaque graphs.  The
+    structured weighted-norm path above must be selected whenever provenance
+    is available, because probing expands each decision basis into a runtime
+    evaluation and cannot retain a compact sparse pattern.
+    """
+    decision_dimension = decision_bindings[-1].stop if decision_bindings else 0
+    zero_decision = np.zeros(decision_dimension, dtype=float)
+    basis_vectors = np.eye(decision_dimension, dtype=float)
+    cost_function = Function(tape, cost, backend="numpy")
+    constraint_functions = [
+        Function(tape, residual, backend="numpy")
+        for residual, _lower, _upper in constraint_data
+    ]
+    parameter_spaces = [
+        binding.dim.to_space(tape.input_names[binding.index])
+        for binding in parameter_bindings
+    ]
+    residual_rows = [
+        residual.dim.flat() for residual, _lower, _upper in constraint_data
+    ]
+    bound_functions = [
+        (
+            (
+                Function(tape, [lower], backend="numpy")
+                if isinstance(lower, Tracer)
+                else None
+            ),
+            (
+                Function(tape, [upper], backend="numpy")
+                if isinstance(upper, Tracer)
+                else None
+            ),
+        )
+        for _residual, lower, upper in constraint_data
+    ]
+    coefficient_slices = _build_output_slices(
+        px_length=decision_dimension * (decision_dimension + 1) // 2,
+        q_length=decision_dimension,
+        ax_length=sum(rows * decision_dimension for rows in residual_rows),
+        bound_length=sum(residual_rows),
+    )
+
+    def evaluate(compiled, decision, runtime_args):
+        return compiled(
+            *materialise_tape_inputs(
+                tape,
+                decision_bindings,
+                parameter_bindings,
+                np.asarray(decision, dtype=float),
+                runtime_args,
+            )
+        )
+
+    def implementation(*runtime_args):
+        f_zero = evaluate(cost_function, zero_decision, runtime_args)
+        px_values = []
+        q_values = []
+        positive_costs = []
+        for column, basis in enumerate(basis_vectors):
+            positive = evaluate(cost_function, basis, runtime_args)
+            negative = evaluate(cost_function, -basis, runtime_args)
+            positive_costs.append(positive)
+            px_values.append(positive + negative - 2.0 * f_zero)
+            q_values.append(0.5 * (positive - negative))
+            for row in range(column):
+                pair = evaluate(
+                    cost_function, basis + basis_vectors[row], runtime_args
+                )
+                px_values.append(
+                    pair - positive_costs[row] - positive + f_zero
+                )
+
+        ax_values = []
+        lower_values = []
+        upper_values = []
+        for (
+            (_residual, lower, upper),
+            compiled,
+            (lower_compiled, upper_compiled),
+        ) in zip(
+            constraint_data, constraint_functions, bound_functions, strict=True
+        ):
+            residual_zero = _flatten_symbolic_vector(
+                evaluate(compiled, zero_decision, runtime_args)
+            )
+            lower_value = (
+                evaluate(lower_compiled, zero_decision, runtime_args)
+                if lower_compiled is not None
+                else lower
+            )
+            upper_value = (
+                evaluate(upper_compiled, zero_decision, runtime_args)
+                if upper_compiled is not None
+                else upper
+            )
+            lower_vector = _flatten_symbolic_vector(lower_value)
+            upper_vector = _flatten_symbolic_vector(upper_value)
+            for row, residual_value in enumerate(residual_zero):
+                lower_values.append(
+                    lower_vector[row % lower_vector.size] - residual_value
+                )
+                upper_values.append(
+                    upper_vector[row % upper_vector.size] - residual_value
+                )
+            for basis in basis_vectors:
+                residual_basis = _flatten_symbolic_vector(
+                    evaluate(compiled, basis, runtime_args)
+                )
+                ax_values.extend(
+                    residual_basis[row] - residual_zero[row]
+                    for row in range(residual_zero.size)
+                )
+        values = [
+            _symbolic_vector(px_values, f_zero),
+            _symbolic_vector(q_values, f_zero),
+            _symbolic_vector(ax_values, f_zero),
+            _symbolic_vector(lower_values, f_zero),
+            _symbolic_vector(upper_values, f_zero),
+            f_zero,
+        ]
+        return values
+
+    outputs = function(parameter_spaces, implementation, backend="numpy")
+    p_entries = {
+        (row, column)
+        for column in range(decision_dimension)
+        for row in range(column + 1)
+    }
+    a_entries = {
+        (offset + row, column)
+        for offset, row_count in zip(
+            np.cumsum([0, *residual_rows[:-1]]), residual_rows, strict=True
+        )
+        for row in range(row_count)
+        for column in range(decision_dimension)
+    }
+    return (
+        outputs,
+        coefficient_slices,
+        _pack_csc(decision_dimension, decision_dimension, p_entries),
+        _pack_csc(sum(residual_rows), decision_dimension, a_entries),
+    )
 
 
 def _build_output_slices(
@@ -937,6 +1226,9 @@ def _osqp_bound(value):
 
 
 def _flatten_symbolic_vector(value) -> np.ndarray:
+    """Flatten evaluator outputs, unwrapping a single structured output."""
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
     if isinstance(value, Tracer) and not value.dim.is_scalar():
         return np.asarray(
             [value[index] for index in range(value.dim.flat())],
