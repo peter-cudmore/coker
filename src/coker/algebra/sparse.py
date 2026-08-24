@@ -14,21 +14,39 @@ from coker.algebra.tensor import SymbolicVector
 
 @dataclass(frozen=True)
 class SparseMatrixPattern:
-    """Fixed CSC structure and source data for a symbolic sparse matrix."""
+    """Immutable CSC structure and symbolic source data for a sparse matrix.
+
+    ``indptr`` and ``indices`` use the canonical CSC ordering: columns are
+    visited from left to right and row indices within each column are sorted.
+    ``data`` contains the symbolic values in exactly that order.
+    """
 
     shape: tuple[int, int]
     indptr: tuple[int, ...]
     indices: tuple[int, ...]
     data: Tracer
-class SparseMatrixBuilder:
-    """Build matrices with a fixed compressed-sparse-column boolean pattern.
 
-    The supplied pattern determines CSC column pointers and row indices. Data
-    follows exactly ``scipy.sparse.csc_array(pattern).data`` ordering.
+
+class SparseMatrixBuilder:
+    """Construct symbolic matrices from a fixed boolean CSC sparsity pattern.
+
+    Pattern canonicalisation happens once during construction.  Every call to
+    :meth:`matrix` then interprets its flat data vector in canonical CSC
+    order, making the resulting sparsity structure stable across backends and
+    runs.  The builder owns only the small structural arrays; callers own the
+    data vectors.
     """
 
     def __init__(self, pattern: np.ndarray | scipy.sparse.sparray):
+        """Canonicalise ``pattern`` and retain only its fixed CSC structure.
+
+        Dense patterns must be boolean.  Sparse inputs are converted through
+        boolean CSC semantics so numeric sparse masks remain convenient while
+        duplicate entries and unsorted rows are normalised deterministically.
+        """
         if scipy.sparse.issparse(pattern):
+            if len(pattern.shape) != 2:
+                raise TypeError("pattern must be two-dimensional")
             compressed = scipy.sparse.csc_array(pattern, dtype=bool)
         else:
             dense = np.asarray(pattern)
@@ -39,19 +57,15 @@ class SparseMatrixBuilder:
             compressed = scipy.sparse.csc_array(dense)
         compressed.eliminate_zeros()
         compressed.sort_indices()
-        assert compressed.indptr is not None
-        assert compressed.indices is not None
-        self.shape = compressed.shape
-        self.indptr = compressed.indptr.copy()
-        self.indices = compressed.indices.copy()
-        self._flat_indices = np.concatenate(
-            [
-                self.indices[self.indptr[column] : self.indptr[column + 1]]
-                * self.shape[1]
-                + column
-                for column in range(self.shape[1])
-            ]
-        )
+        self.shape = (int(compressed.shape[0]), int(compressed.shape[1]))
+        self.indptr = tuple(int(value) for value in compressed.indptr)
+        self.indices = tuple(int(value) for value in compressed.indices)
+        flat_indices = [
+            row * self.shape[1] + column
+            for column in range(self.shape[1])
+            for row in self.indices[self.indptr[column] : self.indptr[column + 1]]
+        ]
+        self._flat_indices = np.asarray(flat_indices, dtype=np.intp)
 
     @property
     def nnz(self) -> int:

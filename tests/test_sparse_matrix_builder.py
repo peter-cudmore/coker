@@ -1,4 +1,6 @@
 import numpy as np
+import pytest
+
 import scipy.sparse
 
 from coker import SparseMatrixBuilder, function
@@ -28,3 +30,13 @@ def test_sparse_matrix_builder_traces_csc_data():
     )
 
     assert np.allclose(apply(np.array([1.0, 2.0, 3.0, 4.0])), [4.0, 1.0])
+
+
+def test_sparse_matrix_builder_validates_dense_patterns_and_empty_columns():
+    with pytest.raises(TypeError, match="two-dimensional boolean"):
+        SparseMatrixBuilder(np.ones((2, 2), dtype=float))
+
+    builder = SparseMatrixBuilder(np.zeros((3, 0), dtype=bool))
+    assert builder.shape == (3, 0)
+    assert builder.nnz == 0
+    assert builder.matrix(np.empty(0)).shape == (3, 0)

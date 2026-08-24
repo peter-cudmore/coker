@@ -11,6 +11,7 @@ from .optimisation import (
     BoundedConstraint,
     SolveFailure,
     SolveInfo,
+    WeightedNorm,
     bounded,
     weighted_norm,
 )
@@ -217,6 +218,8 @@ __all__ = [
     "SolveFailure",
     "SolveInfo",
     "SolverOptions",
+    "WeightedNorm",
     "bounded",
     "norm",
+    "weighted_norm",
 ]
