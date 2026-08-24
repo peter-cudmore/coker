@@ -60,6 +60,14 @@ class CokerFunction:
 
         return bytes(CompiledGraph.compile(self.graph).program)
 
+    def compile_artifact(
+        self, *, name: str = "coker_function", version: str = "1"
+    ):
+        """Compile this lowered Coker function into a mapped artifact."""
+        from coker.backends.coker.artifacts import _compile_artifact
+
+        return _compile_artifact(self, name=name, version=version)
+
     def export_payload(self) -> dict[str, object]:
         """Return the deterministic graph payload consumed by the compiler."""
         return self.graph.export_payload()

@@ -158,7 +158,7 @@ class CompiledArtifact:
         return artifact, constants
 
 
-def compile_artifact(
+def _compile_artifact(
     lowered_function: Any,
     *,
     name: str = "coker_function",
@@ -213,10 +213,6 @@ def write_artifact(
     return artifact.write_artifact(
         artifact_path, rust_constants_path, module_name
     )
-
-
-compile_function = compile_artifact
-compile_qp = compile_qp_artifact
 
 
 def _archive_alignment(data: bytes) -> int:
@@ -277,8 +273,6 @@ def _rust_identifier(value: str) -> str:
 __all__ = [
     "ArtifactMetadata",
     "CompiledArtifact",
-    "compile_artifact",
-    "compile_function",
     "compile_qp_artifact",
     "write_artifact",
 ]
