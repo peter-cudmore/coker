@@ -60,6 +60,24 @@ The repository's own tests follow the same pattern: numerical execution is
 validated under ``numpy``, variational solves are exercised through ``casadi``,
 and low-level native graph behaviour is tested under ``coker``.
 
+Optimisation program composition
+--------------------------------
+
+``MathematicalProgram`` is a numerical module.  A concrete call returns the
+solved objective followed by its declared outputs:
+
+.. code-block:: python
+
+   objective, solution = program(parameters)
+
+Programs may be called from a traced ``function``.  Coker records the call
+statically and executes its prebuilt QP solver when the enclosing function is
+evaluated.  Solver calls remain numerical boundaries: derivatives through an
+argmin or argmax are not defined.
+
+``numpy``, ``casadi``, and ``coker`` support host-side program composition.
+The JAX backend does not construct optimisation programs.
+
 Related guides
 --------------
 
