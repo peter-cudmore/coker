@@ -108,14 +108,18 @@ class CokerBackend(Backend):
         raise NotImplementedError
 
     def lower(self, function: Function):
-        if any(
-            isinstance(function.tape.nodes[index][0], ModuleCallOP)
-            for index in range(len(function.tape.nodes))
-            if index not in function.tape.input_indicies
-        ) or any(
-            isinstance(function.tape.dim[input_index], FunctionSpace)
-            for input_index in function.tape.input_indicies
-        ) or any(output is None for output in function.output):
+        if (
+            any(
+                isinstance(function.tape.nodes[index][0], ModuleCallOP)
+                for index in range(len(function.tape.nodes))
+                if index not in function.tape.input_indicies
+            )
+            or any(
+                isinstance(function.tape.dim[input_index], FunctionSpace)
+                for input_index in function.tape.input_indicies
+            )
+            or any(output is None for output in function.output)
+        ):
             numpy_backend = get_backend_by_name("numpy", set_current=False)
             return numpy_backend.lower(function)
 
@@ -138,11 +142,10 @@ class CokerBackend(Backend):
             initial_conditions,
         )
 
-
-
     def make_optimisation_module(self, implementation):
         """Wrap a prebuilt QP solver for numerical module composition."""
         return CokerModule(implementation)
+
 
 def _node_shape(dimension):
     return dimension.shape if hasattr(dimension, "shape") else None
@@ -168,10 +171,11 @@ def _constant_array(value, shape: Tuple[int, ...]) -> np.ndarray:
 def _constant_to_bw(
     memory: MemorySpec, value, shape: Tuple[int, ...]
 ) -> BilinearWeights:
-    array = _constant_array(value, shape)
-    return BilinearWeights(
-        memory, shape, constant=dok_ndarray.fromarray(array)
-    )
+    if scipy.sparse.issparse(value):
+        constant = dok_ndarray.from_scipy(value.reshape(shape))
+    else:
+        constant = dok_ndarray.fromarray(_constant_array(value, shape))
+    return BilinearWeights(memory, shape, constant=constant)
 
 
 def _flatten_constant_rows(value, shape: Tuple[int, ...]) -> List[float]:
@@ -236,27 +240,47 @@ def _concatenate_bilinear_operands(
             _constant_to_bw(memory, operand_array, operand_array.shape)
         )
 
-    constant = dok_ndarray.fromarray(
-        np.concatenate(
-            [operand.constant.toarray() for operand in bilinear_operands],
-            axis=axis,
-        )
-    )
-    linear = dok_ndarray.fromarray(
-        np.concatenate(
-            [operand.linear.toarray() for operand in bilinear_operands],
-            axis=axis,
-        )
-    )
-    quadratic = dok_ndarray.fromarray(
-        np.concatenate(
-            [operand.quadratic.toarray() for operand in bilinear_operands],
-            axis=axis,
-        )
-    )
+    if not bilinear_operands:
+        raise ValueError("cannot concatenate no bilinear operands")
+    rank = len(bilinear_operands[0].shape)
+    if axis < 0:
+        axis += rank
+    if axis < 0 or axis >= rank:
+        raise ValueError("concatenation axis is outside the operand rank")
+    output_shape = list(bilinear_operands[0].shape)
+    output_shape[axis] = 0
+    for operand in bilinear_operands:
+        if len(operand.shape) != rank or any(
+            left != right
+            for index, (left, right) in enumerate(
+                zip(output_shape, operand.shape, strict=True)
+            )
+            if index != axis
+        ):
+            raise ValueError("bilinear concatenation has incompatible shapes")
+        output_shape[axis] += operand.shape[axis]
+
+    constant = dok_ndarray(tuple(output_shape))
+    linear = dok_ndarray((*output_shape, memory.count))
+    quadratic = dok_ndarray((*output_shape, memory.count, memory.count))
+    offset = 0
+    for operand in bilinear_operands:
+        for key, value in operand.constant.keys.items():
+            output_key = list(key)
+            output_key[axis] += offset
+            constant[tuple(output_key)] = value
+        for key, value in operand.linear.keys.items():
+            output_key = list(key[:rank])
+            output_key[axis] += offset
+            linear[(*output_key, key[-1])] = value
+        for key, value in operand.quadratic.keys.items():
+            output_key = list(key[:rank])
+            output_key[axis] += offset
+            quadratic[(*output_key, key[-2], key[-1])] = value
+        offset += operand.shape[axis]
     return BilinearWeights.from_trusted_dok(
         memory,
-        constant.shape,
+        tuple(output_shape),
         constant=constant,
         linear=linear,
         quadratic=quadratic,
@@ -272,9 +296,7 @@ def _build_opaque_operand(
         stored = dok_ndarray.fromarray(np.reshape(value, shape, order="C"))
         return ConstantOperand(stored, shape)
     if scipy.sparse.issparse(value):
-        stored = dok_ndarray.fromarray(
-            np.reshape(value.toarray(), shape, order="C")
-        )
+        stored = dok_ndarray.from_scipy(value.reshape(shape))
         return ConstantOperand(stored, shape)
     return ConstantOperand(value, shape)
 
@@ -315,14 +337,141 @@ class _FunctionTableBuilder:
         return function_id, graph
 
 
-def create_opgraph(function: Function):
+def create_compact_bilinear_opgraph(function: Function):
+    """Lower a vector-valued bilinear graph in one fused workspace layer.
+
+    This avoids relocation of intermediate bilinear weights. Matrix outputs
+    use ordinary lowering because their tangent layout is not fused here.
+    """
+    if any(
+        not (output.dim.is_scalar() or output.dim.is_vector())
+        for output in function.output
+        if output is not None
+    ):
+        return None
+    tape = function.tape
+    if tape is None:
+        return None
+    input_layer = InputLayer()
+    input_specs = {}
+    for input_index in tape.input_indicies:
+        if input_index < 0:
+            return None
+        position = input_layer.add_input(tape.dim[input_index])
+        input_specs[input_index] = input_layer.input_specs[position]
+    memory = MemorySpec(0, input_layer.dimension)
+    values = {}
+    for input_index, (spec, shape) in input_specs.items():
+        values[input_index] = BilinearWeights.project(memory, spec, shape)
+
+    for index, node in enumerate(tape.nodes):
+        if index in values:
+            continue
+        operation, *arguments = node
+        shape = _node_shape(tape.dim[index])
+        if operation == OP.VALUE:
+            values[index] = _constant_to_bw(memory, arguments[0], shape)
+            continue
+        operands = []
+        for argument in arguments:
+            if not isinstance(argument, Tracer):
+                operands.append(argument)
+                continue
+            value = values.get(argument.index)
+            if value is None:
+                return None
+            operands.append(value)
+        try:
+            value = ops[operation](*operands)
+        except (KeyError, AssertionError, TypeError, NotImplementedError):
+            return None
+        if not isinstance(value, BilinearWeights):
+            return None
+        values[index] = value
+
+    outputs = []
+    for output in function.output:
+        if output is None:
+            return None
+        value = values.get(output.index)
+        if value is None or value.memory != memory:
+            return None
+        outputs.append(value)
+    if not outputs:
+        return None
+    fused = _concatenate_bilinear_operands(memory, outputs, axis=0)
+    output_memory = MemorySpec(0, int(np.prod(fused.shape)))
+    output_layer = OutputLayer()
+    offset = 0
+    for output in function.output:
+        count = tape.dim[output.index].flat()
+        output_layer.add_output(
+            MemorySpec(offset, count), tape.dim[output.index]
+        )
+        offset += count
+    workspace_memory = MemorySpec(0, max(memory.count, output_memory.count))
+    graph = SparseNet(
+        workspace_memory,
+        input_layer,
+        output_layer,
+        [BilinearWorkspaceLayer(memory, output_memory, fused)],
+    )
+    graph.output_weights = outputs
+    graph.output_weights_are_raw = True
+    return graph
+
+
+def create_unfused_opgraph(function: Function):
+    """Lower a graph without materialising a whole-function bilinear tensor."""
     return _FunctionTableBuilder().build(function)
+
+
+def create_opgraph(function: Function):
+    compact = create_compact_bilinear_opgraph(function)
+    if compact is not None:
+        return compact
+    return create_unfused_opgraph(function)
 
 
 def _generic_layer_weights(layer: GenericVectorLayer):
     """Represent an exactly bilinear generic layer as a workspace mapping."""
     if layer.opaque_programs:
-        return None
+        rows = []
+        for program in layer.opaque_programs:
+            if program.op != OP.MATMUL or len(program.operands) != 2:
+                return None
+            left_operand, right_operand = program.operands
+            if isinstance(left_operand, ConstantOperand):
+                left = left_operand.value
+            elif isinstance(left_operand, WorkspaceOperand):
+                left = BilinearWeights.project(
+                    layer.memory_in, left_operand.spec, left_operand.shape
+                )
+            else:
+                return None
+            if isinstance(right_operand, ConstantOperand):
+                right = right_operand.value
+            elif isinstance(right_operand, WorkspaceOperand):
+                right = BilinearWeights.project(
+                    layer.memory_in, right_operand.spec, right_operand.shape
+                )
+            else:
+                return None
+            try:
+                mapped = left @ right
+            except (
+                AssertionError,
+                TypeError,
+                ValueError,
+                NotImplementedError,
+            ):
+                return None
+            if not isinstance(mapped, BilinearWeights):
+                return None
+            rows.extend(
+                mapped[index] for index in range(int(np.prod(mapped.shape)))
+            )
+        return _concatenate_bilinear_operands(layer.memory_in, rows, axis=0)
 
     def operand(ref):
         if ref == UNUSED_REF:
@@ -350,9 +499,7 @@ def _generic_layer_weights(layer: GenericVectorLayer):
         if not isinstance(value, BilinearWeights):
             return None
         rows.append(value)
-    return _concatenate_bilinear_operands(
-        layer.memory_in, rows, axis=0
-    )
+    return _concatenate_bilinear_operands(layer.memory_in, rows, axis=0)
 
 
 def _raw_output_weights(graph: SparseNet, output_weights):
@@ -948,7 +1095,7 @@ def _create_opgraph(
         layers,
         function_id=function_id,
     )
-    # Kept as compile-time metadata for QP coefficient extraction.  Runtime
+    # Kept as compile-time metadata for QP coefficient extraction. Runtime
     # graphs do not inspect this attribute.
     graph.output_weights = output_weights
     raw_weights = _raw_output_weights(graph, output_weights)
