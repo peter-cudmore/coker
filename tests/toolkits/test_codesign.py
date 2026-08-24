@@ -208,7 +208,6 @@ def test_coker_program_composes_as_numerical_module():
     assert isinstance(program.impl, CokerModule)
     solver = program.impl._solver
 
-
     from coker import function
 
     post_solve = function(
