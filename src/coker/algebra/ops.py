@@ -81,6 +81,37 @@ class Operator:
         return not self.is_linear() and not self.is_bilinear()
 
 
+
+class ModuleCallOP(Operator):
+    """Invoke a statically known numerical module at concrete evaluation time."""
+
+    def __init__(self, module):
+        self.module = module
+
+    def compute_shape(self, *dims: Dimension) -> Dimension:
+        expected = self.module.input_shape
+        if tuple(dims) != tuple(expected):
+            raise InvalidShape(
+                f"Module expects input shapes {expected}, got {dims}"
+            )
+        return Dimension((sum(dim.flat() for dim in self.module.result_shape),))
+
+    def is_linear(self):
+        return False
+
+
+class ModuleOutputOP(Operator):
+    """Select one objective-first result from a :class:`ModuleCallOP`."""
+
+    def __init__(self, output_index: int, output_dim: Dimension):
+        self.output_index = output_index
+        self.output_dim = output_dim
+
+    def compute_shape(self, _module_result: Dimension) -> Dimension:
+        return self.output_dim
+
+    def is_linear(self):
+        return False
 class ConcatenateOP(Operator):
     __slots__ = ("axis",)
 

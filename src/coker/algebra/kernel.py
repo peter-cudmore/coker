@@ -12,8 +12,15 @@ from coker.algebra.dimensions import (
     FunctionSpace,
     Element,
 )
+from coker.algebra.ops import (
+    OP,
+    Noop,
+    Operator,
+    ReshapeOP,
+    ModuleCallOP,
+    ModuleOutputOP,
+)
 from coker.algebra.tensor import SymbolicVector
-from coker.algebra.ops import OP, Noop, Operator, ReshapeOP
 
 from coker.algebra.ops import numpy_atomics, numpy_composites
 
