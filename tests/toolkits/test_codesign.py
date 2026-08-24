@@ -6,7 +6,7 @@ from coker.toolkits.codesign import (
     Minimise,
     norm as codesign_norm,
 )
-from coker import Dimension, VectorSpace
+from coker import Dimension, Scalar, VectorSpace
 from coker.toolkits.codesign import SolveFailure
 
 
@@ -173,3 +173,24 @@ def test_mathematical_program_composes_as_numerical_module():
     assert objective == pytest.approx(0.0, abs=1e-6)
     assert np.allclose(solution, np.array([3.0]), atol=1e-6)
     assert np.allclose(doubled_solution, np.array([6.0]), atol=1e-6)
+
+
+def test_casadi_program_composes_as_numerical_module():
+    pytest.importorskip("casadi")
+
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        (target,) = builder.arguments
+        x = builder.new_variable(name="x", initial_value=0.0)
+        builder.objective = Minimise((x - target) ** 2)
+        builder.outputs = [x]
+        program = builder.build("casadi")
+
+    from coker import function
+
+    post_solve = function(
+        [Scalar("p")],
+        lambda p: 3.0 * program(p)[1],
+        backend="casadi",
+    )
+
+    assert post_solve(2.0) == pytest.approx(6.0, abs=1e-6)
