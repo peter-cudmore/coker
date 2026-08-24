@@ -1,6 +1,7 @@
 """Symbolic sparse-matrix construction utilities."""
 
 from __future__ import annotations
+from dataclasses import dataclass
 
 import numpy as np
 import scipy.sparse
@@ -10,6 +11,15 @@ from coker.algebra.kernel import Tracer
 from coker.algebra.tensor import SymbolicVector
 
 
+
+@dataclass(frozen=True)
+class SparseMatrixPattern:
+    """Fixed CSC structure and source data for a symbolic sparse matrix."""
+
+    shape: tuple[int, int]
+    indptr: tuple[int, ...]
+    indices: tuple[int, ...]
+    data: Tracer
 class SparseMatrixBuilder:
     """Build matrices with a fixed compressed-sparse-column boolean pattern.
 
@@ -62,7 +72,14 @@ class SparseMatrixBuilder:
             matrix = SymbolicVector.zeros((self.shape[0] * self.shape[1],))
             for index, flat_index in enumerate(self._flat_indices):
                 matrix[int(flat_index)] = data[index]
-            return np.reshape(matrix.collapse(), self.shape)
+            result = np.reshape(matrix.collapse(), self.shape)
+            result.sparse_matrix_pattern = SparseMatrixPattern(
+                self.shape,
+                tuple(int(value) for value in self.indptr),
+                tuple(int(value) for value in self.indices),
+                data,
+            )
+            return result
 
         values = np.asarray(data)
         if values.shape != (self.nnz,):
