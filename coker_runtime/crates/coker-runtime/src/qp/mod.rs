@@ -362,9 +362,10 @@ impl EmbeddedOsqpInstance {
         let n_plus_m = n
             .checked_add(m)
             .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?;
-        let p_nnz = checked_embedded_ffi_length(qp_program.p_pattern().indices.len())?;
-        let a_nnz = checked_embedded_ffi_length(qp_program.a_pattern().indices.len())?;
-        let kkt_nnz = checked_embedded_ffi_length(qdldl_plan.kkt_pattern().indices.len())?;
+        let (p_indptr, p_indices, p_nnz) = mapped_osqp_csc_ptrs(qp_program.p_pattern(), "QP P")?;
+        let (a_indptr, a_indices, a_nnz) = mapped_osqp_csc_ptrs(qp_program.a_pattern(), "QP A")?;
+        let (kkt_indptr, kkt_indices, kkt_nnz) =
+            mapped_osqp_csc_ptrs(qdldl_plan.kkt_pattern(), "QP KKT")?;
         let l_nnz = checked_embedded_ffi_length(symbolic_l.l_pattern().indices.len())?;
         let storage = unsafe {
             slice::from_raw_parts_mut(arena.base.as_ptr().cast::<MaybeUninit<u8>>(), arena.bytes)
@@ -394,18 +395,8 @@ impl EmbeddedOsqpInstance {
             n,
             n,
             p_nnz,
-            qp_program
-                .p_pattern()
-                .indptr
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
-            qp_program
-                .p_pattern()
-                .indices
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
+            p_indptr,
+            p_indices,
             region_ptr!(f32, layout.pdata_x()),
         );
         ffi::embedded_bind::bind_csc_matrix(
@@ -413,18 +404,8 @@ impl EmbeddedOsqpInstance {
             m,
             n,
             a_nnz,
-            qp_program
-                .a_pattern()
-                .indptr
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
-            qp_program
-                .a_pattern()
-                .indices
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
+            a_indptr,
+            a_indices,
             region_ptr!(f32, layout.adata_x()),
         );
         let l_indptr = region_ptr!(i32, layout.qdldl_l_p());
@@ -459,18 +440,8 @@ impl EmbeddedOsqpInstance {
             n_plus_m,
             n_plus_m,
             kkt_nnz,
-            qdldl_plan
-                .kkt_pattern()
-                .indptr
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
-            qdldl_plan
-                .kkt_pattern()
-                .indices
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
+            kkt_indptr,
+            kkt_indices,
             region_ptr!(f32, layout.qdldl_kkt_x()),
         );
         ffi::embedded_bind::bind_matrix(

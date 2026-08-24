@@ -240,25 +240,46 @@ fn execute_qp_program(
             instance_ref.numeric_slices_mut(program.p_nnz, program.a_nnz, program.n, program.m)?;
         (p_x.as_ptr(), a_x.as_ptr())
     };
-    let update_mat_status = {
+    let (update_mat_status, counts) = {
         let instance_ref = instance
             .as_mut()
             .ok_or_else(BoundMappedQpProgram::invalid_instance_error)?;
         let mut solver = instance_ref.solver();
-        unsafe {
+        let counts = unsafe {
+            solver
+                .matrix_update_counts()
+                .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?
+        };
+        if !counts.is_consistent(program.p_nnz, program.a_nnz) {
+            return Err(RuntimeError::EmbeddedQpCscDescriptor {
+                p_nzmax: counts.p.nzmax,
+                p_terminal: counts.p.terminal_indptr,
+                p_submitted: program.p_nnz,
+                a_nzmax: counts.a.nzmax,
+                a_terminal: counts.a.terminal_indptr,
+                a_submitted: program.a_nnz,
+            });
+        }
+        let status = unsafe {
             solver
                 .update_data_mat(
                     slice::from_raw_parts(p_x_ptr, program.p_nnz),
                     slice::from_raw_parts(a_x_ptr, program.a_nnz),
                 )
                 .ok_or(RuntimeError::EmbeddedQpWorkspaceInvalid)?
-        }
+        };
+        (status, counts)
     };
     if update_mat_status != 0 {
         *instance = program.bind_instance_in_arena(arena).ok();
-        return Err(RuntimeError::EmbeddedQpAbi {
-            operation: "update_data_mat",
+        return Err(RuntimeError::EmbeddedQpCscUpdate {
             status: update_mat_status,
+            p_nzmax: counts.p.nzmax,
+            p_terminal: counts.p.terminal_indptr,
+            p_submitted: program.p_nnz,
+            a_nzmax: counts.a.nzmax,
+            a_terminal: counts.a.terminal_indptr,
+            a_submitted: program.a_nnz,
         });
     }
 

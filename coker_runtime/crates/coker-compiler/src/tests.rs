@@ -98,9 +98,9 @@ fn qp_program_arena_layout_json() -> Value {
 
 fn qp_program_plan_json() -> Value {
     json!({
-        "abi_version": 1,
+        "abi_version": 2,
         "profile": "Osqp063Embedded2Qdldl",
-        "version": 1,
+        "version": 2,
         "settings": {
             "rho": 0.1,
             "sigma": 1e-6,
@@ -378,7 +378,7 @@ fn compile_exported_qp_json_builds_single_module_with_qp_program() {
         }
     );
     assert_eq!(qp_program.coefficient_outputs.r.length, 1);
-    assert_eq!(qp_program.embedded_plan.abi_version, 1);
+    assert_eq!(qp_program.embedded_plan.abi_version, 2);
     assert_eq!(
         qp_program.embedded_plan.profile,
         EmbeddedQpProfile::Osqp063Embedded2Qdldl
@@ -404,7 +404,7 @@ fn compile_exported_qp_json_builds_single_module_with_qp_program() {
             linsys_solver: EmbeddedLinsysSolver::Qdldl,
         }
     );
-    assert_eq!(qp_program.embedded_plan.version, 1);
+    assert_eq!(qp_program.embedded_plan.version, 2);
     assert_eq!(
         qp_program.embedded_plan.qdldl_plan,
         QpProgramQdldlPlan {
@@ -479,6 +479,22 @@ fn compile_exported_qp_json_rejects_mismatched_embedded_plan_pattern() {
         CompileError::InvalidField {
             field: "embedded_plan.qdldl_plan.p_pattern",
             ..
+        }
+    ));
+}
+
+#[test]
+fn compile_exported_qp_json_rejects_legacy_csc_abi() {
+    let mut exported_qp_json = exported_qp_module_json();
+    exported_qp_json["qp_programs"][0]["embedded_plan"]["abi_version"] = json!(1);
+
+    let error = compile_exported_qp_json(exported_qp_json.to_string().as_bytes()).unwrap_err();
+
+    assert!(matches!(
+        error,
+        CompileError::InvalidField {
+            field: "embedded_plan.abi_version",
+            reason: "unsupported embedded QP plan abi version",
         }
     ));
 }

@@ -452,6 +452,36 @@ def test_coker_qp_extracts_sparse_weighted_norm_coefficients():
     assert np.allclose(coefficients[r.start : r.start + r.length], [16939.0])
 
 
+def test_coker_qp_emits_weighted_hessian_in_csc_order():
+    from coker.backends.coker.optimisation import _build_coefficient_function
+
+    weights = SparseMatrixBuilder(np.ones((3, 3), dtype=bool))
+    with ProblemBuilder(
+        arguments=[weights.data_space("weight_data")]
+    ) as builder:
+        (weight_data,) = builder.arguments
+        x = builder.new_variable("x", shape=(3,), initial_value=np.zeros(3))
+        cost = weighted_norm(weights.matrix(weight_data), x)
+        bindings = _build_bindings(cost, [weight_data])
+        coefficient_function, slices = _build_coefficient_function(
+            cost.tape,
+            cost,
+            [],
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+
+    coefficients = np.asarray(
+        coefficient_function(np.arange(1.0, 10.0)),
+        dtype=float,
+    )
+    px = slices["px"]
+    assert np.allclose(
+        coefficients[px.start : px.start + px.length],
+        [28.0, 64.0, 154.0, 100.0, 244.0, 388.0],
+    )
+
+
 def test_coker_qp_rejects_dense_weighted_norm():
     with ProblemBuilder() as builder:
         x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))

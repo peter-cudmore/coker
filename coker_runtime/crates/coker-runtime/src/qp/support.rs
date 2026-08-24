@@ -1,4 +1,5 @@
 use super::*;
+use core::mem::{align_of, size_of_val};
 
 pub(super) fn validate_mapped_qp_program(
     qp_program: &ArchivedQpProgram,
@@ -13,8 +14,8 @@ pub(super) fn validate_mapped_qp_program(
         ));
     }
     let m = checked_embedded_osqp_index(qp_program.a_pattern().nrows.to_native(), "QP m")?;
-    let p_nnz = checked_embedded_slice_len(qp_program.p_pattern().indices.len(), "QP P nnz")?;
-    let a_nnz = checked_embedded_slice_len(qp_program.a_pattern().indices.len(), "QP A nnz")?;
+    let p_nnz = validate_mapped_osqp_csc_pattern(qp_program.p_pattern(), "QP P")?;
+    let a_nnz = validate_mapped_osqp_csc_pattern(qp_program.a_pattern(), "QP A")?;
     let arena_layout = qp_program.embedded_plan().arena_layout();
     let arena_bytes = checked_embedded_usize(arena_layout.total_bytes(), "QP arena bytes")?;
     let arena_alignment =
@@ -32,6 +33,54 @@ pub(super) fn validate_mapped_qp_program(
         ));
     }
     Ok((n, m, p_nnz, a_nnz, requirements))
+}
+
+/// Returns direct OSQP index pointers after validating the mapped CSC ABI.
+pub(super) fn mapped_osqp_csc_ptrs(
+    pattern: &coker_bytecode::ArchivedEmbeddedCscPattern,
+    field: &'static str,
+) -> Result<(*mut raw::OSQPInt, *mut raw::OSQPInt, i32), RuntimeError> {
+    let nnz = validate_mapped_osqp_csc_pattern(pattern, field)?;
+    let indptr = pattern.indptr.as_ptr();
+    let indices = pattern.indices.as_ptr();
+    Ok((
+        indptr.cast::<raw::OSQPInt>().cast_mut(),
+        indices.cast::<raw::OSQPInt>().cast_mut(),
+        checked_embedded_ffi_length(nnz)?,
+    ))
+}
+
+fn validate_mapped_osqp_csc_pattern(
+    pattern: &coker_bytecode::ArchivedEmbeddedCscPattern,
+    field: &'static str,
+) -> Result<usize, RuntimeError> {
+    let ncols = checked_embedded_osqp_index(pattern.ncols.to_native(), field)?;
+    if pattern.indptr.len() != ncols + 1 {
+        return Err(RuntimeError::ValidationField {
+            field,
+            problem: "indptr length must equal column count plus one",
+        });
+    }
+    if pattern.indptr.as_ptr() as usize % align_of::<raw::OSQPInt>() != 0
+        || pattern.indices.as_ptr() as usize % align_of::<raw::OSQPInt>() != 0
+        || size_of_val(&pattern.indptr[0]) != core::mem::size_of::<raw::OSQPInt>()
+        || (!pattern.indices.is_empty()
+            && size_of_val(&pattern.indices[0]) != core::mem::size_of::<raw::OSQPInt>())
+    {
+        return Err(RuntimeError::ValidationField {
+            field,
+            problem: "mapped CSC indices do not match the embedded OSQP index ABI",
+        });
+    }
+    let nnz = checked_embedded_slice_len(pattern.indices.len(), field)?;
+    let terminal = pattern.indptr[ncols].to_native();
+    if terminal < 0 || usize::try_from(terminal).ok() != Some(nnz) {
+        return Err(RuntimeError::ValidationField {
+            field,
+            problem: "terminal indptr does not match the CSC index count",
+        });
+    }
+    Ok(nnz)
 }
 
 pub(super) fn validate_embedded_evaluator(

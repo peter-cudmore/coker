@@ -70,11 +70,15 @@ pub(crate) fn embedded_csc_pattern_from_archived(
     EmbeddedCscPattern {
         nrows: pattern.nrows.into(),
         ncols: pattern.ncols.into(),
-        indptr: pattern.indptr.iter().map(|value| (*value).into()).collect(),
+        indptr: pattern
+            .indptr
+            .iter()
+            .map(|value| value.to_native())
+            .collect(),
         indices: pattern
             .indices
             .iter()
-            .map(|value| (*value).into())
+            .map(|value| value.to_native())
             .collect(),
     }
 }
@@ -167,8 +171,8 @@ pub(crate) fn validate_embedded_osqp_settings(
 pub(crate) fn validate_embedded_csc_pattern(
     nrows: u32,
     ncols: u32,
-    indptr: &[u32],
-    indices: &[u32],
+    indptr: &[i32],
+    indices: &[i32],
     field: &'static str,
 ) -> Result<(), BytecodeError> {
     let nrows = usize::try_from(nrows)
@@ -270,8 +274,8 @@ pub(crate) fn validate_permutation(
 }
 
 pub(crate) fn validate_upper_triangular_pattern(
-    indptr: &[u32],
-    indices: &[u32],
+    indptr: &[i32],
+    indices: &[i32],
     field: &'static str,
 ) -> Result<(), BytecodeError> {
     for col in 0..indptr.len().saturating_sub(1) {
