@@ -447,7 +447,8 @@ def validate_qp_problem(
         SparseMatrixPattern,
     ):
         raise ValueError(
-            "Coker weighted-norm QP objectives require a SparseMatrixBuilder weight"
+            "Coker weighted-norm QP objectives require a "
+            "SparseMatrixBuilder weight"
         )
     if not cost.dim.is_scalar():
         raise ValueError("Coker QP objective must be scalar")
@@ -578,7 +579,7 @@ def _bilinear_coefficient_function(
     parameter_bindings: list[InputBinding],
     constraint_data,
 ):
-    """Extract QP coefficients without materialising sparse weighted products."""
+    """Extract QP coefficients without materialising weighted products."""
     from coker.backends.coker.core import create_opgraph
 
     def graph_for(tracer):
@@ -597,7 +598,8 @@ def _bilinear_coefficient_function(
         )
         if not isinstance(weighted_pattern, SparseMatrixPattern):
             raise ValueError(
-                "Coker weighted-norm QP objectives require a SparseMatrixBuilder weight"
+                "Coker weighted-norm QP objectives require a "
+                "SparseMatrixBuilder weight"
             )
         if weighted_pattern.shape[1] != weighted_norm.residual.dim.flat():
             raise ValueError(
@@ -614,7 +616,8 @@ def _bilinear_coefficient_function(
             or weighted_data_weights is None
         ):
             raise ValueError(
-                "Coker weighted-norm QP inputs must have raw bilinear provenance"
+                "Coker weighted-norm QP inputs must have raw "
+                "bilinear provenance"
             )
         cost_graph = None
         cost_weights = None
