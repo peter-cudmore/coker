@@ -20,19 +20,30 @@ class Minimise:
 
 
 class MathematicalProgram:
+    """A numerical optimisation module mapping parameters to objective and outputs.
+
+    Calling a program returns a tuple whose first element is the solved scalar
+    objective and whose remaining elements are the declared program outputs.
+    """
+
     def __init__(
         self,
         input_shape: Tuple[Dimension, ...],
         output_shape: Tuple[Dimension, ...],
         impl: Callable,
     ):
-
         self.input_shape = input_shape
         self.output_shape = output_shape
         self.impl = impl
         self.solve_info = None
 
+    @property
+    def result_shape(self) -> Tuple[Dimension, ...]:
+        """Return the objective-first shapes produced by this program."""
+        return (Dimension(None), *self.output_shape)
+
     def __call__(self, *args):
+        """Solve the program and return ``(objective, *declared_outputs)``."""
         if len(args) != len(self.input_shape):
             raise ValueError(
                 f"Expected {len(self.input_shape)} runtime arguments, "
@@ -45,16 +56,26 @@ class MathematicalProgram:
             self.solve_info = getattr(self.impl, "last_solve_info", None)
         if not isinstance(result, (list, tuple)):
             result = [result]
-        if len(result) != len(self.output_shape):
+        if len(result) != len(self.result_shape):
             raise ValueError(
-                f"Backend returned {len(result)} outputs for "
-                f"{len(self.output_shape)} requested outputs"
+                f"Backend returned {len(result)} results for "
+                f"{len(self.result_shape)} requested objective and outputs"
             )
 
-        return [
-            np.reshape(np.asarray(o), dim.shape)
-            for o, dim in zip(result, self.output_shape)
-        ]
+        objective, *outputs = result
+        objective_array = np.asarray(objective)
+        if objective_array.size != 1:
+            raise TypeError(
+                "Backend returned a non-scalar optimisation objective with "
+                f"shape {objective_array.shape}"
+            )
+        return (
+            float(objective_array.reshape(-1)[0]),
+            *(
+                np.reshape(np.asarray(output), dim.shape)
+                for output, dim in zip(outputs, self.output_shape)
+            ),
+        )
 
     def export_payload(self) -> dict[str, object]:
         """Return the deterministic artifact payload when supported."""
@@ -65,7 +86,6 @@ class MathematicalProgram:
                 "Coker artifact payload"
             )
         return exporter()
-
 
 class ProblemBuilder:
     def __init__(self, arguments: Optional[List[VectorSpace | Scalar]] = None):
@@ -139,10 +159,10 @@ class ProblemBuilder:
         )
 
         impl = backend.build_optimisation_problem(
-            self.objective.expression,  # cost
+            self.objective.expression,
             self.constraints,
             self.arguments,
-            self.outputs,
+            [self.objective.expression, *self.outputs],
             self._normalise_initial_conditions(),
         )
 

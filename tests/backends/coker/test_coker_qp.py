@@ -262,17 +262,19 @@ def test_coker_backend_builder_returns_casadi_style_solver(monkeypatch):
         builder.objective.expression,
         builder.constraints,
         builder.arguments,
-        builder.outputs,
+        [builder.objective.expression, *builder.outputs],
         builder.initial_conditions,
     )
 
     assert solver.last_solve_info is None
 
-    [first_solution] = solver(np.array([3.0, -1.0]))
+    first_objective, first_solution = solver(np.array([3.0, -1.0]))
     first_info = solver.last_solve_info
-    [second_solution] = solver(np.array([2.0, -1.0]))
+    second_objective, second_solution = solver(np.array([2.0, -1.0]))
     second_info = solver.last_solve_info
 
+    assert first_objective == pytest.approx(2.5, abs=1e-6)
+    assert second_objective == pytest.approx(0.0, abs=1e-6)
     assert np.allclose(first_solution, np.array([1.5, -0.5]), atol=1e-6)
     assert np.allclose(second_solution, np.array([2.0, -1.0]), atol=1e-6)
     assert first_info is not None
@@ -293,7 +295,8 @@ def test_coker_qp_solves_fixed_problem():
         builder.outputs = [x]
         problem = builder.build("coker")
 
-    (x_val,) = problem()
+    objective, x_val = problem()
+    assert objective == pytest.approx(0.0, abs=1e-6)
     assert np.allclose(x_val, np.array([1.0, -2.0]), atol=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.backend == "coker"
@@ -310,7 +313,8 @@ def test_coker_qp_solves_parameterized_problem():
         problem = builder.build("coker")
 
     target_value = np.array([3.0, -1.0])
-    (x_val,) = problem(target_value)
+    objective, x_val = problem(target_value)
+    assert objective == pytest.approx(0.0, abs=1e-6)
     assert np.allclose(x_val, target_value, atol=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
@@ -390,11 +394,13 @@ def test_coker_qp_updates_warm_start_between_solves():
         builder.outputs = [x]
         problem = builder.build("coker")
 
-    (first_solution,) = problem(np.array([1.0, 2.0]))
+    first_objective, first_solution = problem(np.array([1.0, 2.0]))
     first_info = problem.solve_info
-    (second_solution,) = problem(np.array([0.5, 0.25]))
+    second_objective, second_solution = problem(np.array([0.5, 0.25]))
     second_info = problem.solve_info
 
+    assert first_objective == pytest.approx(0.0, abs=1e-6)
+    assert second_objective == pytest.approx(0.0, abs=1e-6)
     assert np.allclose(first_solution, np.array([1.0, 2.0]), atol=1e-6)
     assert np.allclose(second_solution, np.array([0.5, 0.25]), atol=1e-6)
     assert first_info is not None
@@ -429,7 +435,8 @@ def test_coker_qp_solves_unconstrained_problem():
         builder.outputs = [x]
         problem = builder.build("coker")
 
-    (x_val,) = problem()
+    objective, x_val = problem()
+    assert objective == pytest.approx(0.0, abs=1e-6)
     assert np.allclose(x_val, np.array([2.0, -3.0]), atol=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
@@ -451,11 +458,12 @@ def test_coker_qp_accepts_parameterized_objective_and_two_sided_bounds():
         builder.outputs = [x]
         problem = builder.build("coker")
 
-    (solution,) = problem(
+    objective, solution = problem(
         np.array([3.0, -1.0]),
         np.array([-1.0, -2.0]),
         np.array([2.0, 1.0]),
     )
+    assert objective == pytest.approx(1.0, abs=1e-3)
 
     assert problem.solve_info is not None
     assert problem.solve_info.success
