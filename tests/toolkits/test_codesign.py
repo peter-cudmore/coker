@@ -47,11 +47,12 @@ def test_optimisation_zero_input_problem(variational_backend):
 
     soln = problem()
 
-    assert len(soln) == 3
-    x_val, p_val, z_val = soln
+    assert len(soln) == 4
+    objective, x_val, p_val, z_val = soln
 
     x_expected = np.array([1, 2, 0], dtype=float)
     p_expected = np.array([0, 0], dtype=float)
+    assert objective == pytest.approx(6.0, abs=1e-5)
     assert np.allclose(x_val, x_expected, atol=1e-6)
     assert np.allclose(p_val, p_expected, atol=1e-6)
     assert 1 - 1e-5 < abs(z_val) < 1 + 1e-5
@@ -74,7 +75,8 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
     assert problem.input_shape == (Dimension((2,)),)
     assert problem.output_shape == (Dimension((2,)),)
 
-    (x_val,) = problem(np.array([3.0, -1.0]))
+    objective, x_val = problem(np.array([3.0, -1.0]))
+    assert objective == pytest.approx(0.0, abs=1e-6)
     assert x_val.shape == (2,)
     assert np.allclose(x_val, np.array([3.0, -1.0]), atol=1e-6)
     assert problem.solve_info is not None
@@ -96,7 +98,8 @@ def test_optimisation_norm_helper(variational_backend):
         builder.outputs = [x]
         problem = builder.build(variational_backend)
 
-    (x_val,) = problem()
+    objective, x_val = problem()
+    assert objective == pytest.approx(0.5, abs=1e-6)
     assert np.allclose(x_val, np.array([1.5, 0.0]), atol=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
@@ -134,7 +137,8 @@ def test_optimisation_supports_nonlinear_constraints(variational_backend):
         builder.outputs = [x]
         problem = builder.build(variational_backend)
 
-    (x_val,) = problem()
+    objective, x_val = problem()
+    assert objective == pytest.approx(0.25, abs=5e-4)
     assert np.allclose(x_val, np.array([0.5, 0.0]), atol=5e-4)
     assert problem.solve_info is not None
     assert problem.solve_info.success
