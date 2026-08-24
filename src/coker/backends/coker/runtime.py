@@ -131,7 +131,7 @@ class RuntimeQpProgram:
             self._solution,
             initial,
         )
-        from coker.optimisation import SolveInfo
+        from coker.toolkits.codesign.optimisation import SolveInfo
 
         info = SolveInfo(
             backend="coker",

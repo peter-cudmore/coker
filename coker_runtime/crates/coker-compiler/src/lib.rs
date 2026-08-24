@@ -453,6 +453,10 @@ fn compute_qp_program_arena_layout(
     })?;
     let kkt_nnz = qdldl_plan.kkt_pattern.indices.len();
     let l_nnz = qdldl_plan.symbolic_l.l_pattern.indices.len();
+    let l_indptr_count = n_plus_m.checked_add(1).ok_or(CompileError::InvalidField {
+        field: "embedded_plan.arena_layout.qdldl_l_p",
+        reason: "arena layout dimensions overflow usize",
+    })?;
     let iwork_count = n_plus_m.checked_mul(3).ok_or(CompileError::InvalidField {
         field: "embedded_plan.arena_layout.qdldl_iwork",
         reason: "arena layout dimensions overflow usize",
@@ -544,6 +548,18 @@ fn compute_qp_program_arena_layout(
         &mut arena_alignment,
         l_nnz,
         "embedded_plan.arena_layout.qdldl_l_x",
+    )?;
+    let qdldl_l_p = push_qp_arena_region::<ffi_raw::QDLDL_int>(
+        &mut offset,
+        &mut arena_alignment,
+        l_indptr_count,
+        "embedded_plan.arena_layout.qdldl_l_p",
+    )?;
+    let qdldl_l_i = push_qp_arena_region::<ffi_raw::QDLDL_int>(
+        &mut offset,
+        &mut arena_alignment,
+        l_nnz,
+        "embedded_plan.arena_layout.qdldl_l_i",
     )?;
     let qdldl_l = push_qp_arena_region::<ffi_raw::OSQPCscMatrix>(
         &mut offset,
@@ -752,6 +768,8 @@ fn compute_qp_program_arena_layout(
         solution,
         info,
         qdldl_l_x,
+        qdldl_l_p,
+        qdldl_l_i,
         qdldl_l,
         qdldl_kkt_x,
         qdldl_kkt,

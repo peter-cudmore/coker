@@ -4,9 +4,9 @@ from typing import Optional, List, Tuple, Callable, Any
 
 import numpy as np
 
-from coker import Dimension
+from coker.algebra.dimensions import Dimension
 from coker.algebra.kernel import Tape, Tracer, VectorSpace, Scalar
-from coker.backends import get_backend_by_name, get_current_backend
+from .optimisation import BoundedConstraint, SolveFailure, SolveInfo, bounded
 
 
 @dataclasses.dataclass
@@ -55,6 +55,16 @@ class MathematicalProgram:
             np.reshape(np.asarray(o), dim.shape)
             for o, dim in zip(result, self.output_shape)
         ]
+
+    def export_payload(self) -> dict[str, object]:
+        """Return the deterministic artifact payload when supported."""
+        exporter = getattr(self.impl, "export_payload", None)
+        if exporter is None:
+            raise NotImplementedError(
+                "this mathematical program backend has no "
+                "Coker artifact payload"
+            )
+        return exporter()
 
 
 class ProblemBuilder:
@@ -120,6 +130,7 @@ class ProblemBuilder:
         assert isinstance(self.objective, Minimise)
         assert self.tape is not None
         assert self.outputs
+        from coker.backends import get_backend_by_name, get_current_backend
 
         backend = (
             get_backend_by_name(backend)
@@ -147,3 +158,16 @@ class ProblemBuilder:
 
 def norm(arg, order=2):
     return np.linalg.norm(arg, ord=order)
+
+
+__all__ = [
+    "BoundedConstraint",
+    "MathematicalProgram",
+    "Minimise",
+    "ProblemBuilder",
+    "SolveFailure",
+    "SolveInfo",
+    "SolverOptions",
+    "bounded",
+    "norm",
+]

@@ -11,8 +11,16 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.factories import zeros
-from coker.optimisation import SolveFailure, SolveInfo
 
+from coker.artifacts import (
+    ArtifactMetadata,
+    CompiledArtifact,
+    compile_artifact,
+    compile_function,
+    compile_qp_artifact,
+    compile_qp,
+    write_artifact,
+)
 
 __all__ = [
     "Function",
@@ -24,6 +32,11 @@ __all__ = [
     "FunctionSpace",
     "SymbolicVector",
     "zeros",
-    "SolveFailure",
-    "SolveInfo",
+    "ArtifactMetadata",
+    "CompiledArtifact",
+    "compile_qp",
+    "compile_artifact",
+    "compile_function",
+    "compile_qp_artifact",
+    "write_artifact",
 ]

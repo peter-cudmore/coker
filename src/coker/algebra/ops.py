@@ -144,6 +144,14 @@ class NormOP(Operator):
 
 
 class ClipOP(Operator):
+    """Elementwise clipping operation retained for graph compatibility.
+
+    Traced ``numpy.clip`` calls are expanded into ``CASE`` and comparison
+    nodes before export.  The expansion uses inclusive lower and upper
+    comparisons: the push-forward derivative is zero at the lower bound and
+    one at the upper bound (the selected branch owns the boundary).
+    """
+
     def __init__(self, a=None, a_min=None, a_max=None):
         self.lower = a_min
         self.higher = a_max

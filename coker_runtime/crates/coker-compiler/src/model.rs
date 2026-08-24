@@ -154,6 +154,8 @@ pub(crate) struct ExportedQpProgramArenaLayout {
     pub(crate) solution: ExportedQpProgramArenaRegion,
     pub(crate) info: ExportedQpProgramArenaRegion,
     pub(crate) qdldl_l_x: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_l_p: ExportedQpProgramArenaRegion,
+    pub(crate) qdldl_l_i: ExportedQpProgramArenaRegion,
     pub(crate) qdldl_l: ExportedQpProgramArenaRegion,
     pub(crate) qdldl_kkt_x: ExportedQpProgramArenaRegion,
     pub(crate) qdldl_kkt: ExportedQpProgramArenaRegion,

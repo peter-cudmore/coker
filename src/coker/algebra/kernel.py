@@ -102,10 +102,22 @@ class TapeInner:
     def constant_hash(value) -> int:
         if isinstance(value, (int, float)):
             return hash((0, 0, value))
-        elif isinstance(value, np.ndarray):
+        if isinstance(value, np.ndarray):
             return hash((*value.shape, *value.flatten().tolist()))
-        else:
-            return hash(value)
+        if sp.sparse.issparse(value):
+            canonical = value.tocsc(copy=True)
+            canonical.sum_duplicates()
+            canonical.sort_indices()
+            return hash(
+                (
+                    canonical.shape,
+                    canonical.dtype.str,
+                    canonical.indptr.tobytes(),
+                    canonical.indices.tobytes(),
+                    canonical.data.tobytes(),
+                )
+            )
+        return hash(value)
 
     @staticmethod
     def try_sparsify(value: Any) -> Any:
@@ -615,7 +627,56 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         raise NotImplementedError(f"{ufunc} is not implemented")
 
     def __array_function__(self, func, types, args, kwargs):
+        if func is np.clip:
+            value, lower, upper = args
+
+            def clip_scalar(item, item_lower, item_upper):
+                result = item
+                if item_upper is not None:
+                    result = if_then_else(
+                        item <= item_upper, result, item_upper
+                    )
+                if item_lower is not None:
+                    result = if_then_else(
+                        item <= item_lower, item_lower, result
+                    )
+                return result
+
+            if isinstance(value, Tracer) and value.dim.is_vector():
+                count = value.shape[0]
+                lower_values = (
+                    lower
+                    if lower is not None
+                    and isinstance(lower, (list, tuple, np.ndarray))
+                    else [lower] * count
+                )
+                upper_values = (
+                    upper
+                    if upper is not None
+                    and isinstance(upper, (list, tuple, np.ndarray))
+                    else [upper] * count
+                )
+                return np.concatenate(
+                    [
+                        clip_scalar(
+                            value[index],
+                            lower_values[index],
+                            upper_values[index],
+                        )
+                        for index in range(count)
+                    ]
+                )
+
+            return clip_scalar(value, lower, upper)
+
         try:
+            if func == np.reshape:
+                shape = (
+                    args[1]
+                    if len(args) > 1
+                    else kwargs.get("newshape", kwargs.get("shape"))
+                )
+                return self._emit(ReshapeOP(shape), args[0])
             return self._emit(numpy_atomics[func], *args)
         except KeyError:
             pass
@@ -839,32 +900,6 @@ class Function:
 
         backend = get_backend_by_name(self.backend)
         return backend.lower(self)
-
-    def compile_bytecode(self) -> bytes:
-        """Compile this fixed-shape numeric function to a Coker bytecode module.
-
-        The returned artifact is executable through ``coker-runtime``'s mapped
-        runtime; it contains no Python callback or interpreter dependency.
-        """
-        from coker.algebra.dimensions import FunctionSpace
-        from coker.backends.coker.core import create_opgraph
-        from coker.backends.coker.runtime import CompiledGraph
-
-        if any(
-            isinstance(self.tape.dim[input_index], FunctionSpace)
-            for input_index in self.tape.input_indicies
-        ):
-            raise NotImplementedError(
-                "bytecode compilation does not support FunctionSpace inputs"
-            )
-        if any(output is None for output in self.output):
-            raise NotImplementedError(
-                "bytecode compilation does not support None outputs"
-            )
-        return bytes(CompiledGraph.compile(create_opgraph(self)).program)
-
-    def compile(self, backend: str):
-        raise NotImplementedError("Not yet implemented")
 
     def __le__(self, other: np.ndarray):
         # self < other

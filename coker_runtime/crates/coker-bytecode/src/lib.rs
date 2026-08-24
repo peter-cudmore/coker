@@ -134,6 +134,8 @@ pub struct QpProgramArenaLayout {
     pub solution: QpProgramArenaRegion,
     pub info: QpProgramArenaRegion,
     pub qdldl_l_x: QpProgramArenaRegion,
+    pub qdldl_l_p: QpProgramArenaRegion,
+    pub qdldl_l_i: QpProgramArenaRegion,
     pub qdldl_l: QpProgramArenaRegion,
     pub qdldl_kkt_x: QpProgramArenaRegion,
     pub qdldl_kkt: QpProgramArenaRegion,

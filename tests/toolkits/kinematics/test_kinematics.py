@@ -559,3 +559,72 @@ def test_add_multiple():
     assert (
         np.linalg.norm(dscrews_0[0] - dscrews_0[1]) < 1e-4
     ), f"{dscrews_0[0]} != {dscrews_0[1]}"
+
+
+def _compiled_hexapod_model(branched=True):
+    model = RigidBody()
+    effectors = []
+    parent = model.WORLD
+    for leg in range(6):
+        if branched:
+            parent = model.WORLD
+        for joint in range(3):
+            parent = model.add_link(
+                parent=parent,
+                at=Isometry3(translation=np.array([0.4, 0.1 * leg, 0.0])),
+                joint=Revolute(Screw.w_z()),
+                inertia=Inertia.zero(),
+            )
+        effectors.append(
+            model.add_effector(
+                parent,
+                Isometry3(translation=np.array([0.2, 0.0, 0.0])),
+            )
+        )
+    return model, effectors
+
+
+def test_rigid_body_function_matches_hexapod_cartesian_kinematics():
+    _assert_kinematics_function(_compiled_hexapod_model()[0])
+
+
+def test_compiled_rigid_body_function_matches_serial_kinematics():
+    _assert_kinematics_function(_compiled_hexapod_model(branched=False)[0])
+
+
+def test_compiled_rigid_body_function_matches_branched_kinematics():
+    _assert_kinematics_function(_compiled_hexapod_model(branched=True)[0])
+
+
+def _assert_kinematics_function(model):
+    angles = np.linspace(-0.4, 0.4, model.total_joints())
+    kinematics = model.to_function()
+
+    positions, jacobians = kinematics(angles)
+    compiled = function(
+        [VectorSpace("q", model.total_joints())],
+        kinematics,
+        backend="numpy",
+    )
+    compiled_positions, compiled_jacobians = compiled(angles)
+
+    direct_fk = model.forward_kinematics(angles)
+    direct_spatial = model.spatial_manipulator_jacobian(angles)
+    expected_positions = np.concatenate(
+        [transform.translation for transform in direct_fk]
+    )
+    expected_jacobians = np.concatenate(
+        [
+            spatial[3:, :]
+            + np.cross(spatial[:3, :].T, transform.translation).T
+            for transform, spatial in zip(direct_fk, direct_spatial)
+        ],
+        axis=0,
+    )
+
+    assert positions.shape == expected_positions.shape
+    assert jacobians.shape == expected_jacobians.shape
+    assert np.allclose(positions, expected_positions)
+    assert np.allclose(jacobians, expected_jacobians)
+    assert np.allclose(compiled_positions, expected_positions)
+    assert np.allclose(compiled_jacobians, expected_jacobians)

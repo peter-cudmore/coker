@@ -30,6 +30,41 @@ from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.weights import BilinearWeights
 
 
+class CokerFunction:
+    """A Coker-lowered function graph and its backend-specific operations."""
+
+    def __init__(self, function: Function):
+        self.function = function
+        self._graph = None
+
+    @property
+    def graph(self) -> SparseNet:
+        """Build the Coker graph only when compilation needs it."""
+        if self._graph is None:
+            self._graph = create_opgraph(self.function)
+        return self._graph
+
+    @property
+    def function_id(self) -> int:
+        """Return the graph's stable function-table identifier."""
+        return self.graph.function_id
+
+    def __call__(self, inputs):
+        """Evaluate through the reference interpreter on the Python host."""
+        numpy_backend = get_backend_by_name("numpy", set_current=False)
+        return numpy_backend.evaluate(self.function, inputs)
+
+    def compile_bytecode(self) -> bytes:
+        """Compile this lowered graph into a mapped Coker bytecode module."""
+        from coker.backends.coker.runtime import CompiledGraph
+
+        return bytes(CompiledGraph.compile(self.graph).program)
+
+    def export_payload(self) -> dict[str, object]:
+        """Return the deterministic graph payload consumed by the compiler."""
+        return self.graph.export_payload()
+
+
 class CokerBackend(Backend):
     def __init__(self):
         pass
@@ -71,12 +106,7 @@ class CokerBackend(Backend):
             numpy_backend = get_backend_by_name("numpy", set_current=False)
             return numpy_backend.lower(function)
 
-        graph = create_opgraph(function)
-
-        def compiled(inputs):
-            return [graph(*inputs)]
-
-        return compiled
+        return CokerFunction(function)
 
     def build_optimisation_problem(
         self,
@@ -137,17 +167,19 @@ def _append_bilinear_value(
     quadratic: dok_ndarray,
     start: int,
     weights: BilinearWeights,
+    output_shape: Tuple[int, ...],
 ):
+    output_rank = len(output_shape)
     for key, value in weights.constant.keys.items():
-        row = np.ravel_multi_index(key, weights.shape, order="C")
+        row = np.ravel_multi_index(key[:output_rank], output_shape, order="C")
         target = (start + row,)
         constant[target] = constant[target] + value
     for key, value in weights.linear.keys.items():
-        row = np.ravel_multi_index(key[:-1], weights.shape, order="C")
+        row = np.ravel_multi_index(key[:output_rank], output_shape, order="C")
         target = (start + row, key[-1])
         linear[target] = linear[target] + value
     for key, value in weights.quadratic.keys.items():
-        row = np.ravel_multi_index(key[:-2], weights.shape, order="C")
+        row = np.ravel_multi_index(key[:output_rank], output_shape, order="C")
         target = (start + row, key[-2], key[-1])
         quadratic[target] = quadratic[target] + value
 
@@ -269,6 +301,65 @@ def create_opgraph(function: Function):
     return _FunctionTableBuilder().build(function)
 
 
+def _raw_output_weights(graph: SparseNet, output_weights):
+    """Compose graph outputs back through workspace relocation layers."""
+    from coker.backends.coker.weights import compose_bilinear_weights
+
+    weights = list(output_weights)
+    for layer in reversed(graph.intermediate_layers):
+        if isinstance(layer, BilinearWorkspaceLayer):
+            composed = []
+            for weight in weights:
+                if weight is None:
+                    composed.append(None)
+                    continue
+                try:
+                    composed.append(
+                        compose_bilinear_weights(weight, layer.weights)
+                    )
+                except AssertionError:
+                    return None
+            if any(weight is None for weight in composed):
+                return None
+            weights = composed
+            continue
+        if isinstance(layer, GenericVectorLayer):
+            if layer.opaque_programs or any(
+                operation != IDENTITY_OP for operation, *_refs in layer.ops
+            ):
+                return None
+            mapping = BilinearWeights.from_trusted_dok(
+                layer.memory_in,
+                (layer.memory_out.count,),
+                linear=dok_ndarray(
+                    (layer.memory_out.count, layer.memory_in.count),
+                    {
+                        (row, first): 1
+                        for row, (_op, first, _second, _third) in enumerate(
+                            layer.ops
+                        )
+                    },
+                ),
+            )
+            composed = []
+            for weight in weights:
+                if weight is None:
+                    composed.append(None)
+                    continue
+                try:
+                    composed.append(compose_bilinear_weights(weight, mapping))
+                except AssertionError:
+                    return None
+            if any(weight is None for weight in composed):
+                return None
+            weights = composed
+            continue
+        # Function evaluation is an opaque computation from provenance's
+        # perspective, even when its output happens to be numeric.
+        return None
+    return weights
+
+
 def _create_opgraph(
     function: Function,
     function_table_builder: _FunctionTableBuilder,
@@ -276,6 +367,21 @@ def _create_opgraph(
 ):
     tape = function.tape
     numpy_backend = get_backend_by_name("numpy", set_current=False)
+    remaining_uses: Dict[int, int] = {}
+    for node_index in range(len(tape)):
+        if node_index in tape.input_indicies:
+            continue
+        _operation, *arguments = tape.nodes[node_index]
+        for argument in arguments:
+            if isinstance(argument, Tracer):
+                remaining_uses[argument.index] = (
+                    remaining_uses.get(argument.index, 0) + 1
+                )
+    for output in function.output:
+        if output is not None:
+            remaining_uses[output.index] = (
+                remaining_uses.get(output.index, 0) + 1
+            )
 
     input_layer = InputLayer()
     node_values = {}
@@ -320,8 +426,15 @@ def _create_opgraph(
             return
 
         previous_memory = current_memory
+        retained = []
+        next_location = 0
+        for node_index, previous_spec in node_specs.items():
+            shape = _node_shape(tape.dim[node_index])
+            next_spec = MemorySpec(next_location, previous_spec.count)
+            retained.append((node_index, previous_spec, shape, next_spec))
+            next_location += next_spec.count
+
         additions = []
-        next_location = current_size
         for node_index in pending_bilinear_nodes:
             bilinear_value = node_values[node_index]
             shape = _node_shape(tape.dim[node_index])
@@ -335,15 +448,22 @@ def _create_opgraph(
         quadratic = dok_ndarray(
             (next_location, previous_memory.count, previous_memory.count)
         )
-        for row in range(current_size):
-            linear[(row, row)] = 1
-        for _node_index, bilinear_value, _shape, spec in additions:
+        for _node_index, previous_spec, _shape, next_spec in retained:
+            for offset in range(previous_spec.count):
+                linear[
+                    (
+                        next_spec.location + offset,
+                        previous_spec.location + offset,
+                    )
+                ] = 1
+        for _node_index, bilinear_value, output_shape, spec in additions:
             _append_bilinear_value(
                 constant,
                 linear,
                 quadratic,
                 spec.location,
                 bilinear_value,
+                output_shape,
             )
 
         weights = BilinearWeights(
@@ -359,7 +479,12 @@ def _create_opgraph(
 
         current_memory = new_memory
         current_size = next_location
-        extend_node_values(new_memory)
+        node_specs.clear()
+        for node_index, _previous_spec, shape, spec in retained:
+            node_specs[node_index] = spec
+            node_values[node_index] = BilinearWeights.project(
+                new_memory, spec, shape
+            )
         for node_index, _bilinear_value, shape, spec in additions:
             node_specs[node_index] = spec
             node_values[node_index] = BilinearWeights.project(
@@ -543,14 +668,38 @@ def _create_opgraph(
             )
             current_memory = constant_memory
             current_size = constant_memory.count
-            extend_node_values(constant_memory)
 
-        output_spec = MemorySpec(current_size, output_count)
-        next_memory = MemorySpec(0, current_size + output_count)
-        layer_operations = [
-            (IDENTITY_OP, row, UNUSED_REF, UNUSED_REF)
-            for row in range(current_size)
-        ]
+        argument_counts: Dict[int, int] = {}
+        for argument in arguments:
+            argument_counts[argument.index] = (
+                argument_counts.get(argument.index, 0) + 1
+            )
+        retained = []
+        next_location = 0
+        for retained_index, previous_spec in node_specs.items():
+            uses_after = remaining_uses.get(retained_index, 0) - (
+                argument_counts.get(retained_index, 0)
+            )
+            if uses_after <= 0:
+                continue
+            shape = _node_shape(tape.dim[retained_index])
+            next_spec = MemorySpec(next_location, previous_spec.count)
+            retained.append((retained_index, previous_spec, shape, next_spec))
+            next_location += next_spec.count
+
+        output_spec = MemorySpec(next_location, output_count)
+        next_memory = MemorySpec(0, next_location + output_count)
+        layer_operations = []
+        for _retained_index, previous_spec, _shape, next_spec in retained:
+            layer_operations.extend(
+                (
+                    IDENTITY_OP,
+                    previous_spec.location + offset,
+                    UNUSED_REF,
+                    UNUSED_REF,
+                )
+                for offset in range(next_spec.count)
+            )
         layer_operations.extend(appended_operations)
 
         opaque_programs: List[OpaqueProgram] = []
@@ -586,87 +735,119 @@ def _create_opgraph(
         layers.append(layer)
         current_memory = next_memory
         current_size = next_memory.count
-        extend_node_values(next_memory)
+        node_specs.clear()
+        for retained_index, _previous_spec, shape, spec in retained:
+            node_specs[retained_index] = spec
+            node_values[retained_index] = BilinearWeights.project(
+                next_memory, spec, shape
+            )
         node_specs[node_index] = output_spec
         node_values[node_index] = BilinearWeights.project(
             next_memory, output_spec, output_shape
         )
+
+    def release_arguments(arguments):
+        for argument in arguments:
+            if not isinstance(argument, Tracer):
+                continue
+            remaining_uses[argument.index] -= 1
+            if remaining_uses[argument.index] != 0:
+                continue
+            node_values.pop(argument.index, None)
+            node_specs.pop(argument.index, None)
+            if argument.index in pending_bilinear_nodes:
+                pending_bilinear_nodes.remove(argument.index)
 
     for node_index in range(len(tape)):
         if node_index in tape.input_indicies:
             continue
 
         operation, *arguments = tape.nodes[node_index]
-        if operation == OP.VALUE:
-            (constant_value,) = arguments
-            node_values[node_index] = _as_numpy_value(constant_value)
-            continue
+        try:
+            if operation == OP.VALUE:
+                (constant_value,) = arguments
+                node_values[node_index] = _as_numpy_value(constant_value)
+                continue
 
-        operands = [node_values[argument.index] for argument in arguments]
-        if all(
-            not isinstance(operand, BilinearWeights) for operand in operands
-        ):
-            node_values[node_index] = numpy_backend.call(operation, *operands)
-            continue
-
-        if operation == OP.EVALUATE and isinstance(
-            node_values[arguments[0].index], Function
-        ):
-            lower_function_evaluation(node_index, arguments)
-            continue
-
-        if operation in ops:
-            memories = {
-                id(operand.memory)
+            operands = [node_values[argument.index] for argument in arguments]
+            if all(
+                not isinstance(operand, BilinearWeights)
                 for operand in operands
-                if isinstance(operand, BilinearWeights)
-            }
-            if len(memories) <= 1:
-                try:
-                    result = ops[operation](*operands)
-                    if isinstance(result, BilinearWeights):
-                        queue_bilinear(node_index, result)
-                        continue
-                except (AssertionError, TypeError, NotImplementedError):
-                    pass
+            ):
+                node_values[node_index] = numpy_backend.call(
+                    operation, *operands
+                )
+                continue
 
-        if isinstance(operation, ConcatenateOP):
-            bilinear_memory = next(
-                (
-                    operand.memory
+            if operation == OP.EVALUATE and isinstance(
+                node_values[arguments[0].index], Function
+            ):
+                lower_function_evaluation(node_index, arguments)
+                continue
+            if operation == OP.MATMUL:
+                flush_bilinear()
+                operands = [
+                    node_values[argument.index] for argument in arguments
+                ]
+
+            if operation in ops:
+                memories = {
+                    id(operand.memory)
                     for operand in operands
                     if isinstance(operand, BilinearWeights)
-                ),
-                None,
-            )
-            if bilinear_memory is not None:
-                try:
+                }
+                if len(memories) <= 1:
+                    try:
+                        result = ops[operation](*operands)
+                        if isinstance(result, BilinearWeights):
+                            queue_bilinear(node_index, result)
+                            continue
+                    except (
+                        AssertionError,
+                        TypeError,
+                        NotImplementedError,
+                    ):
+                        pass
+
+            if isinstance(operation, ConcatenateOP):
+                bilinear_memory = next(
+                    (
+                        operand.memory
+                        for operand in operands
+                        if isinstance(operand, BilinearWeights)
+                    ),
+                    None,
+                )
+                if bilinear_memory is not None:
+                    try:
+                        queue_bilinear(
+                            node_index,
+                            _concatenate_bilinear_operands(
+                                bilinear_memory,
+                                operands,
+                                axis=operation.axis,
+                            ),
+                        )
+                        continue
+                    except (AssertionError, TypeError, ValueError):
+                        pass
+
+            if isinstance(operation, ReshapeOP):
+                (argument_value,) = operands
+                if isinstance(argument_value, BilinearWeights):
                     queue_bilinear(
                         node_index,
-                        _concatenate_bilinear_operands(
-                            bilinear_memory, operands, axis=operation.axis
+                        argument_value.reshape(
+                            operation.newshape,
+                            order=operation.order,
                         ),
                     )
                     continue
-                except (AssertionError, TypeError, ValueError):
-                    pass
 
-        if isinstance(operation, ReshapeOP):
-            (argument_value,) = operands
-            if isinstance(argument_value, BilinearWeights):
-                queue_bilinear(
-                    node_index,
-                    argument_value.reshape(
-                        operation.newshape, order=operation.order
-                    ),
-                )
-                continue
-            node_values[node_index] = np.reshape(
-                argument_value, operation.newshape, order=operation.order
-            )
-            continue
+            lower_generic(node_index, operation, arguments)
 
-        lower_generic(node_index, operation, arguments)
+        finally:
+            release_arguments(arguments)
 
     for output in function.output:
         if output is None:
@@ -687,13 +868,34 @@ def _create_opgraph(
     flush_bilinear()
 
     output_layer = OutputLayer()
+    output_weights = []
     for output in function.output:
         output_layer.add_output(node_specs[output.index], output.dim)
+        output_weights.append(node_values.get(output.index))
 
-    return SparseNet(
-        current_memory,
+    workspace_count = max(
+        [
+            input_layer.dimension,
+            current_memory.count,
+            *(
+                max(layer.memory_in.count, layer.memory_out.count)
+                for layer in layers
+            ),
+        ]
+    )
+
+    graph = SparseNet(
+        MemorySpec(0, workspace_count),
         input_layer,
         output_layer,
         layers,
         function_id=function_id,
     )
+    # Kept as compile-time metadata for QP coefficient extraction.  Runtime
+    # graphs do not inspect this attribute.
+    graph.output_weights = output_weights
+    raw_weights = _raw_output_weights(graph, output_weights)
+    graph.output_weights_are_raw = raw_weights is not None
+    if raw_weights is not None:
+        graph.output_weights = raw_weights
+    return graph

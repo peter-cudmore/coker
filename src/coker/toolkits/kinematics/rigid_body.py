@@ -543,3 +543,33 @@ class RigidBody:
         ]
 
         return links, effectors
+
+    def to_function(self):
+        """Return this body's end-effector kinematics as a traceable callable.
+
+        The callable accepts the body's complete joint-coordinate vector and
+        returns flattened end-effector positions plus concatenated Cartesian
+        Jacobians.  It uses the same forward-kinematics and spatial-Jacobian
+        calculations as numerical users, so it can be passed directly to
+        :func:`coker.function` when a backend-specific
+        :class:`coker.Function` is required.
+        """
+
+        def kinematics(angles):
+            transforms = self.forward_kinematics(angles)
+            positions = np.concatenate(
+                [transform.translation for transform in transforms]
+            )
+            jacobians = np.concatenate(
+                [
+                    spatial[3:, :]
+                    - hat(transform.translation) @ spatial[:3, :]
+                    for transform, spatial in zip(
+                        transforms, self.spatial_manipulator_jacobian(angles)
+                    )
+                ],
+                axis=0,
+            )
+            return positions, jacobians
+
+        return kinematics

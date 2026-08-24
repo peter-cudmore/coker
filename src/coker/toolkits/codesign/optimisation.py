@@ -1,9 +1,41 @@
+"""Shared optimisation constraints and solver result types."""
+
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
+class BoundedConstraint:
+    """A residual constrained by explicit lower and upper bounds.
+
+    Bounds may be constants or symbolic parameters on the residual's tape.
+    """
+
+    residual: Any
+    lower_bound: Any
+    upper_bound: Any
+
+    @property
+    def tape(self):
+        """Return the tape owning the residual and symbolic bounds."""
+        return self.residual.tape
+
+    def as_halfplane_bound(self):
+        """Return the residual and its lower and upper bounds."""
+        return self.residual, self.lower_bound, self.upper_bound
+
+
+def bounded(
+    residual: Any, lower_bound: Any, upper_bound: Any
+) -> BoundedConstraint:
+    """Constrain a residual within explicit lower and upper bounds."""
+    return BoundedConstraint(residual, lower_bound, upper_bound)
+
+
+@dataclass(frozen=True)
 class SolveInfo:
+    """Normalised outcome reported by an optimisation backend."""
+
     backend: str
     solver: str
     success: bool
@@ -13,6 +45,8 @@ class SolveInfo:
 
 
 class SolveFailure(RuntimeError):
+    """An optimisation solve error carrying its normalised result metadata."""
+
     def __init__(self, message: str, solve_info: SolveInfo):
         super().__init__(message)
         self.solve_info = solve_info
@@ -21,6 +55,7 @@ class SolveFailure(RuntimeError):
 def solve_info_from_casadi_stats(
     stats: Mapping[str, Any], *, solver: str = "ipopt"
 ) -> SolveInfo:
+    """Normalise a CasADi solver statistics mapping."""
     iteration_count = stats.get("iter_count")
     if iteration_count is not None:
         iteration_count = int(iteration_count)
@@ -42,6 +77,7 @@ def solve_info_from_casadi_stats(
 def solve_info_from_scipy_result(
     result, *, solver: str = "trust-constr"
 ) -> SolveInfo:
+    """Normalise a SciPy optimiser result object."""
     iteration_count = getattr(result, "nit", None)
     if iteration_count is not None:
         iteration_count = int(iteration_count)
@@ -56,3 +92,13 @@ def solve_info_from_scipy_result(
         unified_return_status=unified_status,
         iteration_count=iteration_count,
     )
+
+
+__all__ = [
+    "BoundedConstraint",
+    "SolveFailure",
+    "SolveInfo",
+    "bounded",
+    "solve_info_from_casadi_stats",
+    "solve_info_from_scipy_result",
+]
