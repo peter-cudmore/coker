@@ -177,8 +177,13 @@ def to_casadi(value):
 def extract_symbols(arg: ca.MX):
     if isinstance(arg, (ca.Function, coker.Function)):
         return set()
-    v = {arg.dep(i) for i in range(arg.n_dep()) if arg.dep(i).is_symbolic()}
-    return v
+    if arg.is_symbolic():
+        return {arg}
+    return {
+        arg.dep(index)
+        for index in range(arg.n_dep())
+        if arg.dep(index).is_symbolic()
+    }
 
 
 def substitute(output: List[Tracer], workspace):
