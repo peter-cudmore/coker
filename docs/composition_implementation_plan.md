@@ -23,6 +23,19 @@
 - [x] Reuse the existing mapped QP runtime per module call; do not rebuild a QP or solver per invocation.
 - [x] Test host composition and prebuilt solver reuse; commit the completed phase.
 
+## Embedded Coker module execution
+
+- [ ] Add a `QpCall` bytecode layer that references a QP executable and binds
+  its parameter slices and primal output slice.
+- [ ] Require the embedding application to provide one prepared QP context per
+  call layer: solver arena, evaluator workspace, coefficient buffer, flat
+  parameter buffer, and primal solution buffer.
+- [ ] Execute `QpCall` layers through those caller-owned contexts, copying the
+  primal solution into the parent program workspace only after coefficient
+  evaluation and solving complete.
+- [ ] Reject mismatched QP ids, input widths, output widths, missing contexts,
+  and duplicate call-context bindings before execution.
+
 ## Cleanup
 
 - [x] Update public documentation for objective-first program results and composition semantics.
