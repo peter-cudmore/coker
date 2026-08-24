@@ -13,7 +13,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
 const MAGIC: [u8; 8] = *b"COKERB03";
-const VERSION: u16 = 3;
+const VERSION: u16 = 4;
 const HEADER_SIZE: usize = 16;
 const QP_MAGIC: [u8; 8] = *b"COKERQ03";
 const EMBEDDED_QP_PLAN_MAGIC: [u8; 8] = *b"COKERP03";
@@ -773,6 +773,7 @@ pub struct EvaluateLayer {
     pub input_bindings: Vec<EvaluateInputBinding>,
     pub output_bindings: Vec<EvaluateOutputBinding>,
 }
+
 
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub enum EvaluateInputBinding {
