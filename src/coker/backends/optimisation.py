@@ -180,7 +180,9 @@ def decision_degree(
             )
             continue
         if op == OP.VALUE:
-            degree = decision_degree(arguments[0], tape, decision_indices, memo)
+            degree = decision_degree(
+                arguments[0], tape, decision_indices, memo
+            )
         elif op.is_linear():
             degree = max(
                 (memo[dependency.index] for dependency in dependencies),

@@ -1,7 +1,7 @@
 """Host orchestration for Coker optimisation modules.
 
-The wrapped solver owns host-side setup state only.  Its compiled QP runtime keeps
-coefficient, solver, and warm-start buffers inside the existing runtime object.
+The wrapped solver owns host-side setup state only. Its compiled QP runtime
+keeps coefficient, solver, and warm-start buffers in the runtime object.
 """
 
 from __future__ import annotations
@@ -24,7 +24,9 @@ class CokerModule:
         try:
             return self._solver(*args)
         finally:
-            self.last_solve_info = getattr(self._solver, "last_solve_info", None)
+            self.last_solve_info = getattr(
+                self._solver, "last_solve_info", None
+            )
 
     def export_payload(self) -> dict[str, object]:
         """Return the wrapped solver's deterministic Coker payload."""

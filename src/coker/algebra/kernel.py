@@ -17,8 +17,6 @@ from coker.algebra.ops import (
     Noop,
     Operator,
     ReshapeOP,
-    ModuleCallOP,
-    ModuleOutputOP,
 )
 from coker.algebra.tensor import SymbolicVector
 
@@ -999,6 +997,7 @@ def _normalise_result(result, tape: Tape):
         if isinstance(v, SymbolicVector):
             v = v.collapse()
         return v if isinstance(v, Tracer) else tape.insert_value(v)
+
     if isinstance(result, (list, tuple)):
         result = [wrap(r) for r in result]
     else:

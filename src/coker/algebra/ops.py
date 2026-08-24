@@ -81,9 +81,8 @@ class Operator:
         return not self.is_linear() and not self.is_bilinear()
 
 
-
 class ModuleCallOP(Operator):
-    """Invoke a statically known numerical module at concrete evaluation time."""
+    """Invoke a statically known module during concrete evaluation."""
 
     def __init__(self, module):
         self.module = module
@@ -94,7 +93,9 @@ class ModuleCallOP(Operator):
             raise InvalidShape(
                 f"Module expects input shapes {expected}, got {dims}"
             )
-        return Dimension((sum(dim.flat() for dim in self.module.result_shape),))
+        return Dimension(
+            (sum(dim.flat() for dim in self.module.result_shape),)
+        )
 
     def is_linear(self):
         return False
@@ -112,6 +113,8 @@ class ModuleOutputOP(Operator):
 
     def is_linear(self):
         return False
+
+
 class ConcatenateOP(Operator):
     __slots__ = ("axis",)
 

@@ -11,7 +11,6 @@ from coker.algebra.kernel import Tracer
 from coker.algebra.tensor import SymbolicVector
 
 
-
 @dataclass(frozen=True)
 class SparseMatrixPattern:
     """Immutable CSC structure and symbolic source data for a sparse matrix.
@@ -63,7 +62,9 @@ class SparseMatrixBuilder:
         flat_indices = [
             row * self.shape[1] + column
             for column in range(self.shape[1])
-            for row in self.indices[self.indptr[column] : self.indptr[column + 1]]
+            for row in self.indices[
+                self.indptr[column] : self.indptr[column + 1]
+            ]
         ]
         self._flat_indices = np.asarray(flat_indices, dtype=np.intp)
 
