@@ -5,8 +5,9 @@ import scipy.sparse
 
 from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Function, Tracer
-from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP
+from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP, ModuleCallOP
 from coker.backends.backend import ArrayLike, Backend, get_backend_by_name
+from coker.backends.coker.module import CokerModule
 from coker.backends.coker.optimisation import (
     build_optimisation_problem as build_qp_optimisation_problem,
 )
@@ -108,6 +109,10 @@ class CokerBackend(Backend):
 
     def lower(self, function: Function):
         if any(
+            isinstance(function.tape.nodes[index][0], ModuleCallOP)
+            for index in range(len(function.tape.nodes))
+            if index not in function.tape.input_indicies
+        ) or any(
             isinstance(function.tape.dim[input_index], FunctionSpace)
             for input_index in function.tape.input_indicies
         ) or any(output is None for output in function.output):
@@ -133,6 +138,11 @@ class CokerBackend(Backend):
             initial_conditions,
         )
 
+
+
+    def make_optimisation_module(self, implementation):
+        """Wrap a prebuilt QP solver for numerical module composition."""
+        return CokerModule(implementation)
 
 def _node_shape(dimension):
     return dimension.shape if hasattr(dimension, "shape") else None
