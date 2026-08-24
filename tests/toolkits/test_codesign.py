@@ -142,3 +142,34 @@ def test_optimisation_supports_nonlinear_constraints(variational_backend):
     assert np.allclose(x_val, np.array([0.5, 0.0]), atol=5e-4)
     assert problem.solve_info is not None
     assert problem.solve_info.success
+
+
+def test_mathematical_program_composes_as_numerical_module():
+    with ProblemBuilder(arguments=[VectorSpace("target", 1)]) as builder:
+        (target,) = builder.arguments
+        x = builder.new_variable(
+            name="x", shape=(1,), initial_value=np.zeros(1)
+        )
+        builder.objective = Minimise(np.dot(x - target, x - target))
+        builder.outputs = [x]
+        program = builder.build("numpy")
+
+    from coker import function
+
+    pre_solve = function(
+        [VectorSpace("r", 1)],
+        lambda r: program(r + np.ones(1)),
+        backend="numpy",
+    )
+    post_solve = function(
+        [VectorSpace("p", 1)],
+        lambda p: 2.0 * program(p)[1],
+        backend="numpy",
+    )
+
+    objective, solution = pre_solve(np.array([2.0]))
+    doubled_solution = post_solve(np.array([3.0]))
+
+    assert objective == pytest.approx(0.0, abs=1e-6)
+    assert np.allclose(solution, np.array([3.0]), atol=1e-6)
+    assert np.allclose(doubled_solution, np.array([6.0]), atol=1e-6)

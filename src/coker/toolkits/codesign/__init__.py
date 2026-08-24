@@ -6,6 +6,7 @@ import numpy as np
 
 from coker.algebra.dimensions import Dimension
 from coker.algebra.kernel import Tape, Tracer, VectorSpace, Scalar
+from coker.algebra.ops import ModuleCallOP, ModuleOutputOP
 from .optimisation import BoundedConstraint, SolveFailure, SolveInfo, bounded
 
 
@@ -43,7 +44,28 @@ class MathematicalProgram:
         return (Dimension(None), *self.output_shape)
 
     def __call__(self, *args):
-        """Solve the program and return ``(objective, *declared_outputs)``."""
+        """Solve the program or record a static call in an enclosing trace."""
+        traced_arguments = [arg for arg in args if isinstance(arg, Tracer)]
+        if traced_arguments:
+            if len(traced_arguments) != len(args):
+                raise TypeError(
+                    "MathematicalProgram calls cannot mix traced and "
+                    "concrete arguments"
+                )
+            tape = traced_arguments[0].tape
+            if any(argument.tape is not tape for argument in traced_arguments):
+                raise ValueError(
+                    "MathematicalProgram arguments must belong to one tape"
+                )
+            call_index = tape.append(ModuleCallOP(self), *args)
+            call = Tracer(tape, call_index)
+            return tuple(
+                Tracer(
+                    tape,
+                    tape.append(ModuleOutputOP(index, dimension), call),
+                )
+                for index, dimension in enumerate(self.result_shape)
+            )
         if len(args) != len(self.input_shape):
             raise ValueError(
                 f"Expected {len(self.input_shape)} runtime arguments, "
