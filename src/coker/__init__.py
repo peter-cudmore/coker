@@ -11,7 +11,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.factories import zeros
-from coker.algebra.sparse import SparseMatrixBuilder
+from coker.algebra.sparse import SparseMatrixBuilder, SparseMatrixPattern
 
 
 __all__ = [
@@ -25,4 +25,5 @@ __all__ = [
     "SymbolicVector",
     "zeros",
     "SparseMatrixBuilder",
+    "SparseMatrixPattern",
 ]

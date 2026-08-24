@@ -992,12 +992,13 @@ def _normalise_result(result, tape: Tape):
         result = result.collapse()
 
     def wrap(v):
+        if isinstance(v, (list, tuple)):
+            v = np.asarray(v, dtype=object)
         if isinstance(v, np.ndarray):
             v = strip_symbols_from_array(v)
         if isinstance(v, SymbolicVector):
             v = v.collapse()
         return v if isinstance(v, Tracer) else tape.insert_value(v)
-
     if isinstance(result, (list, tuple)):
         result = [wrap(r) for r in result]
     else:
