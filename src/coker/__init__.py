@@ -11,6 +11,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.tensor import SymbolicVector
 from coker.algebra.factories import zeros
+from coker.algebra.sparse import SparseMatrixBuilder
 
 from coker.artifacts import (
     ArtifactMetadata,
@@ -35,6 +36,7 @@ __all__ = [
     "ArtifactMetadata",
     "CompiledArtifact",
     "compile_qp",
+    "SparseMatrixBuilder",
     "compile_artifact",
     "compile_function",
     "compile_qp_artifact",
