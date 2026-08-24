@@ -151,3 +151,32 @@ def test_outer_product():
     ba = b @ a_dok
     ba_array = ba.toarray()
     assert np.allclose(ba_array, actual)
+
+
+def test_sparse_contractions_match_dense_tensor_contractions():
+    lhs = dok_ndarray(
+        (2, 3, 2),
+        {(0, 0, 1): 2.0, (1, 2, 0): -3.0, (1, 1, 1): 4.0},
+    )
+    dense_rhs = np.array([[0.0, 5.0], [7.0, 0.0]])
+    sparse_rhs = dok_ndarray.fromarray(dense_rhs)
+
+    dense_result = lhs @ dense_rhs
+    sparse_result = lhs @ sparse_rhs
+    expected = np.tensordot(lhs.toarray(), dense_rhs, axes=([2], [0]))
+
+    assert np.allclose(dense_result.toarray(), expected)
+    assert np.allclose(sparse_result.toarray(), expected)
+
+
+def test_from_scipy_preserves_only_sparse_entries():
+    import scipy.sparse
+
+    matrix = scipy.sparse.coo_array(
+        ([2.0, -3.0, 5.0], ([0, 1, 1], [2, 0, 0])), shape=(2, 3)
+    )
+
+    result = dok_ndarray.from_scipy(matrix)
+
+    assert result.shape == (2, 3)
+    assert result.keys == {(0, 2): 2.0, (1, 0): 2.0}

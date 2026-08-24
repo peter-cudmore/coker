@@ -28,26 +28,75 @@ def cross(x, y):
         x.is_linear and y.is_linear
     ), "cross product of quadratic weights not supported"
 
-    c_x = x.constant.toarray()  # shape (3,)
-    c_y = y.constant.toarray()  # shape (3,)
-    L_x = x.linear.toarray()  # shape (3, n)
-    L_y = y.linear.toarray()  # shape (3, n)
+    epsilon = (
+        ((0, 0, 0), (0, 0, 1), (0, -1, 0)),
+        ((0, 0, -1), (0, 0, 0), (1, 0, 0)),
+        ((0, 1, 0), (-1, 0, 0), (0, 0, 0)),
+    )
 
-    c_result = np.cross(c_x, c_y)  # shape (3,)
-    # linear contribution: cross(L_x @ m, c_y) + cross(c_x, L_y @ m)
-    #   = -hat(c_y) @ L_x @ m + hat(c_x) @ L_y @ m
-    L_result = (
-        -hat(c_y).toarray() @ L_x + hat(c_x).toarray() @ L_y
-    )  # shape (3, n)
-    # quadratic contribution: cross(L_x @ m, L_y @ m)
-    Q_result = np.einsum("ijk,js,kt->ist", _CROSS_EPSILON, L_x, L_y)
+    def accumulate(data, key, value):
+        result = data.get(key, 0.0) + value
+        if result:
+            data[key] = result
+        else:
+            data.pop(key, None)
+
+    constant = {}
+    for (left_axis,), left_value in x.constant.keys.items():
+        for (right_axis,), right_value in y.constant.keys.items():
+            for output_axis, epsilon_value in enumerate(
+                epsilon[left_axis][right_axis]
+            ):
+                if epsilon_value:
+                    accumulate(
+                        constant,
+                        (output_axis,),
+                        epsilon_value * left_value * right_value,
+                    )
+
+    linear = {}
+    for (left_axis, memory_index), left_value in x.linear.keys.items():
+        for (right_axis,), right_value in y.constant.keys.items():
+            for output_axis, epsilon_value in enumerate(
+                epsilon[left_axis][right_axis]
+            ):
+                if epsilon_value:
+                    accumulate(
+                        linear,
+                        (output_axis, memory_index),
+                        epsilon_value * left_value * right_value,
+                    )
+    for (left_axis,), left_value in x.constant.keys.items():
+        for (right_axis, memory_index), right_value in y.linear.keys.items():
+            for output_axis, epsilon_value in enumerate(
+                epsilon[left_axis][right_axis]
+            ):
+                if epsilon_value:
+                    accumulate(
+                        linear,
+                        (output_axis, memory_index),
+                        epsilon_value * left_value * right_value,
+                    )
+
+    quadratic = {}
+    for (left_axis, left_memory), left_value in x.linear.keys.items():
+        for (right_axis, right_memory), right_value in y.linear.keys.items():
+            for output_axis, epsilon_value in enumerate(
+                epsilon[left_axis][right_axis]
+            ):
+                if epsilon_value:
+                    accumulate(
+                        quadratic,
+                        (output_axis, left_memory, right_memory),
+                        epsilon_value * left_value * right_value,
+                    )
 
     return BilinearWeights.from_trusted_dok(
         x.memory,
         (3,),
-        constant=dok_ndarray.fromarray(c_result),
-        linear=dok_ndarray.fromarray(L_result),
-        quadratic=dok_ndarray.fromarray(Q_result),
+        constant=dok_ndarray((3,), constant),
+        linear=dok_ndarray((3, x.memory.count), linear),
+        quadratic=dok_ndarray((3, x.memory.count, x.memory.count), quadratic),
     )
 
 

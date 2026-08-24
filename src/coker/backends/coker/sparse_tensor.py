@@ -165,6 +165,25 @@ class dok_ndarray(np.lib.mixins.NDArrayOperatorsMixin):
         return dok_ndarray(shape, keys)
 
     @staticmethod
+    def from_scipy(other) -> "dok_ndarray":
+        """Convert a two-dimensional SciPy sparse matrix without densifying."""
+        compressed = other.tocoo(copy=True)
+        compressed.sum_duplicates()
+        return dok_ndarray(
+            tuple(int(size) for size in compressed.shape),
+            {
+                (int(row), int(column)): float(value)
+                for row, column, value in zip(
+                    compressed.row,
+                    compressed.col,
+                    compressed.data,
+                    strict=True,
+                )
+                if value != 0
+            },
+        )
+
+    @staticmethod
     def from_maybe(
         arg: Optional[Union[np.ndarray, "dok_ndarray"]],
         expected_shape: Optional[Tuple[int, ...]] = None,
@@ -452,39 +471,41 @@ def tensor_vector_product(tensor: dok_ndarray, vector: np.ndarray, axis=1):
 def tensor_ndarray_product(
     tensor: dok_ndarray, array: np.ndarray, l_axis=-1, r_axis=0
 ):
-
     assert isinstance(array, np.ndarray) and isinstance(tensor, dok_ndarray)
     assert abs(l_axis) < len(tensor.shape)
     assert abs(r_axis) < len(array.shape)
     assert array.shape[r_axis] == tensor.shape[l_axis]
 
-    if l_axis == -1:
-        l_axis = len(tensor.shape) - 1
-
-    if r_axis == -1:
-        r_axis = len(array.shape) - 1
+    if l_axis < 0:
+        l_axis += len(tensor.shape)
+    if r_axis < 0:
+        r_axis += len(array.shape)
 
     l_shape = tuple(s for i, s in enumerate(tensor.shape) if i != l_axis)
     r_shape = tuple(s for i, s in enumerate(array.shape) if i != r_axis)
-    shape = tuple((*l_shape, *r_shape))
-    data = {}
-    with np.nditer(array, flags=["multi_index"], op_flags=["readonly"]) as it:
-        for x in it:
-            x_idx_front = it.multi_index[0:r_axis]
-            x_idx_tail = it.multi_index[r_axis + 1 :]
-            keys = (
-                k for k in tensor.keys if k[l_axis] == it.multi_index[r_axis]
+    shape = (*l_shape, *r_shape)
+    array_by_contracted_index = {}
+    for array_index in zip(*np.nonzero(array), strict=True):
+        array_by_contracted_index.setdefault(array_index[r_axis], []).append(
+            (
+                (*array_index[:r_axis], *array_index[r_axis + 1 :]),
+                array[array_index],
             )
-            for k in keys:
-                k_l = k[0:l_axis]
-                k_r = k[l_axis + 1 :]
+        )
 
-                key = tuple((*k_l, *k_r, *x_idx_front, *x_idx_tail))
-                if key in data:
-                    data[key] += float(x) * tensor.keys[k]
-                else:
-                    data[key] = float(x) * tensor.keys[k]
-
+    data = {}
+    for tensor_index, tensor_value in tensor.keys.items():
+        contracted_index = tensor_index[l_axis]
+        tensor_key = (*tensor_index[:l_axis], *tensor_index[l_axis + 1 :])
+        for array_key, array_value in array_by_contracted_index.get(
+            contracted_index, ()
+        ):
+            key = (*tensor_key, *array_key)
+            result = data.get(key, 0.0) + tensor_value * array_value
+            if result:
+                data[key] = result
+            else:
+                data.pop(key, None)
     return dok_ndarray(shape, data)
 
 
@@ -495,22 +516,26 @@ def tensor_sum(lhs: dok_ndarray, rhs, l_index=0, r_index=0):
         *[s for i, s in enumerate(lhs.shape) if i != l_index],
         *[s for i, s in enumerate(rhs.shape) if i != r_index],
     )
+    rhs_by_contracted_index = {}
+    for rhs_key, rhs_value in rhs.keys.items():
+        rhs_by_contracted_index.setdefault(rhs_key[r_index], []).append(
+            (rhs_key, rhs_value)
+        )
 
     new_data = {}
-    for k_l, v_l in lhs.keys.items():
-        for k_r, v_r in rhs.keys.items():
-            if k_l[l_index] == k_r[r_index]:
-                new_key = (
-                    *k_l[0:l_index],
-                    *k_l[l_index + 1 :],
-                    *k_r[0:r_index],
-                    *k_r[r_index + 1 :],
-                )
-
-                v = v_l * v_r
-                if new_key in new_data:
-                    new_data[new_key] += v
-                else:
-                    new_data[new_key] = v
-
+    for lhs_key, lhs_value in lhs.keys.items():
+        for rhs_key, rhs_value in rhs_by_contracted_index.get(
+            lhs_key[l_index], ()
+        ):
+            new_key = (
+                *lhs_key[:l_index],
+                *lhs_key[l_index + 1 :],
+                *rhs_key[:r_index],
+                *rhs_key[r_index + 1 :],
+            )
+            result = new_data.get(new_key, 0.0) + lhs_value * rhs_value
+            if result:
+                new_data[new_key] = result
+            else:
+                new_data.pop(new_key, None)
     return dok_ndarray(new_shape, new_data)

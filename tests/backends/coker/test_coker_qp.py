@@ -77,10 +77,10 @@ def test_extracts_constant_qp_coefficients():
     embedded_plan = qp_payload["embedded_plan"]
     assert extracted.n == 2
     assert extracted.m == 2
-    assert extracted.p_indptr == [0, 1, 3]
-    assert extracted.p_indices == [0, 0, 1]
-    assert extracted.a_indptr == [0, 2, 4]
-    assert extracted.a_indices == [0, 1, 0, 1]
+    assert extracted.p_indptr == [0, 1, 2]
+    assert extracted.p_indices == [0, 1]
+    assert extracted.a_indptr == [0, 1, 2]
+    assert extracted.a_indices == [0, 1]
     assert extracted.coefficient_slices["q"].length == 2
     assert "program" not in payload
     assert qp_payload["function_id"] != qp_payload["coefficient_function_id"]
@@ -109,6 +109,33 @@ def test_extracts_constant_qp_coefficients():
     )
     assert embedded_plan["qdldl_plan"]["p_pattern"] == qp_payload["p_pattern"]
     assert embedded_plan["qdldl_plan"]["a_pattern"] == qp_payload["a_pattern"]
+    symbolic_l = embedded_plan["qdldl_plan"]["symbolic_l"]["l_pattern"]
+    assert symbolic_l == {
+        "nrows": 4,
+        "ncols": 4,
+        "indptr": [0, 1, 2, 2, 2],
+        "indices": [2, 3],
+    }
+
+
+def test_qp_preserves_structural_off_diagonal_hessian_entries():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
+        cost = (x[0] + x[1]) ** 2 + x[0] ** 2 + x[1] ** 2
+        bindings = _build_bindings(cost, [])
+
+    extracted = extract_qp_program(
+        cost,
+        [],
+        [x],
+        bindings.decision_indices,
+        bindings.decision_bindings,
+        bindings.parameter_bindings,
+    )
+
+    assert extracted.p_indptr == [0, 1, 3]
+    assert extracted.p_indices == [0, 0, 1]
+    RuntimeQpProgram.compile(extracted)
 
 
 def test_qp_validation_rejects_cubic_objective():
@@ -164,10 +191,10 @@ def test_extracts_parameterized_qp_coefficients():
     )
 
     assert extracted.m == 2
-    assert extracted.p_indptr == [0, 1, 3]
-    assert extracted.a_indptr == [0, 2, 4]
-    assert extracted.coefficient_slices["px"].length == 3
-    assert extracted.coefficient_slices["ax"].length == 4
+    assert extracted.p_indptr == [0, 1, 2]
+    assert extracted.a_indptr == [0, 1, 2]
+    assert extracted.coefficient_slices["px"].length == 2
+    assert extracted.coefficient_slices["ax"].length == 2
     _payload, coefficient_function, qp_payload = (
         _extract_single_qp_program_payload(extracted)
     )
@@ -369,7 +396,7 @@ def test_coker_qp_parameterized_box_coefficients_and_solution():
         coefficients[
             matrix_slice.start : matrix_slice.start + matrix_slice.length
         ],
-        [1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0],
+        [1.0, -1.0, 1.0, -1.0],
     )
     runtime_qp = RuntimeQpProgram.compile(
         extract_qp_program(
@@ -437,6 +464,28 @@ def test_coker_qp_rejects_dense_weighted_norm():
             [],
             [x],
             bindings.decision_indices,
+            bindings.decision_bindings,
+            bindings.parameter_bindings,
+        )
+
+
+def test_coker_qp_rejects_missing_bilinear_provenance(monkeypatch):
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
+        cost = np.dot(x, x)
+        bindings = _build_bindings(cost, [])
+
+    monkeypatch.setattr(
+        coker_qp_optimisation,
+        "_bilinear_coefficient_function",
+        lambda *_args: None,
+    )
+
+    with pytest.raises(ValueError, match="raw bilinear provenance"):
+        coker_qp_optimisation._build_coefficient_function(
+            cost.tape,
+            cost,
+            [],
             bindings.decision_bindings,
             bindings.parameter_bindings,
         )
