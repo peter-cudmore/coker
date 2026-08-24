@@ -115,6 +115,33 @@ pub fn bind_matrix(
     matrix.symmetry = symmetry;
 }
 
+/// C-facing CSC metadata used to verify full OSQP matrix updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddedCscCounts {
+    pub nzmax: raw::OSQPInt,
+    pub terminal_indptr: raw::OSQPInt,
+}
+
+/// C-facing P and A counts read from the live embedded OSQP solver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddedCscUpdateCounts {
+    pub p: EmbeddedCscCounts,
+    pub a: EmbeddedCscCounts,
+}
+
+impl EmbeddedCscUpdateCounts {
+    pub fn is_consistent(self, px_len: usize, ax_len: usize) -> bool {
+        self.p.nzmax >= 0
+            && self.a.nzmax >= 0
+            && self.p.terminal_indptr >= 0
+            && self.a.terminal_indptr >= 0
+            && self.p.nzmax == self.p.terminal_indptr
+            && self.a.nzmax == self.a.terminal_indptr
+            && usize::try_from(self.p.nzmax).ok() == Some(px_len)
+            && usize::try_from(self.a.nzmax).ok() == Some(ax_len)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct EmbeddedSolutionView<'a> {
     pub primal: &'a [raw::OSQPFloat],
@@ -123,6 +150,18 @@ pub struct EmbeddedSolutionView<'a> {
     pub iterations: raw::OSQPInt,
     pub primal_residual: raw::OSQPFloat,
     pub dual_residual: raw::OSQPFloat,
+}
+
+fn csc_counts(matrix: &raw::OSQPCscMatrix) -> Option<EmbeddedCscCounts> {
+    let n = usize::try_from(matrix.n).ok()?;
+    if matrix.nzmax < 0 || matrix.p.is_null() || matrix.i.is_null() || matrix.x.is_null() {
+        return None;
+    }
+    let terminal_indptr = unsafe { *matrix.p.add(n) };
+    Some(EmbeddedCscCounts {
+        nzmax: matrix.nzmax,
+        terminal_indptr,
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -208,32 +247,42 @@ impl EmbeddedSolver {
         ))
     }
 
+    /// Returns the live C-facing CSC metadata used by OSQP's full updates.
+    ///
     /// # Safety
     ///
-    /// `self` must wrap a valid live `OSQPSolver`. The provided slices must
-    /// match the bound `P` and `A` nonzero counts.
+    /// `self` must wrap a valid live `OSQPSolver` with initialized data and
+    /// matrix descriptors.
+    pub unsafe fn matrix_update_counts(&self) -> Option<EmbeddedCscUpdateCounts> {
+        let work = self.solver.as_ref().work.as_ref()?;
+        let data = work.data.as_ref()?;
+        Some(EmbeddedCscUpdateCounts {
+            p: csc_counts(data.P.as_ref()?.csc.as_ref()?)?,
+            a: csc_counts(data.A.as_ref()?.csc.as_ref()?)?,
+        })
+    }
+
+    /// # Safety
+    ///
+    /// `self` must wrap a valid live `OSQPSolver`. The supplied full matrices
+    /// must match the live CSC descriptors exactly.
     pub unsafe fn update_data_mat(
         &mut self,
         px: &[raw::OSQPFloat],
         ax: &[raw::OSQPFloat],
     ) -> Option<raw::OSQPInt> {
-        let work = self.solver.as_ref().work.as_ref()?;
-        let data = work.data.as_ref()?;
-        let p = data.P.as_ref()?.csc.as_ref()?;
-        let a = data.A.as_ref()?.csc.as_ref()?;
-        let p_nnz = usize::try_from(p.nzmax).ok()?;
-        let a_nnz = usize::try_from(a.nzmax).ok()?;
-        if px.len() != p_nnz || ax.len() != a_nnz {
+        let counts = self.matrix_update_counts()?;
+        if !counts.is_consistent(px.len(), ax.len()) {
             return None;
         }
         Some(raw::osqp_update_data_mat(
             self.as_ptr(),
             px.as_ptr(),
             core::ptr::null(),
-            p.nzmax,
+            counts.p.terminal_indptr,
             ax.as_ptr(),
             core::ptr::null(),
-            a.nzmax,
+            counts.a.terminal_indptr,
         ))
     }
 

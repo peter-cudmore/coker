@@ -1688,11 +1688,22 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
         Ok(_) => panic!("expected mapped QP update failure"),
         Err(error) => error,
     };
-    assert!(matches!(error, RuntimeError::EmbeddedQpAbi { .. }));
+    assert!(matches!(error, RuntimeError::EmbeddedQpCscUpdate { .. }));
 
     let diagnostics = bound
         .execute(
             &[&valid],
+            None,
+            MappedQpWorkspace::new(&mut evaluator_workspace, &mut oversized_coefficient_outputs),
+            &mut outputs,
+        )
+        .unwrap();
+    assert_eq!(diagnostics.status, QpSolveStatus::Solved);
+
+    let updated = [2.0f32, -2.0, 1.0, 0.0, 10.0, 0.0];
+    let diagnostics = bound
+        .execute(
+            &[&updated],
             None,
             MappedQpWorkspace::new(&mut evaluator_workspace, &mut oversized_coefficient_outputs),
             &mut outputs,

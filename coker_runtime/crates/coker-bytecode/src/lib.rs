@@ -13,11 +13,11 @@ use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
 const MAGIC: [u8; 8] = *b"COKERB03";
-const VERSION: u16 = 4;
+const VERSION: u16 = 5;
 const HEADER_SIZE: usize = 16;
 const QP_MAGIC: [u8; 8] = *b"COKERQ03";
 const EMBEDDED_QP_PLAN_MAGIC: [u8; 8] = *b"COKERP03";
-const EMBEDDED_QP_PLAN_VERSION: u16 = 1;
+const EMBEDDED_QP_PLAN_VERSION: u16 = 2;
 type ArchivedU32Vec = rkyv::vec::ArchivedVec<rkyv::rend::u32_le>;
 
 /// Half-open slice into the flattened QP coefficient output buffer.
@@ -69,13 +69,17 @@ pub enum EmbeddedLinsysSolver {
     Qdldl,
 }
 
-/// Pointer-free CSC sparsity pattern used by embedded solver plans.
+/// Pointer-free CSC sparsity pattern with OSQP-compatible signed indices.
+///
+/// `indptr` and `indices` use the embedded OSQP `i32` index representation.
+/// Mapped embedded runtimes may borrow their little-endian archive storage
+/// directly after checking target endianness and pointer alignment.
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub struct EmbeddedCscPattern {
     pub nrows: u32,
     pub ncols: u32,
-    pub indptr: Vec<u32>,
-    pub indices: Vec<u32>,
+    pub indptr: Vec<i32>,
+    pub indices: Vec<i32>,
 }
 
 /// Embedded OSQP settings captured in the archived QP plan.
@@ -263,8 +267,8 @@ impl QpProgramQdldlPlan {
 
 /// ABI version expected by mapped embedded runtimes.
 impl QpProgramPlan {
-    /// Embedded solver profile expected by mapped embedded runtimes.
-    pub const ABI_VERSION: u16 = 1;
+    /// Embedded solver profile and CSC index ABI expected by mapped runtimes.
+    pub const ABI_VERSION: u16 = 2;
     /// Plan encoding version expected by mapped embedded runtimes.
     pub const PROFILE: EmbeddedQpProfile = EmbeddedQpProfile::Osqp063Embedded2Qdldl;
     pub const VERSION: u16 = EMBEDDED_QP_PLAN_VERSION;

@@ -84,6 +84,29 @@ pub enum RuntimeError {
     EmbeddedQpWorkspaceInvalid,
     #[error("embedded QP evaluator produced non-finite coefficients or invalid bounds")]
     EmbeddedQpNumericInvalid,
+    #[error(
+        "embedded OSQP CSC descriptor mismatch: P nzmax {p_nzmax}, terminal {p_terminal}, submitted {p_submitted}; A nzmax {a_nzmax}, terminal {a_terminal}, submitted {a_submitted}"
+    )]
+    EmbeddedQpCscDescriptor {
+        p_nzmax: i32,
+        p_terminal: i32,
+        p_submitted: usize,
+        a_nzmax: i32,
+        a_terminal: i32,
+        a_submitted: usize,
+    },
+    #[error(
+        "embedded OSQP update_data_mat failed with status {status}: P nzmax {p_nzmax}, terminal {p_terminal}, submitted {p_submitted}; A nzmax {a_nzmax}, terminal {a_terminal}, submitted {a_submitted}"
+    )]
+    EmbeddedQpCscUpdate {
+        status: i32,
+        p_nzmax: i32,
+        p_terminal: i32,
+        p_submitted: usize,
+        a_nzmax: i32,
+        a_terminal: i32,
+        a_submitted: usize,
+    },
     #[error("embedded OSQP ABI {operation} failed with status {status}")]
     EmbeddedQpAbi {
         operation: &'static str,

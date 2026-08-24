@@ -897,9 +897,24 @@ fn lower_embedded_csc_pattern(
     Ok(EmbeddedCscPattern {
         nrows: checked_embedded_qp_u32(pattern.nrows, nrows_field)?,
         ncols: checked_embedded_qp_u32(pattern.ncols, ncols_field)?,
-        indptr: lower_embedded_u32_vec(pattern.indptr, indptr_field)?,
-        indices: lower_embedded_u32_vec(pattern.indices, indices_field)?,
+        indptr: lower_embedded_osqp_index_vec(pattern.indptr, indptr_field)?,
+        indices: lower_embedded_osqp_index_vec(pattern.indices, indices_field)?,
     })
+}
+
+fn lower_embedded_osqp_index_vec(
+    values: Vec<u64>,
+    field: &'static str,
+) -> Result<Vec<i32>, CompileError> {
+    values
+        .into_iter()
+        .map(|value| {
+            i32::try_from(value).map_err(|_| CompileError::InvalidField {
+                field,
+                reason: "value exceeds embedded OSQP i32 index range",
+            })
+        })
+        .collect()
 }
 
 fn lower_embedded_u32_vec(values: Vec<u64>, field: &'static str) -> Result<Vec<u32>, CompileError> {

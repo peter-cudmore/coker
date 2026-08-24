@@ -255,9 +255,9 @@ class ExtractedQpProgram:
             for binding in self.parameter_bindings
         ]
         embedded_plan = {
-            "abi_version": 1,
+            "abi_version": 2,
             "profile": "Osqp063Embedded2Qdldl",
-            "version": 1,
+            "version": 2,
             "settings": {
                 "rho": 0.1,
                 "sigma": 1.0e-6,
@@ -813,7 +813,12 @@ def _bilinear_coefficient_function(
                 for left in support
                 for right in support
             )
-    pairs = [(column, row) for row, column in sorted(p_entries)]
+    pairs = [
+        (column, row)
+        for row, column in sorted(
+            p_entries, key=lambda entry: (entry[1], entry[0])
+        )
+    ]
     a_entries = {
         (constraint_offsets[constraint_index] + row, decision)
         for constraint_index, (weights, row_count) in enumerate(
