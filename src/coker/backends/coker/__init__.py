@@ -1,3 +1,7 @@
-from coker.backends.coker.core import CokerBackend, create_opgraph
+from coker.backends.coker.core import (
+    CokerBackend,
+    CokerFunction,
+    create_opgraph,
+)
 
-__all__ = ["CokerBackend", "create_opgraph"]
+__all__ = ["CokerBackend", "CokerFunction", "create_opgraph"]
