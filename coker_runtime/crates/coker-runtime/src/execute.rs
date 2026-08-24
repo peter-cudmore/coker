@@ -58,7 +58,7 @@ pub(crate) fn execute_program_layers(
                         );
                     })
                     .is_some(),
-                Layer::Evaluate(_) => false,
+                Layer::Evaluate(_) | Layer::QpCall(_) => false,
             }
         } else {
             false
@@ -74,6 +74,7 @@ pub(crate) fn execute_program_layers(
             Layer::Evaluate(evaluate_layer) => {
                 execute_evaluate_layer(module, evaluate_layer, workspace)
             }
+            Layer::QpCall(_) => {}
         }
     }
     false
@@ -138,7 +139,7 @@ pub(crate) fn push_forward_program_layers(
                     }
                     _ => false,
                 },
-                Layer::Evaluate(_) => false,
+                Layer::Evaluate(_) | Layer::QpCall(_) => false,
             }
         } else {
             false
@@ -158,6 +159,7 @@ pub(crate) fn push_forward_program_layers(
             Layer::Evaluate(evaluate_layer) => {
                 execute_evaluate_push_forward(module, evaluate_layer, workspace, tangent_workspace)
             }
+            Layer::QpCall(_) => {}
         }
     }
     false

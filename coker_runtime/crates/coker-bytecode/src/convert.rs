@@ -759,6 +759,9 @@ pub(crate) fn layer_from_archived(layer: &ArchivedLayer) -> Layer {
         ArchivedLayer::Evaluate(evaluate_layer) => {
             Layer::Evaluate(evaluate_layer_from_archived(evaluate_layer))
         }
+        ArchivedLayer::QpCall(qp_call_layer) => {
+            Layer::QpCall(qp_call_layer_from_archived(qp_call_layer))
+        }
     }
 }
 
@@ -804,6 +807,19 @@ pub(crate) fn evaluate_layer_from_archived(
             .iter()
             .map(evaluate_output_binding_from_archived)
             .collect(),
+    }
+}
+
+pub(crate) fn qp_call_layer_from_archived(qp_call_layer: &ArchivedQpCallLayer) -> QpCallLayer {
+    QpCallLayer {
+        call_slot: qp_call_layer.call_slot.into(),
+        qp_function_id: qp_call_layer.qp_function_id.into(),
+        input_bindings: qp_call_layer
+            .input_bindings
+            .iter()
+            .map(evaluate_input_binding_from_archived)
+            .collect(),
+        output_binding: evaluate_output_binding_from_archived(&qp_call_layer.output_binding),
     }
 }
 

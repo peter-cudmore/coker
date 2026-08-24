@@ -78,6 +78,28 @@ argmin or argmax are not defined.
 ``numpy``, ``casadi``, and ``coker`` support host-side program composition.
 The JAX backend does not construct optimisation programs.
 
+Embedded mapped QP calls
+------------------------
+
+The Rust runtime executes mapped QP calls only through
+``MappedModule::execute_with_qp_contexts``.  Bytecode ``QpCall`` layers identify
+their target QP executable with ``qp_function_id`` and their embedding-owned
+state with ``call_slot``.
+
+Before execution, prepare one ``QpCallContext`` for every call layer.  Each
+context holds the prepared solver created from that mapped QP program's
+caller-owned arena, plus caller-owned evaluator workspace, coefficient output,
+flat parameter, and primal-solution buffers.  Allocate these buffers during
+application setup using ``MappedQpProgram::workspace_requirements()``; the
+execution path performs no allocation and does not rebuild a solver.
+
+Pass all contexts to ``execute_with_qp_contexts`` with the parent inputs,
+workspace, and outputs.  The runtime validates that every call slot has exactly
+one context, that its QP id and buffer widths match bytecode, then evaluates
+coefficients, solves, and copies the primal solution to the layer's parent
+workspace destination.  QP calls are numerical boundaries and are unsupported
+by push-forward execution.
+
 Related guides
 --------------
 

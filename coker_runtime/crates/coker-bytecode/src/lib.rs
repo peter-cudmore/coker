@@ -742,6 +742,7 @@ pub enum Layer {
     Bilinear(BilinearLayer),
     Generic(GenericLayer),
     Evaluate(EvaluateLayer),
+    QpCall(QpCallLayer),
 }
 
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
@@ -774,6 +775,14 @@ pub struct EvaluateLayer {
     pub output_bindings: Vec<EvaluateOutputBinding>,
 }
 
+/// Invokes a QP executable through a caller-owned prepared solver context.
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
+pub struct QpCallLayer {
+    pub call_slot: u16,
+    pub qp_function_id: u16,
+    pub input_bindings: Vec<EvaluateInputBinding>,
+    pub output_binding: EvaluateOutputBinding,
+}
 
 #[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
 pub enum EvaluateInputBinding {

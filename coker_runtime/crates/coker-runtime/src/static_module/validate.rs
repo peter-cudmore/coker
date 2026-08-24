@@ -52,6 +52,7 @@ pub(super) fn validate_program_struct(
             ArchivedLayer::Evaluate(evaluate_layer) => {
                 validate_evaluate_layer(module, evaluate_layer, program, workspace_size)?
             }
+            ArchivedLayer::QpCall(_) => {}
         }
     }
     Ok(())

@@ -58,6 +58,7 @@ fn validate_program_struct(module: &BytecodeModule, program: &Program) -> Result
             Layer::Evaluate(evaluate_layer) => {
                 validate_evaluate_layer(module, evaluate_layer, program, workspace_size)?
             }
+            Layer::QpCall(_) => {}
         }
     }
     Ok(())

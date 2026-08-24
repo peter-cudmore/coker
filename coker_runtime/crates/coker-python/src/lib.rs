@@ -395,14 +395,22 @@ fn qp_program_info_py<'py>(py: Python<'py>, program: &[u8]) -> PyResult<Bound<'p
     info.set_item("function_id", function_id)?;
     info.set_item("input_specs", input_lengths)?;
     info.set_item("output_spec", output_length)?;
-    info.set_item("evaluator_workspace_size", requirements.evaluator_workspace_size)?;
-    info.set_item("tangent_workspace_size", requirements.tangent_workspace_size)?;
-    info.set_item("coefficient_output_size", requirements.coefficient_output_size)?;
+    info.set_item(
+        "evaluator_workspace_size",
+        requirements.evaluator_workspace_size,
+    )?;
+    info.set_item(
+        "tangent_workspace_size",
+        requirements.tangent_workspace_size,
+    )?;
+    info.set_item(
+        "coefficient_output_size",
+        requirements.coefficient_output_size,
+    )?;
     info.set_item("arena_bytes", requirements.arena_bytes)?;
     info.set_item("arena_alignment", requirements.arena_alignment)?;
     Ok(info)
 }
-
 
 #[pyfunction]
 fn execute_program(program: &[u8], inputs: Vec<Vec<f32>>) -> PyResult<Vec<f32>> {
