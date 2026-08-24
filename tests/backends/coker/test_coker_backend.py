@@ -57,6 +57,105 @@ def test_scalar_weights():
     assert w(1) == 1
 
 
+def test_bilinear_numpy_projection_keeps_sparse_coefficient_tensors(
+    monkeypatch,
+):
+    memory = MemorySpec(0, 128)
+    weights = BilinearWeights.from_trusted_dok(
+        memory,
+        shape=(2,),
+        constant=dok_ndarray((2,), {(0,): 1.0}),
+        linear=dok_ndarray((2, 128), {(0, 7): 2.0}),
+        quadratic=dok_ndarray(
+            (2, 128, 128),
+            {(0, 7, 11): 3.0},
+        ),
+    )
+    dense_round_trips = []
+    original_fromarray = dok_ndarray.fromarray
+
+    def record_fromarray(value):
+        dense_round_trips.append(value.shape)
+        return original_fromarray(value)
+
+    monkeypatch.setattr(dok_ndarray, "fromarray", record_fromarray)
+    projected = weights.__rmatmul__(np.array([[1.0, 0.0]]))
+
+    assert dense_round_trips == []
+    assert projected.constant.keys == {(0,): 1.0}
+    assert projected.linear.keys == {(0, 7): 2.0}
+    assert projected.quadratic.keys == {(0, 7, 11): 3.0}
+
+
+def test_bilinear_matrix_matrix_product_lowers_without_opaque_layer():
+    def implementation(x):
+        left = np.reshape(x, (2, 2))
+        right = np.reshape(x + 1.0, (2, 2))
+        return left @ right
+
+    f = function([VectorSpace("x", 4)], implementation)
+    graph = create_opgraph(f)
+
+    assert not any(
+        getattr(layer, "opaque_programs", ()) for layer in graph.layers
+    )
+    value = np.array([0.2, -0.5, 1.1, 0.7])
+    assert np.allclose(graph(value), f(value))
+
+
+def test_bilinear_matrix_times_constant_vector_contracts_output_axis():
+    memory = MemorySpec(0, 16)
+    weights = BilinearWeights.from_trusted_dok(
+        memory,
+        shape=(2, 3),
+        constant=dok_ndarray(
+            (2, 3),
+            {(0, 1): 2.0, (1, 2): 3.0},
+        ),
+        linear=dok_ndarray((2, 3, 16), {(0, 1, 7): 4.0}),
+        quadratic=dok_ndarray(
+            (2, 3, 16, 16),
+            {(1, 2, 7, 11): 6.0},
+        ),
+    )
+
+    projected = weights @ np.array([10.0, 5.0, 2.0])
+
+    assert projected.shape == (2,)
+    assert projected.constant.keys == {(0,): 10.0, (1,): 6.0}
+    assert projected.linear.keys == {(0, 7): 20.0}
+    assert projected.quadratic.keys == {(1, 7, 11): 12.0}
+
+
+def test_graph_lowering_extends_only_live_bilinear_values(monkeypatch):
+    def implementation(x):
+        value = x
+        for _ in range(20):
+            value = np.sin(2.0 * value)
+        return value
+
+    symbolic_function = function(
+        [VectorSpace("x", 4)],
+        implementation=implementation,
+    )
+    extension_count = 0
+    original_extend_memory = BilinearWeights.extend_memory
+
+    def count_extend_memory(value, memory):
+        nonlocal extension_count
+        extension_count += 1
+        return original_extend_memory(value, memory)
+
+    monkeypatch.setattr(
+        BilinearWeights,
+        "extend_memory",
+        count_extend_memory,
+    )
+    create_opgraph(symbolic_function)
+
+    assert extension_count <= 2 * 20
+
+
 def test_coker_graph():
     alpha = 3
     beta = 4

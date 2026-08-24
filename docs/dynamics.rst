@@ -16,7 +16,7 @@ The main public surface is re-exported from :mod:`coker.dynamics`:
 - :class:`coker.dynamics.VariationalProblem`
 - :class:`coker.dynamics.BoundedVariable`
 - :class:`coker.dynamics.TranscriptionOptions`
-- :class:`coker.optimisation.SolveInfo` and :class:`coker.optimisation.SolveFailure`
+- :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -98,8 +98,8 @@ Solve status and failures
 -------------------------
 
 Both the dynamics layer and the codesign helpers surface solve metadata through
-:class:`coker.optimisation.SolveInfo`. Failed solves raise
-:class:`coker.optimisation.SolveFailure` with the backend status attached.
+:class:`coker.toolkits.codesign.SolveInfo`. Failed solves raise
+:class:`coker.toolkits.codesign.SolveFailure` with the backend status attached.
 
 Next places to read
 -------------------

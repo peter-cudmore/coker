@@ -22,7 +22,7 @@ from coker.algebra.kernel import (
 )
 import numpy as np
 from typing import Dict
-from coker.optimisation import SolveInfo
+from coker.toolkits.codesign.optimisation import SolveInfo
 
 if TYPE_CHECKING:
     from .transcription_helpers import InterpolatingPoly

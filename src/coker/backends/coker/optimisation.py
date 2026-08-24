@@ -57,6 +57,8 @@ QP_ARENA_REGION_NAMES = [
     "solution",
     "info",
     "qdldl_l_x",
+    "qdldl_l_p",
+    "qdldl_l_i",
     "qdldl_l",
     "qdldl_kkt_x",
     "qdldl_kkt",
@@ -247,8 +249,8 @@ class ExtractedQpProgram:
                 "adaptive_rho_interval": 50,
                 "adaptive_rho_tolerance": 5.0,
                 "max_iter": 4000,
-                "eps_abs": 1.0e-3,
-                "eps_rel": 1.0e-3,
+                "eps_abs": 1.0e-6,
+                "eps_rel": 1.0e-6,
                 "eps_prim_inf": 1.0e-4,
                 "eps_dual_inf": 1.0e-4,
                 "scaling": 0,
@@ -307,6 +309,7 @@ class CokerSolver:
         outputs: list[Tracer],
         initial_guess: np.ndarray,
         runtime_qp: RuntimeQpProgram,
+        extracted_qp: ExtractedQpProgram,
         warm_start: bool = True,
     ):
         self.tape = tape
@@ -316,9 +319,14 @@ class CokerSolver:
         self.outputs = outputs
         self.initial_guess = np.asarray(initial_guess, dtype=float)
         self.runtime_qp = runtime_qp
+        self._extracted_qp = extracted_qp
         self.warm_start = warm_start
         self.last_solve_info = None
         self._warm_start_vector = self.initial_guess.copy()
+
+    def export_payload(self) -> dict[str, object]:
+        """Return the deterministic QP payload used by the Coker compiler."""
+        return self._extracted_qp.export_payload()
 
     def __call__(self, *runtime_args):
         runtime_args_tuple = normalise_runtime_args(
@@ -346,7 +354,7 @@ class CokerSolver:
                     break
         self.last_solve_info = solve_info
         if not solve_info.success:
-            from coker.optimisation import SolveFailure
+            from coker.toolkits.codesign.optimisation import SolveFailure
 
             raise SolveFailure(
                 f"OSQP solve failed: {solve_info.return_status}", solve_info
@@ -394,6 +402,14 @@ def build_optimisation_problem(
     bindings = build_problem_bindings(
         tape, [parameter.index for parameter in parameters]
     )
+    extracted = extract_qp_program(
+        cost,
+        constraints,
+        outputs,
+        bindings.decision_indices,
+        bindings.decision_bindings,
+        bindings.parameter_bindings,
+    )
     runtime_qp = compile_qp_problem(
         backend,
         cost,
@@ -414,6 +430,7 @@ def build_optimisation_problem(
             bindings.decision_bindings, initial_conditions
         ),
         runtime_qp=runtime_qp,
+        extracted_qp=extracted,
     )
 
 
@@ -544,6 +561,204 @@ def compile_qp_problem(
     return RuntimeQpProgram.compile(extracted)
 
 
+def _bilinear_coefficient_function(
+    tape: Tape,
+    cost: Tracer,
+    constraints: list[Tracer],
+    decision_bindings: list[InputBinding],
+    parameter_bindings: list[InputBinding],
+    constraint_data,
+):
+    """Extract QP coefficients from bilinear graph weights."""
+    from coker.backends.coker.core import create_opgraph
+
+    def graph_for(tracer):
+        return create_opgraph(Function(tape, [tracer], backend="numpy"))
+
+    cost_graph = graph_for(cost)
+    cost_weights = cost_graph.output_weights[0]
+    residual_weights = []
+    residual_graphs = []
+    for residual, _lower, _upper in constraint_data:
+        residual_graph = graph_for(residual)
+        residual_graphs.append(residual_graph)
+        residual_weights.append(residual_graph.output_weights[0])
+    input_memory_count = sum(
+        tape.dim[index].flat() for index in tape.input_indicies
+    )
+    if (
+        not getattr(cost_graph, "output_weights_are_raw", False)
+        or any(
+            not getattr(graph, "output_weights_are_raw", False)
+            for graph in residual_graphs
+        )
+        or cost_weights is None
+        or any(weight is None for weight in residual_weights)
+        or cost_weights.memory.count != input_memory_count
+        or any(
+            weight.memory.count != input_memory_count
+            for weight in residual_weights
+        )
+    ):
+        # Workspace relocation or an opaque lowered operation changes the
+        # coordinate system.  Never interpret those coordinates as tape inputs.
+        return None
+    bound_weights = {}
+    for _residual, lower_bound, upper_bound in constraint_data:
+        for bound in (lower_bound, upper_bound):
+            if not isinstance(bound, Tracer):
+                continue
+            bound_graph = graph_for(bound)
+            if not getattr(bound_graph, "output_weights_are_raw", False):
+                return None
+            weight = bound_graph.output_weights[0]
+            if weight is None or weight.memory.count != input_memory_count:
+                return None
+            bound_weights[id(bound)] = weight
+    memory_offsets = {}
+    offset = 0
+    for index in tape.input_indicies:
+        size = tape.dim[index].flat()
+        memory_offsets[index] = list(range(offset, offset + size))
+        offset += size
+    decision_memory = [
+        coordinate
+        for binding in decision_bindings
+        for coordinate in memory_offsets[binding.index]
+    ]
+    parameter_memory = [
+        coordinate
+        for binding in parameter_bindings
+        for coordinate in memory_offsets[binding.index]
+    ]
+    parameter_spaces = [
+        binding.dim.to_space(tape.input_names[binding.index])
+        for binding in parameter_bindings
+    ]
+
+    def lookup(table, key):
+        return table.keys.get(key, 0.0)
+
+    def expression(weights, row, params, decision=None, other=None):
+        result = lookup(weights.constant, (row,))
+        if decision is None:
+            for (out_row, index), value in weights.linear.keys.items():
+                if out_row == row:
+                    result += value * params.get(index, 0.0)
+            for (
+                out_row,
+                left,
+                right,
+            ), value in weights.quadratic.keys.items():
+                if out_row == row:
+                    result += (
+                        value * params.get(left, 0.0) * params.get(right, 0.0)
+                    )
+            return result
+        result = lookup(weights.linear, (row, decision))
+        if other is not None:
+            return lookup(weights.quadratic, (row, decision, other)) + lookup(
+                weights.quadratic, (row, other, decision)
+            )
+        for (out_row, left, right), value in weights.quadratic.keys.items():
+            if out_row != row:
+                continue
+            if left == decision:
+                result += value * params.get(right, 0.0)
+            elif right == decision:
+                result += value * params.get(left, 0.0)
+        return result
+
+    residual_rows = [
+        residual.dim.flat() for residual, _l, _u in constraint_data
+    ]
+    pairs = [
+        (column, row)
+        for column in range(len(decision_memory))
+        for row in range(column + 1)
+    ]
+
+    def implementation(*runtime_params):
+        params = {
+            coordinate: item
+            for coordinate, item in zip(
+                parameter_memory,
+                (
+                    item
+                    for value in runtime_params
+                    for item in _flatten_symbolic_vector(value)
+                ),
+            )
+        }
+        px = [
+            expression(
+                cost_weights,
+                0,
+                params,
+                decision=decision_memory[column],
+                other=decision_memory[row],
+            )
+            for column, row in pairs
+        ]
+        q = [
+            expression(cost_weights, 0, params, decision=decision)
+            for decision in decision_memory
+        ]
+        ax = []
+        for weights, row_count in zip(residual_weights, residual_rows):
+            for row in range(row_count):
+                ax.extend(
+                    expression(weights, row, params, decision=decision)
+                    for decision in decision_memory
+                )
+
+        def bound_values(bound, weight, row_count):
+            if weight is not None:
+                return [
+                    expression(weight, row, params) for row in range(row_count)
+                ]
+
+            values = np.asarray(_osqp_bound(bound)).reshape(-1)
+            if values.size == 1:
+                return [values[0]] * row_count
+            if values.size == row_count:
+                return values.tolist()
+            return None
+
+        lower = []
+        upper = []
+        for residual, lower_bound, upper_bound in constraint_data:
+            row_count = residual.dim.flat()
+            lower_values = bound_values(
+                lower_bound, bound_weights.get(id(lower_bound)), row_count
+            )
+            upper_values = bound_values(
+                upper_bound, bound_weights.get(id(upper_bound)), row_count
+            )
+            if lower_values is None or upper_values is None:
+                return None
+            lower.extend(lower_values)
+            upper.extend(upper_values)
+        return [
+            *px,
+            *q,
+            *ax,
+            *lower,
+            *upper,
+            expression(cost_weights, 0, params),
+        ]
+
+    function_outputs = function(
+        parameter_spaces, implementation, backend="numpy"
+    )
+    return function_outputs, _build_output_slices(
+        px_length=len(decision_memory) * (len(decision_memory) + 1) // 2,
+        q_length=len(decision_memory),
+        ax_length=sum(rows * len(decision_memory) for rows in residual_rows),
+        bound_length=sum(rows for rows in residual_rows),
+    )
+
+
 def _build_coefficient_function(
     tape: Tape,
     cost: Tracer,
@@ -558,6 +773,16 @@ def _build_coefficient_function(
     constraint_data = [
         constraint.as_halfplane_bound() for constraint in constraints
     ]
+    direct = _bilinear_coefficient_function(
+        tape,
+        cost,
+        constraints,
+        decision_bindings,
+        parameter_bindings,
+        constraint_data,
+    )
+    if direct is not None:
+        return direct
 
     parameter_spaces = [
         binding.dim.to_space(tape.input_names[binding.index])
@@ -653,13 +878,31 @@ def _build_coefficient_function(
                 )
             )
             row_count = residual_zero.size
-            lower_bound = _osqp_bound(lower_bound)
-            upper_bound = _osqp_bound(upper_bound)
+            lower_bound = _symbolic_bound_components(
+                lower_bound,
+                row_count,
+                tape,
+                decision_bindings,
+                parameter_bindings,
+                zero_decision,
+                runtime_args,
+            )
+            upper_bound = _symbolic_bound_components(
+                upper_bound,
+                row_count,
+                tape,
+                decision_bindings,
+                parameter_bindings,
+                zero_decision,
+                runtime_args,
+            )
             lower_values.extend(
-                lower_bound - residual_zero[row] for row in range(row_count)
+                lower_bound[row] - residual_zero[row]
+                for row in range(row_count)
             )
             upper_values.extend(
-                upper_bound - residual_zero[row] for row in range(row_count)
+                upper_bound[row] - residual_zero[row]
+                for row in range(row_count)
             )
 
             row_coefficients = [[] for _ in range(row_count)]
@@ -730,7 +973,38 @@ def _build_output_slices(
     return slices
 
 
-def _osqp_bound(value: float) -> float:
+def _symbolic_bound_components(
+    bound,
+    row_count: int,
+    tape: Tape,
+    decision_bindings: list[InputBinding],
+    parameter_bindings: list[InputBinding],
+    zero_decision: np.ndarray,
+    runtime_args,
+) -> np.ndarray:
+    bound = _osqp_bound(bound)
+    if isinstance(bound, Tracer):
+        bound = _evaluate_function(
+            bound,
+            tape,
+            decision_bindings,
+            parameter_bindings,
+            zero_decision,
+            runtime_args,
+        )
+    values = _flatten_symbolic_vector(bound)
+    if values.size == 1:
+        return np.full(row_count, values[0], dtype=object)
+    if values.size != row_count:
+        raise ValueError(
+            "QP bound dimension does not match residual dimension"
+        )
+    return values
+
+
+def _osqp_bound(value):
+    if isinstance(value, Tracer):
+        return value
     if np.isposinf(value):
         return OSQP_INFINITY
     if np.isneginf(value):

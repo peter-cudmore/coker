@@ -6,7 +6,8 @@ from coker.toolkits.codesign import (
     Minimise,
     norm as codesign_norm,
 )
-from coker import Dimension, SolveFailure, VectorSpace
+from coker import Dimension, VectorSpace
+from coker.toolkits.codesign import SolveFailure
 
 
 def quadratic(x, p, z):

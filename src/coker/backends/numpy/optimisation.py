@@ -24,56 +24,47 @@ from coker.backends.optimisation import (
     normalise_value,
     reshape_flat_slice,
 )
-from coker.optimisation import SolveFailure, solve_info_from_scipy_result
+from coker.toolkits.codesign.optimisation import (
+    SolveFailure,
+    solve_info_from_scipy_result,
+)
 
 
 @dataclass(frozen=True)
 class ConstraintFactory:
-    lower_bound: float
-    upper_bound: float
+    lower_bound: object
+    upper_bound: object
     is_affine_in_decisions: bool
     decision_dimension: int
     output_dimension: int
     evaluate: Callable[[np.ndarray, tuple], np.ndarray]
     jacobian: Callable[[np.ndarray, tuple], np.ndarray]
+    evaluate_lower_bound: Callable[[tuple], np.ndarray]
+    evaluate_upper_bound: Callable[[tuple], np.ndarray]
 
     def build(
         self, runtime_args: tuple
     ) -> optimize.LinearConstraint | optimize.NonlinearConstraint:
+        lower_bound = self.evaluate_lower_bound(runtime_args)
+        upper_bound = self.evaluate_upper_bound(runtime_args)
         if self.is_affine_in_decisions:
             zero_decision = np.zeros(self.decision_dimension, dtype=float)
             affine_offset = self.evaluate(zero_decision, runtime_args)
-            linear_term = self.jacobian(zero_decision, runtime_args)
-            lower_bound = (
-                _expand_bound(self.lower_bound, self.output_dimension)
-                - affine_offset
-            )
-            upper_bound = (
-                _expand_bound(self.upper_bound, self.output_dimension)
-                - affine_offset
-            )
             return optimize.LinearConstraint(
-                linear_term, lower_bound, upper_bound
+                self.jacobian(zero_decision, runtime_args),
+                lower_bound - affine_offset,
+                upper_bound - affine_offset,
             )
-
-        lower_bound = _expand_bound(self.lower_bound, self.output_dimension)
-        upper_bound = _expand_bound(self.upper_bound, self.output_dimension)
-
-        def nonlinear_constraint_value(
-            decision_vector: np.ndarray,
-        ) -> np.ndarray:
-            return self.evaluate(decision_vector, runtime_args)
-
-        def nonlinear_constraint_jacobian(
-            decision_vector: np.ndarray,
-        ) -> np.ndarray:
-            return self.jacobian(decision_vector, runtime_args)
 
         return optimize.NonlinearConstraint(
-            nonlinear_constraint_value,
+            lambda decision_vector: self.evaluate(
+                decision_vector, runtime_args
+            ),
             lower_bound,
             upper_bound,
-            jac=nonlinear_constraint_jacobian,
+            jac=lambda decision_vector: self.jacobian(
+                decision_vector, runtime_args
+            ),
             hess=optimize.BFGS(),
         )
 
@@ -287,6 +278,17 @@ def _build_constraint_factory(
             evaluate, decision_vector, runtime_args
         )
 
+    def evaluate_bound(bound: object, runtime_args: tuple) -> np.ndarray:
+        if isinstance(bound, Tracer):
+            (value,) = problem._evaluate_tracers(
+                [bound],
+                np.zeros(decision_dimension, dtype=float),
+                runtime_args,
+            )
+        else:
+            value = bound
+        return _expand_bound(value, residual.dim.flat())
+
     return ConstraintFactory(
         lower_bound=lower_bound,
         upper_bound=upper_bound,
@@ -297,6 +299,12 @@ def _build_constraint_factory(
         output_dimension=residual.dim.flat(),
         evaluate=evaluate,
         jacobian=jacobian,
+        evaluate_lower_bound=lambda runtime_args: evaluate_bound(
+            lower_bound, runtime_args
+        ),
+        evaluate_upper_bound=lambda runtime_args: evaluate_bound(
+            upper_bound, runtime_args
+        ),
     )
 
 
@@ -399,8 +407,11 @@ def _coerce_vector(value: object) -> np.ndarray:
     return coerce_vector(value)
 
 
-def _expand_bound(bound: float, size: int) -> np.ndarray:
-    return np.full(size, float(bound), dtype=float)
+def _expand_bound(bound: object, size: int) -> np.ndarray:
+    values = np.asarray(bound, dtype=float)
+    if values.ndim == 0:
+        return np.full(size, float(values), dtype=float)
+    return np.broadcast_to(values, (size,)).astype(float, copy=False)
 
 
 def _normalise_value(value: object, dim: Dimension) -> object:

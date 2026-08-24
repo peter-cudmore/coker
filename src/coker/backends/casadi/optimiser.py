@@ -5,7 +5,10 @@ import casadi as ca
 import numpy as np
 
 from coker.algebra.kernel import Tracer
-from coker.optimisation import SolveFailure, solve_info_from_casadi_stats
+from coker.toolkits.codesign.optimisation import (
+    SolveFailure,
+    solve_info_from_casadi_stats,
+)
 
 
 def build_optimisation_problem(
@@ -62,12 +65,20 @@ def build_optimisation_problem(
     lbs = []
     ubs = []
 
-    for i, constraint in enumerate(constraints):
+    for constraint in constraints:
         c, lb, ub = constraint.as_halfplane_bound()
         (c_i,) = substitute([c], workspace)
+        if isinstance(lb, Tracer):
+            (lb_i,) = substitute([lb], workspace)
+        else:
+            lb_i = to_casadi(lb) * ca.DM.ones(*c_i.shape)
+        if isinstance(ub, Tracer):
+            (ub_i,) = substitute([ub], workspace)
+        else:
+            ub_i = to_casadi(ub) * ca.DM.ones(*c_i.shape)
 
-        lbs.append(to_casadi(lb) * ca.DM.ones(*c_i.shape))
-        ubs.append(to_casadi(ub) * ca.DM.ones(*c_i.shape))
+        lbs.append(lb_i)
+        ubs.append(ub_i)
         cs.append(c_i)
 
     upper_bound = ca.vertcat(*ubs)

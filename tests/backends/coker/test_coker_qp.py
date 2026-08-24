@@ -1,13 +1,19 @@
 import numpy as np
 import pytest
 
-from coker import SolveFailure, SolveInfo, VectorSpace
+from coker import VectorSpace
 from coker.backends.coker.core import CokerBackend
 from coker.backends.coker import optimisation as coker_qp_optimisation
 from coker.backends.coker.optimisation import extract_qp_program
 from coker.backends.coker.runtime import RuntimeQpProgram
 from coker.backends.optimisation import build_problem_bindings
-from coker.toolkits.codesign import Minimise, ProblemBuilder
+from coker.toolkits.codesign import (
+    Minimise,
+    ProblemBuilder,
+    SolveFailure,
+    SolveInfo,
+    bounded,
+)
 
 
 def _build_bindings(cost, parameters):
@@ -427,3 +433,30 @@ def test_coker_qp_solves_unconstrained_problem():
     assert np.allclose(x_val, np.array([2.0, -3.0]), atol=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
+
+
+def test_coker_qp_accepts_parameterized_objective_and_two_sided_bounds():
+    """The caller supplies targets and bounds, never a preassembled Hessian."""
+    with ProblemBuilder(
+        arguments=[
+            VectorSpace("target", 2),
+            VectorSpace("lower", 2),
+            VectorSpace("upper", 2),
+        ]
+    ) as builder:
+        target, lower, upper = builder.arguments
+        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
+        builder.objective = Minimise(np.dot(x - target, x - target))
+        builder.constraints = [bounded(x, lower, upper)]
+        builder.outputs = [x]
+        problem = builder.build("coker")
+
+    (solution,) = problem(
+        np.array([3.0, -1.0]),
+        np.array([-1.0, -2.0]),
+        np.array([2.0, 1.0]),
+    )
+
+    assert problem.solve_info is not None
+    assert problem.solve_info.success
+    assert np.allclose(solution, np.array([2.0, -1.0]), atol=1.0e-3)

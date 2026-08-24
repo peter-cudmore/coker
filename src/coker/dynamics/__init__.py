@@ -34,7 +34,7 @@ from coker.dynamics.types import (
     VariationalSolution,
     VariationalIterationCallback,
 )
-from coker.optimisation import SolveFailure, SolveInfo
+from coker.toolkits.codesign.optimisation import SolveFailure, SolveInfo
 
 __all__ = [
     "BoundedVariable",

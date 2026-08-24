@@ -23,6 +23,8 @@ const QP_ARENA_REGION_NAMES: &[&str] = &[
     "solution",
     "info",
     "qdldl_l_x",
+    "qdldl_l_p",
+    "qdldl_l_i",
     "qdldl_l",
     "qdldl_kkt_x",
     "qdldl_kkt",

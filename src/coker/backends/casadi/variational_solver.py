@@ -19,7 +19,10 @@ from coker.dynamics import (
     VariationalSolution,
     split_at_non_differentiable_points,
 )
-from coker.optimisation import SolveFailure, solve_info_from_casadi_stats
+from coker.toolkits.codesign.optimisation import (
+    SolveFailure,
+    solve_info_from_casadi_stats,
+)
 
 
 def noop(*_args):

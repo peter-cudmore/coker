@@ -249,12 +249,47 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                     return float(other.constant) * self
 
                 if self.is_linear and other.is_linear:
-                    result = float(self.constant) * other
-                    result.quadratic = dok_ndarray(
-                        (1, 1, 1),
-                        {(0, 0, 0): float(self.linear) * float(other.linear)},
+                    memory_count = self.memory.count
+                    constant_value = self.constant[(0,)] * other.constant[(0,)]
+                    linear_data = {}
+                    for key, value in self.linear.keys.items():
+                        contribution = other.constant[(0,)] * value
+                        if contribution:
+                            linear_data[key] = (
+                                linear_data.get(key, 0.0) + contribution
+                            )
+                    for key, value in other.linear.keys.items():
+                        contribution = self.constant[(0,)] * value
+                        if contribution:
+                            linear_data[key] = (
+                                linear_data.get(key, 0.0) + contribution
+                            )
+                    quadratic_data = {}
+                    for self_key, self_value in self.linear.keys.items():
+                        for (
+                            other_key,
+                            other_value,
+                        ) in other.linear.keys.items():
+                            target = (0, self_key[-1], other_key[-1])
+                            quadratic_data[target] = (
+                                quadratic_data.get(target, 0.0)
+                                + self_value * other_value
+                            )
+                    constant = (
+                        dok_ndarray((1,), {(0,): constant_value})
+                        if constant_value
+                        else dok_ndarray((1,))
                     )
-                    return result
+                    return BilinearWeights.from_trusted_dok(
+                        self.memory,
+                        (1,),
+                        constant,
+                        dok_ndarray((1, memory_count), linear_data),
+                        dok_ndarray(
+                            (1, memory_count, memory_count),
+                            quadratic_data,
+                        ),
+                    )
 
             if isinstance(other, (np.ndarray, dok_ndarray)):
                 if isinstance(other, np.ndarray) and len(other.shape) == 1:
@@ -351,7 +386,10 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
                 self.linear - other.linear,
                 self.quadratic - other.quadratic,
             )
-        raise TypeError(f"Cannot add {type(other)}")
+        raise TypeError(f"Cannot subtract {type(other)}")
+
+    def __rsub__(self, other):
+        return (-self).__add__(other)
 
     def __neg__(self):
         return BilinearWeights(
@@ -363,24 +401,57 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         )
 
     def __rmatmul__(self, other):
-
         if isinstance(other, (np.ndarray, dok_ndarray)):
-            constant = other @ self.constant
-            try:
 
-                linear = other @ self.linear
-            except IndexError as ex:
-                print(f"{other}, {(self.linear.shape, self.linear.keys)}")
-                raise ex
-            quadratic = other @ self.quadratic
-            shape = constant.shape
+            def project(tensor: dok_ndarray) -> dok_ndarray:
+                if isinstance(other, np.ndarray):
+                    return tensor.__rmatmul__(other)
+                return other @ tensor
+
+            constant = project(self.constant)
+            linear = project(self.linear)
+            quadratic = project(self.quadratic)
             return BilinearWeights.from_trusted_dok(
-                self.memory, shape, constant, linear, quadratic
+                self.memory, constant.shape, constant, linear, quadratic
             )
 
         raise TypeError(f"Cannot matmul {type(other)}")
 
     def __matmul__(self, other):
+        if isinstance(other, (np.ndarray, dok_ndarray)):
+            assert len(other.shape) >= 1
+            assert self.shape[-1] == other.shape[0]
+            col = len(self.shape) - 1
+            vector = (
+                dok_ndarray.fromarray(other)
+                if isinstance(other, np.ndarray)
+                else other
+            )
+
+            def contract(tensor: dok_ndarray, memory_rank: int) -> dok_ndarray:
+                result = tensor_sum(tensor, vector, l_index=col, r_index=0)
+                # tensor_sum places the left memory axes before right output
+                # axes; move them to the trailing positions used by
+                # BilinearWeights.
+                right_rank = len(other.shape) - 1
+                for memory_index in reversed(range(memory_rank)):
+                    position = col + memory_index
+                    for _ in range(right_rank):
+                        result = result.swap_indices(position, position + 1)
+                        position += 1
+                return result
+
+            shape = (*self.shape[:-1], *other.shape[1:])
+            if not shape:
+                shape = (1,)
+            return BilinearWeights.from_trusted_dok(
+                self.memory,
+                shape,
+                contract(self.constant, 0),
+                contract(self.linear, 1),
+                contract(self.quadratic, 2),
+            )
+
         assert (
             isinstance(other, BilinearWeights) and other.memory is self.memory
         )
@@ -389,38 +460,30 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             or self.is_constant
             or other.is_constant
         )
-        # Contract self's last output axis with other's first output axis.
-        # self.shape = (..., n), other.shape = (n, ...)
-        # self.constant/linear/quadratic have shape (*self.shape, ...) —
-        # output axes first, memory axes last. We must contract over
-        # axis len(self.shape)-1 of self's tensors and axis 0 of
-        # other's tensors, not the last (memory) axis.
         col = len(self.shape) - 1
 
-        def _contract(lhs: dok_ndarray, rhs: dok_ndarray) -> dok_ndarray:
-            """tensor_sum contracting lhs axis col with rhs axis 0."""
-            return tensor_sum(lhs, rhs, l_index=col, r_index=0)
+        def _contract(
+            lhs: dok_ndarray,
+            rhs: dok_ndarray,
+            lhs_memory_rank: int,
+        ) -> dok_ndarray:
+            result = tensor_sum(lhs, rhs, l_index=col, r_index=0)
+            right_output_rank = len(other.shape) - 1
+            for memory_index in reversed(range(lhs_memory_rank)):
+                position = col + memory_index
+                for _ in range(right_output_rank):
+                    result = result.swap_indices(position, position + 1)
+                    position += 1
+            return result
 
-        constant = _contract(self.constant, other.constant)
-        linear = _contract(self.constant, other.linear) + _contract(
-            self.linear, other.constant
+        constant = _contract(self.constant, other.constant, 0)
+        linear = _contract(self.constant, other.linear, 0) + _contract(
+            self.linear, other.constant, 1
         )
-        linear_linear_quadratic = tensor_sum(
-            self.linear, other.linear, l_index=col, r_index=0
-        )
-        # tensor_sum produces (out_l..., mem_l, out_r..., mem_r).
-        # BilinearWeights convention requires
-        # (out_l..., out_r..., mem_l, mem_r).
-        # Move mem_l (at position col) past the M-1 out_r axes.
-        mem_l_pos = col
-        for _ in range(len(other.shape) - 1):
-            linear_linear_quadratic = linear_linear_quadratic.swap_indices(
-                mem_l_pos, mem_l_pos + 1
-            )
-            mem_l_pos += 1
+        linear_linear_quadratic = _contract(self.linear, other.linear, 1)
         quadratic = (
-            _contract(self.constant, other.quadratic)
-            + _contract(self.quadratic, other.constant)
+            _contract(self.constant, other.quadratic, 0)
+            + _contract(self.quadratic, other.constant, 2)
             + linear_linear_quadratic
         )
         shape = (*self.shape[:-1], *other.shape[1:])
@@ -504,18 +567,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             return self.__add__(args)
 
         if ufunc == np.subtract and method == "__call__":
-            if self.is_scalar() and isinstance(args, scalar):
-                if self.constant.is_empty():
-                    constant = dok_ndarray((1,), {(0,): args})
-                else:
-                    constant = self.constant.clone()
-                    constant[(0,)] = args - constant[(0,)]
-                linear = -self.linear
-                quadratic = -self.quadratic
-
-                return BilinearWeights.from_trusted_dok(
-                    self.memory, self.shape, constant, linear, quadratic
-                )
+            return self.__rsub__(args)
 
         raise NotImplementedError(f"{ufunc} not implemented")
 
@@ -563,39 +615,72 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
             "the other order==0"
         )
         memory_count = self.memory.count
-        output_size = int(np.prod(self.shape))
-        c_self = self.constant.toarray().flatten()
-        c_rhs = rhs.constant.toarray().flatten()
-        l_self = self.linear.toarray().reshape(output_size, memory_count)
-        l_rhs = rhs.linear.toarray().reshape(output_size, memory_count)
-        q_self = self.quadratic.toarray().reshape(
-            output_size, memory_count, memory_count
-        )
-        q_rhs = rhs.quadratic.toarray().reshape(
-            output_size, memory_count, memory_count
-        )
+        output_rank = len(self.shape)
+        constant_value = 0.0
+        linear_data = {}
+        quadratic_data = {}
 
-        constant_val = float(np.dot(c_self, c_rhs))
-        c = dok_ndarray.fromarray(np.array([constant_val]))
+        for output_key, value in self.constant.keys.items():
+            constant_value += value * rhs.constant[output_key]
+        for key, value in self.linear.keys.items():
+            output_key = key[:output_rank]
+            memory_index = key[-1]
+            contribution = rhs.constant[output_key] * value
+            if contribution:
+                target = (0, memory_index)
+                linear_data[target] = (
+                    linear_data.get(target, 0.0) + contribution
+                )
+        for key, value in rhs.linear.keys.items():
+            output_key = key[:output_rank]
+            memory_index = key[-1]
+            contribution = self.constant[output_key] * value
+            if contribution:
+                target = (0, memory_index)
+                linear_data[target] = (
+                    linear_data.get(target, 0.0) + contribution
+                )
 
-        linear_val = (c_self @ l_rhs + c_rhs @ l_self).reshape(1, memory_count)
-        linear_weights = dok_ndarray.fromarray(linear_val)
+        for source, other_constant in (
+            (self.quadratic, rhs.constant),
+            (rhs.quadratic, self.constant),
+        ):
+            for key, value in source.keys.items():
+                output_key = key[:output_rank]
+                contribution = other_constant[output_key] * value
+                if contribution:
+                    target = (0, key[-2], key[-1])
+                    quadratic_data[target] = (
+                        quadratic_data.get(target, 0.0) + contribution
+                    )
 
-        linear_linear = (l_self.T @ l_rhs).reshape(
-            1, memory_count, memory_count
+        rhs_linear_by_output = {}
+        for key, value in rhs.linear.keys.items():
+            rhs_linear_by_output.setdefault(key[:output_rank], []).append(
+                (key[-1], value)
+            )
+        for key, value in self.linear.keys.items():
+            output_key = key[:output_rank]
+            for rhs_memory_index, rhs_value in rhs_linear_by_output.get(
+                output_key, ()
+            ):
+                target = (0, key[-1], rhs_memory_index)
+                quadratic_data[target] = (
+                    quadratic_data.get(target, 0.0) + value * rhs_value
+                )
+
+        constant = (
+            dok_ndarray((1,), {(0,): constant_value})
+            if constant_value
+            else dok_ndarray((1,))
         )
-        c_self_quadratic = np.einsum("i,ijk->jk", c_self, q_rhs).reshape(
-            1, memory_count, memory_count
-        )
-        c_rhs_quadratic = np.einsum("i,ijk->jk", c_rhs, q_self).reshape(
-            1, memory_count, memory_count
-        )
-        q = dok_ndarray.fromarray(
-            linear_linear + c_self_quadratic + c_rhs_quadratic
+        linear = dok_ndarray((1, memory_count), linear_data)
+        quadratic = dok_ndarray(
+            (1, memory_count, memory_count), quadratic_data
         )
 
         return BilinearWeights.from_trusted_dok(
-            self.memory, (1,), c, linear_weights, q
+            self.memory, (1,), constant, linear, quadratic
         )
 
     @staticmethod
@@ -619,6 +704,125 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         return BilinearWeights.project(
             memory, MemorySpec(memory.location, memory.count), shape
         )
+
+
+def compose_bilinear_weights(
+    outer: BilinearWeights, inner: BilinearWeights
+) -> BilinearWeights | None:
+    """Substitute ``inner`` into ``outer`` while preserving degree two.
+
+    ``outer`` is a polynomial in the coordinates produced by ``inner``.
+    Composition is exact when the resulting polynomial has degree at most two;
+    higher-order terms are rejected rather than silently discarded.
+    """
+    assert outer.memory.count == inner.shape[0]
+    if len(outer.shape) != 1 or (outer.is_quadratic and inner.is_quadratic):
+        return None
+    memory = inner.memory
+    output_shape = outer.shape
+    constant = {}
+    linear = {}
+    quadratic = {}
+    inner_linear_by_row = {}
+    for (row, coordinate), value in inner.linear.keys.items():
+        inner_linear_by_row.setdefault(row, []).append((coordinate, value))
+    inner_quadratic_by_row = {}
+    for (row, left, right), value in inner.quadratic.keys.items():
+        inner_quadratic_by_row.setdefault(row, []).append((left, right, value))
+    outer_linear_by_output = {}
+    for (*output_index, coordinate), value in outer.linear.keys.items():
+        outer_linear_by_output.setdefault(tuple(output_index), []).append(
+            (coordinate, value)
+        )
+    outer_quadratic_by_output = {}
+    for (*output_index, left, right), value in outer.quadratic.keys.items():
+        outer_quadratic_by_output.setdefault(tuple(output_index), []).append(
+            (left, right, value)
+        )
+
+    def add(table, key, value):
+        if value:
+            table[key] = table.get(key, 0.0) + value
+
+    for output_index in np.ndindex(output_shape):
+        c = outer.constant.keys.get(output_index, 0.0)
+        l_terms = outer_linear_by_output.get(output_index, ())
+        q_terms = outer_quadratic_by_output.get(output_index, ())
+        for index, value in l_terms:
+            c += value * inner.constant.keys.get((index,), 0.0)
+        for left, right, value in q_terms:
+            c += (
+                value
+                * inner.constant.keys.get((left,), 0.0)
+                * inner.constant.keys.get((right,), 0.0)
+            )
+        if c:
+            constant[output_index] = c
+
+        for index, value in l_terms:
+            for coordinate, inner_value in inner_linear_by_row.get(index, ()):
+                add(
+                    linear,
+                    (*output_index, coordinate),
+                    value * inner_value,
+                )
+            for left, right, inner_value in inner_quadratic_by_row.get(
+                index, ()
+            ):
+                add(
+                    quadratic,
+                    (*output_index, left, right),
+                    value * inner_value,
+                )
+        for left, right, value in q_terms:
+            left_constant = inner.constant.keys.get((left,), 0.0)
+            right_constant = inner.constant.keys.get((right,), 0.0)
+            for coordinate, inner_value in inner_linear_by_row.get(left, ()):
+                add(
+                    linear,
+                    (*output_index, coordinate),
+                    value * inner_value * right_constant,
+                )
+            for coordinate, inner_value in inner_linear_by_row.get(right, ()):
+                add(
+                    linear,
+                    (*output_index, coordinate),
+                    value * inner_value * left_constant,
+                )
+            for i, j, inner_value in inner_quadratic_by_row.get(left, ()):
+                add(
+                    quadratic,
+                    (*output_index, i, j),
+                    value * inner_value * right_constant,
+                )
+            for i, j, inner_value in inner_quadratic_by_row.get(right, ()):
+                add(
+                    quadratic,
+                    (*output_index, i, j),
+                    value * inner_value * left_constant,
+                )
+            for i, left_value in inner_linear_by_row.get(left, ()):
+                for j, right_value in inner_linear_by_row.get(right, ()):
+                    add(
+                        quadratic,
+                        (*output_index, i, j),
+                        value * left_value * right_value,
+                    )
+
+    # Drop exact cancellation, keeping sparse tensors compact.
+    for table in (constant, linear, quadratic):
+        for key in [key for key, value in table.items() if value == 0.0]:
+            del table[key]
+
+    return BilinearWeights.from_trusted_dok(
+        memory,
+        output_shape,
+        constant=dok_ndarray((*output_shape,), constant),
+        linear=dok_ndarray((*output_shape, memory.count), linear),
+        quadratic=dok_ndarray(
+            (*output_shape, memory.count, memory.count), quadratic
+        ),
+    )
 
 
 def outer_product(lhs: dok_ndarray, rhs: dok_ndarray):

@@ -427,23 +427,31 @@ impl EmbeddedOsqpInstance {
                 .cast_mut(),
             region_ptr!(f32, layout.adata_x()),
         );
+        let l_indptr = region_ptr!(i32, layout.qdldl_l_p());
+        let l_indices = region_ptr!(i32, layout.qdldl_l_i());
+        unsafe {
+            let destination = slice::from_raw_parts_mut(l_indptr, n_plus_m as usize + 1);
+            for (destination, source) in destination
+                .iter_mut()
+                .zip(symbolic_l.l_pattern().indptr.iter())
+            {
+                *destination = checked_embedded_ffi_length(source.to_native() as usize)?;
+            }
+            let destination = slice::from_raw_parts_mut(l_indices, l_nnz as usize);
+            for (destination, source) in destination
+                .iter_mut()
+                .zip(symbolic_l.l_pattern().indices.iter())
+            {
+                *destination = checked_embedded_ffi_length(source.to_native() as usize)?;
+            }
+        }
         ffi::embedded_bind::bind_csc_matrix(
             &mut instance.qdldl_l_csc,
             n_plus_m,
             n_plus_m,
             l_nnz,
-            symbolic_l
-                .l_pattern()
-                .indptr
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
-            symbolic_l
-                .l_pattern()
-                .indices
-                .as_ptr()
-                .cast::<i32>()
-                .cast_mut(),
+            l_indptr,
+            l_indices,
             region_ptr!(f32, layout.qdldl_l_x()),
         );
         ffi::embedded_bind::bind_csc_matrix(

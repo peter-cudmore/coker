@@ -26,6 +26,33 @@ quadratic_weights = cross(linear_a, linear_b)
 TEST_VECTOR = np.array([1.0, 2.0, 3.0])
 
 
+def test_scalar_linear_product_supports_multi_value_memory():
+    left = BilinearWeights(
+        MEMORY,
+        shape=(1,),
+        constant=dok_ndarray((1,), {(0,): 2.0}),
+        linear=dok_ndarray(
+            (1, 3),
+            {(0, 0): 1.0, (0, 2): -0.5},
+        ),
+    )
+    right = BilinearWeights(
+        MEMORY,
+        shape=(1,),
+        constant=dok_ndarray((1,), {(0,): -1.0}),
+        linear=dok_ndarray(
+            (1, 3),
+            {(0, 1): 3.0},
+        ),
+    )
+
+    product = left * right
+
+    assert product.quadratic.shape == (1, 3, 3)
+    expected = left(TEST_VECTOR) * right(TEST_VECTOR)
+    assert np.allclose(product(TEST_VECTOR), expected)
+
+
 # --- dot product tests ---
 
 
@@ -36,6 +63,22 @@ def test_dot_both_linear():
         result(TEST_VECTOR),
         np.dot(A @ TEST_VECTOR, B @ TEST_VECTOR),
     )
+
+
+def test_dot_builds_sparse_coefficients_without_dense_round_trip(monkeypatch):
+    dense_round_trips = []
+    original_toarray = dok_ndarray.toarray
+
+    def record_toarray(value):
+        dense_round_trips.append(value.shape)
+        return original_toarray(value)
+
+    monkeypatch.setattr(dok_ndarray, "toarray", record_toarray)
+    result = dot(linear_a, linear_b)
+
+    assert dense_round_trips == []
+    actual = original_toarray(result.quadratic).reshape(3, 3)
+    assert np.allclose(actual, A.T @ B)
 
 
 def test_dot_constant_and_quadratic():

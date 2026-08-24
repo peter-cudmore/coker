@@ -127,6 +127,16 @@ impl ArchivedQpProgramArenaLayout {
         &self.qdldl_l_x
     }
 
+    /// Returns the arena region for QDLDL's mutable `Lp` buffer.
+    pub fn qdldl_l_p(&self) -> &ArchivedQpProgramArenaRegion {
+        &self.qdldl_l_p
+    }
+
+    /// Returns the arena region for QDLDL's mutable `Li` buffer.
+    pub fn qdldl_l_i(&self) -> &ArchivedQpProgramArenaRegion {
+        &self.qdldl_l_i
+    }
+
     /// Returns the arena region for QDLDL's `L` structure.
     pub fn qdldl_l(&self) -> &ArchivedQpProgramArenaRegion {
         &self.qdldl_l

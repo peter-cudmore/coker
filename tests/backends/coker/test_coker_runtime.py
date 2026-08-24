@@ -174,13 +174,14 @@ def test_runtime_matches_mixed_constant_workspace_graph():
     )
 
 
-def test_function_compile_bytecode_exports_mapped_runtime_artifact():
+def test_lowered_coker_function_compiles_mapped_runtime_artifact():
     symbolic_function = function(
         [VectorSpace("x", 3)],
         implementation=lambda x: np.cross(x, np.array([1.0, -2.0, 0.5])),
     )
 
-    program = symbolic_function.compile_bytecode()
+    lowered = symbolic_function.lower()
+    program = lowered.compile_bytecode()
 
     assert isinstance(program, bytes)
     assert program

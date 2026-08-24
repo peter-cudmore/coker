@@ -1,12 +1,13 @@
 import numpy as np
 import pytest
-from coker import FunctionSpace, Scalar, SolveFailure, VectorSpace, function
+from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.dynamics import (
     BoundedVariable,
     VariationalProblem,
     VariationalSolution,
     create_autonomous_ode,
 )
+from coker.toolkits.codesign import SolveFailure
 from coker.dynamics.dynamical_system import create_control_system
 
 # Dynamics

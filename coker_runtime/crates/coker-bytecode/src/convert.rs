@@ -635,6 +635,8 @@ pub(crate) fn qp_program_arena_layout_from_archived(
         solution: qp_program_arena_region_from_archived(&layout.solution),
         info: qp_program_arena_region_from_archived(&layout.info),
         qdldl_l_x: qp_program_arena_region_from_archived(&layout.qdldl_l_x),
+        qdldl_l_p: qp_program_arena_region_from_archived(&layout.qdldl_l_p),
+        qdldl_l_i: qp_program_arena_region_from_archived(&layout.qdldl_l_i),
         qdldl_l: qp_program_arena_region_from_archived(&layout.qdldl_l),
         qdldl_kkt_x: qp_program_arena_region_from_archived(&layout.qdldl_kkt_x),
         qdldl_kkt: qp_program_arena_region_from_archived(&layout.qdldl_kkt),

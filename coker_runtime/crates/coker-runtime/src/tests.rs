@@ -78,7 +78,7 @@ fn scalar_qp_region(byte_offset: u32) -> coker_bytecode::QpProgramArenaRegion {
 #[cfg(not(osqp_embedded))]
 fn scalar_qp_arena_layout() -> coker_bytecode::QpProgramArenaLayout {
     coker_bytecode::QpProgramArenaLayout {
-        total_bytes: 44,
+        total_bytes: 46,
         arena_alignment: 1,
         pdata_x: scalar_qp_region(0),
         pdata: scalar_qp_region(1),
@@ -94,36 +94,38 @@ fn scalar_qp_arena_layout() -> coker_bytecode::QpProgramArenaLayout {
         solution: scalar_qp_region(11),
         info: scalar_qp_region(12),
         qdldl_l_x: scalar_qp_region(13),
-        qdldl_l: scalar_qp_region(14),
-        qdldl_kkt_x: scalar_qp_region(15),
-        qdldl_kkt: scalar_qp_region(16),
-        qdldl: scalar_qp_region(17),
-        qdldl_dinv: scalar_qp_region(18),
-        qdldl_bp: scalar_qp_region(19),
-        qdldl_sol: scalar_qp_region(20),
-        qdldl_rho_inv_vec: scalar_qp_region(21),
-        qdldl_d: scalar_qp_region(22),
-        qdldl_iwork: scalar_qp_region(23),
-        qdldl_bwork: scalar_qp_region(24),
-        qdldl_fwork: scalar_qp_region(25),
-        work_rho_vec: scalar_qp_region(26),
-        work_rho_inv_vec: scalar_qp_region(27),
-        work_constr_type: scalar_qp_region(28),
-        work_x: scalar_qp_region(29),
-        work_y: scalar_qp_region(30),
-        work_z: scalar_qp_region(31),
-        work_xz_tilde: scalar_qp_region(32),
-        work_x_prev: scalar_qp_region(33),
-        work_z_prev: scalar_qp_region(34),
-        work_ax: scalar_qp_region(35),
-        work_px: scalar_qp_region(36),
-        work_aty: scalar_qp_region(37),
-        work_delta_y: scalar_qp_region(38),
-        work_atdelta_y: scalar_qp_region(39),
-        work_delta_x: scalar_qp_region(40),
-        work_pdelta_x: scalar_qp_region(41),
-        work_adelta_x: scalar_qp_region(42),
-        workspace: scalar_qp_region(43),
+        qdldl_l_p: scalar_qp_region(14),
+        qdldl_l_i: scalar_qp_region(15),
+        qdldl_l: scalar_qp_region(16),
+        qdldl_kkt_x: scalar_qp_region(17),
+        qdldl_kkt: scalar_qp_region(18),
+        qdldl: scalar_qp_region(19),
+        qdldl_dinv: scalar_qp_region(20),
+        qdldl_bp: scalar_qp_region(21),
+        qdldl_sol: scalar_qp_region(22),
+        qdldl_rho_inv_vec: scalar_qp_region(23),
+        qdldl_d: scalar_qp_region(24),
+        qdldl_iwork: scalar_qp_region(25),
+        qdldl_bwork: scalar_qp_region(26),
+        qdldl_fwork: scalar_qp_region(27),
+        work_rho_vec: scalar_qp_region(28),
+        work_rho_inv_vec: scalar_qp_region(29),
+        work_constr_type: scalar_qp_region(30),
+        work_x: scalar_qp_region(31),
+        work_y: scalar_qp_region(32),
+        work_z: scalar_qp_region(33),
+        work_xz_tilde: scalar_qp_region(34),
+        work_x_prev: scalar_qp_region(35),
+        work_z_prev: scalar_qp_region(36),
+        work_ax: scalar_qp_region(37),
+        work_px: scalar_qp_region(38),
+        work_aty: scalar_qp_region(39),
+        work_delta_y: scalar_qp_region(40),
+        work_atdelta_y: scalar_qp_region(41),
+        work_delta_x: scalar_qp_region(42),
+        work_pdelta_x: scalar_qp_region(43),
+        work_adelta_x: scalar_qp_region(44),
+        workspace: scalar_qp_region(45),
     }
 }
 
@@ -171,6 +173,10 @@ fn scalar_qp_arena_layout() -> coker_bytecode::QpProgramArenaLayout {
     let info = scalar_qp_push_region::<ffi_raw::OSQPInfo>(&mut offset, &mut arena_alignment, 1);
     let qdldl_l_x =
         scalar_qp_push_region::<ffi_raw::QDLDL_float>(&mut offset, &mut arena_alignment, 1);
+    let qdldl_l_p =
+        scalar_qp_push_region::<ffi_raw::QDLDL_int>(&mut offset, &mut arena_alignment, 3);
+    let qdldl_l_i =
+        scalar_qp_push_region::<ffi_raw::QDLDL_int>(&mut offset, &mut arena_alignment, 1);
     let qdldl_l =
         scalar_qp_push_region::<ffi_raw::OSQPCscMatrix>(&mut offset, &mut arena_alignment, 1);
     let qdldl_kkt_x =
@@ -245,6 +251,8 @@ fn scalar_qp_arena_layout() -> coker_bytecode::QpProgramArenaLayout {
         solution,
         info,
         qdldl_l_x,
+        qdldl_l_p,
+        qdldl_l_i,
         qdldl_l,
         qdldl_kkt_x,
         qdldl_kkt,
@@ -1640,6 +1648,7 @@ fn qp_load_rejects_bad_coefficient_output_layout_length() {
 fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_failed_update() {
     let module = build_mapped_scalar_qp_module(2, 1, 6, 1, true);
     let aligned_bytes = encode_into_aligned_bytes(&module);
+    let original_bytes = aligned_bytes.as_slice().to_vec();
     let mapped = MappedModule::new_from_bytes(aligned_bytes.as_slice()).unwrap();
     let qp_program = mapped.qp_program(2).unwrap();
     let requirements = qp_program.workspace_requirements();
@@ -1691,6 +1700,7 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
         .unwrap();
     assert_eq!(diagnostics.status, QpSolveStatus::Solved);
     assert_eq!(&oversized_coefficient_outputs[6..], &[123.0, 123.0]);
+    assert_eq!(aligned_bytes.as_slice(), original_bytes.as_slice());
 }
 
 #[cfg(not(osqp_embedded))]
