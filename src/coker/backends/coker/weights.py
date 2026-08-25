@@ -250,43 +250,59 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
 
                 if self.is_linear and other.is_linear:
                     memory_count = self.memory.count
-                    constant_value = self.constant[(0,)] * other.constant[(0,)]
+                    scalar_constant = self.constant.keys.get((0,), 0.0)
+                    constant_data = {}
                     linear_data = {}
-                    for key, value in self.linear.keys.items():
-                        contribution = other.constant[(0,)] * value
-                        if contribution:
-                            linear_data[key] = (
-                                linear_data.get(key, 0.0) + contribution
-                            )
-                    for key, value in other.linear.keys.items():
-                        contribution = self.constant[(0,)] * value
-                        if contribution:
-                            linear_data[key] = (
-                                linear_data.get(key, 0.0) + contribution
-                            )
                     quadratic_data = {}
-                    for self_key, self_value in self.linear.keys.items():
+
+                    for output_key, value in other.constant.keys.items():
+                        contribution = scalar_constant * value
+                        if contribution:
+                            constant_data[output_key] = contribution
+
+                    for (
+                        _scalar_row,
+                        memory_index,
+                    ), value in self.linear.keys.items():
                         for (
-                            other_key,
-                            other_value,
-                        ) in other.linear.keys.items():
-                            target = (0, self_key[-1], other_key[-1])
+                            output_key,
+                            constant_value,
+                        ) in other.constant.keys.items():
+                            contribution = constant_value * value
+                            if contribution:
+                                target = (*output_key, memory_index)
+                                linear_data[target] = (
+                                    linear_data.get(target, 0.0) + contribution
+                                )
+
+                    for key, value in other.linear.keys.items():
+                        output_key = key[:-1]
+                        contribution = scalar_constant * value
+                        if contribution:
+                            linear_data[key] = (
+                                linear_data.get(key, 0.0) + contribution
+                            )
+
+                    for (
+                        _scalar_row,
+                        left,
+                    ), left_value in self.linear.keys.items():
+                        for key, right_value in other.linear.keys.items():
+                            output_key = key[:-1]
+                            right = key[-1]
+                            target = (*output_key, left, right)
                             quadratic_data[target] = (
                                 quadratic_data.get(target, 0.0)
-                                + self_value * other_value
+                                + left_value * right_value
                             )
-                    constant = (
-                        dok_ndarray((1,), {(0,): constant_value})
-                        if constant_value
-                        else dok_ndarray((1,))
-                    )
+
                     return BilinearWeights.from_trusted_dok(
                         self.memory,
-                        (1,),
-                        constant,
-                        dok_ndarray((1, memory_count), linear_data),
+                        other.shape,
+                        dok_ndarray(other.shape, constant_data),
+                        dok_ndarray((*other.shape, memory_count), linear_data),
                         dok_ndarray(
-                            (1, memory_count, memory_count),
+                            (*other.shape, memory_count, memory_count),
                             quadratic_data,
                         ),
                     )
