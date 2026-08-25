@@ -150,6 +150,27 @@ def test_runtime_matches_dot_graph():
     )
 
 
+def test_runtime_materialises_quadratic_dot_before_dependent_dot():
+    def implementation(x):
+        squared_norm = np.dot(x, x)
+        vector = np.concatenate([squared_norm, x])
+        return np.dot(vector, vector)
+
+    symbolic_function = function(
+        [VectorSpace("x", 3)], implementation=implementation
+    )
+    graph = create_opgraph(symbolic_function)
+    assert not any(
+        layer.opaque_programs
+        for layer in graph.layers
+        if hasattr(layer, "opaque_programs")
+    )
+    compiled_graph = CompiledGraph.compile(graph)
+    value = np.array([1.0, -2.0, 0.5])
+    squared_norm = np.dot(value, value)
+    _assert_same(compiled_graph(value), squared_norm * (squared_norm + 1.0))
+
+
 def test_runtime_matches_cross_graph():
     symbolic_function = function(
         [VectorSpace("x", 3)],

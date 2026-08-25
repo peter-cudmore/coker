@@ -988,7 +988,20 @@ def _create_opgraph(
             ):
                 lower_function_evaluation(node_index, arguments)
                 continue
-            if operation == OP.MATMUL:
+            if operation == OP.DOT and any(
+                isinstance(operand, BilinearWeights)
+                and not operand.is_linear
+                and not operand.is_constant
+                for operand in operands
+            ):
+                # A dot product is quadratic in its current workspace
+                # coordinates. Materialise an earlier quadratic result before
+                # forming another dot so the product stays degree two.
+                flush_bilinear()
+                operands = [
+                    node_values[argument.index] for argument in arguments
+                ]
+            elif operation == OP.MATMUL:
                 flush_bilinear()
                 operands = [
                     node_values[argument.index] for argument in arguments
