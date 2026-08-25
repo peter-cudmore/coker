@@ -130,6 +130,7 @@ pub(crate) struct ExportedQdldlSymbolicL {
 pub(crate) struct ExportedEmbeddedCscPattern {
     pub(crate) nrows: u64,
     pub(crate) ncols: u64,
+    pub(crate) nnz: u64,
     pub(crate) indptr: Vec<u64>,
     pub(crate) indices: Vec<u64>,
 }

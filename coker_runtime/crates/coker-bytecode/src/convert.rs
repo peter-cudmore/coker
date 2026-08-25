@@ -70,6 +70,7 @@ pub(crate) fn embedded_csc_pattern_from_archived(
     EmbeddedCscPattern {
         nrows: pattern.nrows.into(),
         ncols: pattern.ncols.into(),
+        nnz: pattern.nnz.into(),
         indptr: pattern
             .indptr
             .iter()
@@ -167,7 +168,6 @@ pub(crate) fn validate_embedded_osqp_settings(
     }
     Ok(())
 }
-
 pub(crate) fn validate_embedded_csc_pattern(
     nrows: u32,
     ncols: u32,

@@ -17,7 +17,7 @@ const VERSION: u16 = 5;
 const HEADER_SIZE: usize = 16;
 const QP_MAGIC: [u8; 8] = *b"COKERQ03";
 const EMBEDDED_QP_PLAN_MAGIC: [u8; 8] = *b"COKERP03";
-const EMBEDDED_QP_PLAN_VERSION: u16 = 2;
+const EMBEDDED_QP_PLAN_VERSION: u16 = 3;
 type ArchivedU32Vec = rkyv::vec::ArchivedVec<rkyv::rend::u32_le>;
 
 /// Half-open slice into the flattened QP coefficient output buffer.
@@ -78,6 +78,7 @@ pub enum EmbeddedLinsysSolver {
 pub struct EmbeddedCscPattern {
     pub nrows: u32,
     pub ncols: u32,
+    pub nnz: u32,
     pub indptr: Vec<i32>,
     pub indices: Vec<i32>,
 }
@@ -223,9 +224,17 @@ pub struct EmbeddedQpPlan {
     pub qdldl_plan: EmbeddedQdldlPlan,
 }
 
-/// Validates matrix dimensions, row pointers, and index bounds.
+/// Validates matrix dimensions, nonzero count, row pointers, and index bounds.
 impl EmbeddedCscPattern {
     pub fn validate(&self, field: &'static str) -> Result<(), BytecodeError> {
+        if usize::try_from(self.nnz)
+            .map_err(|_| BytecodeError::Decode(format!("{field} nnz exceeds usize")))?
+            != self.indices.len()
+        {
+            return Err(BytecodeError::Decode(format!(
+                "{field} nnz must match the number of indices"
+            )));
+        }
         validate_embedded_csc_pattern(self.nrows, self.ncols, &self.indptr, &self.indices, field)
     }
 }
@@ -268,7 +277,7 @@ impl QpProgramQdldlPlan {
 /// ABI version expected by mapped embedded runtimes.
 impl QpProgramPlan {
     /// Embedded solver profile and CSC index ABI expected by mapped runtimes.
-    pub const ABI_VERSION: u16 = 2;
+    pub const ABI_VERSION: u16 = 3;
     /// Plan encoding version expected by mapped embedded runtimes.
     pub const PROFILE: EmbeddedQpProfile = EmbeddedQpProfile::Osqp063Embedded2Qdldl;
     pub const VERSION: u16 = EMBEDDED_QP_PLAN_VERSION;
@@ -306,6 +315,9 @@ impl QpProgramPlan {
 /// Validates the standalone embedded QDLDL payload.
 impl EmbeddedQdldlPlan {
     pub fn validate(&self) -> Result<(), BytecodeError> {
+        self.p_pattern.validate("qdldl_plan.p_pattern")?;
+        self.a_pattern.validate("qdldl_plan.a_pattern")?;
+        self.kkt_pattern.validate("qdldl_plan.kkt_pattern")?;
         validate_embedded_qp_plan_dimensions_impl(
             self.p_pattern.nrows,
             self.p_pattern.ncols,

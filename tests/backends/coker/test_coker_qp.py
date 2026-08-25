@@ -94,12 +94,14 @@ def test_extracts_constant_qp_coefficients():
     assert qp_payload["p_pattern"] == {
         "nrows": extracted.n,
         "ncols": extracted.n,
+        "nnz": len(extracted.p_indices),
         "indptr": extracted.p_indptr,
         "indices": extracted.p_indices,
     }
     assert qp_payload["a_pattern"] == {
         "nrows": extracted.m,
         "ncols": extracted.n,
+        "nnz": len(extracted.a_indices),
         "indptr": extracted.a_indptr,
         "indices": extracted.a_indices,
     }
@@ -113,6 +115,7 @@ def test_extracts_constant_qp_coefficients():
     assert symbolic_l == {
         "nrows": 4,
         "ncols": 4,
+        "nnz": 2,
         "indptr": [0, 1, 2, 2, 2],
         "indices": [2, 3],
     }
