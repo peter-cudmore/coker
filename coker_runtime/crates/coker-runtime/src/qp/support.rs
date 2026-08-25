@@ -72,12 +72,18 @@ fn validate_mapped_osqp_csc_pattern(
             problem: "mapped CSC indices do not match the embedded OSQP index ABI",
         });
     }
-    let nnz = checked_embedded_slice_len(pattern.indices.len(), field)?;
+    let nnz = checked_embedded_osqp_index(pattern.nnz.to_native(), field)?;
+    if nnz != pattern.indices.len() {
+        return Err(RuntimeError::ValidationField {
+            field,
+            problem: "nnz must match the CSC index count",
+        });
+    }
     let terminal = pattern.indptr[ncols].to_native();
     if terminal < 0 || usize::try_from(terminal).ok() != Some(nnz) {
         return Err(RuntimeError::ValidationField {
             field,
-            problem: "terminal indptr does not match the CSC index count",
+            problem: "terminal indptr must match nnz",
         });
     }
     Ok(nnz)
@@ -138,17 +144,6 @@ pub(super) fn checked_embedded_osqp_index(
         });
     }
     Ok(value as usize)
-}
-
-pub(super) fn checked_embedded_slice_len(
-    length: usize,
-    field: &'static str,
-) -> Result<usize, RuntimeError> {
-    let value = u32::try_from(length).map_err(|_| RuntimeError::ValidationField {
-        field,
-        problem: "exceeds the embedded OSQP i32 index range",
-    })?;
-    checked_embedded_osqp_index(value, field)
 }
 
 pub(super) fn checked_embedded_usize(

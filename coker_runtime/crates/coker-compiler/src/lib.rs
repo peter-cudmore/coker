@@ -897,6 +897,7 @@ fn lower_embedded_csc_pattern(
     Ok(EmbeddedCscPattern {
         nrows: checked_embedded_qp_u32(pattern.nrows, nrows_field)?,
         ncols: checked_embedded_qp_u32(pattern.ncols, ncols_field)?,
+        nnz: checked_embedded_qp_u32(pattern.nnz, indices_field)?,
         indptr: lower_embedded_osqp_index_vec(pattern.indptr, indptr_field)?,
         indices: lower_embedded_osqp_index_vec(pattern.indices, indices_field)?,
     })

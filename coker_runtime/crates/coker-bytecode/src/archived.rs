@@ -481,6 +481,14 @@ impl ArchivedProgram {
     }
 }
 
+/// Archived accessor helpers for direct-mapped CSC patterns.
+impl ArchivedEmbeddedCscPattern {
+    /// Returns the explicit number of CSC entries required by the OSQP ABI.
+    pub fn nnz(&self) -> u32 {
+        self.nnz.to_native()
+    }
+}
+
 /// Archived accessor helpers for mapped QP program records.
 impl ArchivedQpProgram {
     /// Returns the coefficient-evaluator function id referenced by this QP program.

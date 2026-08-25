@@ -33,6 +33,7 @@ fn scalar_qp_pattern() -> coker_bytecode::EmbeddedCscPattern {
     coker_bytecode::EmbeddedCscPattern {
         nrows: 1,
         ncols: 1,
+        nnz: 1,
         indptr: vec![0, 1],
         indices: vec![0],
     }
@@ -316,6 +317,7 @@ fn scalar_qp_plan() -> coker_bytecode::QpProgramPlan {
             kkt_pattern: coker_bytecode::EmbeddedCscPattern {
                 nrows: 2,
                 ncols: 2,
+                nnz: 3,
                 indptr: vec![0, 1, 3],
                 indices: vec![0, 0, 1],
             },
@@ -328,6 +330,7 @@ fn scalar_qp_plan() -> coker_bytecode::QpProgramPlan {
                 l_pattern: coker_bytecode::EmbeddedCscPattern {
                     nrows: 2,
                     ncols: 2,
+                    nnz: 1,
                     indptr: vec![0, 1, 1],
                     indices: vec![1],
                 },
@@ -1559,12 +1562,14 @@ fn qp_load_rejects_p_lower_triangle_entries() {
     qp_program.p_pattern = coker_bytecode::EmbeddedCscPattern {
         nrows: 2,
         ncols: 2,
+        nnz: 1,
         indptr: vec![0, 1, 1],
         indices: vec![1],
     };
     qp_program.a_pattern = coker_bytecode::EmbeddedCscPattern {
         nrows: 1,
         ncols: 2,
+        nnz: 1,
         indptr: vec![0, 1, 1],
         indices: vec![0],
     };

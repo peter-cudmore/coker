@@ -98,9 +98,9 @@ fn qp_program_arena_layout_json() -> Value {
 
 fn qp_program_plan_json() -> Value {
     json!({
-        "abi_version": 2,
+        "abi_version": 3,
         "profile": "Osqp063Embedded2Qdldl",
-        "version": 2,
+        "version": 3,
         "settings": {
             "rho": 0.1,
             "sigma": 1e-6,
@@ -124,18 +124,21 @@ fn qp_program_plan_json() -> Value {
             "p_pattern": {
                 "nrows": 1,
                 "ncols": 1,
+                "nnz": 1,
                 "indptr": [0, 1],
                 "indices": [0]
             },
             "a_pattern": {
                 "nrows": 1,
                 "ncols": 1,
+                "nnz": 1,
                 "indptr": [0, 1],
                 "indices": [0]
             },
             "kkt_pattern": {
                 "nrows": 2,
                 "ncols": 2,
+                "nnz": 3,
                 "indptr": [0, 1, 3],
                 "indices": [0, 0, 1]
             },
@@ -148,6 +151,7 @@ fn qp_program_plan_json() -> Value {
                 "l_pattern": {
                     "nrows": 2,
                     "ncols": 2,
+                    "nnz": 1,
                     "indptr": [0, 1, 1],
                     "indices": [1]
                 },
@@ -174,12 +178,14 @@ fn exported_qp_module_json() -> Value {
                 "p_pattern": {
                     "nrows": 1,
                     "ncols": 1,
+                    "nnz": 1,
                     "indptr": [0, 1],
                     "indices": [0]
                 },
                 "a_pattern": {
                     "nrows": 1,
                     "ncols": 1,
+                    "nnz": 1,
                     "indptr": [0, 1],
                     "indices": [0]
                 },
@@ -373,12 +379,13 @@ fn compile_exported_qp_json_builds_single_module_with_qp_program() {
         EmbeddedCscPattern {
             nrows: 1,
             ncols: 1,
+            nnz: 1,
             indptr: vec![0, 1],
             indices: vec![0],
         }
     );
     assert_eq!(qp_program.coefficient_outputs.r.length, 1);
-    assert_eq!(qp_program.embedded_plan.abi_version, 2);
+    assert_eq!(qp_program.embedded_plan.abi_version, 3);
     assert_eq!(
         qp_program.embedded_plan.profile,
         EmbeddedQpProfile::Osqp063Embedded2Qdldl
@@ -404,25 +411,28 @@ fn compile_exported_qp_json_builds_single_module_with_qp_program() {
             linsys_solver: EmbeddedLinsysSolver::Qdldl,
         }
     );
-    assert_eq!(qp_program.embedded_plan.version, 2);
+    assert_eq!(qp_program.embedded_plan.version, 3);
     assert_eq!(
         qp_program.embedded_plan.qdldl_plan,
         QpProgramQdldlPlan {
             p_pattern: EmbeddedCscPattern {
                 nrows: 1,
                 ncols: 1,
+                nnz: 1,
                 indptr: vec![0, 1],
                 indices: vec![0],
             },
             a_pattern: EmbeddedCscPattern {
                 nrows: 1,
                 ncols: 1,
+                nnz: 1,
                 indptr: vec![0, 1],
                 indices: vec![0],
             },
             kkt_pattern: EmbeddedCscPattern {
                 nrows: 2,
                 ncols: 2,
+                nnz: 3,
                 indptr: vec![0, 1, 3],
                 indices: vec![0, 0, 1],
             },
@@ -435,6 +445,7 @@ fn compile_exported_qp_json_builds_single_module_with_qp_program() {
                 l_pattern: EmbeddedCscPattern {
                     nrows: 2,
                     ncols: 2,
+                    nnz: 1,
                     indptr: vec![0, 1, 1],
                     indices: vec![1],
                 },

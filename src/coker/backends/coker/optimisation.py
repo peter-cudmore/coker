@@ -99,6 +99,7 @@ def _csc_pattern_dict(
     return {
         "nrows": int(nrows),
         "ncols": int(ncols),
+        "nnz": len(indices),
         "indptr": [int(value) for value in indptr],
         "indices": [int(value) for value in indices],
     }
@@ -255,9 +256,9 @@ class ExtractedQpProgram:
             for binding in self.parameter_bindings
         ]
         embedded_plan = {
-            "abi_version": 2,
+            "abi_version": 3,
             "profile": "Osqp063Embedded2Qdldl",
-            "version": 2,
+            "version": 3,
             "settings": {
                 "rho": 0.1,
                 "sigma": 1.0e-6,

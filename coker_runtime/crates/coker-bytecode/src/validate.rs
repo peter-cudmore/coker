@@ -144,12 +144,17 @@ pub(crate) fn validate_archived_qdldl_plan_dimensions(
             }
         }
         let terminal = pattern.indptr[ncols].to_native();
-        if usize::try_from(terminal)
-            .map_err(|_| BytecodeError::Decode(format!("{field} terminal indptr exceeds usize")))?
+        if terminal < 0 || terminal as u32 != pattern.nnz.to_native() {
+            return Err(BytecodeError::Decode(format!(
+                "{field} terminal indptr must match nnz"
+            )));
+        }
+        if usize::try_from(pattern.nnz.to_native())
+            .map_err(|_| BytecodeError::Decode(format!("{field} nnz exceeds usize")))?
             != pattern.indices.len()
         {
             return Err(BytecodeError::Decode(format!(
-                "{field} terminal indptr must match the number of indices"
+                "{field} nnz must match the number of indices"
             )));
         }
         for col in 0..ncols {
@@ -1834,6 +1839,7 @@ pub(crate) fn archived_csc_patterns_match(
 ) -> bool {
     lhs.nrows.to_native() == rhs.nrows.to_native()
         && lhs.ncols.to_native() == rhs.ncols.to_native()
+        && lhs.nnz.to_native() == rhs.nnz.to_native()
         && lhs.indptr.len() == rhs.indptr.len()
         && lhs.indices.len() == rhs.indices.len()
         && lhs
@@ -1882,12 +1888,17 @@ pub(crate) fn validate_archived_embedded_csc_pattern(
         }
     }
     let terminal = pattern.indptr[ncols].to_native();
-    if usize::try_from(terminal)
-        .map_err(|_| BytecodeError::Decode(format!("{field} terminal indptr exceeds usize")))?
+    if terminal < 0 || terminal as u32 != pattern.nnz.to_native() {
+        return Err(BytecodeError::Decode(format!(
+            "{field} terminal indptr must match nnz"
+        )));
+    }
+    if usize::try_from(pattern.nnz.to_native())
+        .map_err(|_| BytecodeError::Decode(format!("{field} nnz exceeds usize")))?
         != pattern.indices.len()
     {
         return Err(BytecodeError::Decode(format!(
-            "{field} terminal indptr must match the number of indices"
+            "{field} nnz must match the number of indices"
         )));
     }
     for col in 0..ncols {
