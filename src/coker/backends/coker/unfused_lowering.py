@@ -16,10 +16,12 @@ from coker.backends.coker.lowering import (
 
 from coker.backends.coker.ast_preprocessing import FunctionTable
 
+
 class _FunctionTableBuilder:
     def __init__(self):
         self._function_ids_by_identity: Dict[int, int] = {}
         self._graphs_by_id: Dict[int, SparseNet | None] = {}
+
     def build(self, function: Function) -> FunctionTable:
         entry_function_id, _graph = self.get_or_build(function)
         ordered_graphs = [
@@ -46,6 +48,7 @@ class _FunctionTableBuilder:
         graph = _create_opgraph(function, self)
         self._graphs_by_id[function_id] = graph
         return function_id, graph
+
 
 def _create_opgraph(
     function: Function,

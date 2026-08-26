@@ -22,6 +22,7 @@ from coker.backends.coker.qp_types import (
     OSQP_INFINITY,
 )
 
+
 def build_optimisation_problem(
     backend,
     cost: Tracer,
