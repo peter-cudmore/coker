@@ -934,21 +934,59 @@ def _create_residual_opgraph(
             dok_ndarray((*shape, compiler_memory.count, compiler_memory.count), quadratic),
         )
 
-    def lower_contraction(operation, lhs, rhs, output_shape):
-        lhs_shape, rhs_shape = lhs.shape, rhs.shape
+    def contraction_products(operation, lhs_shape, rhs_shape):
         if operation is OP.DOT and lhs_shape == rhs_shape:
-            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
-        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 1:
-            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
-        elif operation is OP.MATMUL and len(lhs_shape) == 2 and len(rhs_shape) == 1:
-            products = [((i,), (i, k), (k,)) for i in range(lhs_shape[0]) for k in range(lhs_shape[1])]
-        elif operation is OP.MATMUL and len(lhs_shape) == 1 and len(rhs_shape) == 2:
-            products = [((j,), (k,), (k, j)) for j in range(rhs_shape[1]) for k in range(lhs_shape[0])]
-        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 2:
-            products = [((i, j), (i, k), (k, j)) for i in range(lhs_shape[0]) for j in range(rhs_shape[1]) for k in range(lhs_shape[1])]
-        elif operation is OP.CROSS and lhs_shape == rhs_shape == (3,):
-            products = [((0,), (1,), (2,)), ((0,), (2,), (1,)), ((1,), (2,), (0,)), ((1,), (0,), (2,)), ((2,), (0,), (1,)), ((2,), (1,), (0,))]
-        else:
+            return [((), (k,), (k,)) for k in range(lhs_shape[0])]
+        if operation is OP.CROSS and lhs_shape == rhs_shape == (3,):
+            return [
+                ((0,), (1,), (2,)), ((0,), (2,), (1,)),
+                ((1,), (2,), (0,)), ((1,), (0,), (2,)),
+                ((2,), (0,), (1,)), ((2,), (1,), (0,)),
+            ]
+        if operation is not OP.MATMUL:
+            return None
+        if len(lhs_shape) == len(rhs_shape) == 1:
+            return [((), (k,), (k,)) for k in range(lhs_shape[0])]
+        if len(lhs_shape) == 2 and len(rhs_shape) == 1:
+            return [
+                ((i,), (i, k), (k,))
+                for i in range(lhs_shape[0])
+                for k in range(lhs_shape[1])
+            ]
+        if len(lhs_shape) == 1 and len(rhs_shape) == 2:
+            return [
+                ((j,), (k,), (k, j))
+                for j in range(rhs_shape[1])
+                for k in range(lhs_shape[0])
+            ]
+        if len(lhs_shape) < 2 or len(rhs_shape) < 2:
+            return None
+        if lhs_shape[-1] != rhs_shape[-2]:
+            return None
+        batch_shape = np.broadcast_shapes(lhs_shape[:-2], rhs_shape[:-2])
+
+        def broadcast_coordinate(batch, source_batch):
+            padding = len(batch) - len(source_batch)
+            return tuple(
+                0 if extent == 1 else batch[padding + axis]
+                for axis, extent in enumerate(source_batch)
+            )
+
+        return [
+            (
+                batch + (row, column),
+                broadcast_coordinate(batch, lhs_shape[:-2]) + (row, inner),
+                broadcast_coordinate(batch, rhs_shape[:-2]) + (inner, column),
+            )
+            for batch in np.ndindex(batch_shape)
+            for row in range(lhs_shape[-2])
+            for column in range(rhs_shape[-1])
+            for inner in range(lhs_shape[-1])
+        ]
+
+    def lower_contraction(operation, lhs, rhs, output_shape):
+        products = contraction_products(operation, lhs.shape, rhs.shape)
+        if products is None:
             return None
         result = {}
         for ordinal, (output, left, right) in enumerate(products):
@@ -978,19 +1016,8 @@ def _create_residual_opgraph(
             if isinstance(rhs_arg, Tracer)
             else np.asarray(rhs_arg).shape or (1,)
         )
-        if operation is OP.DOT and lhs_shape == rhs_shape:
-            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
-        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 1:
-            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
-        elif operation is OP.MATMUL and len(lhs_shape) == 2 and len(rhs_shape) == 1:
-            products = [((i,), (i, k), (k,)) for i in range(lhs_shape[0]) for k in range(lhs_shape[1])]
-        elif operation is OP.MATMUL and len(lhs_shape) == 1 and len(rhs_shape) == 2:
-            products = [((j,), (k,), (k, j)) for j in range(rhs_shape[1]) for k in range(lhs_shape[0])]
-        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 2:
-            products = [((i, j), (i, k), (k, j)) for i in range(lhs_shape[0]) for j in range(rhs_shape[1]) for k in range(lhs_shape[1])]
-        elif operation is OP.CROSS and lhs_shape == rhs_shape == (3,):
-            products = [((0,), (1,), (2,)), ((0,), (2,), (1,)), ((1,), (2,), (0,)), ((1,), (0,), (2,)), ((2,), (0,), (1,)), ((2,), (1,), (0,))]
-        else:
+        products = contraction_products(operation, lhs_shape, rhs_shape)
+        if products is None:
             return False
 
         def scalar_operand(argument, coordinate, shape):
@@ -1017,9 +1044,19 @@ def _create_residual_opgraph(
             terms = terms_by_output.setdefault(output, {})
             terms[pair] = terms.get(pair, 0.0) + coefficient
         life = lifetimes[index]
+        logical_output_shape = tuple(
+            max(output[axis] for output in terms_by_output if output) + 1
+            for axis in range(max((len(output) for output in terms_by_output), default=0))
+        )
+        if logical_output_shape and int(np.prod(logical_output_shape)) != life.width:
+            return False
         rows = []
         for output, terms in terms_by_output.items():
-            flat_output = 0 if not output else int(np.ravel_multi_index(output, output_shape or (1,)))
+            flat_output = (
+                0
+                if not output
+                else int(np.ravel_multi_index(output, logical_output_shape))
+            )
             rows.append(BilinearRow(
                 life.slot.start + flat_output,
                 tuple(
