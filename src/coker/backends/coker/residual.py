@@ -376,3 +376,121 @@ def push_forward_nonlinear_stage(
         )
         workspace[operation.output] = value
         dworkspace[operation.output] = tangent
+
+
+@dataclass(frozen=True)
+class InputBinding:
+    """One ABI input mapped into ordered stable workspace slots."""
+
+    slots: Tuple[int, ...]
+
+    def __post_init__(self):
+        if not self.slots or any(slot < 0 for slot in self.slots):
+            raise ValueError("input binding requires non-negative slots")
+        if len(set(self.slots)) != len(self.slots):
+            raise ValueError("input binding slots must be unique")
+
+
+@dataclass(frozen=True)
+class InputMap:
+    """Writes caller inputs directly into stable workspace slots."""
+
+    bindings: Tuple[InputBinding, ...]
+
+    def write_into(self, args: Tuple[object, ...], workspace: np.ndarray) -> None:
+        if len(args) != len(self.bindings):
+            raise ValueError("input count does not match residual input map")
+        for binding, argument in zip(self.bindings, args, strict=True):
+            values = np.asarray(argument).reshape(-1, order="C")
+            if values.size != len(binding.slots):
+                raise ValueError("input width does not match residual input map")
+            workspace[np.asarray(binding.slots, dtype=np.intp)] = values
+
+
+@dataclass(frozen=True)
+class OutputBinding:
+    """One ordered residual workspace projection and its public shape."""
+
+    slots: Tuple[int, ...]
+    shape: Tuple[int, ...] | None
+
+    def __post_init__(self):
+        if not self.slots or any(slot < 0 for slot in self.slots):
+            raise ValueError("output binding requires non-negative slots")
+        if self.shape is not None and int(np.prod(self.shape)) != len(self.slots):
+            raise ValueError("output shape does not match residual output slots")
+
+
+@dataclass(frozen=True)
+class OutputMap:
+    """Reads declared outputs from stable workspace slots."""
+
+    bindings: Tuple[OutputBinding, ...]
+
+    def read(self, workspace: np.ndarray):
+        outputs = []
+        for binding in self.bindings:
+            values = workspace[np.asarray(binding.slots, dtype=np.intp)]
+            if binding.shape is None:
+                outputs.append(float(values[0]))
+            else:
+                outputs.append(np.reshape(values, binding.shape, order="C"))
+        return outputs[0] if len(outputs) == 1 else outputs
+
+
+@dataclass(frozen=True)
+class CallStage:
+    """Invoke one lowered callee through direct stable-slot bindings.
+
+    Inputs and outputs are ordered scalar slots.  Non-addressable expressions
+    must be materialized by the scheduler before the call stage.
+    """
+
+    callee: object
+    inputs: Tuple[Tuple[int, ...], ...]
+    outputs: Tuple[int, ...]
+
+    def __post_init__(self):
+        if any(slot < 0 for slots in self.inputs for slot in slots):
+            raise ValueError("call input requires non-negative slots")
+        if not self.outputs or any(slot < 0 for slot in self.outputs):
+            raise ValueError("call output requires non-negative slots")
+        if len(set(self.outputs)) != len(self.outputs):
+            raise ValueError("call outputs must be unique")
+
+
+def _call_arguments(stage: CallStage, workspace: np.ndarray) -> tuple[np.ndarray, ...]:
+    return tuple(
+        workspace[np.asarray(slots, dtype=np.intp)] for slots in stage.inputs
+    )
+
+
+def _flatten_call_outputs(value: object) -> np.ndarray:
+    values = value if isinstance(value, (tuple, list)) else (value,)
+    return np.concatenate(
+        [np.asarray(item).reshape(-1, order="C") for item in values]
+    )
+
+
+def apply_call_stage(stage: CallStage, workspace: np.ndarray) -> None:
+    """Evaluate one nested residual call into direct stable output slots."""
+    values = _flatten_call_outputs(stage.callee(*_call_arguments(stage, workspace)))
+    if values.size != len(stage.outputs):
+        raise ValueError("call result width does not match stable output bindings")
+    workspace[np.asarray(stage.outputs, dtype=np.intp)] = values
+
+
+def push_forward_call_stage(
+    stage: CallStage, workspace: np.ndarray, dworkspace: np.ndarray
+) -> None:
+    """Evaluate one nested residual call and its tangent in stable slots."""
+    arguments = _call_arguments(stage, workspace)
+    tangents = _call_arguments(stage, dworkspace)
+    value, tangent = stage.callee.push_forward(*arguments, *tangents)
+    values = _flatten_call_outputs(value)
+    dvalues = _flatten_call_outputs(tangent)
+    if values.size != len(stage.outputs) or dvalues.size != len(stage.outputs):
+        raise ValueError("call result width does not match stable output bindings")
+    output_slots = np.asarray(stage.outputs, dtype=np.intp)
+    workspace[output_slots] = values
+    dworkspace[output_slots] = dvalues

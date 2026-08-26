@@ -7,10 +7,15 @@ from coker.backends.coker.layers import InputLayer, OutputLayer
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.residual import (
     BilinearStage,
+    CallStage,
+    InputMap,
     NonlinearStage,
+    OutputMap,
     apply_bilinear_stage,
+    apply_call_stage,
     apply_nonlinear_stage,
     push_forward_bilinear_stage,
+    push_forward_call_stage,
     push_forward_nonlinear_stage,
 )
 from coker.algebra.ops import OP
@@ -156,15 +161,31 @@ class SparseNet:
 
     def __init__(
         self,
-        memory: MemorySpec,
-        input_layer: InputLayer,
-        output_layer: OutputLayer,
+        memory: MemorySpec | int,
+        input_layer: InputLayer | InputMap,
+        output_layer: OutputLayer | OutputMap,
         intermediate_layers=None,
         *,
-        residual_stages: Tuple[BilinearStage | NonlinearStage, ...] | None = None,
+        residual_stages: (
+            Tuple[BilinearStage | NonlinearStage | CallStage, ...] | None
+        ) = None,
     ):
         if intermediate_layers is not None and residual_stages is not None:
             raise ValueError("SparseNet cannot mix legacy and residual stages")
+        if residual_stages is None:
+            if not isinstance(memory, MemorySpec):
+                raise TypeError("legacy SparseNet requires a MemorySpec")
+            if not isinstance(input_layer, InputLayer) or not isinstance(
+                output_layer, OutputLayer
+            ):
+                raise TypeError("legacy SparseNet requires legacy input/output maps")
+        else:
+            if not isinstance(memory, int) or memory < 0:
+                raise TypeError("residual SparseNet requires a workspace size")
+            if not isinstance(input_layer, InputMap) or not isinstance(
+                output_layer, OutputMap
+            ):
+                raise TypeError("residual SparseNet requires residual input/output maps")
         self.memory = memory
         self.input_layer = input_layer
         self.output_layer = output_layer
@@ -183,11 +204,8 @@ class SparseNet:
         return [self.input_layer, *stages, self.output_layer]
 
     def _residual_workspace(self, *args) -> np.ndarray:
-        input_values = self.apply_input_map(*args)
-        if input_values.size > self.memory.count:
-            raise ValueError("input map exceeds residual workspace")
-        workspace = np.zeros(self.memory.count, dtype=input_values.dtype)
-        workspace[: input_values.size] = input_values
+        workspace = np.zeros(self.memory, dtype=float)
+        self.input_layer.write_into(args, workspace)
         return workspace
 
     def __call__(self, *args):
@@ -196,9 +214,11 @@ class SparseNet:
             for stage in self.residual_stages:
                 if isinstance(stage, BilinearStage):
                     apply_bilinear_stage(stage, workspace)
-                else:
+                elif isinstance(stage, NonlinearStage):
                     apply_nonlinear_stage(stage, workspace)
-            return self.output_layer.call(workspace)
+                else:
+                    apply_call_stage(stage, workspace)
+            return self.output_layer.read(workspace)
 
         workspace = self.apply_input_map(*args)
         if workspace.size < self.memory.count:
@@ -210,21 +230,26 @@ class SparseNet:
         return self.output_layer.call(workspace)
 
     def push_forward(self, *tangent_spaces):
-        n_args = len(self.input_layer.input_specs)
-        x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
         if self.residual_stages is not None:
+            n_args = len(self.input_layer.bindings)
+            x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
+            if len(dx) != n_args:
+                raise ValueError("residual push_forward requires one tangent per input")
             workspace = self._residual_workspace(*x)
             dworkspace = self._residual_workspace(*dx)
             for stage in self.residual_stages:
                 if isinstance(stage, BilinearStage):
                     push_forward_bilinear_stage(stage, workspace, dworkspace)
-                else:
+                elif isinstance(stage, NonlinearStage):
                     push_forward_nonlinear_stage(stage, workspace, dworkspace)
-            return (
-                self.output_layer.call(workspace),
-                self.output_layer.call(dworkspace),
+                else:
+                    push_forward_call_stage(stage, workspace, dworkspace)
+            return self.output_layer.read(workspace), self.output_layer.read(
+                dworkspace
             )
 
+        n_args = len(self.input_layer.input_specs)
+        x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
         workspace = self.apply_input_map(*x)
         dworkspace = self.apply_input_map(*dx)
         if workspace.size < self.memory.count:
