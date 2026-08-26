@@ -48,7 +48,6 @@ class CokerFunction:
 
         return bytes(CompiledGraph.compile(self.function_table).program)
 
-
     def compile_artifact(
         self, *, name: str = "coker_function", version: str = "1"
     ):

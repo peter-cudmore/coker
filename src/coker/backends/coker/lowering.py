@@ -31,6 +31,7 @@ from coker.backends.coker.op_impl import ops
 from coker.backends.coker.sparse_tensor import dok_ndarray
 from coker.backends.coker.weights import BilinearWeights
 
+
 def _node_shape(dimension):
     return dimension.shape if hasattr(dimension, "shape") else None
 
@@ -183,8 +184,6 @@ def _build_opaque_operand(
         stored = dok_ndarray.from_scipy(value.reshape(shape))
         return ConstantOperand(stored, shape)
     return ConstantOperand(value, shape)
-
-
 
 
 def create_compact_bilinear_opgraph(function: Function):
@@ -405,5 +404,3 @@ def _raw_output_weights(graph: SparseNet, output_weights):
         # perspective, even when its output happens to be numeric.
         return None
     return weights
-
-

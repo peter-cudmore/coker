@@ -195,6 +195,7 @@ class SparseNet:
             ],
         }
 
+
 class FunctionTable:
     """Own the SparseNet programs that make up one lowered Coker module."""
 

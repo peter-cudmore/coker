@@ -61,8 +61,9 @@ fn validate_mapped_osqp_csc_pattern(
             problem: "indptr length must equal column count plus one",
         });
     }
-    if pattern.indptr.as_ptr() as usize % align_of::<raw::OSQPInt>() != 0
-        || pattern.indices.as_ptr() as usize % align_of::<raw::OSQPInt>() != 0
+    if !(pattern.indptr.as_ptr() as usize).is_multiple_of(align_of::<raw::OSQPInt>())
+        || !(pattern.indices.as_ptr() as usize)
+            .is_multiple_of(align_of::<raw::OSQPInt>())
         || size_of_val(&pattern.indptr[0]) != core::mem::size_of::<raw::OSQPInt>()
         || (!pattern.indices.is_empty()
             && size_of_val(&pattern.indices[0]) != core::mem::size_of::<raw::OSQPInt>())
