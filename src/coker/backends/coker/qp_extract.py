@@ -6,7 +6,6 @@ import numpy as np
 
 from coker.algebra.kernel import Function, Tape, Tracer, function
 from coker.algebra.sparse import SparseMatrixPattern
-from coker.backends.backend import get_backend_by_name
 from coker.backends.optimisation import (
     InputBinding,
     build_initial_guess,
@@ -144,7 +143,6 @@ def extract_qp_program(
     )
 
     coefficient_table = create_function_table(coefficient_function)
-    coefficient_graph = coefficient_table.entry
     p_indptr, p_indices = p_pattern
     a_indptr, a_indices = a_pattern
     return ExtractedQpProgram(

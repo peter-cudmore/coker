@@ -22,7 +22,7 @@ class CokerFunction:
 
     @property
     def function_table(self):
-        """Build the module-owned function table only when compilation needs it."""
+        """Build the table only when compilation needs it."""
         if self._function_table is None:
             self._function_table = create_function_table(self.function)
         return self._function_table
