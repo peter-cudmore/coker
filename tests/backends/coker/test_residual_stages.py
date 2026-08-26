@@ -19,6 +19,7 @@ from coker.backends.coker.residual import (
     RetainedExpression,
     SlotOperand,
     push_forward_bilinear_stage,
+    canonical_expression,
     push_forward_nonlinear_stage,
 )
 
@@ -40,6 +41,20 @@ def test_retained_expression_requires_canonical_sparse_terms():
             roots=(2, 7),
             quadratic=(QuadraticTerm(0, 1, 1.0), QuadraticTerm(0, 1, 2.0)),
         )
+
+
+def test_canonical_expression_combines_and_cancels_terms():
+    expression = canonical_expression(
+        roots=(2, 7),
+        linear=(LinearTerm(0, 2.0), LinearTerm(0, -2.0)),
+        quadratic=(
+            QuadraticTerm(1, 0, 3.0),
+            QuadraticTerm(0, 1, -1.0),
+        ),
+    )
+
+    assert expression.linear == ()
+    assert expression.quadratic == (QuadraticTerm(0, 1, 2.0),)
 
 
 def test_nonlinear_stage_rejects_intra_stage_dependencies():

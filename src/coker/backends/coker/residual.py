@@ -69,6 +69,35 @@ class RetainedExpression:
             previous = pair
 
 
+def canonical_expression(
+    roots: Tuple[int, ...],
+    constant: float = 0.0,
+    linear: Tuple[LinearTerm, ...] = (),
+    quadratic: Tuple[QuadraticTerm, ...] = (),
+) -> RetainedExpression:
+    """Canonicalize sparse coefficients for one retained expression."""
+    linear_terms = {}
+    for term in linear:
+        linear_terms[term.root] = linear_terms.get(term.root, 0.0) + term.coefficient
+    quadratic_terms = {}
+    for term in quadratic:
+        pair = tuple(sorted((term.left, term.right)))
+        quadratic_terms[pair] = quadratic_terms.get(pair, 0.0) + term.coefficient
+    return RetainedExpression(
+        roots=roots,
+        constant=constant,
+        linear=tuple(
+            LinearTerm(root, coefficient)
+            for root, coefficient in sorted(linear_terms.items())
+            if coefficient != 0.0
+        ),
+        quadratic=tuple(
+            QuadraticTerm(left, right, coefficient)
+            for (left, right), coefficient in sorted(quadratic_terms.items())
+            if coefficient != 0.0
+        ),
+    )
+
 NonlinearOperand = SlotOperand | RetainedExpression
 
 
