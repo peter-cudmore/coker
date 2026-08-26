@@ -25,8 +25,35 @@ from coker.backends.coker.residual import (
     BilinearStage,
     CallStage,
     NonlinearStage,
+    RetainedExpression,
+    SlotOperand,
     stage_count,
 )
+
+
+def _stage_slots(stage: object) -> set[int]:
+    """Return every workspace slot read or written by one residual stage."""
+    slots: set[int] = set()
+    if isinstance(stage, BilinearStage):
+        for row in stage.rows:
+            slots.add(row.output)
+            for term in row.terms:
+                if term.left is not None:
+                    slots.add(term.left)
+                if term.right is not None:
+                    slots.add(term.right)
+    elif isinstance(stage, NonlinearStage):
+        for operation in stage.operations:
+            slots.add(operation.output)
+            for operand in (operation.first, operation.second, operation.third):
+                if isinstance(operand, SlotOperand):
+                    slots.add(operand.slot)
+                elif isinstance(operand, RetainedExpression):
+                    slots.update(operand.roots)
+    elif isinstance(stage, CallStage):
+        slots.update(stage.outputs)
+        slots.update(slot for binding in stage.inputs for slot in binding)
+    return slots
 from coker.toolkits.kinematics import Inertia, Revolute, RigidBody
 from coker.toolkits.spatial import Isometry3, Screw
 
@@ -128,19 +155,14 @@ def build_hexapod() -> RigidBody:
 
 
 def compile_hexapod():
-    """Build the executable Python residual graph for the hexapod.
-    Bytecode compilation is intentionally deferred to the typed-bytecode
-    phase.  The returned graph is the residual SparseNet itself and is
-    executable through ``__call__`` and ``push_forward``.
-    """
+    """Build the executable Python residual graph for the hexapod."""
     model = build_hexapod()
     lowered = function(
         [VectorSpace("q", model.total_joints())],
         implementation=model.to_function(),
         backend="coker",
     )
-    graph = lowered.lower().graph
-    return model, graph
+    return model, lowered.lower().graph
 
 
 def payload_metrics(
@@ -150,12 +172,12 @@ def payload_metrics(
     *,
     require_v6: bool = False,
 ) -> dict[str, object]:
-    """Summarize residual stages without serializing a legacy payload."""
     stages = tuple(graph.residual_stages or ())
     kinds: dict[str, int] = {}
     generic_ops = bilinear_rows = bilinear_terms = 0
-    workspace_bytes_touched = 0
+    touched_slots: set[int] = set()
     for stage in stages:
+        touched_slots.update(_stage_slots(stage))
         if isinstance(stage, BilinearStage):
             kind = "bilinear"
             bilinear_rows += len(stage.rows)
@@ -168,35 +190,48 @@ def payload_metrics(
         else:
             kind = type(stage).__name__.lower()
         kinds[kind] = kinds.get(kind, 0) + 1
+    input_slots = {
+        slot
+        for binding in getattr(graph.input_layer, "bindings", ())
+        for slot in binding.slots
+    }
+    output_slots = {
+        slot
+        for binding in getattr(graph.output_layer, "bindings", ())
+        for slot in binding.slots
+    }
+    touched_slots.update(input_slots | output_slots)
     workspace = max(
         int(workspace_f32),
         int(tangent_f32),
         int(getattr(graph, "residual_workspace_size", graph.memory)),
     )
-    if require_v6:
-        # Residual stages have no relocation, explicit-copy, or clear rows.
-        pass
+    copy_rows = int(getattr(graph, "frontier_copy_rows", 0))
+    if require_v6 and copy_rows:
+        raise AssertionError("v6 residual contains explicit copy rows")
     return {
         "layer_count": stage_count(stages),
         "residual_stage_count": stage_count(stages),
-        "residual_copy_rows": 0,
+        "residual_copy_rows": copy_rows,
         "residual_workspace_f32": workspace,
         "algebraic_frontier_count": sum(isinstance(s, BilinearStage) for s in stages),
         "nonlinear_batch_count": sum(isinstance(s, NonlinearStage) for s in stages),
         "generic_layer_count": sum(isinstance(s, NonlinearStage) for s in stages),
         "bilinear_layer_count": sum(isinstance(s, BilinearStage) for s in stages),
         "layer_kinds": kinds,
-        "frontier_closure_reasons": {},
-        "frontier_copy_rows": 0,
+        "frontier_closure_reasons": getattr(graph, "frontier_closure_reasons", {}),
+        "frontier_copy_rows": copy_rows,
         "generic_arithmetic_rows": generic_ops,
-        "identity_relocation_rows": 0,
-        "bilinear_identity_relocation_rows": 0,
-        "explicit_copy_rows": 0,
+        "identity_relocation_rows": int(getattr(graph, "identity_relocation_rows", 0)),
+        "bilinear_identity_relocation_rows": int(
+            getattr(graph, "bilinear_identity_relocation_rows", 0)
+        ),
+        "explicit_copy_rows": copy_rows,
         "bilinear_rows": bilinear_rows,
         "bilinear_terms": bilinear_terms,
-        "output_clear_rows": 0,
-        "output_clear_bytes": 0,
-        "workspace_bytes_touched": workspace_bytes_touched,
+        "output_clear_rows": int(getattr(graph, "output_clear_rows", 0)),
+        "output_clear_bytes": int(getattr(graph, "output_clear_bytes", 0)),
+        "workspace_bytes_touched": len(touched_slots) * np.dtype(float).itemsize,
     }
 
 
