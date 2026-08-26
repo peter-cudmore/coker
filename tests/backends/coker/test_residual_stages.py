@@ -175,6 +175,77 @@ def test_residual_alias_input_bindings_share_primal_and_tangent_slot():
 
     assert output == pytest.approx(9.0)
     assert tangent == pytest.approx(12.0)
+ 
+ 
+def test_residual_retained_expression_and_ordered_nonlinear_chain():
+    graph = SparseNet(
+        5,
+        InputMap((InputBinding((0, 1)),)),
+        OutputMap((OutputBinding((4,), None),)),
+        residual_stages=(
+            NonlinearStage(
+                operations=(
+                    NonlinearOperation(
+                        2,
+                        OP.ADD,
+                        RetainedExpression(
+                            roots=(0, 1),
+                            constant=1.5,
+                            linear=(LinearTerm(0, 2.0), LinearTerm(1, -0.5)),
+                        ),
+                        SlotOperand(0),
+                    ),
+                )
+            ),
+            NonlinearStage(
+                operations=(NonlinearOperation(3, OP.SIN, SlotOperand(2)),)
+            ),
+            NonlinearStage(
+                operations=(NonlinearOperation(4, OP.MUL, SlotOperand(3), SlotOperand(1)),)
+            ),
+        ),
+    )
+    x = np.array([0.4, -1.2])
+    dx = np.array([0.7, 0.25])
+    inner = 1.5 + 2.0 * x[0] - 0.5 * x[1] + x[0]
+    expected = np.sin(inner) * x[1]
+    h = 1e-6
+    plus = x + h * dx
+    minus = x - h * dx
+    expected_dx = (
+        np.sin(1.5 + 2.0 * plus[0] - 0.5 * plus[1] + plus[0]) * plus[1]
+        - np.sin(1.5 + 2.0 * minus[0] - 0.5 * minus[1] + minus[0]) * minus[1]
+    ) / (2 * h)
+    actual, actual_dx = graph.push_forward(x, dx)
+    assert actual == pytest.approx(expected)
+    assert actual_dx == pytest.approx(expected_dx, abs=1e-8)
+
+
+def test_residual_direct_view_output_preserves_order_and_shape():
+    graph = SparseNet(
+        4,
+        InputMap((InputBinding((0, 1, 2, 3)),)),
+        OutputMap((OutputBinding((2, 0), (2,)),)),
+        residual_stages=(),
+    )
+    x = np.arange(4.0)
+    assert np.array_equal(graph(x), np.array([2.0, 0.0]))
+    value, tangent = graph.push_forward(x, np.ones(4))
+    assert np.array_equal(value, np.array([2.0, 0.0]))
+    assert np.array_equal(tangent, np.array([1.0, 1.0]))
+ 
+ 
+def test_residual_rejects_unknown_stage_type():
+    graph = SparseNet(
+        1,
+        InputMap((InputBinding((0,)),)),
+        OutputMap((OutputBinding((0,), None),)),
+        residual_stages=(object(),),
+    )
+    with pytest.raises(TypeError, match="unsupported residual stage"):
+        graph(np.array([2.0]))
+    with pytest.raises(TypeError, match="unsupported residual stage"):
+        graph.push_forward(np.array([2.0]), np.array([1.0]))
 
 
 def test_compiler_preserves_aliases_across_nested_call_push_forward():
