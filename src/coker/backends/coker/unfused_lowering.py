@@ -1117,15 +1117,7 @@ def _create_residual_opgraph(
         if isinstance(node, Tracer):
             continue
         operation, *arguments = node
-        is_view = (
-            isinstance(operation, (ReshapeOP, ConcatenateOP))
-            or operation is OP.TRANSPOSE
-        )
-        if (
-            index not in semantic_dag.nodes
-            and operation is not OP.VALUE
-            and not is_view
-        ):
+        if index not in semantic_dag.nodes:
             continue
         if index in tape.input_indicies:
             life = lifetimes[index]
