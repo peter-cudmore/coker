@@ -5,6 +5,14 @@ from coker.algebra.kernel import Function, Tracer
 import numpy as np
 from coker.backends.coker.layers import InputLayer, OutputLayer
 from coker.backends.coker.memory import MemorySpec
+from coker.backends.coker.residual import (
+    BilinearStage,
+    NonlinearStage,
+    apply_bilinear_stage,
+    apply_nonlinear_stage,
+    push_forward_bilinear_stage,
+    push_forward_nonlinear_stage,
+)
 from coker.algebra.ops import OP
 
 
@@ -144,24 +152,59 @@ def label_sources(
 
 
 class SparseNet:
+    """A lowered Coker program with either legacy or stable-slot stages."""
+
     def __init__(
         self,
         memory: MemorySpec,
         input_layer: InputLayer,
         output_layer: OutputLayer,
-        intermediate_layers,
+        intermediate_layers=None,
+        *,
+        residual_stages: Tuple[BilinearStage | NonlinearStage, ...] | None = None,
     ):
+        if intermediate_layers is not None and residual_stages is not None:
+            raise ValueError("SparseNet cannot mix legacy and residual stages")
         self.memory = memory
         self.input_layer = input_layer
         self.output_layer = output_layer
-        self.intermediate_layers = intermediate_layers
+        self.intermediate_layers = (
+            [] if intermediate_layers is None else list(intermediate_layers)
+        )
+        self.residual_stages = residual_stages
 
     @property
     def layers(self):
-        return [self.input_layer, *self.intermediate_layers, self.output_layer]
+        stages = (
+            self.intermediate_layers
+            if self.residual_stages is None
+            else self.residual_stages
+        )
+        return [self.input_layer, *stages, self.output_layer]
+
+    def _residual_workspace(self, *args) -> np.ndarray:
+        input_values = self.apply_input_map(*args)
+        if input_values.size > self.memory.count:
+            raise ValueError("input map exceeds residual workspace")
+        workspace = np.zeros(self.memory.count, dtype=input_values.dtype)
+        workspace[: input_values.size] = input_values
+        return workspace
 
     def __call__(self, *args):
+        if self.residual_stages is not None:
+            workspace = self._residual_workspace(*args)
+            for stage in self.residual_stages:
+                if isinstance(stage, BilinearStage):
+                    apply_bilinear_stage(stage, workspace)
+                else:
+                    apply_nonlinear_stage(stage, workspace)
+            return self.output_layer.call(workspace)
+
         workspace = self.apply_input_map(*args)
+        if workspace.size < self.memory.count:
+            workspace = np.pad(
+                workspace, (0, self.memory.count - workspace.size)
+            )
         for layer in self.intermediate_layers:
             workspace = layer(workspace)
         return self.output_layer.call(workspace)
@@ -169,8 +212,29 @@ class SparseNet:
     def push_forward(self, *tangent_spaces):
         n_args = len(self.input_layer.input_specs)
         x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
+        if self.residual_stages is not None:
+            workspace = self._residual_workspace(*x)
+            dworkspace = self._residual_workspace(*dx)
+            for stage in self.residual_stages:
+                if isinstance(stage, BilinearStage):
+                    push_forward_bilinear_stage(stage, workspace, dworkspace)
+                else:
+                    push_forward_nonlinear_stage(stage, workspace, dworkspace)
+            return (
+                self.output_layer.call(workspace),
+                self.output_layer.call(dworkspace),
+            )
+
         workspace = self.apply_input_map(*x)
         dworkspace = self.apply_input_map(*dx)
+        if workspace.size < self.memory.count:
+            workspace = np.pad(
+                workspace, (0, self.memory.count - workspace.size)
+            )
+        if dworkspace.size < self.memory.count:
+            dworkspace = np.pad(
+                dworkspace, (0, self.memory.count - dworkspace.size)
+            )
 
         for layer in self.intermediate_layers:
             workspace, dworkspace = layer.push_forward(workspace, dworkspace)
@@ -186,6 +250,10 @@ class SparseNet:
         return self.output_layer.call(workspace)
 
     def export_program_payload(self):
+        if self.residual_stages is not None:
+            raise RuntimeError(
+                "residual SparseNet requires the typed bytecode builder"
+            )
         return {
             "workspace": self.memory.to_export_dict(),
             "input_layer": self.input_layer.to_export_dict(),

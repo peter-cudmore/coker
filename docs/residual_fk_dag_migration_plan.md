@@ -164,7 +164,7 @@ Do not claim that more than 50 stages are unavoidable from the current 116-layer
 
 - [x] Remove dynamic source-function relowering from `GenericVectorLayer._eval_opaque_program`; nested host execution resolves a retained `FunctionTable` entry by function ID.
 - [x] Build compiler-only semantic DAG direct/materialized edge projections and deterministic waves.
-- [~] Define the residual `SparseNet`. `ValueLifetime`, `EpochValue`, semantic waves, and diagnostics exist, but lowering still emits compact-layer objects.
+- [x] Define the residual `SparseNet` stage model: stable-slot bilinear and nonlinear stages, retained-expression operands, direct Python primal/push-forward stage evaluation, and strict intra-stage dependency rejection.
 - [ ] Make stable residual slots and exact first-fit reuse authoritative after final uses include retained roots, all boundaries, outputs, nested bindings, and tangent consumers.
 - [ ] Replace `current_memory`/`next_memory` growth, dense `BilinearWeights`, retained-prefix identities, and constant-extension layers with residual `SparseNet` stages.
 - [ ] Complete root replacement, selective boundary materialization, degree closure, ordered generic chains, and alias handling.
