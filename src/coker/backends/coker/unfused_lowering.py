@@ -923,10 +923,84 @@ def _create_residual_opgraph(
         result = {}
         for ordinal, (output, left, right) in enumerate(products):
             term = compiler_binary("mul", scalar_weight(lhs, left), scalar_weight(rhs, right))
+            # A product of two quadratic operands exceeds the residual
+            # bilinear degree budget.  Do not let that unsupported term poison
+            # the accumulator with ``None``; defer the complete contraction to
+            # the residual nonlinear stage instead.
+            if term is None:
+                return None
             if operation is OP.CROSS and ordinal % 2:
                 term = compiler_binary("mul", term, _constant_to_bw(compiler_memory, -1.0, (1,)))
             result[output] = term if output not in result else compiler_binary("add", result[output], term)
         return assemble_weights(result, output_shape or (1,))
+    def materialize_contraction(index, operation, arguments, output_shape):
+        """Emit a contraction over already-materialized scalar slots."""
+        if len(arguments) != 2:
+            return False
+        lhs_arg, rhs_arg = arguments
+        lhs_shape = (
+            _node_shape(tape.dim[lhs_arg.index])
+            if isinstance(lhs_arg, Tracer)
+            else np.asarray(lhs_arg).shape or (1,)
+        )
+        rhs_shape = (
+            _node_shape(tape.dim[rhs_arg.index])
+            if isinstance(rhs_arg, Tracer)
+            else np.asarray(rhs_arg).shape or (1,)
+        )
+        if operation is OP.DOT and lhs_shape == rhs_shape:
+            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
+        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 1:
+            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
+        elif operation is OP.MATMUL and len(lhs_shape) == 2 and len(rhs_shape) == 1:
+            products = [((i,), (i, k), (k,)) for i in range(lhs_shape[0]) for k in range(lhs_shape[1])]
+        elif operation is OP.MATMUL and len(lhs_shape) == 1 and len(rhs_shape) == 2:
+            products = [((j,), (k,), (k, j)) for j in range(rhs_shape[1]) for k in range(lhs_shape[0])]
+        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 2:
+            products = [((i, j), (i, k), (k, j)) for i in range(lhs_shape[0]) for j in range(rhs_shape[1]) for k in range(lhs_shape[1])]
+        elif operation is OP.CROSS and lhs_shape == rhs_shape == (3,):
+            products = [((0,), (1,), (2,)), ((0,), (2,), (1,)), ((1,), (2,), (0,)), ((1,), (0,), (2,)), ((2,), (0,), (1,)), ((2,), (1,), (0,))]
+        else:
+            return False
+
+        def scalar_operand(argument, coordinate, shape):
+            if isinstance(argument, Tracer):
+                slots = view_refs(argument.index)
+                flat = int(np.ravel_multi_index(coordinate, shape))
+                return slots[flat], 1.0
+            return None, float(np.asarray(argument)[coordinate])
+
+        terms_by_output = {}
+        for ordinal, (output, left, right) in enumerate(products):
+            left_slot, left_factor = scalar_operand(lhs_arg, left, lhs_shape)
+            right_slot, right_factor = scalar_operand(rhs_arg, right, rhs_shape)
+            coefficient = left_factor * right_factor * (
+                -1.0 if operation is OP.CROSS and ordinal % 2 else 1.0
+            )
+            pair = (left_slot, right_slot)
+            if pair[0] is None:
+                pair = (None, pair[1])
+            elif pair[1] is None:
+                pair = (None, pair[0])
+            else:
+                pair = tuple(sorted(pair))
+            terms = terms_by_output.setdefault(output, {})
+            terms[pair] = terms.get(pair, 0.0) + coefficient
+        life = lifetimes[index]
+        rows = []
+        for output, terms in terms_by_output.items():
+            flat_output = 0 if not output else int(np.ravel_multi_index(output, output_shape or (1,)))
+            rows.append(BilinearRow(
+                life.slot.start + flat_output,
+                tuple(
+                    BilinearTerm(left, right, coefficient)
+                    for (left, right), coefficient in sorted(terms.items())
+                    if coefficient
+                ),
+            ))
+        stages.append(BilinearStage(tuple(sorted(rows, key=lambda row: row.output))))
+        refs[index] = tuple(life.slot.start + i for i in range(life.width))
+        return True
     for index in tape.input_indicies:
         life = lifetimes[index]
         refs[index] = tuple(life.slot.start + i for i in range(life.width))
@@ -1079,9 +1153,7 @@ def _create_residual_opgraph(
                     ))
                 else:
                     operands.append(operand_value)
-            else:
-                operands.append(argument)
-        if operation in {OP.DOT, OP.MATMUL, OP.CROSS}:
+        if operation in {OP.DOT, OP.MATMUL, OP.CROSS} and len(operands) == 2:
             contraction_operands = [
                 item if isinstance(item, BilinearWeights) else _constant_to_bw(
                     compiler_memory, item, np.asarray(item).shape or (1,)
@@ -1094,6 +1166,10 @@ def _create_residual_opgraph(
             )
             if result is not None:
                 emit_bilinear(index, result)
+                continue
+            if materialize_contraction(
+                index, operation, value_arguments, _node_shape(tape.dim[index]) or (1,)
+            ):
                 continue
         if operation in {OP.ADD, OP.SUB, OP.MUL} and any(
             isinstance(item, BilinearWeights) for item in operands
