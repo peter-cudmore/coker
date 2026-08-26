@@ -129,11 +129,9 @@ class CasadiBackend(Backend):
             for index in range(len(function.tape.nodes))
             if index not in function.tape.input_indicies
         ):
-            from coker.backends import get_backend_by_name
-
-            return get_backend_by_name("numpy", set_current=False).lower(
-                function
-            )
+            # Module calls are numerical-only. The generic evaluator handles
+            # them without changing the enclosing function's backend.
+            return super().lower(function)
         if any(
             isinstance(shape, FunctionSpace)
             for shape in function.input_shape()
