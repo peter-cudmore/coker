@@ -902,12 +902,24 @@ def _create_residual_opgraph(
         )
 
     def assemble_weights(scalars, shape):
-        source_shape = shape
-        shape = (int(np.prod(shape)),)
+        """Flatten contraction rows using their logical output coordinates."""
+        source_shape = tuple(shape)
+        shape = (int(np.prod(source_shape)),)
+        coordinate_rank = max(
+            (len(coordinate) for coordinate in scalars), default=0
+        )
+        coordinate_shape = tuple(
+            max(coordinate[axis] for coordinate in scalars if coordinate) + 1
+            for axis in range(coordinate_rank)
+        )
+        if coordinate_rank > 1 and int(np.prod(coordinate_shape)) != shape[0]:
+            return None
         constant, linear, quadratic = {}, {}, {}
         for coordinate, value in scalars.items():
             if len(coordinate) > 1:
-                coordinate = (int(np.ravel_multi_index(coordinate, source_shape)),)
+                coordinate = (
+                    int(np.ravel_multi_index(coordinate, coordinate_shape)),
+                )
             elif not coordinate:
                 coordinate = (0,)
             for key, coefficient in value.constant.keys.items():
