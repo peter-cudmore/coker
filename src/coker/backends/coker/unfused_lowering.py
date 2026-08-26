@@ -867,9 +867,12 @@ def _create_residual_opgraph(
         )
 
     def operand(value, index, row=0):
-        if index in refs:
-            slots = refs[index]
-            return SlotOperand(slots[min(row, len(slots) - 1)])
+        if isinstance(value, BilinearWeights) and index in lifetimes:
+            life = lifetimes[index]
+            refs[index] = tuple(
+                life.slot.start + offset for offset in range(life.width)
+            )
+            return SlotOperand(refs[index][min(row, life.width - 1)])
         if isinstance(value, (int, float, np.number)):
             return scalar_constant(value)
         array = np.asarray(value).reshape(-1)
@@ -896,23 +899,35 @@ def _create_residual_opgraph(
                 left = None if term.left is None else term.left
                 right = None if term.right is None else term.right
                 translated.append(BilinearTerm(left, right, term.coefficient))
-            rows.append(BilinearRow(absolute, tuple(sorted(
-                translated,
-                key=lambda term: (-1 if term.left is None else term.left,
-                                 -1 if term.right is None else term.right),
-            ))))
+            rows.append(
+                BilinearRow(
+                    absolute,
+                    tuple(sorted(
+                        translated,
+                        key=lambda term: (
+                            -1 if term.left is None else term.left,
+                            -1 if term.right is None else term.right,
+                        ),
+                    )),
+                )
+            )
         values[index] = value
         if rows:
-            stages.append(BilinearStage(tuple(rows)))
-        refs[index] = tuple(life.slot.start + i for i in range(life.width))
-
+            stages.extend(BilinearStage((row,)) for row in rows)
     def view_refs(index):
         value = values[index]
         if isinstance(value, tuple):
             return value
+        if index not in refs and index in lifetimes:
+            life = lifetimes[index]
+            refs[index] = tuple(
+                life.slot.start + offset for offset in range(life.width)
+            )
         return refs[index]
 
-    for index in sorted(semantic_dag.nodes):
+    for index in range(len(tape.nodes)):
+        if index not in semantic_dag.nodes:
+            continue
         if index in tape.input_indicies:
             life = lifetimes[index]
             refs[index] = tuple(life.slot.start + i for i in range(life.width))
@@ -984,7 +999,13 @@ def _create_residual_opgraph(
                         np.full(shape, item) if np.isscalar(item) else item,
                         shape,
                     ))
-            result = compiler_binary({OP.ADD: "add", OP.SUB: "sub", OP.MUL: "mul"}[operation], *normalized)
+            try:
+                result = compiler_binary(
+                    {OP.ADD: "add", OP.SUB: "sub", OP.MUL: "mul"}[operation],
+                    *normalized,
+                )
+            except (TypeError, ValueError, AssertionError):
+                result = None
             if result is not None:
                 emit_bilinear(index, result)
                 continue
