@@ -2,7 +2,9 @@ import numpy as np
 import pytest
 
 from coker import VectorSpace, function
+from coker.algebra.ops import OP
 from coker.backends.coker.lowering import create_function_table
+
 
 BYTECODE_PHASE_REASON = (
     "mapped-bytecode checks resume after the Python residual phase"
@@ -55,24 +57,25 @@ def test_nonlinear_scalar_closes_between_algebraic_frontiers():
     )
 
 
-def test_generic_flush_diagnostics_capture_wave_and_cause():
+def test_generic_flush_diagnostics_capture_residual_nonlinear_stage():
     fn = function(
         [VectorSpace("x", 2)],
         implementation=lambda x: np.sin(x) + x * x,
         backend="coker",
     )
     graph = create_function_table(fn).entry
-    assert graph.generic_flushes
-    assert all(
-        set(record) == {"wave", "waves", "cause", "nodes"}
-        and record["wave"] in record["waves"]
-        and record["cause"]
-        and record["nodes"]
-        for record in graph.generic_flushes
-    )
-    assert graph.generic_flush_cause_histogram == {
-        "boundary:nonlinear-scalar-consumer": 1,
+    stages = tuple(graph.residual_stages)
+    nonlinear = [stage for stage in stages if hasattr(stage, "operations")]
+    assert nonlinear
+    assert all(stage.operations for stage in nonlinear)
+    assert {operation.op for stage in nonlinear for operation in stage.operations} == {
+        OP.SIN
     }
+    assert any(hasattr(stage, "rows") for stage in stages)
+    value = np.array([0.5, -2.0])
+    np.testing.assert_allclose(graph(value), np.sin(value) + value * value)
+
+
 
 
 @pytest.mark.skip(reason=BYTECODE_PHASE_REASON)
@@ -118,23 +121,17 @@ def test_independent_frontier_rows_pin_all_roots_until_batch_close():
     )
 
 
-def test_frontier_metadata_distinguishes_independent_branches():
-    fn, _payload_value = _payload(
+def test_residual_stages_preserve_independent_branch_roots():
+    fn = function(
+        [VectorSpace("x", 2), VectorSpace("y", 2)],
         lambda x, y: (x * x, y * y),
-        (VectorSpace("x", 2), VectorSpace("y", 2)),
+        backend="coker",
     )
     graph = create_function_table(fn).entry
-    metadata = graph.frontier_metadata
-    assert metadata
-    values = {
-        node: value
-        for record in metadata
-        for node, value in record["values"].items()
-    }
-    assert len(values) == 2
-    assert {value.roots for value in values.values()} == {(0,), (1,)}
-    assert {value.symbolic_dependencies for value in values.values()} == {(0,), (1,)}
-    assert all(value.earliest_consumer_wave is not None for value in values.values())
+    bilinear = [stage for stage in graph.residual_stages if hasattr(stage, "rows")]
+    assert bilinear
+    outputs = {row.output for stage in bilinear for row in stage.rows}
+    assert len(outputs) >= 2
     actual = graph(np.array([1.0, 2.0]), np.array([3.0, 4.0]))
     np.testing.assert_allclose(actual[0], np.array([1.0, 4.0]))
     np.testing.assert_allclose(actual[1], np.array([9.0, 16.0]))
@@ -200,34 +197,33 @@ def test_alias_and_nested_boundaries_preserve_primal_and_tangent():
     np.testing.assert_allclose(dactual, gtangent)
     np.testing.assert_allclose(gvalue, expected)
 
-
 def test_hexapod_frontier_artifact_stays_within_layer_and_copy_budget():
     from scripts.inspect_kinematics_artifact import compile_hexapod, payload_metrics
 
-    model, lowered, payload = compile_hexapod()
-    metrics = payload_metrics(payload, 0, 0, require_v6=False)
+    model, lowered = compile_hexapod()
+    metrics = payload_metrics(lowered, require_v6=False)
     assert metrics["layer_count"] < 50
     assert metrics["explicit_copy_rows"] == 0
     assert metrics["identity_relocation_rows"] == 0
     assert metrics["output_clear_rows"] == 0
     assert model.total_joints() == 18
-    assert lowered is not None
+    assert lowered.residual_stages is not None
 
 
 def test_hexapod_lowered_matches_source_fk_and_jacobian():
     from scripts.inspect_kinematics_artifact import compile_hexapod
 
-    model, lowered, _payload = compile_hexapod()
+    model, lowered = compile_hexapod()
     angles = np.linspace(-0.4, 0.4, model.total_joints())
     expected_positions, expected_jacobian = model.to_function()(angles)
-    actual_positions, actual_jacobian = lowered((angles,))
-
+    actual_positions, actual_jacobian = lowered(angles)
     np.testing.assert_allclose(
         actual_positions, expected_positions, rtol=1e-12, atol=1e-12
     )
     np.testing.assert_allclose(
         actual_jacobian, expected_jacobian, rtol=1e-12, atol=1e-12
     )
+
 
 
 
