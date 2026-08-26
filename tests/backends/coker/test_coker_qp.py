@@ -3,8 +3,8 @@ import pytest
 
 from coker import SparseMatrixBuilder, VectorSpace
 from coker.backends.coker.core import CokerBackend
-from coker.backends.coker import optimisation as coker_qp_optimisation
-from coker.backends.coker.optimisation import extract_qp_program
+from coker.backends.coker import qp_extract as coker_qp_optimisation
+from coker.backends.coker.qp_extract import extract_qp_program
 from coker.backends.coker.runtime import RuntimeQpProgram
 from coker.backends.optimisation import build_problem_bindings
 from coker.toolkits.codesign import (
@@ -352,7 +352,7 @@ def test_coker_qp_solves_parameterized_problem():
 
 
 def test_coker_qp_parameterized_box_coefficients_and_solution():
-    from coker.backends.coker.optimisation import _build_coefficient_function
+    from coker.backends.coker.qp_extract import _build_coefficient_function
 
     with ProblemBuilder(
         arguments=[
@@ -417,7 +417,7 @@ def test_coker_qp_parameterized_box_coefficients_and_solution():
 
 
 def test_coker_qp_extracts_sparse_weighted_norm_coefficients():
-    from coker.backends.coker.optimisation import _build_coefficient_function
+    from coker.backends.coker.qp_extract import _build_coefficient_function
 
     weights = SparseMatrixBuilder(
         np.array([[True, True], [False, True], [True, False]])
@@ -456,7 +456,7 @@ def test_coker_qp_extracts_sparse_weighted_norm_coefficients():
 
 
 def test_coker_qp_emits_weighted_hessian_in_csc_order():
-    from coker.backends.coker.optimisation import _build_coefficient_function
+    from coker.backends.coker.qp_extract import _build_coefficient_function
 
     weights = SparseMatrixBuilder(np.ones((3, 3), dtype=bool))
     with ProblemBuilder(
@@ -561,7 +561,7 @@ def test_coker_qp_weighted_norm_avoids_dense_cost_fusion(monkeypatch):
 
 
 def test_coker_qp_affine_residual_adjusts_parameterized_bounds():
-    from coker.backends.coker.optimisation import _build_coefficient_function
+    from coker.backends.coker.qp_extract import _build_coefficient_function
 
     with ProblemBuilder(
         arguments=[

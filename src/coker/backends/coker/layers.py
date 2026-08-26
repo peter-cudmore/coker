@@ -97,7 +97,7 @@ def _export_constant_value(value, shape):
     if isinstance(value, dok_ndarray):
         return {"kind": "tensor", "value": value.to_export_dict()}
     if isinstance(value, Function):
-        from coker.backends.coker.core import create_opgraph
+        from coker.backends.coker.lowering import create_opgraph
 
         return {
             "kind": "function",
@@ -735,7 +735,7 @@ class GenericVectorLayer:
         ]
 
         if program.op == OP.EVALUATE and isinstance(values[0], Function):
-            from coker.backends.coker.core import create_opgraph
+            from coker.backends.coker.lowering import create_opgraph
 
             graph = create_opgraph(values[0])
             tangents = [
