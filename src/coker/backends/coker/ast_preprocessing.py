@@ -190,7 +190,9 @@ class SparseNet:
         self.input_layer = input_layer
         self.output_layer = output_layer
         self.intermediate_layers = (
-            [] if intermediate_layers is None else list(intermediate_layers)
+            list(residual_stages)
+            if residual_stages is not None
+            else ([] if intermediate_layers is None else list(intermediate_layers))
         )
         self.residual_stages = residual_stages
 
@@ -221,10 +223,6 @@ class SparseNet:
             return self.output_layer.read(workspace)
 
         workspace = self.apply_input_map(*args)
-        if workspace.size < self.memory.count:
-            workspace = np.pad(
-                workspace, (0, self.memory.count - workspace.size)
-            )
         for layer in self.intermediate_layers:
             workspace = layer(workspace)
         return self.output_layer.call(workspace)
@@ -252,15 +250,6 @@ class SparseNet:
         x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
         workspace = self.apply_input_map(*x)
         dworkspace = self.apply_input_map(*dx)
-        if workspace.size < self.memory.count:
-            workspace = np.pad(
-                workspace, (0, self.memory.count - workspace.size)
-            )
-        if dworkspace.size < self.memory.count:
-            dworkspace = np.pad(
-                dworkspace, (0, self.memory.count - dworkspace.size)
-            )
-
         for layer in self.intermediate_layers:
             workspace, dworkspace = layer.push_forward(workspace, dworkspace)
 
