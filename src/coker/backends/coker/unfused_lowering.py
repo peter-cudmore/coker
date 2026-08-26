@@ -2,19 +2,39 @@
 
 from __future__ import annotations
 
-from coker.backends.coker.lowering import *
+from typing import Dict, List, Tuple
+
+
+from coker.algebra.kernel import Function, Tracer
+from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP
+from coker.backends.backend import get_backend_by_name
+from coker.backends.coker.ast_preprocessing import FunctionTable, SparseNet
+from coker.backends.coker.layers import (
+    IDENTITY_OP,
+    OPAQUE_OP,
+    UNUSED_REF,
+    BilinearWorkspaceLayer,
+    FunctionEvaluationLayer,
+    GenericVectorLayer,
+    InputLayer,
+    OpaqueProgram,
+    OutputLayer,
+)
 from coker.backends.coker.lowering import (
     _append_bilinear_value,
     _as_numpy_value,
     _build_opaque_operand,
     _constant_extension_weights,
     _concatenate_bilinear_operands,
+    _constant_to_bw,
     _flatten_constant_rows,
     _node_shape,
     _raw_output_weights,
 )
-
-from coker.backends.coker.ast_preprocessing import FunctionTable
+from coker.backends.coker.memory import MemorySpec
+from coker.backends.coker.op_impl import ops
+from coker.backends.coker.sparse_tensor import dok_ndarray
+from coker.backends.coker.weights import BilinearWeights
 
 
 class _FunctionTableBuilder:

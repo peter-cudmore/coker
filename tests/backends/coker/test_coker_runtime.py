@@ -1,6 +1,6 @@
 import numpy as np
 from coker import Scalar, VectorSpace, function, if_then_else
-from coker.backends.coker.lowering import create_function_table, create_opgraph
+from coker.backends.coker.lowering import create_function_table
 from coker.backends.coker.runtime import CompiledGraph
 
 

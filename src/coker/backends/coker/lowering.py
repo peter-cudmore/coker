@@ -1,28 +1,25 @@
 """Coker tape-to-SparseNet lowering phases.
 
-This module is the data boundary between the backend facade and graph consumers.
-It accepts a :class:`Function` and produces a :class:`SparseNet`; callers use
-the graph rather than reaching into another lowering phase.
+This module is the data boundary between the backend facade and graph
+consumers. It accepts a :class:`Function` and produces a :class:`SparseNet`;
+callers use the graph rather than reaching into another lowering phase.
 """
 
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import scipy.sparse
 
 from coker.algebra.kernel import Function, Tracer
-from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP
-from coker.backends.backend import get_backend_by_name
+from coker.algebra.ops import OP
 from coker.backends.coker.ast_preprocessing import FunctionTable, SparseNet
 from coker.backends.coker.layers import (
     IDENTITY_OP,
     UNUSED_REF,
     BilinearWorkspaceLayer,
     ConstantOperand,
-    FunctionEvaluationLayer,
     GenericVectorLayer,
     InputLayer,
-    OpaqueProgram,
     OutputLayer,
     WorkspaceOperand,
 )
