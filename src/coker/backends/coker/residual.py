@@ -416,8 +416,6 @@ class InputBinding:
     def __post_init__(self):
         if not self.slots or any(slot < 0 for slot in self.slots):
             raise ValueError("input binding requires non-negative slots")
-        if len(set(self.slots)) != len(self.slots):
-            raise ValueError("input binding slots must be unique")
 
 
 @dataclass(frozen=True)

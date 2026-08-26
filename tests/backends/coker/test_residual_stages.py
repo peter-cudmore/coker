@@ -21,6 +21,7 @@ from coker.backends.coker.residual import (
     push_forward_bilinear_stage,
     canonical_expression,
     push_forward_nonlinear_stage,
+    stage_count,
 )
 
 
@@ -153,3 +154,24 @@ def test_residual_call_stage_binds_direct_stable_slots():
 
     assert output == pytest.approx(np.sin(2.0))
     assert tangent == pytest.approx(np.cos(2.0) * 3.0)
+
+def test_residual_alias_input_bindings_share_primal_and_tangent_slot():
+    graph = SparseNet(
+        2,
+        InputMap((InputBinding((0,)), InputBinding((0,)))),
+        OutputMap((OutputBinding((1,), None),)),
+        residual_stages=(
+            NonlinearStage(
+                operations=(
+                    NonlinearOperation(1, OP.MUL, SlotOperand(0), SlotOperand(0)),
+                )
+            ),
+        ),
+    )
+
+    output, tangent = graph.push_forward(
+        np.array([3.0]), np.array([3.0]), np.array([2.0]), np.array([2.0])
+    )
+
+    assert output == pytest.approx(9.0)
+    assert tangent == pytest.approx(12.0)
