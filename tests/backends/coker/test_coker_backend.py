@@ -166,9 +166,8 @@ def test_coker_graph():
 
     g = create_opgraph(f)
 
-    assert (
-        len(g.layers) == 3
-    ), f"Expected 3 layers (in, compute, out), got {len(g.layers)}"
+    assert g.residual_stages is not None
+    assert g.residual_stages == tuple(g.intermediate_layers)
 
     result = f(1)
 

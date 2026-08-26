@@ -620,7 +620,7 @@ def _schedule_residual_slots(function: Function) -> Dict[int, ValueLifetime]:
     # Reuse is enabled only when no scheduled frontier can retain a borrowed
     # view past the producer batch.  The conservative default handles the
     # mixed generic/algebraic case; pure residual DAGs may opt in below.
-    reuse_slots = True
+    reuse_slots = False
     semantic_dag = _build_semantic_dag(function)
     required = set(semantic_dag.nodes)
     emitted_ordinal = {
@@ -712,7 +712,11 @@ def _schedule_residual_slots(function: Function) -> Dict[int, ValueLifetime]:
     free_ranges: List[SlotRange] = []
     active: Dict[int, ValueLifetime] = {}
     lifetimes: Dict[int, ValueLifetime] = {}
-    next_slot = 0
+    next_slot = sum(
+        tape.dim[index].flat()
+        for index in tape.input_indicies
+        if index in required
+    )
 
     def release(slot: SlotRange) -> None:
         free_ranges.append(slot)
@@ -754,6 +758,16 @@ def _schedule_residual_slots(function: Function) -> Dict[int, ValueLifetime]:
             )
             free_ranges.sort(key=lambda candidate: candidate.start)
         return SlotRange(slot.start, width)
+    for input_index in tape.input_indicies:
+        if input_index in required:
+            width = tape.dim[input_index].flat()
+            lifetime = ValueLifetime(
+                input_index, width, 0, final_uses[input_index],
+                allocate(width),
+            )
+            lifetimes[input_index] = lifetime
+            active[input_index] = lifetime
+
 
     for _tape_ordinal, node_index in enumerate(semantic_dag.order):
         # Multiple nodes can share an emitted wave; they are simultaneous for
@@ -763,6 +777,8 @@ def _schedule_residual_slots(function: Function) -> Dict[int, ValueLifetime]:
             if reuse_slots and lifetime.final_use < definition_ordinal:
                 release(lifetime.slot)
                 del active[value]
+        if node_index in tape.input_indicies:
+            continue
         if node_index in tape.input_indicies:
             operation = None
         else:
@@ -848,17 +864,76 @@ def _create_residual_opgraph(
     refs: Dict[int, Tuple[int, ...]] = {}
     stages = []
     compiler_memory = MemorySpec(0, workspace_size)
-    for value_index, (value_operation, *value_arguments) in enumerate(tape.nodes):
+    for value_index, node in enumerate(tape.nodes):
+        if isinstance(node, Tracer):
+            continue
+        value_operation, *value_arguments = node
         if value_operation is OP.VALUE:
             values[value_index] = _as_numpy_value(value_arguments[0])
 
+    def symbolic_shape(index):
+        return _node_shape(tape.dim[index]) or (1,)
+
+    def scalar_weight(value, coordinate):
+        coordinate = coordinate if isinstance(coordinate, tuple) else (coordinate,)
+        return BilinearWeights.from_trusted_dok(
+            compiler_memory, (1,),
+            dok_ndarray((1,), {(0,): coefficient for key, coefficient in value.constant.keys.items() if key == coordinate}),
+            dok_ndarray((1, compiler_memory.count), {(0, key[-1]): coefficient for key, coefficient in value.linear.keys.items() if key[:-1] == coordinate}),
+            dok_ndarray((1, compiler_memory.count, compiler_memory.count), {(0, key[-2], key[-1]): coefficient for key, coefficient in value.quadratic.keys.items() if key[:-2] == coordinate}),
+        )
+
+    def assemble_weights(scalars, shape):
+        source_shape = shape
+        shape = (int(np.prod(shape)),)
+        constant, linear, quadratic = {}, {}, {}
+        for coordinate, value in scalars.items():
+            if len(coordinate) > 1:
+                coordinate = (int(np.ravel_multi_index(coordinate, source_shape)),)
+            elif not coordinate:
+                coordinate = (0,)
+            for key, coefficient in value.constant.keys.items():
+                if coefficient: constant[coordinate] = coefficient
+            for key, coefficient in value.linear.keys.items():
+                if coefficient: linear[(*coordinate, key[-1])] = coefficient
+            for key, coefficient in value.quadratic.keys.items():
+                if coefficient: quadratic[(*coordinate, key[-2], key[-1])] = coefficient
+        return BilinearWeights.from_trusted_dok(
+            compiler_memory, shape, dok_ndarray(shape, constant),
+            dok_ndarray((*shape, compiler_memory.count), linear),
+            dok_ndarray((*shape, compiler_memory.count, compiler_memory.count), quadratic),
+        )
+
+    def lower_contraction(operation, lhs, rhs, output_shape):
+        lhs_shape, rhs_shape = lhs.shape, rhs.shape
+        if operation is OP.DOT and lhs_shape == rhs_shape:
+            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
+        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 1:
+            products = [((), (k,), (k,)) for k in range(lhs_shape[0])]
+        elif operation is OP.MATMUL and len(lhs_shape) == 2 and len(rhs_shape) == 1:
+            products = [((i,), (i, k), (k,)) for i in range(lhs_shape[0]) for k in range(lhs_shape[1])]
+        elif operation is OP.MATMUL and len(lhs_shape) == 1 and len(rhs_shape) == 2:
+            products = [((j,), (k,), (k, j)) for j in range(rhs_shape[1]) for k in range(lhs_shape[0])]
+        elif operation is OP.MATMUL and len(lhs_shape) == len(rhs_shape) == 2:
+            products = [((i, j), (i, k), (k, j)) for i in range(lhs_shape[0]) for j in range(rhs_shape[1]) for k in range(lhs_shape[1])]
+        elif operation is OP.CROSS and lhs_shape == rhs_shape == (3,):
+            products = [((0,), (1,), (2,)), ((0,), (2,), (1,)), ((1,), (2,), (0,)), ((1,), (0,), (2,)), ((2,), (0,), (1,)), ((2,), (1,), (0,))]
+        else:
+            return None
+        result = {}
+        for ordinal, (output, left, right) in enumerate(products):
+            term = compiler_binary("mul", scalar_weight(lhs, left), scalar_weight(rhs, right))
+            if operation is OP.CROSS and ordinal % 2:
+                term = compiler_binary("mul", term, _constant_to_bw(compiler_memory, -1.0, (1,)))
+            result[output] = term if output not in result else compiler_binary("add", result[output], term)
+        return assemble_weights(result, output_shape or (1,))
     for index in tape.input_indicies:
         life = lifetimes[index]
         refs[index] = tuple(life.slot.start + i for i in range(life.width))
         values[index] = BilinearWeights.project(
             compiler_memory,
             MemorySpec(life.slot.start, life.width),
-            _node_shape(tape.dim[index]),
+            _node_shape(tape.dim[index]) or (1,),
         )
 
     def scalar_constant(value):
@@ -880,19 +955,25 @@ def _create_residual_opgraph(
 
     def emit_bilinear(index, value):
         life = lifetimes[index]
-        output_shape = _node_shape(tape.dim[index])
         rows = []
         for row in range(life.width):
-            terms = []
+            term_map = {}
             constant = value.constant.keys.get((row,), 0.0)
             if constant:
-                terms.append(BilinearTerm(None, None, float(constant)))
+                term_map[(-1, -1)] = float(constant)
             for key, coefficient in value.linear.keys.items():
                 if key[0] == row and coefficient:
-                    terms.append(BilinearTerm(None, key[1], float(coefficient)))
+                    pair = (-1, key[1])
+                    term_map[pair] = term_map.get(pair, 0.0) + float(coefficient)
             for key, coefficient in value.quadratic.keys.items():
                 if key[0] == row and coefficient:
-                    terms.append(BilinearTerm(key[1], key[2], float(coefficient)))
+                    pair = (min(key[1], key[2]), max(key[1], key[2]))
+                    term_map[pair] = term_map.get(pair, 0.0) + float(coefficient)
+            terms = [
+                BilinearTerm(None if left < 0 else left, None if right < 0 else right, coefficient)
+                for (left, right), coefficient in sorted(term_map.items())
+                if coefficient
+            ]
             absolute = life.slot.start + row
             translated = []
             for term in terms:
@@ -949,7 +1030,7 @@ def _create_residual_opgraph(
             values[index] = BilinearWeights.project(
                 compiler_memory,
                 MemorySpec(life.slot.start, life.width),
-                _node_shape(tape.dim[index]),
+                _node_shape(tape.dim[index]) or (1,),
             )
             continue
         operation, *arguments = tape.nodes[index]
@@ -994,17 +1075,31 @@ def _create_residual_opgraph(
                     operands.append(BilinearWeights.project(
                         compiler_memory,
                         MemorySpec(refs[argument.index][0], len(refs[argument.index])),
-                        _node_shape(tape.dim[argument.index]),
+                        _node_shape(tape.dim[argument.index]) or (1,),
                     ))
                 else:
                     operands.append(operand_value)
             else:
                 operands.append(argument)
+        if operation in {OP.DOT, OP.MATMUL, OP.CROSS}:
+            contraction_operands = [
+                item if isinstance(item, BilinearWeights) else _constant_to_bw(
+                    compiler_memory, item, np.asarray(item).shape or (1,)
+                )
+                for item in operands
+            ]
+            result = lower_contraction(
+                operation, contraction_operands[0], contraction_operands[1],
+                _node_shape(tape.dim[index])
+            )
+            if result is not None:
+                emit_bilinear(index, result)
+                continue
         if operation in {OP.ADD, OP.SUB, OP.MUL} and any(
             isinstance(item, BilinearWeights) for item in operands
         ):
             normalized = []
-            shape = _node_shape(tape.dim[index])
+            shape = _node_shape(tape.dim[index]) or (1,)
             for item in operands:
                 if isinstance(item, BilinearWeights):
                     normalized.append(item)
