@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Set, Tuple
 
-
+import numpy as np
 from coker.algebra.kernel import Function, Tracer
 from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP
+
+
+from coker.backends.coker.weights import BilinearWeights, compiler_binary
 from coker.backends.backend import get_backend_by_name
 from coker.backends.coker.ast_preprocessing import FunctionTable, SparseNet
 from coker.backends.coker.layers import (
-    IDENTITY_OP,
     OPAQUE_OP,
     UNUSED_REF,
     BilinearWorkspaceLayer,
@@ -20,7 +23,7 @@ from coker.backends.coker.layers import (
     OpaqueProgram,
     OutputLayer,
 )
-from coker.backends.coker.lowering import (
+from coker.backends.coker.lowering_support import (
     _append_bilinear_value,
     _as_numpy_value,
     _build_opaque_operand,
@@ -34,7 +37,751 @@ from coker.backends.coker.lowering import (
 from coker.backends.coker.memory import MemorySpec
 from coker.backends.coker.op_impl import ops
 from coker.backends.coker.sparse_tensor import dok_ndarray
-from coker.backends.coker.weights import BilinearWeights
+
+
+@dataclass(frozen=True)
+class SlotRange:
+    """Contiguous caller-workspace range assigned to one live tape value."""
+
+    start: int
+    length: int
+
+
+@dataclass(frozen=True)
+class ValueLifetime:
+    """Compiler-only lifetime and stable workspace assignment for a tape value."""
+
+    value: int
+    width: int
+    first_definition: int
+    final_use: int
+    slot: SlotRange
+@dataclass(frozen=True)
+class EpochValue:
+    """Compiler-only expression and the symbolic metadata that roots it."""
+
+    value: object
+    roots: Tuple[int, ...]
+    degree: int
+    symbolic_dependencies: Tuple[int, ...] = ()
+    earliest_consumer_wave: int | None = None
+
+
+@dataclass
+class _EpochFrontier:
+    """Deterministic compiler state for one maximal bilinear epoch."""
+
+    roots: Tuple[int, ...]
+    values: Dict[int, EpochValue]
+    uses: Dict[int, int]
+    closed_reason: str | None = None
+
+    def track(
+        self,
+        node_index: int,
+        value: object,
+        degree: int,
+        symbolic_dependencies: Tuple[int, ...] = (),
+        earliest_consumer_wave: int | None = None,
+    ) -> None:
+        """Retain expression-local roots rather than stamping the input basis.
+
+        A dependency already in this frontier contributes its roots; a
+        materialized/input predecessor is itself a root.  This makes the
+        metadata valid across selective closure and keeps symbolic
+        predecessors available for boundary selection.
+        """
+        dependencies = tuple(sorted(set(symbolic_dependencies)))
+        expression_roots = {
+            root
+            for dependency in dependencies
+            for root in (
+                self.values[dependency].roots
+                if dependency in self.values
+                else (dependency,)
+            )
+        }
+        if not expression_roots:
+            expression_roots.update(self.roots)
+        self.values[node_index] = EpochValue(
+            value,
+            tuple(sorted(expression_roots)),
+            degree,
+            dependencies,
+            earliest_consumer_wave,
+        )
+
+    def close(self, reason: str) -> None:
+        self.closed_reason = reason
+
+
+def _stable_use_counts(tape, required_nodes, outputs):
+    """Count uses in tape order, rather than relying on set iteration order."""
+    uses: Dict[int, int] = {}
+    for node_index in sorted(required_nodes):
+        if node_index in tape.input_indicies:
+            continue
+        _operation, *arguments = tape.nodes[node_index]
+        for argument in arguments:
+            if isinstance(argument, Tracer):
+                uses[argument.index] = uses.get(argument.index, 0) + 1
+    for output in outputs:
+        if output is not None:
+            uses[output.index] = uses.get(output.index, 0) + 1
+    return uses
+
+@dataclass(frozen=True)
+class _SemanticWave:
+    """Immutable emitted ready antichain."""
+
+    ordinal: int
+    nodes: Tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _SemanticDag:
+    """Required graph with direct execution and collapsed materialized edges."""
+
+    nodes: Tuple[int, ...]
+    execution_dependencies: Dict[int, Tuple[int, ...]]
+    materialized_dependencies: Dict[int, Tuple[int, ...]]
+    waves: Tuple[_SemanticWave, ...]
+    order: Tuple[int, ...]
+
+@dataclass(frozen=True)
+class ColoredBarrierNode:
+    """A compiler-only node in the collapsed generic/bilinear barrier DAG."""
+
+    node_id: int
+    color: str
+    members: Tuple[int, ...]
+    dependencies: Tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class ColoredBarrierDag:
+    """Collapsed barrier graph and deterministic scheduling diagnostics."""
+
+    nodes: Tuple[ColoredBarrierNode, ...]
+    critical_path: int
+    schedule: Tuple[Tuple[int, ...], ...]
+    color_switches: int
+    lower_bound: int
+    theoretically_attainable_le_50: bool
+    @property
+    def critical_path_lower_bound(self) -> int:
+        return self.critical_path
+
+    @property
+    def scheduled_color_switch_count(self) -> int:
+        return self.color_switches
+
+
+def _colored_barrier_dag(semantic_dag: _SemanticDag, tape) -> ColoredBarrierDag:
+    """Collapse algebraic regions and schedule the resulting colored DAG.
+
+    This is deliberately independent of emitted layers. A bilinear component
+    starts as a maximal connected component of algebraic operations; components
+    that cross a generic barrier are split before projection. Generic
+    operations remain individual barriers. Edges are projected from the direct
+    execution DAG, retaining every barrier-to-barrier RAW edge.
+    """
+    algebraic = {OP.ADD, OP.SUB, OP.MUL, OP.DOT, OP.MATMUL, OP.CROSS}
+    required = set(semantic_dag.nodes)
+    algebraic_nodes = {
+        index for index in required
+        if not isinstance(tape.nodes[index], Tracer)
+        and tape.nodes[index][0] in algebraic
+    }
+    parent = {index: index for index in algebraic_nodes}
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left, right):
+        left, right = find(left), find(right)
+        if left != right:
+            parent[right] = left
+
+    for consumer in sorted(algebraic_nodes):
+        for producer in semantic_dag.execution_dependencies.get(consumer, ()):
+            if producer in algebraic_nodes:
+                union(consumer, producer)
+
+    components: Dict[int, List[int]] = {}
+    for index in sorted(algebraic_nodes):
+        components.setdefault(find(index), []).append(index)
+    # Keep the initial connected components where possible, but never allow a
+    # component to straddle a generic barrier.  Such a non-convex component
+    # projects to A -> G -> A and is a cycle in the quotient.
+    initial_components = [
+        tuple(members)
+        for members in sorted(components.values(), key=lambda values: values[0])
+    ]
+    generic_descriptors: List[Tuple[int, str, Tuple[int, ...]]] = []
+    for index in sorted(required):
+        if index in algebraic_nodes or index in tape.input_indicies:
+            continue
+        if isinstance(tape.nodes[index], Tracer):
+            continue
+        operation = tape.nodes[index][0]
+        if (
+            operation == OP.VALUE
+            or isinstance(operation, (ReshapeOP, ConcatenateOP))
+            or operation is OP.TRANSPOSE
+        ):
+            continue
+        generic_descriptors.append((0, "generic", (index,)))
+
+    direct = semantic_dag.execution_dependencies
+
+    def make_nodes(
+        algebraic_components: List[Tuple[int, ...]],
+    ) -> Tuple[ColoredBarrierNode, ...]:
+        descriptors: List[Tuple[int, str, Tuple[int, ...]]] = []
+        node_for: Dict[int, int] = {}
+        next_id = 0
+        for members in algebraic_components:
+            descriptors.append((next_id, "bilinear", members))
+            for member in members:
+                node_for[member] = next_id
+            next_id += 1
+        for _, _, (index,) in generic_descriptors:
+            descriptors.append((next_id, "generic", (index,)))
+            node_for[index] = next_id
+            next_id += 1
+        dependencies: Dict[int, Set[int]] = {
+            node_id: set() for node_id, _, _ in descriptors
+        }
+
+        def barrier_sources(
+            index: int, visiting: Set[int] | None = None
+        ) -> Set[int]:
+            if index in node_for:
+                return {node_for[index]}
+            if (
+                index in tape.input_indicies
+                or isinstance(tape.nodes[index], Tracer)
+                or tape.nodes[index][0] == OP.VALUE
+            ):
+                return set()
+            if visiting is None:
+                visiting = set()
+            if index in visiting:
+                return set()
+            visiting.add(index)
+            sources: Set[int] = set()
+            for predecessor in direct.get(index, ()):
+                sources.update(barrier_sources(predecessor, visiting))
+            visiting.remove(index)
+            return sources
+
+        for consumer in sorted(node_for):
+            consumer_id = node_for[consumer]
+            for predecessor in direct.get(consumer, ()):
+                for producer_id in barrier_sources(predecessor):
+                    if producer_id != consumer_id:
+                        dependencies[consumer_id].add(producer_id)
+        return tuple(
+            ColoredBarrierNode(
+                node_id, color, members, tuple(sorted(dependencies[node_id]))
+            )
+            for node_id, color, members in descriptors
+        )
+
+    algebraic_components = initial_components
+    nodes = make_nodes(algebraic_components)
+    # A component is non-convex exactly when its collapsed projection
+    # participates in a cycle.  Split that component into its individual
+    # operations and rebuild; this preserves every semantic edge while making
+    # the generic-mediated boundary explicit.
+    def cycle_nodes(graph_nodes: Tuple[ColoredBarrierNode, ...]) -> Set[int]:
+        by_id = {node.node_id: node for node in graph_nodes}
+        visiting: Set[int] = set()
+        visited: Set[int] = set()
+        cyclic: Set[int] = set()
+
+        def visit(node_id: int, stack: Tuple[int, ...] = ()) -> None:
+            if node_id in visiting:
+                start = stack.index(node_id) if node_id in stack else 0
+                cyclic.update(stack[start:])
+                return
+            if node_id in visited:
+                return
+            visiting.add(node_id)
+            for dependency in by_id[node_id].dependencies:
+                visit(dependency, stack + (node_id,))
+            visiting.remove(node_id)
+            visited.add(node_id)
+
+        for node in graph_nodes:
+            visit(node.node_id)
+        return cyclic
+
+    algebraic_components = initial_components
+    nodes = make_nodes(algebraic_components)
+    # A component is non-convex exactly when its collapsed projection
+    # participates in a cycle.  Split that component into its individual
+    # operations and rebuild; this preserves every semantic edge while making
+    # the generic-mediated boundary explicit.
+    while True:
+        cyclic = cycle_nodes(nodes)
+        split = [
+            node
+            for node in nodes
+            if node.node_id in cyclic
+            and node.color == "bilinear"
+            and len(node.members) > 1
+        ]
+        if not split:
+            break
+        split_components = {node.members for node in split}
+        algebraic_components = [
+            member
+            for component in algebraic_components
+            for member in (
+                ((item,) for item in component)
+                if component in split_components
+                else (component,)
+            )
+        ]
+        nodes = make_nodes(algebraic_components)
+    if cycle_nodes(nodes):
+        raise ValueError("colored barrier DAG contains a cycle")
+    node_by_id = {node.node_id: node for node in nodes}
+    # Longest path in the now-validated topological DAG.
+    depths: Dict[int, int] = {}
+
+    def depth(node_id: int) -> int:
+        if node_id in depths:
+            return depths[node_id]
+        result = 1 + max((depth(dep) for dep in node_by_id[node_id].dependencies), default=0)
+        depths[node_id] = result
+        return result
+
+    for node in nodes:
+        depth(node.node_id)
+    critical_path = max(depths.values(), default=0)
+
+    unscheduled = set(node.node_id for node in nodes)
+    scheduled: Set[int] = set()
+    schedule: List[Tuple[int, ...]] = []
+    previous_color = None
+    switches = 0
+    while unscheduled:
+        ready = [
+            node for node in nodes
+            if node.node_id in unscheduled
+            and all(dep in scheduled for dep in node.dependencies)
+        ]
+        if not ready:
+            raise ValueError("colored barrier DAG cannot be scheduled: cycle")
+        colors = {node.color for node in ready}
+        color = previous_color if previous_color in colors else min(
+            colors, key=lambda value: min(
+                node.node_id for node in ready if node.color == value
+            )
+        )
+        batch = tuple(node.node_id for node in ready if node.color == color)
+        schedule.append(batch)
+        scheduled.update(batch)
+        unscheduled.difference_update(batch)
+        if previous_color is not None and color != previous_color:
+            switches += 1
+        previous_color = color
+    return ColoredBarrierDag(
+        nodes=nodes,
+        critical_path=critical_path,
+        schedule=tuple(schedule),
+        color_switches=switches,
+        lower_bound=critical_path,
+        theoretically_attainable_le_50=critical_path <= 50,
+    )
+
+
+def analyze_colored_barrier_dag(function: Function) -> ColoredBarrierDag:
+    """Return compiler-only colored barrier metrics for ``function``."""
+    semantic_dag = _build_semantic_dag(function)
+    return _colored_barrier_dag(semantic_dag, function.tape)
+
+
+build_colored_barrier_dag = analyze_colored_barrier_dag
+
+
+
+def _semantic_waves(
+    tape, nodes: Tuple[int, ...], dependencies: Dict[int, Tuple[int, ...]]
+) -> Tuple[_SemanticWave, ...]:
+    """Emit deterministic nonlinear strata with algebraic prerequisites first.
+
+    Algebraic nodes retain their current expression frontier within a stratum;
+    generic nodes advance to the next nonlinear level.  Views are aliases, so
+    they inherit the level of their source rather than introducing a layer.
+    """
+    algebraic_operations = {
+        OP.ADD, OP.SUB, OP.MUL, OP.DOT, OP.MATMUL, OP.CROSS
+    }
+    view_operations = (ReshapeOP, ConcatenateOP)
+    required = set(nodes)
+    inputs = set(tape.input_indicies)
+    constants = {
+        index for index in required
+        if index not in inputs and tape.nodes[index][0] == OP.VALUE
+    }
+    levels: Dict[int, int] = {
+        index: 0 for index in inputs | constants
+    }
+
+    def is_view(index: int) -> bool:
+        return (
+            index not in inputs
+            and isinstance(tape.nodes[index][0], view_operations)
+            or index not in inputs
+            and tape.nodes[index][0] is OP.TRANSPOSE
+        )
+
+    visiting: Set[int] = set()
+
+    def level(index: int) -> int:
+        if index in levels:
+            return levels[index]
+        if index in visiting:
+            raise ValueError("cyclic or unresolved execution dependencies")
+        visiting.add(index)
+        operation = tape.nodes[index][0]
+        dependency_level = max(
+            (level(dependency) for dependency in dependencies.get(index, ())),
+            default=0,
+        )
+        # A view is transparent to scheduling.  Every other non-algebraic
+        # operation is a nonlinear boundary and advances the stratum.
+        if is_view(index):
+            result = dependency_level
+        elif operation in algebraic_operations:
+            result = dependency_level
+        else:
+            result = dependency_level + 1
+        visiting.remove(index)
+        levels[index] = result
+        return result
+
+    for index in sorted(required):
+        level(index)
+
+    waves: List[_SemanticWave] = []
+    ordinal = 0
+    initial = tuple(sorted(inputs | constants))
+    if initial:
+        waves.append(_SemanticWave(ordinal, initial))
+        ordinal += 1
+
+    # A stratum consists of all algebraic prerequisites followed by generic
+    # nodes.  The latter are emitted as ready antichains, retaining a safety
+    # boundary if an unusual direct dependency ever shares their level.
+    # Process each level as a small topological schedule.  Algebraic nodes
+    # ready at the start of a stratum are emitted first, then all independent
+    # generic nodes; algebraic nodes that consume those generic results follow
+    # in the same stratum.
+    scheduled = set(inputs | constants)
+    max_level = max(levels.values(), default=0)
+    for stratum in range(max_level + 1):
+        unscheduled = {
+            index for index in required
+            if index not in scheduled and levels[index] == stratum
+        }
+        while unscheduled:
+            ready = [
+                index for index in sorted(unscheduled)
+                if all(
+                    dependency in scheduled
+                    for dependency in dependencies.get(index, ())
+                )
+            ]
+            if not ready:
+                raise ValueError("cyclic or unresolved execution dependencies")
+            algebraic_ready = tuple(
+                index for index in ready
+                if tape.nodes[index][0] in algebraic_operations or is_view(index)
+            )
+            if algebraic_ready:
+                waves.append(_SemanticWave(ordinal, algebraic_ready))
+                ordinal += 1
+                unscheduled.difference_update(algebraic_ready)
+                scheduled.update(algebraic_ready)
+                continue
+            # All generic nodes ready at this point are independent under the
+            # direct execution DAG and can safely share one strict RAW layer.
+            generic_ready = tuple(ready)
+            waves.append(_SemanticWave(ordinal, generic_ready))
+            ordinal += 1
+            unscheduled.difference_update(generic_ready)
+            scheduled.update(generic_ready)
+    return tuple(waves)
+
+
+def _build_semantic_dag(function: Function) -> _SemanticDag:
+    """Collect required producers and retain both dependency projections."""
+    tape = function.tape
+    required: Set[int] = {
+        output.index for output in function.output if output is not None
+    }
+    pending = list(required)
+    while pending:
+        node_index = pending.pop()
+        if node_index in tape.input_indicies:
+            continue
+        operation, *arguments = tape.nodes[node_index]
+        if operation == OP.VALUE:
+            continue
+        for argument in arguments:
+            if isinstance(argument, Tracer) and argument.index not in required:
+                required.add(argument.index)
+                pending.append(argument.index)
+
+    view_operations = (ReshapeOP, ConcatenateOP)
+
+    def source_nodes(node_index: int) -> Tuple[int, ...]:
+        if node_index in tape.input_indicies:
+            return (node_index,)
+        operation, *arguments = tape.nodes[node_index]
+        if not (isinstance(operation, view_operations) or operation is OP.TRANSPOSE):
+            return (node_index,)
+        sources: Set[int] = set()
+        for argument in arguments:
+            if isinstance(argument, Tracer) and argument.index in required:
+                sources.update(source_nodes(argument.index))
+        return tuple(sorted(sources))
+
+    execution_dependencies: Dict[int, Tuple[int, ...]] = {}
+    materialized_dependencies: Dict[int, Tuple[int, ...]] = {}
+    for node_index in sorted(required):
+        if node_index in tape.input_indicies or tape.nodes[node_index][0] == OP.VALUE:
+            continue
+        direct = tuple(sorted({
+            argument.index for argument in tape.nodes[node_index][1:]
+            if isinstance(argument, Tracer) and argument.index in required
+        }))
+        execution_dependencies[node_index] = direct
+        materialized_dependencies[node_index] = tuple(sorted({
+            source for argument in tape.nodes[node_index][1:]
+            if isinstance(argument, Tracer) and argument.index in required
+            for source in source_nodes(argument.index)
+        }))
+    nodes = tuple(sorted(required))
+    waves = _semantic_waves(tape, nodes, execution_dependencies)
+    order = tuple(index for wave in waves for index in wave.nodes)
+    return _SemanticDag(
+        nodes=nodes,
+        execution_dependencies=execution_dependencies,
+        materialized_dependencies=materialized_dependencies,
+        waves=waves,
+        order=order,
+    )
+
+
+
+
+def _semantic_lowering_order(
+    tape, semantic_dag: _SemanticDag
+) -> Tuple[int, ...]:
+    """Return the exact deterministic emitted wave order."""
+    return tuple(
+        node_index
+        for wave in semantic_dag.waves
+        for node_index in wave.nodes
+    )
+
+
+@dataclass(frozen=True)
+class ViewValue:
+    """Deferred alias resolved from current source nodes at a consumer boundary."""
+
+    operation: object
+    source_node_ids: Tuple[int, ...]
+    shape: Tuple[int, ...]
+
+
+def _schedule_residual_slots(function: Function) -> Dict[int, ValueLifetime]:
+    """Assign deterministic reusable workspace slots to required tape values.
+
+    Inputs retain their ABI order.  Every other materialized value takes the
+    lowest-address free range large enough for its flattened width; a value's
+    range becomes reusable immediately after its final graph/output use.
+    Constants remain immediate operands and therefore consume no slot.
+    """
+    tape = function.tape
+
+    # Reuse is enabled only when no scheduled frontier can retain a borrowed
+    # view past the producer batch.  The conservative default handles the
+    # mixed generic/algebraic case; pure residual DAGs may opt in below.
+    reuse_slots = False
+    semantic_dag = _build_semantic_dag(function)
+    required = set(semantic_dag.nodes)
+    emitted_ordinal = {
+        node_index: wave.ordinal
+        for wave in semantic_dag.waves
+        for node_index in wave.nodes
+    }
+    final_uses = dict(emitted_ordinal)
+    for consumer, producers in semantic_dag.materialized_dependencies.items():
+        consumer_ordinal = emitted_ordinal[consumer]
+        for producer in producers:
+            final_uses[producer] = max(
+                final_uses.get(producer, consumer_ordinal),
+                consumer_ordinal,
+            )
+    algebraic_ops = {OP.ADD, OP.SUB, OP.MUL}
+    algebraic_nodes = {
+        node_index
+        for node_index in required
+        if node_index not in tape.input_indicies
+        and tape.nodes[node_index][0] in algebraic_ops
+    }
+    # Keep the ordinary reverse-use result for every materialized value.  A
+    # frontier is emitted later than its tape consumers, however, so reserve
+    # only the roots read by that frontier through its common closure point.
+    # Intermediate algebraic nodes are not roots and remain eligible for
+    # residual reuse.
+    frontier_roots = set()
+    for algebraic_node in sorted(algebraic_nodes):
+        pending_ancestors = list(tape.nodes[algebraic_node][1:])
+        seen_ancestors = set()
+        while pending_ancestors:
+            argument = pending_ancestors.pop()
+            if not isinstance(argument, Tracer):
+                continue
+            ancestor = argument.index
+            if ancestor in seen_ancestors:
+                continue
+            seen_ancestors.add(ancestor)
+            if ancestor in tape.input_indicies:
+                frontier_roots.add(ancestor)
+                continue
+            operation = tape.nodes[ancestor][0]
+            if operation not in algebraic_ops:
+                frontier_roots.add(ancestor)
+                continue
+            pending_ancestors.extend(tape.nodes[ancestor][1:])
+    frontier_closure = max(
+        (emitted_ordinal[node_index] for node_index in algebraic_nodes),
+        default=-1,
+    )
+    for root in frontier_roots:
+        final_uses[root] = max(
+            final_uses.get(root, 0),
+            frontier_closure,
+        )
+    output_final_use = len(semantic_dag.order)
+    for consumer, producers in semantic_dag.materialized_dependencies.items():
+        consumer_ordinal = emitted_ordinal[consumer]
+        for producer in producers:
+            final_uses[producer] = max(
+                final_uses.get(producer, consumer_ordinal),
+                consumer_ordinal,
+            )
+    for output in function.output:
+        if output is not None:
+            final_uses[output.index] = output_final_use
+    for node_index in sorted(required, reverse=True):
+        if node_index in tape.input_indicies:
+            continue
+        operation, *arguments = tape.nodes[node_index]
+        if operation == OP.VALUE:
+            continue
+        if not (
+            isinstance(operation, (ReshapeOP, ConcatenateOP))
+            or operation is OP.TRANSPOSE
+        ):
+            continue
+        view_use = final_uses.get(
+            node_index, emitted_ordinal[node_index]
+        )
+        for argument in arguments:
+            if isinstance(argument, Tracer) and argument.index in required:
+                final_uses[argument.index] = max(
+                    final_uses.get(argument.index, 0),
+                    view_use,
+                )
+
+    free_ranges: List[SlotRange] = []
+    active: Dict[int, ValueLifetime] = {}
+    lifetimes: Dict[int, ValueLifetime] = {}
+    next_slot = 0
+
+    def release(slot: SlotRange) -> None:
+        free_ranges.append(slot)
+        free_ranges.sort(key=lambda candidate: candidate.start)
+        merged: List[SlotRange] = []
+        for candidate in free_ranges:
+            if (
+                merged
+                and merged[-1].start + merged[-1].length == candidate.start
+            ):
+                previous = merged.pop()
+                merged.append(
+                    SlotRange(
+                        previous.start, previous.length + candidate.length
+                    )
+                )
+            else:
+                merged.append(candidate)
+        free_ranges[:] = merged
+
+    def allocate(width: int) -> SlotRange:
+        nonlocal next_slot
+        candidate_index = next(
+            (
+                index
+                for index, slot in enumerate(free_ranges)
+                if slot.length >= width
+            ),
+            None,
+        )
+        if candidate_index is None:
+            slot = SlotRange(next_slot, width)
+            next_slot += width
+            return slot
+        slot = free_ranges.pop(candidate_index)
+        if slot.length > width:
+            free_ranges.append(
+                SlotRange(slot.start + width, slot.length - width)
+            )
+            free_ranges.sort(key=lambda candidate: candidate.start)
+        return SlotRange(slot.start, width)
+
+    for _tape_ordinal, node_index in enumerate(semantic_dag.order):
+        # Multiple nodes can share an emitted wave; they are simultaneous for
+        # lifetime purposes and must not recycle one another's ranges.
+        definition_ordinal = emitted_ordinal[node_index]
+        for value, lifetime in tuple(active.items()):
+            if reuse_slots and lifetime.final_use < definition_ordinal:
+                release(lifetime.slot)
+                del active[value]
+        if node_index in tape.input_indicies:
+            operation = None
+        else:
+            operation = tape.nodes[node_index][0]
+        if (
+            isinstance(operation, (ReshapeOP, ConcatenateOP))
+            or operation is OP.TRANSPOSE
+        ):
+            continue
+        if node_index not in tape.input_indicies and operation == OP.VALUE:
+            continue
+        width = tape.dim[node_index].flat()
+        lifetime = ValueLifetime(
+            value=node_index,
+            width=width,
+            first_definition=definition_ordinal,
+            final_use=final_uses[node_index],
+            slot=allocate(width),
+        )
+        lifetimes[node_index] = lifetime
+        active[node_index] = lifetime
+    return lifetimes
 
 
 class _FunctionTableBuilder:
@@ -70,63 +817,276 @@ class _FunctionTableBuilder:
         return function_id, graph
 
 
+
 def _create_opgraph(
     function: Function,
     function_table_builder: _FunctionTableBuilder,
 ):
     tape = function.tape
-    numpy_backend = get_backend_by_name("numpy", set_current=False)
-    required_nodes = {
-        output.index for output in function.output if output is not None
-    }
-    pending_nodes = list(required_nodes)
-    while pending_nodes:
-        node_index = pending_nodes.pop()
-        if node_index in tape.input_indicies:
-            continue
-        _operation, *arguments = tape.nodes[node_index]
-        for argument in arguments:
-            if not isinstance(argument, Tracer):
+    semantic_dag = _build_semantic_dag(function)
+    wave_boundary_inputs: Dict[int, Tuple[int, ...]] = {}
+    for wave in semantic_dag.waves:
+        inputs: Set[int] = set()
+        for node_index in wave.nodes:
+            if node_index in tape.input_indicies:
                 continue
-            if argument.index not in required_nodes:
-                required_nodes.add(argument.index)
-                pending_nodes.append(argument.index)
-
-    remaining_uses: Dict[int, int] = {}
-    for node_index in required_nodes:
-        if node_index in tape.input_indicies:
+            operation, *arguments = tape.nodes[node_index]
+            if operation in {
+                OP.VALUE, OP.ADD, OP.SUB, OP.MUL, OP.DOT, OP.MATMUL, OP.CROSS
+            }:
+                continue
+            inputs.update(
+                argument.index
+                for argument in arguments
+                if isinstance(argument, Tracer)
+            )
+        for node_index in wave.nodes:
+            wave_boundary_inputs[node_index] = tuple(sorted(inputs))
+    residual_lifetimes = _schedule_residual_slots(function)
+    numpy_backend = get_backend_by_name("numpy", set_current=False)
+    required_nodes = set(semantic_dag.nodes)
+    wave_ordinals = {
+        node_index: wave.ordinal
+        for wave in semantic_dag.waves
+        for node_index in wave.nodes
+    }
+    algebraic_operations = {OP.ADD, OP.SUB, OP.MUL}
+    symbolic_dependencies = semantic_dag.materialized_dependencies
+    earliest_consumer_wave: Dict[int, int] = {}
+    for consumer, predecessors in symbolic_dependencies.items():
+        operation = tape.nodes[consumer][0]
+        if operation in algebraic_operations or (
+            isinstance(operation, (ReshapeOP, ConcatenateOP))
+            or operation is OP.TRANSPOSE
+        ):
             continue
-        _operation, *arguments = tape.nodes[node_index]
-        for argument in arguments:
-            if isinstance(argument, Tracer):
-                remaining_uses[argument.index] = (
-                    remaining_uses.get(argument.index, 0) + 1
-                )
+        consumer_wave = wave_ordinals[consumer]
+        for predecessor in predecessors:
+            earliest_consumer_wave[predecessor] = min(
+                earliest_consumer_wave.get(predecessor, consumer_wave),
+                consumer_wave,
+            )
+    output_consumer_wave = len(semantic_dag.waves)
     for output in function.output:
         if output is not None:
-            remaining_uses[output.index] = (
-                remaining_uses.get(output.index, 0) + 1
+            earliest_consumer_wave[output.index] = min(
+                earliest_consumer_wave.get(output.index, output_consumer_wave),
+                output_consumer_wave,
             )
+
+    output_indices = {
+        output.index for output in function.output if output is not None
+    }
+    remaining_uses = _stable_use_counts(tape, required_nodes, function.output)
     input_layer = InputLayer()
     node_values = {}
     node_specs: Dict[int, MemorySpec] = {}
-
+    frontier = _EpochFrontier(
+        tuple(sorted(tape.input_indicies)),
+        {},
+        dict(remaining_uses),
+    )
+    frontier_metadata = []
     for input_index in tape.input_indicies:
         input_position = input_layer.add_input(tape.dim[input_index])
-        spec, _shape = input_layer.input_specs[input_position]
-        node_specs[input_index] = spec
+        _abi_spec, _shape = input_layer.input_specs[input_position]
+        node_specs[input_index] = MemorySpec(
+            residual_lifetimes[input_index].slot.start,
+            residual_lifetimes[input_index].slot.length,
+        )
+    residual_workspace_size = max(
+        (
+            lifetime.slot.start + lifetime.slot.length
+            for lifetime in residual_lifetimes.values()
+        ),
+        default=input_layer.dimension,
+    )
+    current_memory = MemorySpec(0, residual_workspace_size)
+    current_size = current_memory.count
 
-    current_memory = MemorySpec(location=0, count=input_layer.dimension)
+    def resolve_view(value):
+        """Resolve a deferred view against current source-node values."""
+        if not isinstance(value, ViewValue):
+            return value
+        operands = tuple(
+            resolve_view(node_values[source_index])
+            for source_index in value.source_node_ids
+        )
+        operation = value.operation
+        if isinstance(operation, ReshapeOP):
+            operand = operands[0]
+            if isinstance(operand, BilinearWeights):
+                return operand.reshape(operation.newshape, order=operation.order)
+            return np.reshape(operand, operation.newshape, order=operation.order)
+        if operation == OP.TRANSPOSE:
+            operand = operands[0]
+            if isinstance(operand, BilinearWeights):
+                return operand.transpose()
+            return np.transpose(operand)
+        if isinstance(operation, ConcatenateOP):
+            if any(isinstance(operand, BilinearWeights) for operand in operands):
+                bilinear_memories = [
+                    operand.memory for operand in operands
+                    if isinstance(operand, BilinearWeights)
+                ]
+                base_memory = max(
+                    bilinear_memories,
+                    key=lambda memory: (memory.count, memory.location),
+                )
+                memory = MemorySpec(
+                    base_memory.location,
+                    max(memory.count for memory in bilinear_memories),
+                )
+                aligned_operands = [
+                    operand.extend_memory(memory)
+                    if isinstance(operand, BilinearWeights)
+                    and operand.memory is not memory
+                    else operand
+                    for operand in operands
+                ]
+                return _concatenate_bilinear_operands(
+                    memory, aligned_operands, axis=operation.axis
+                )
+            return np.concatenate(operands, axis=operation.axis)
+        raise TypeError(f"Unsupported compiler view {operation!r}")
     for input_index in tape.input_indicies:
         node_values[input_index] = BilinearWeights.project(
             current_memory,
             node_specs[input_index],
             _node_shape(tape.dim[input_index]),
         )
-
     layers = []
-    current_size = input_layer.dimension
+    pending_generic = None
+    pending_generic_nodes = set()
+    generic_nodes = set()
     pending_bilinear_nodes: List[int] = []
+    generic_flushes: List[dict] = []
+    def flush_generic(cause: str):
+        nonlocal pending_generic, pending_generic_nodes
+        if pending_generic is None:
+            return
+        flush_nodes = tuple(sorted(pending_generic_nodes))
+        flush_waves = tuple(sorted({
+            wave_ordinals[node_index]
+            for node_index in flush_nodes
+        }))
+        generic_flushes.append({
+            "wave": flush_waves[-1] if flush_waves else None,
+            "waves": flush_waves,
+            "cause": cause,
+            "nodes": flush_nodes,
+        })
+        if pending_generic is None:
+            return
+        epoch_memory = pending_generic["memory_in"]
+        constant_values = pending_generic["constants"]
+        generic_memory = epoch_memory
+        if constant_values:
+            generic_memory = MemorySpec(
+                epoch_memory.location,
+                epoch_memory.count + len(constant_values),
+            )
+            layers.append(
+                BilinearWorkspaceLayer(
+                    epoch_memory,
+                    generic_memory,
+                    _constant_extension_weights(
+                        epoch_memory,
+                        epoch_memory.count,
+                        list(constant_values),
+                    ),
+                    destination_rows=range(
+                        epoch_memory.count, generic_memory.count
+                    ),
+                )
+            )
+        layers.append(
+            GenericVectorLayer(
+                generic_memory,
+                generic_memory,
+                pending_generic["ops"],
+                opaque_programs=pending_generic["opaque_programs"],
+            )
+        )
+        pending_generic = None
+        pending_generic_nodes.clear()
+
+    def pending_nodes():
+        return set(pending_bilinear_nodes)
+
+    def pending_for_boundary(node_indices):
+        """Select pending expressions directly required by this boundary."""
+        return {
+            node_index
+            for node_index in node_indices
+            if node_index in frontier.values and node_index not in node_specs
+        }
+
+    def view_refs(value):
+        """Return workspace references when a view is row-addressable."""
+        if isinstance(value, BilinearWeights):
+            if value.constant.keys or value.quadratic.keys:
+                return None
+            refs = []
+            for key in np.ndindex(value.shape):
+                terms = [
+                    (index[-1], coefficient)
+                    for index, coefficient in value.linear.keys.items()
+                    if index[:-1] == key
+                ]
+                if len(terms) != 1 or terms[0][1] != 1:
+                    return None
+                refs.append(terms[0][0])
+            return refs
+        if not isinstance(value, ViewValue):
+            return None
+        operand_refs = [
+            view_refs(node_values[source_index])
+            for source_index in value.source_node_ids
+        ]
+        if any(refs is None for refs in operand_refs):
+            return None
+        operation = value.operation
+        if isinstance(operation, ReshapeOP):
+            return np.reshape(
+                np.asarray(operand_refs[0]), value.shape, order=operation.order
+            ).reshape(-1).tolist()
+        if operation == OP.TRANSPOSE:
+            source_shape = _view_shape(node_values[value.source_node_ids[0]])
+            return np.transpose(
+                np.asarray(operand_refs[0]).reshape(source_shape)
+            ).reshape(-1).tolist()
+        if isinstance(operation, ConcatenateOP):
+            arrays = [
+                np.asarray(refs).reshape(_view_shape(node_values[source_index]))
+                for refs, source_index in zip(
+                    operand_refs, value.source_node_ids
+                )
+            ]
+            return np.concatenate(arrays, axis=operation.axis).reshape(-1).tolist()
+        return None
+
+    def queue_non_linear_view_sources(node_index: int):
+        """Queue nonlinear sources before a view reaches a bilinear consumer."""
+        value = node_values[node_index]
+        if isinstance(value, ViewValue):
+            for source_index in value.source_node_ids:
+                queue_non_linear_view_sources(source_index)
+            return
+        if (
+            isinstance(value, BilinearWeights)
+            and value.quadratic.keys
+            and node_index in residual_lifetimes
+            and node_index not in node_specs
+        ):
+            queue_bilinear(node_index, value)
+
+    def _view_shape(value):
+        if isinstance(value, ViewValue):
+            return value.shape
+        if isinstance(value, BilinearWeights):
+            return value.shape
+        return np.asarray(value).shape
 
     def extend_node_values(new_memory: MemorySpec):
         for node_index, value in list(node_values.items()):
@@ -135,97 +1095,125 @@ def _create_opgraph(
                 and value.memory != new_memory
             ):
                 node_values[node_index] = value.extend_memory(new_memory)
-
     def queue_bilinear(node_index: int, value: BilinearWeights):
         node_values[node_index] = value
-        if (
-            node_index not in pending_bilinear_nodes
-            and node_index not in node_specs
-        ):
+        degree = 2 if value.quadratic.keys else (1 if value.linear.keys else 0)
+        frontier.track(
+            node_index,
+            value,
+            degree,
+            symbolic_dependencies.get(node_index, ()),
+            earliest_consumer_wave.get(node_index),
+        )
+        if node_index not in pending_bilinear_nodes and node_index not in node_specs:
             pending_bilinear_nodes.append(node_index)
+            pending_bilinear_nodes.sort()
+    boundary_reasons: List[str] = []
 
-    def flush_bilinear():
+    def materialize_boundary(reason: str, node_indices=None):
+        """Materialize only expressions consumed by this boundary."""
         nonlocal current_memory, current_size
-        if not pending_bilinear_nodes:
+        frontier.close(reason)
+
+        def pending_closure(indices) -> set[int]:
+            selected: set[int] = set()
+            pending = list(indices)
+            while pending:
+                node_index = pending.pop()
+                if node_index in selected:
+                    continue
+                value = node_values.get(node_index)
+                if isinstance(value, ViewValue):
+                    pending.extend(value.source_node_ids)
+                    continue
+                if node_index in pending_bilinear_nodes:
+                    selected.add(node_index)
+            return selected
+
+        selected = (
+            set(pending_bilinear_nodes)
+            if node_indices is None
+            else pending_closure(node_indices)
+        )
+        flush_generic(f"boundary:{reason}")
+        boundary_reasons.append(reason)
+        if not selected:
             return
-
+        frontier_metadata.append(
+            {
+                "reason": reason,
+                "selected": tuple(sorted(selected)),
+                "values": {
+                    index: frontier.values[index]
+                    for index in sorted(selected)
+                    if index in frontier.values
+                },
+                "remaining": tuple(sorted(
+                    index for index in frontier.values if index not in selected
+                )),
+            }
+        )
         previous_memory = current_memory
-        retained = []
-        next_location = 0
-        for node_index, previous_spec in node_specs.items():
+        output_rows = set()
+        pending_specs = []
+        for node_index in sorted(selected):
             shape = _node_shape(tape.dim[node_index])
-            next_spec = MemorySpec(next_location, previous_spec.count)
-            retained.append((node_index, previous_spec, shape, next_spec))
-            next_location += next_spec.count
-
-        additions = []
-        for node_index in pending_bilinear_nodes:
-            bilinear_value = node_values[node_index]
-            shape = _node_shape(tape.dim[node_index])
-            spec = MemorySpec(next_location, tape.dim[node_index].flat())
-            additions.append((node_index, bilinear_value, shape, spec))
-            next_location += spec.count
-
-        new_memory = MemorySpec(0, next_location)
-        constant = dok_ndarray((next_location,))
-        linear = dok_ndarray((next_location, previous_memory.count))
-        quadratic = dok_ndarray(
-            (next_location, previous_memory.count, previous_memory.count)
+            if node_index in residual_lifetimes:
+                lifetime = residual_lifetimes[node_index]
+                spec = MemorySpec(lifetime.slot.start, lifetime.slot.length)
+            else:
+                spec = MemorySpec(current_memory.count, tape.dim[node_index].flat())
+            pending_specs.append((node_index, node_values[node_index], shape, spec))
+            output_rows.update(range(spec.location, spec.location + spec.count))
+        new_memory = MemorySpec(
+            0,
+            max(
+                residual_workspace_size,
+                previous_memory.count,
+                *(spec.location + spec.count for _, _, _, spec in pending_specs),
+            ),
         )
-        for _node_index, previous_spec, _shape, next_spec in retained:
-            for offset in range(previous_spec.count):
-                linear[
-                    (
-                        next_spec.location + offset,
-                        previous_spec.location + offset,
-                    )
-                ] = 1
-        for _node_index, bilinear_value, output_shape, spec in additions:
-            _append_bilinear_value(
-                constant,
-                linear,
-                quadratic,
-                spec.location,
-                bilinear_value,
-                output_shape,
-            )
-
-        weights = BilinearWeights(
-            previous_memory,
-            (next_location,),
-            constant=constant,
-            linear=linear,
-            quadratic=quadratic,
+        constant = dok_ndarray((new_memory.count,))
+        linear = dok_ndarray((new_memory.count, previous_memory.count))
+        quadratic = dok_ndarray((new_memory.count, previous_memory.count, previous_memory.count))
+        for _node_index, value, output_shape, spec in pending_specs:
+            _append_bilinear_value(constant, linear, quadratic, spec.location, value, output_shape)
+        layer = BilinearWorkspaceLayer(
+            previous_memory, new_memory,
+            BilinearWeights(previous_memory, (new_memory.count,),
+                            constant=constant, linear=linear, quadratic=quadratic),
+            destination_rows=output_rows,
         )
-        layers.append(
-            BilinearWorkspaceLayer(previous_memory, new_memory, weights)
-        )
-
+        # Keep semantic frontier boundaries authoritative: the post-pass may
+        # coalesce independent rows within one boundary, but must not erase a
+        # closure that separates two epochs.
+        layer._frontier_id = len(frontier_metadata)
+        layers.append(layer)
         current_memory = new_memory
-        current_size = next_location
-        node_specs.clear()
-        for node_index, _previous_spec, shape, spec in retained:
+        current_size = new_memory.count
+        for node_index, _value, shape, spec in pending_specs:
             node_specs[node_index] = spec
-            node_values[node_index] = BilinearWeights.project(
-                new_memory, spec, shape
-            )
-        for node_index, _bilinear_value, shape, spec in additions:
-            node_specs[node_index] = spec
-            node_values[node_index] = BilinearWeights.project(
-                new_memory, spec, shape
-            )
-        pending_bilinear_nodes.clear()
+            node_values[node_index] = BilinearWeights.project(new_memory, spec, shape)
+            frontier.values.pop(node_index, None)
+        pending_bilinear_nodes[:] = [
+            node_index
+            for node_index in pending_bilinear_nodes
+            if node_index not in selected
+        ]
+        extend_node_values(new_memory)
+
+
 
     def lower_function_evaluation(node_index: int, arguments):
+        """Emit a nested graph call after materializing consumed expressions."""
         nonlocal current_memory, current_size
-        flush_bilinear()
+        materialize_boundary("nested-call-input")
 
         function_value = node_values[arguments[0].index]
         if not isinstance(function_value, Function):
             raise NotImplementedError(
                 "Function evaluation requires a statically known Function"
             )
-
         callee_function_id, callee_graph = function_table_builder.get_or_build(
             function_value
         )
@@ -237,93 +1225,164 @@ def _create_opgraph(
             )
             for argument in arguments[1:]
         ]
-
         output_shape = _node_shape(tape.dim[node_index])
         output_count = tape.dim[node_index].flat()
-        output_spec = MemorySpec(current_size, output_count)
-        next_memory = MemorySpec(0, current_size + output_count)
-        output_bindings = [output_spec]
-
-        layer = FunctionEvaluationLayer(
-            current_memory,
-            next_memory,
-            input_bindings,
-            output_bindings,
-            callee_graph,
-            callee_function_id=callee_function_id,
+        lifetime = residual_lifetimes[node_index]
+        output_spec = MemorySpec(lifetime.slot.start, output_count)
+        layers.append(
+            FunctionEvaluationLayer(
+                current_memory,
+                MemorySpec(
+                    0,
+                    max(current_memory.count, output_spec.location + output_count),
+                ),
+                input_bindings,
+                [output_spec],
+                callee_graph,
+                callee_function_id,
+            )
         )
-        layers.append(layer)
-        current_memory = next_memory
-        current_size = next_memory.count
-        extend_node_values(next_memory)
+        current_memory = layers[-1].memory_out
+        current_size = current_memory.count
         node_specs[node_index] = output_spec
         node_values[node_index] = BilinearWeights.project(
-            next_memory, output_spec, output_shape
+            current_memory, output_spec, output_shape
         )
+    def lower_generic(
+        node_index: int, operation, arguments, boundary_inputs
+    ):
+        nonlocal current_memory, current_size, pending_generic
+        if operation == OP.CASE:
+            # CASE is a generic barrier: every algebraic branch must have a
+            # stable slot before its row references are captured.  In
+            # particular, do not let a branch remain only in the pending
+            # frontier while the condition and branches are added to one
+            # generic batch.
+            for argument in arguments:
+                if not isinstance(argument, Tracer):
+                    continue
+                value = node_values[argument.index]
+                if (
+                    isinstance(value, BilinearWeights)
+                    and argument.index in residual_lifetimes
+                    and argument.index not in node_specs
+                ):
+                    queue_bilinear(argument.index, value)
+        def depends_on_generic(index: int, seen=None) -> bool:
+            """Whether an argument reads an output of this generic batch."""
+            if seen is None:
+                seen = set()
+            if index in seen:
+                return False
+            if index in pending_generic_nodes:
+                return True
+            value = node_values.get(index)
+            if isinstance(value, ViewValue):
+                return any(
+                    depends_on_generic(source_index, seen)
+                    for source_index in value.source_node_ids
+                )
+            return False
 
-    def lower_generic(node_index: int, operation, arguments):
-        nonlocal current_memory, current_size
-        flush_bilinear()
-
+        # The runtime validator intentionally rejects a later row reading or
+        # rewriting an earlier row's output in the same scheduled layer.  A
+        # generic chain therefore needs a layer boundary even when the DAG
+        # scheduler made all of its nodes part of one nonlinear wave.
+        if pending_generic and any(
+            isinstance(argument, Tracer)
+            and depends_on_generic(argument.index)
+            for argument in arguments
+        ):
+            flush_generic("direct-dependency")
+        pending_generic_arguments = [
+            argument.index
+            for argument in arguments
+            if isinstance(argument, Tracer)
+            and argument.index in pending_nodes()
+        ]
+        if pending_generic_arguments:
+            materialize_boundary("generic-consumer")
+        if pending_generic is None:
+            pending_generic = {
+                "memory_in": current_memory,
+                "ops": [],
+                "constants": [],
+                "opaque_programs": [],
+            }
         output_shape = _node_shape(tape.dim[node_index])
         output_count = tape.dim[node_index].flat()
-        base_size = current_size
-        constant_values: List[float] = []
 
         def reserve_constant_rows(value, shape: Tuple[int, ...]):
-            start = base_size + len(constant_values)
+            nonlocal current_memory, current_size
             rows = _flatten_constant_rows(value, shape)
-            constant_values.extend(rows)
+            if rows and all(row == rows[0] for row in rows[1:]):
+                rows = rows[:1]
+            start = (
+                pending_generic["memory_in"].count
+                + len(pending_generic["constants"])
+            )
+            pending_generic["constants"].extend(rows)
+            current_memory_ref = MemorySpec(
+                pending_generic["memory_in"].location,
+                pending_generic["memory_in"].count
+                + len(pending_generic["constants"]),
+            )
+            current_memory = current_memory_ref
+            current_size = current_memory_ref.count
             if len(rows) == 1:
                 return start
             return [start + offset for offset in range(len(rows))]
 
         def refs_for_arg(argument):
+            nonlocal current_memory, current_size
             argument_shape = _node_shape(tape.dim[argument.index])
-            if argument.index in node_specs:
+            if (
+                argument.index in node_specs
+                and isinstance(node_values[argument.index], BilinearWeights)
+            ):
                 spec = node_specs[argument.index]
                 if spec.count == 1:
                     return spec.location
-                return [spec.location + offset for offset in range(spec.count)]
+                return [
+                    spec.location + offset for offset in range(spec.count)
+                ]
+            view_value = node_values[argument.index]
+            view_references = view_refs(view_value)
+            if view_references is not None:
+                return view_references
+            if isinstance(view_value, ViewValue):
+                # Nonlinear views are closed above and then resolve through
+                # the source's stable workspace rows.  A view-local copy would
+                # violate aliasing and inflate the frontier layer.
+                raise ValueError(
+                    f"unsupported non-bilinear dynamic view at node {argument.index}"
+                )
+            if (
+                argument.index in residual_lifetimes
+                and isinstance(node_values[argument.index], BilinearWeights)
+            ):
+                lifetime = residual_lifetimes[argument.index]
+                spec = MemorySpec(lifetime.slot.start, lifetime.slot.length)
+                node_specs[argument.index] = spec
+                if spec.count == 1:
+                    return spec.location
+                return [
+                    spec.location + offset for offset in range(spec.count)
+                ]
             return reserve_constant_rows(
                 node_values[argument.index], argument_shape
             )
 
         def row_ref(refs, row: int):
-            return refs if isinstance(refs, int) else refs[row]
+            if isinstance(refs, int):
+                return refs
+            if len(refs) == 1:
+                return refs[0]
+            return refs[row]
 
         appended_operations = []
         scalar_lowered = False
-        if isinstance(operation, ReshapeOP):
-            (argument,) = arguments
-            refs = refs_for_arg(argument)
-            appended_operations.extend(
-                (IDENTITY_OP, row_ref(refs, row), UNUSED_REF, UNUSED_REF)
-                for row in range(output_count)
-            )
-            scalar_lowered = True
-        elif (
-            isinstance(operation, ConcatenateOP)
-            and operation.axis == 0
-            and all(
-                tape.dim[argument.index].is_scalar()
-                or tape.dim[argument.index].is_vector()
-                for argument in arguments
-            )
-        ):
-            concatenated_refs = []
-            for argument in arguments:
-                refs = refs_for_arg(argument)
-                if isinstance(refs, int):
-                    concatenated_refs.append(refs)
-                else:
-                    concatenated_refs.extend(refs)
-            appended_operations.extend(
-                (IDENTITY_OP, ref, UNUSED_REF, UNUSED_REF)
-                for ref in concatenated_refs
-            )
-            scalar_lowered = True
-        elif operation in {
+        if operation in {
             OP.SIN,
             OP.COS,
             OP.TAN,
@@ -379,53 +1438,13 @@ def _create_opgraph(
             )
             scalar_lowered = True
 
-        if constant_values:
-            constant_memory = MemorySpec(0, base_size + len(constant_values))
-            layers.append(
-                BilinearWorkspaceLayer(
-                    current_memory,
-                    constant_memory,
-                    _constant_extension_weights(
-                        current_memory, base_size, constant_values
-                    ),
-                )
-            )
-            current_memory = constant_memory
-            current_size = constant_memory.count
 
-        argument_counts: Dict[int, int] = {}
-        for argument in arguments:
-            argument_counts[argument.index] = (
-                argument_counts.get(argument.index, 0) + 1
-            )
-        retained = []
-        next_location = 0
-        for retained_index, previous_spec in node_specs.items():
-            uses_after = remaining_uses.get(retained_index, 0) - (
-                argument_counts.get(retained_index, 0)
-            )
-            if uses_after <= 0:
-                continue
-            shape = _node_shape(tape.dim[retained_index])
-            next_spec = MemorySpec(next_location, previous_spec.count)
-            retained.append((retained_index, previous_spec, shape, next_spec))
-            next_location += next_spec.count
-
-        output_spec = MemorySpec(next_location, output_count)
-        next_memory = MemorySpec(0, next_location + output_count)
-        layer_operations = []
-        for _retained_index, previous_spec, _shape, next_spec in retained:
-            layer_operations.extend(
-                (
-                    IDENTITY_OP,
-                    previous_spec.location + offset,
-                    UNUSED_REF,
-                    UNUSED_REF,
-                )
-                for offset in range(next_spec.count)
-            )
-        layer_operations.extend(appended_operations)
-
+        lifetime = residual_lifetimes[node_index]
+        output_spec = MemorySpec(lifetime.slot.start, lifetime.slot.length)
+        layer_operations = [
+            (output_spec.location + offset, *operation_row)
+            for offset, operation_row in enumerate(appended_operations)
+        ]
         opaque_programs: List[OpaqueProgram] = []
         if not scalar_lowered:
             operand_specs = []
@@ -446,57 +1465,61 @@ def _create_opgraph(
                     tuple(operand_specs),
                 )
             )
-            layer_operations.extend(
-                (OPAQUE_OP, 0, row, UNUSED_REF) for row in range(output_count)
-            )
-
-        layer = GenericVectorLayer(
-            current_memory,
-            next_memory,
-            layer_operations,
-            opaque_programs=opaque_programs,
-        )
-        layers.append(layer)
-        current_memory = next_memory
-        current_size = next_memory.count
-        node_specs.clear()
-        for retained_index, _previous_spec, shape, spec in retained:
-            node_specs[retained_index] = spec
-            node_values[retained_index] = BilinearWeights.project(
-                next_memory, spec, shape
-            )
+            for row in range(output_count):
+                layer_operations.append(
+                    (
+                        output_spec.location + row,
+                        OPAQUE_OP,
+                        0,
+                        row,
+                        UNUSED_REF,
+                    )
+                )
+        pending_generic["ops"].extend(layer_operations)
+        pending_generic["opaque_programs"].extend(opaque_programs)
+        # Generic outputs still own their stable residual slot.  Recording
+        # that binding prevents later CASE rows from deriving references from
         node_specs[node_index] = output_spec
         node_values[node_index] = BilinearWeights.project(
-            next_memory, output_spec, output_shape
+            current_memory, output_spec, output_shape
         )
-
+        generic_nodes.add(node_index)
+        pending_generic_nodes.add(node_index)
     def release_arguments(arguments):
         for argument in arguments:
             if not isinstance(argument, Tracer):
                 continue
             remaining_uses[argument.index] -= 1
-            if remaining_uses[argument.index] != 0:
-                continue
-            node_values.pop(argument.index, None)
-            node_specs.pop(argument.index, None)
-            if argument.index in pending_bilinear_nodes:
-                pending_bilinear_nodes.remove(argument.index)
+    # The semantic DAG is the sole source of dependency order. Views have
+    # already been resolved to their materialized producers in its edges.
+    lowering_order = _semantic_lowering_order(tape, semantic_dag)
 
-    for node_index in range(len(tape)):
+    for node_index in lowering_order:
         if node_index in tape.input_indicies:
             continue
-
+        operation, *arguments = tape.nodes[node_index]
+        if operation == OP.VALUE:
+            (constant_value,) = arguments
+            node_values[node_index] = _as_numpy_value(constant_value)
+            continue
         if node_index not in required_nodes:
             continue
-        operation, *arguments = tape.nodes[node_index]
         try:
-            if operation == OP.VALUE:
-                (constant_value,) = arguments
-                node_values[node_index] = _as_numpy_value(constant_value)
+            if (
+                isinstance(operation, (ReshapeOP, ConcatenateOP))
+                or operation is OP.TRANSPOSE
+            ):
+                node_values[node_index] = ViewValue(
+                    operation,
+                    tuple(argument.index for argument in arguments),
+                    tuple(_node_shape(tape.dim[node_index])),
+                )
                 continue
-
-            operands = [node_values[argument.index] for argument in arguments]
-            if all(
+            operands = [
+                resolve_view(node_values[argument.index])
+                for argument in arguments
+            ]
+            if operation not in {OP.DOT, OP.CROSS} and all(
                 not isinstance(operand, BilinearWeights)
                 for operand in operands
             ):
@@ -510,108 +1533,414 @@ def _create_opgraph(
             ):
                 lower_function_evaluation(node_index, arguments)
                 continue
-            if operation == OP.DOT and any(
-                isinstance(operand, BilinearWeights)
-                and not operand.is_linear
-                and not operand.is_constant
+            if operation in {OP.ADD, OP.SUB, OP.MUL}:
+                if pending_nodes() and any(
+                    isinstance(argument, Tracer)
+                    and argument.index in generic_nodes
+                    for argument in arguments
+                ) and any(
+                    isinstance(argument, Tracer)
+                    and argument.index in pending_nodes()
+                    for argument in arguments
+                ):
+                    materialize_boundary("nonlinear-scalar-consumer")
+            if operation in {OP.ADD, OP.SUB, OP.MUL} and any(
+                isinstance(operand, BilinearWeights) for operand in operands
+            ) and all(
+                not isinstance(operand, BilinearWeights)
+                or operand.shape == _node_shape(tape.dim[node_index])
                 for operand in operands
             ):
-                # A dot product is quadratic in its current workspace
-                # coordinates. Materialise an earlier quadratic result before
-                # forming another dot so the product stays degree two.
-                flush_bilinear()
-                operands = [
-                    node_values[argument.index] for argument in arguments
-                ]
-            elif operation == OP.MATMUL:
-                flush_bilinear()
-                operands = [
-                    node_values[argument.index] for argument in arguments
-                ]
+                output_shape = _node_shape(tape.dim[node_index])
 
-            if operation in ops:
+                def algebra_operands():
+                    normalized = []
+                    for operand in operands:
+                        if isinstance(operand, BilinearWeights):
+                            value = operand
+                        else:
+                            value = _constant_to_bw(
+                                current_memory,
+                                np.full(output_shape, operand)
+                                if np.isscalar(operand)
+                                else operand,
+                                output_shape,
+                            )
+                        if value.memory is not current_memory:
+                            value = value.extend_memory(current_memory)
+                        normalized.append(value)
+                    return normalized
+
+                algebra_values = algebra_operands()
+                result = compiler_binary(
+                    {OP.ADD: "add", OP.SUB: "sub", OP.MUL: "mul"}[operation],
+                    *algebra_values,
+                )
+                if result is None:
+                    materialize_boundary("bilinear-degree")
+                    operands = [
+                        resolve_view(node_values[argument.index])
+                        for argument in arguments
+                    ]
+                    algebra_values = algebra_operands()
+                    result = compiler_binary(
+                        {OP.ADD: "add", OP.SUB: "sub", OP.MUL: "mul"}[operation],
+                        *algebra_values,
+                    )
+                if result is None:
+                    raise TypeError(
+                        f"compiler algebra could not lower {operation} "
+                        f"at tape node {node_index}"
+                    )
+                queue_bilinear(node_index, result)
+                continue
+            elif operation in {OP.DOT, OP.MATMUL, OP.CROSS}:
+                for argument in arguments:
+                    if isinstance(argument, Tracer):
+                        queue_non_linear_view_sources(argument.index)
+                operands = [
+                    resolve_view(node_values[argument.index])
+                    for argument in arguments
+                ]
+                degrees = [
+                    2 if isinstance(operand, BilinearWeights)
+                    and operand.quadratic.keys
+                    else (
+                        1 if isinstance(operand, BilinearWeights)
+                        and operand.linear.keys
+                        else 0
+                    )
+                    for operand in operands
+                ]
+                if (
+                    any(degree >= 2 for degree in degrees)
+                    and sum(degree > 0 for degree in degrees) >= 2
+                ):
+                    materialize_boundary("bilinear-degree")
+                    operands = [
+                        resolve_view(node_values[argument.index])
+                        for argument in arguments
+                    ]
+                required_memory = max(
+                    (
+                        operand.memory.count
+                        for operand in operands
+                        if isinstance(operand, BilinearWeights)
+                    ),
+                    default=current_memory.count,
+                )
+                required_memory = max(required_memory, current_memory.count)
+                if required_memory > current_memory.count:
+                    current_memory = MemorySpec(
+                        current_memory.location, required_memory
+                    )
+                    current_size = required_memory
+                operands = [
+                    (
+                        _constant_to_bw(
+                            current_memory,
+                            operand,
+                            _node_shape(tape.dim[argument.index]),
+                        )
+                        if not isinstance(operand, BilinearWeights)
+                        else operand
+                    )
+                    for operand, argument in zip(operands, arguments)
+                ]
+                operands = [
+                    (
+                        operand.extend_memory(current_memory)
+                        if isinstance(operand, BilinearWeights)
+                        and operand.memory is not current_memory
+                        else operand
+                    )
+                    for operand in operands
+                ]
                 memories = {
-                    id(operand.memory)
+                    (operand.memory.location, operand.memory.count)
                     for operand in operands
                     if isinstance(operand, BilinearWeights)
                 }
                 if len(memories) <= 1:
                     try:
                         result = ops[operation](*operands)
-                        if isinstance(result, BilinearWeights):
-                            queue_bilinear(node_index, result)
-                            continue
+                        if not isinstance(result, BilinearWeights):
+                            result = _constant_to_bw(
+                                current_memory,
+                                result,
+                                _node_shape(tape.dim[node_index]),
+                            )
+                        queue_bilinear(node_index, result)
+                        continue
                     except (
                         AssertionError,
                         TypeError,
                         NotImplementedError,
-                    ):
-                        pass
+                    ) as error:
+                        raise TypeError(
+                            f"scheduled {operation} lowering failed at tape node {node_index}"
+                        ) from error
 
-            if isinstance(operation, ConcatenateOP):
-                bilinear_memory = next(
-                    (
-                        operand.memory
-                        for operand in operands
-                        if isinstance(operand, BilinearWeights)
-                    ),
-                    None,
-                )
-                if bilinear_memory is not None:
-                    try:
-                        queue_bilinear(
-                            node_index,
-                            _concatenate_bilinear_operands(
-                                bilinear_memory,
-                                operands,
-                                axis=operation.axis,
-                            ),
-                        )
-                        continue
-                    except (AssertionError, TypeError, ValueError):
-                        pass
-
-            if isinstance(operation, ReshapeOP):
-                (argument_value,) = operands
-                if isinstance(argument_value, BilinearWeights):
-                    queue_bilinear(
-                        node_index,
-                        argument_value.reshape(
-                            operation.newshape,
-                            order=operation.order,
-                        ),
-                    )
-                    continue
-
-            lower_generic(node_index, operation, arguments)
+            lower_generic(
+                node_index,
+                operation,
+                arguments,
+                wave_boundary_inputs[node_index],
+            )
 
         finally:
             release_arguments(arguments)
-
+    pure_view_outputs = (
+        not layers
+        and all(
+            output is None
+            or (
+                isinstance(node_values[output.index], ViewValue)
+                and view_refs(node_values[output.index]) is not None
+            )
+            for output in function.output
+        )
+    )
     for output in function.output:
         if output is None:
             continue
-        if output.index in node_specs:
+        raw_value = node_values[output.index]
+        value = resolve_view(raw_value)
+        view_references = view_refs(raw_value)
+        if (
+            pure_view_outputs
+            and isinstance(raw_value, ViewValue)
+            and view_references is not None
+        ):
+            # ``refs`` describes the logical output independently of the
+            # backing range.  Keep the range within the ABI workspace so the
+            # archive validator does not mistake a four-element view of a
+            # two-element input for an out-of-bounds output.
+            node_specs[output.index] = MemorySpec(0, input_layer.dimension)
             continue
-        value = node_values[output.index]
-        if isinstance(value, BilinearWeights):
-            queue_bilinear(output.index, value)
-        else:
-            queue_bilinear(
-                output.index,
-                _constant_to_bw(
-                    current_memory, value, _node_shape(output.dim)
-                ),
+        if (
+            view_references is not None
+            and view_references
+            == list(
+                range(view_references[0], view_references[0] + len(view_references))
             )
+        ):
+            start = view_references[0]
+            node_specs[output.index] = MemorySpec(start, len(view_references))
+            node_values[output.index] = BilinearWeights.project(
+                current_memory,
+                node_specs[output.index],
+                _node_shape(output.dim),
+            )
+            continue
+        if isinstance(raw_value, ViewValue) and view_references is not None:
+            value = resolve_view(raw_value)
+            if isinstance(value, BilinearWeights):
+                output_count = output.dim.flat()
+                output_spec = MemorySpec(current_memory.count, output_count)
+                next_memory = MemorySpec(
+                    0, current_memory.count + output_count
+                )
+                value = value.extend_memory(current_memory)
+                constant = dok_ndarray((next_memory.count,))
+                linear = dok_ndarray((next_memory.count, current_memory.count))
+                quadratic = dok_ndarray(
+                    (next_memory.count, current_memory.count, current_memory.count)
+                )
+                _append_bilinear_value(
+                    constant, linear, quadratic, output_spec.location, value,
+                    _node_shape(output.dim),
+                )
+                layers.append(
+                    BilinearWorkspaceLayer(
+                        current_memory, next_memory,
+                        BilinearWeights(
+                            current_memory, (next_memory.count,),
+                            constant=constant, linear=linear,
+                            quadratic=quadratic,
+                        ),
+                        destination_rows=range(
+                            output_spec.location,
+                            output_spec.location + output_count,
+                        ),
+                    )
+                )
+                current_memory = next_memory
+                current_size = next_memory.count
+                node_specs[output.index] = output_spec
+                node_values[output.index] = BilinearWeights.project(
+                    current_memory, output_spec, _node_shape(output.dim)
+                )
+                continue
+            # A final view may resolve to nonlinear BilinearWeights without a
+            # residual lifetime of its own.  Give it a declared ABI slot and
+            # materialize the resolved expression directly into that slot,
+            # rather than queueing an un-lifetimed node for the frontier.
+            if pending_nodes() or pending_generic is not None:
+                materialize_boundary("output-abi")
+            if output.index in node_specs:
+                continue
+            if not isinstance(value, BilinearWeights):
+                value = _constant_to_bw(
+                    current_memory, value, _node_shape(output.dim)
+                )
+            elif value.memory is not current_memory:
+                value = value.extend_memory(current_memory)
+            output_count = output.dim.flat()
+            output_spec = MemorySpec(current_memory.count, output_count)
+            next_memory = MemorySpec(
+                0, current_memory.count + output_count
+            )
+            constant = dok_ndarray((next_memory.count,))
+            linear = dok_ndarray((next_memory.count, current_memory.count))
+            quadratic = dok_ndarray(
+                (next_memory.count, current_memory.count, current_memory.count)
+            )
+            _append_bilinear_value(
+                constant,
+                linear,
+                quadratic,
+                output_spec.location,
+                value,
+                _node_shape(output.dim),
+            )
+            layers.append(
+                BilinearWorkspaceLayer(
 
-    flush_bilinear()
+                    current_memory,
+                    next_memory,
+                    BilinearWeights(
+                        current_memory,
+                        (next_memory.count,),
+                        constant=constant,
+                        linear=linear,
+                        quadratic=quadratic,
+                    ),
+                    destination_rows=range(
+                        output_spec.location,
+                        output_spec.location + output_count,
+                    ),
+                )
+            )
+            current_memory = next_memory
+            current_size = next_memory.count
+            node_specs[output.index] = output_spec
+            node_values[output.index] = BilinearWeights.project(
+                current_memory, output_spec, _node_shape(output.dim)
+            )
+            continue
+        if output.index not in node_specs:
+            queue_bilinear(output.index, value)
+            materialize_boundary("output-abi")
+            if output.index in node_specs:
+                continue
+        node_values[output.index] = value
+
+    materialize_boundary("output-abi")
 
     output_layer = OutputLayer()
     output_weights = []
     for output in function.output:
-        output_layer.add_output(node_specs[output.index], output.dim)
-        output_weights.append(node_values.get(output.index))
+        if output is None:
+            continue
+        output_value = node_values.get(output.index)
+        output_refs = view_refs(output_value)
+        output_layer.add_output(
+            node_specs[output.index],
+            output.dim,
+            refs=output_refs if pure_view_outputs else None,
+        )
+        output_weights.append(output_value)
 
+    merged_layers = []
+    for layer in layers:
+        previous_frontier = (
+            getattr(merged_layers[-1], "_frontier_id", None)
+            if merged_layers
+            else None
+        )
+        generic_merge = (
+            merged_layers
+            and isinstance(merged_layers[-1], GenericVectorLayer)
+            and isinstance(layer, GenericVectorLayer)
+            and not merged_layers[-1].opaque_programs
+            and not layer.opaque_programs
+            and not merged_layers[-1].constants
+            and not layer.constants
+            and merged_layers[-1].memory_out == layer.memory_in
+        )
+        if generic_merge:
+            previous = merged_layers[-1]
+            previous_outputs = {operation[0] for operation in previous.ops}
+            generic_hazard = any(
+                reference >= 0 and reference in previous_outputs
+                for _output, _op, first, second, third in layer.ops
+                for reference in (first, second, third)
+            )
+            if not generic_hazard:
+                merged_layers[-1] = GenericVectorLayer(
+                    previous.memory_in,
+                    layer.memory_out,
+                    previous.ops + layer.ops,
+                )
+                continue
+        layer_frontier = getattr(layer, "_frontier_id", None)
+        frontier_reasons = tuple(boundary_reasons)
+        nonlinear_boundary = lambda frontier_id: (
+            frontier_id is not None
+            and 0 < frontier_id <= len(frontier_reasons)
+            and "nonlinear-scalar" in frontier_reasons[frontier_id - 1]
+        )
+        if (
+            merged_layers
+            and isinstance(merged_layers[-1], BilinearWorkspaceLayer)
+            and isinstance(layer, BilinearWorkspaceLayer)
+            and (
+                previous_frontier == layer_frontier
+                or previous_frontier is None
+                or layer_frontier is None
+                or not nonlinear_boundary(previous_frontier)
+                and not nonlinear_boundary(layer_frontier)
+            )
+        ):
+            previous = merged_layers[-1]
+            previous_rows = set(previous._destination_rows)
+            reads_previous = (
+                any(
+                    int(key[-1]) in previous_rows
+                    or (
+                        len(key) >= 2
+                        and int(key[-2]) in previous_rows
+                    )
+                    for sparse in (layer.weights.linear, layer.weights.quadratic)
+                    for key in sparse.keys.keys()
+                )
+            )
+            if not reads_previous:
+                common = MemorySpec(
+                    0,
+                    max(previous.memory_in.count, layer.memory_in.count),
+                )
+                combined = compiler_binary(
+                    "add",
+                    previous.weights.extend_memory(common),
+                    layer.weights.extend_memory(common),
+                )
+                if combined is not None:
+                    merged_layers[-1] = BilinearWorkspaceLayer(
+                        common,
+                        MemorySpec(
+                            0,
+                            max(previous.memory_out.count, layer.memory_out.count),
+                        ),
+                        combined,
+                        destination_rows=(
+                            previous_rows | set(layer._destination_rows)
+                        ),
+                    )
+                    continue
+        merged_layers.append(layer)
+    layers = merged_layers
     workspace_count = max(
         [
             input_layer.dimension,
@@ -629,13 +1958,46 @@ def _create_opgraph(
         output_layer,
         layers,
     )
-    # Kept as compile-time metadata for QP coefficient extraction. Runtime
-    # graphs do not inspect this attribute.
+    graph.residual_lifetimes = residual_lifetimes
+    graph.residual_workspace_size = max(
+        (
+            lifetime.slot.start + lifetime.slot.length
+            for lifetime in residual_lifetimes.values()
+        ),
+        default=0,
+    )
+    graph.frontier_metadata = tuple(frontier_metadata)
     graph.output_weights = output_weights
-    raw_weights = _raw_output_weights(graph, output_weights)
-    graph.output_weights_are_raw = raw_weights is not None
-    if raw_weights is not None:
-        graph.output_weights = raw_weights
+    graph.materialization_boundary_reasons = tuple(boundary_reasons)
+    graph.algebraic_frontier_count = sum(
+        isinstance(layer, BilinearWorkspaceLayer) for layer in layers
+    )
+    graph.nonlinear_batch_count = sum(
+        isinstance(layer, GenericVectorLayer) for layer in layers
+    )
+    graph.generic_flushes = tuple(generic_flushes)
+    graph.generic_flush_cause_histogram = {
+        cause: sum(record["cause"] == cause for record in generic_flushes)
+        for cause in sorted({record["cause"] for record in generic_flushes})
+    }
+    graph.generic_flush_wave_histogram = {
+        wave: sum(record["wave"] == wave for record in generic_flushes)
+        for wave in sorted({
+            record["wave"] for record in generic_flushes
+            if record["wave"] is not None
+        })
+    }
+    colored_barrier_dag = _colored_barrier_dag(semantic_dag, tape)
+    graph.colored_barrier_dag = colored_barrier_dag
+    graph.colored_barrier_lower_bound = colored_barrier_dag.lower_bound
+    graph.scheduled_color_switches = colored_barrier_dag.color_switches
+    graph.colored_barrier_theoretically_attainable_le_50 = (
+        colored_barrier_dag.theoretically_attainable_le_50
+    )
+    graph.frontier_closure_reasons = tuple(boundary_reasons)
+    # Frontier emission writes only algebraic destination rows.  It never
+    # emits relocation, clear, or copy rows.
+    graph.frontier_copy_rows = 0
     return graph
 
 

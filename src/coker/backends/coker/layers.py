@@ -189,18 +189,27 @@ def to_float(x):
 
 class OutputLayer:
     def __init__(self):
-        self.outputs: List[Tuple[MemorySpec, Dimension]] = []
+        self.outputs: List[Tuple[MemorySpec, Dimension, Tuple[int, ...] | None]] = []
 
     def inputs(self):
-        return [memory for memory, _ in self.outputs]
+        return [memory for memory, _shape, _refs in self.outputs]
 
-    def add_output(self, memory: MemorySpec, shape: Dimension):
-        self.outputs.append((memory, shape))
+    def add_output(
+        self,
+        memory: MemorySpec,
+        shape: Dimension,
+        refs: Sequence[int] | None = None,
+    ):
+        ordered_refs = None if refs is None else tuple(int(ref) for ref in refs)
+        self.outputs.append((memory, shape, ordered_refs))
 
     def call(self, workspace: np.ndarray):
         result = []
-        for memory, shape in self.outputs:
-            raw = workspace[memory.location : memory.location + memory.count]
+        for memory, shape, refs in self.outputs:
+            if refs is None or not refs:
+                raw = workspace[memory.location : memory.location + memory.count]
+            else:
+                raw = workspace[np.asarray(refs, dtype=np.intp)]
             if shape.dim is None:
                 result.append(to_float(raw))
             else:
@@ -214,10 +223,39 @@ class OutputLayer:
             "outputs": [
                 {
                     "memory": memory.to_export_dict(),
+                    **({"refs": list(refs)} if refs else {}),
                 }
-                for memory, _shape in self.outputs
+                for memory, _shape, refs in self.outputs
             ]
         }
+
+
+def _bilinear_row_terms(weights: BilinearWeights):
+    """Return canonical homogeneous terms grouped by output row."""
+    output_count = int(np.prod(weights.shape, dtype=int))
+    grouped = [dict() for _ in range(output_count)]
+
+    def add(row, left, right, value):
+        pair = (min(left, right), max(left, right))
+        grouped[row][pair] = grouped[row].get(pair, 0.0) + float(value)
+
+    for key, value in weights.constant.keys.items():
+        row = int(np.ravel_multi_index(key, weights.shape, order="C"))
+        add(row, 0, 0, value)
+    for key, value in weights.linear.keys.items():
+        row = int(np.ravel_multi_index(key[:-1], weights.shape, order="C"))
+        add(row, 0, int(key[-1]) + 1, value)
+    for key, value in weights.quadratic.keys.items():
+        row = int(np.ravel_multi_index(key[:-2], weights.shape, order="C"))
+        add(row, int(key[-2]) + 1, int(key[-1]) + 1, value)
+    return [
+        [
+            {"left": left, "right": right, "value": value}
+            for (left, right), value in sorted(terms.items())
+            if value != 0.0
+        ]
+        for terms in grouped
+    ]
 
 
 class BilinearWorkspaceLayer:
@@ -226,10 +264,23 @@ class BilinearWorkspaceLayer:
         memory_in: MemorySpec,
         memory_out: MemorySpec,
         weights: BilinearWeights,
+        destination_rows=None,
     ):
         self.memory_in = memory_in
         self.memory_out = memory_out
         self.weights = weights
+        derived_rows = {
+            int(key[0])
+            for sparse in (
+                weights.constant,
+                weights.linear,
+                weights.quadratic,
+            )
+            for key in sparse.keys.keys()
+        }
+        self._destination_rows = tuple(
+            sorted(derived_rows if destination_rows is None else destination_rows)
+        )
 
     def inputs(self) -> List[MemorySpec]:
         return [self.memory_in]
@@ -238,21 +289,70 @@ class BilinearWorkspaceLayer:
         return [self.memory_out]
 
     def __call__(self, workspace: np.ndarray) -> np.ndarray:
-        return np.asarray(self.weights(workspace)).reshape(-1, order="C")
+        input_workspace = np.asarray(workspace).reshape(-1, order="C")[
+            : self.memory_in.count
+        ]
+        result = np.asarray(self.weights(input_workspace)).reshape(-1, order="C")
+        if self.memory_in != self.memory_out:
+            # Expanding a workspace must retain every previously materialized
+            # row.  Scheduled weights only populate their destination rows;
+            # returning the sparse result directly would erase the prefix.
+            output = np.zeros(self.memory_out.count, dtype=result.dtype)
+            preserved = min(self.memory_in.count, output.size)
+            output[:preserved] = np.asarray(workspace).reshape(-1, order="C")[
+                :preserved
+            ]
+            rows = list(self._destination_rows)
+            output[rows] = result[rows]
+            return output
+        output = np.asarray(workspace).reshape(-1, order="C").copy()
+        rows = list(self._destination_rows)
+        output[rows] = result[rows]
+        return output
 
     def push_forward(self, workspace: np.ndarray, dworkspace: np.ndarray):
-        y, dy = self.weights.push_forwards(workspace, dworkspace)
-        return (
-            np.asarray(y).reshape(-1, order="C"),
-            np.asarray(dy).reshape(-1, order="C"),
-        )
+        source = np.asarray(workspace).reshape(-1, order="C")[: self.memory_in.count]
+        dsource = np.asarray(dworkspace).reshape(-1, order="C")[: self.memory_in.count]
+        y, dy = self.weights.push_forwards(source, dsource)
+        if self.memory_in != self.memory_out:
+            output = np.zeros(self.memory_out.count, dtype=np.asarray(y).dtype)
+            doutput = np.zeros(self.memory_out.count, dtype=np.asarray(dy).dtype)
+            preserved = min(self.memory_in.count, output.size)
+            flat_workspace = np.asarray(workspace).reshape(-1, order="C")
+            flat_dworkspace = np.asarray(dworkspace).reshape(-1, order="C")
+            output[:preserved] = flat_workspace[:preserved]
+            doutput[:preserved] = flat_dworkspace[:preserved]
+            rows = list(self._destination_rows)
+            output[rows] = np.asarray(y).reshape(-1, order="C")[rows]
+            doutput[rows] = np.asarray(dy).reshape(-1, order="C")[rows]
+            return output, doutput
+        output = np.asarray(workspace).reshape(-1, order="C").copy()
+        doutput = np.asarray(dworkspace).reshape(-1, order="C").copy()
+        rows = list(self._destination_rows)
+        output[rows] = np.asarray(y).reshape(-1, order="C")[rows]
+        doutput[rows] = np.asarray(dy).reshape(-1, order="C")[rows]
+        return output, doutput
 
     def to_export_dict(self):
+        """Export the row-grouped scheduled bilinear representation."""
+        rows = []
+        terms = []
+        grouped = _bilinear_row_terms(self.weights)
+        for output in self._destination_rows:
+            key_values = grouped[output]
+            start = len(terms)
+            terms.extend(key_values)
+            rows.append(
+                {
+                    "output": output,
+                    "term_start": start,
+                    "term_count": len(key_values),
+                }
+            )
         return {
-            "kind": "bilinear",
-            "memory_in": self.memory_in.to_export_dict(),
-            "memory_out": self.memory_out.to_export_dict(),
-            "weights": self.weights.to_export_dict(),
+            "kind": "scheduled_bilinear",
+            "rows": rows,
+            "terms": terms,
         }
 
 
@@ -444,19 +544,17 @@ class GenericVectorLayer:
 
     def __call__(self, workspace: np.ndarray) -> np.ndarray:
         workspace = np.asarray(workspace).reshape(-1, order="C")
-        values = np.empty(self.memory_out.count, dtype=float)
+        values = workspace.astype(float, copy=True)
         opaque_rows = {
-            row
+            program.row_start + offset
             for program in self.opaque_programs
-            for row in range(
-                program.row_start, program.row_start + program.row_count
-            )
+            for offset in range(program.row_count)
         }
-        for row, (op, first, second, third) in enumerate(self.ops):
-            if row in opaque_rows:
+        for output, op, first, second, third in self.ops:
+            if output in opaque_rows:
                 continue
-            values[row] = self._eval_scalar_value(
-                op, first, second, third, workspace
+            values[output] = self._eval_scalar_value(
+                op, first, second, third, values
             )
         for program in self.opaque_programs:
             flat = np.asarray(
@@ -470,24 +568,19 @@ class GenericVectorLayer:
     def push_forward(self, workspace: np.ndarray, dworkspace: np.ndarray):
         workspace = np.asarray(workspace).reshape(-1, order="C")
         dworkspace = np.asarray(dworkspace).reshape(-1, order="C")
-        values = np.empty(self.memory_out.count, dtype=float)
-        tangents = np.zeros(self.memory_out.count, dtype=float)
-
+        values = workspace.astype(float, copy=True)
+        tangents = dworkspace.astype(float, copy=True)
         opaque_rows = {
-            row
+            program.row_start + offset
             for program in self.opaque_programs
-            for row in range(
-                program.row_start, program.row_start + program.row_count
-            )
+            for offset in range(program.row_count)
         }
-
-        for row, (op, first, second, third) in enumerate(self.ops):
-            if row in opaque_rows:
+        for output, op, first, second, third in self.ops:
+            if output in opaque_rows:
                 continue
-            values[row], tangents[row] = self._eval_scalar_row(
-                op, first, second, third, workspace, dworkspace
+            values[output], tangents[output] = self._eval_scalar_row(
+                op, first, second, third, values, tangents
             )
-
         for program in self.opaque_programs:
             result, dresult = self._eval_opaque_program(
                 program, workspace, dworkspace
@@ -498,7 +591,6 @@ class GenericVectorLayer:
             stop = start + program.row_count
             values[start:stop] = flat
             tangents[start:stop] = dflat
-
         return values, tangents
 
     def to_export_dict(self):
@@ -509,24 +601,27 @@ class GenericVectorLayer:
             )
         if self.opaque_programs:
             raise NotImplementedError(
-                "Function evaluation and opaque programs are "
-                "not yet exportable"
+                "opaque programs not exportable: "
+                + repr([program.op for program in self.opaque_programs])
             )
+        def absolute(reference):
+            if reference < 0:
+                return -1
+            return int(self.memory_in.location + reference)
+
         return {
-            "kind": "generic",
-            "memory_in": self.memory_in.to_export_dict(),
-            "memory_out": self.memory_out.to_export_dict(),
+            "kind": "scheduled_generic",
             "ops": [
                 {
+                    "output": int(output),
+                    "first": absolute(first),
+                    "second": absolute(second),
+                    "third": absolute(third),
                     "op": _export_operator(op),
-                    "first": first,
-                    "second": second,
-                    "third": third,
                 }
-                for op, first, second, third in self.ops
+                for output, op, first, second, third in self.ops
             ],
         }
-
     def _resolve_scalar(self, index: int, workspace: np.ndarray) -> float:
         if index >= 0:
             return float(workspace[index])
@@ -734,16 +829,11 @@ class GenericVectorLayer:
             for operand in program.operands
         ]
 
-        if program.op == OP.EVALUATE and isinstance(values[0], Function):
-            from coker.backends.coker.lowering import create_opgraph
-
-            graph = create_opgraph(values[0])
-            tangents = [
-                self._materialize_tangent(operand, dworkspace)
-                for operand in program.operands[1:]
-            ]
-            result, dresult = graph.push_forward(*values[1:], *tangents)
-            return result, dresult
+        if program.op == OP.EVALUATE:
+            raise RuntimeError(
+                "opaque Function evaluation reached GenericVectorLayer; "
+                "lower it as a FunctionEvaluationLayer"
+            )
 
         result = backend.call(program.op, *values)
         tangents = [

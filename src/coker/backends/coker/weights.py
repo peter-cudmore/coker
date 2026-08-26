@@ -544,7 +544,7 @@ class BilinearWeights(np.lib.mixins.NDArrayOperatorsMixin):
         assert memory.location == 0
         assert self.memory.location == 0
         assert memory.count >= self.memory.count
-        if memory.count == self.memory.count:
+        if memory is self.memory:
             return self.clone()
 
         linear = dok_ndarray(
@@ -839,6 +839,148 @@ def compose_bilinear_weights(
             (*output_shape, memory.count, memory.count), quadratic
         ),
     )
+
+
+def _canonical_terms(table, quadratic=False):
+    """Return sparse terms with symmetric quadratic monomials canonicalized."""
+    result = {}
+    for key, value in table.items():
+        if quadratic:
+            key = (*key[:-2], min(key[-2], key[-1]), max(key[-2], key[-1]))
+        if value:
+            result[key] = result.get(key, 0.0) + float(value)
+    return {key: value for key, value in result.items() if value != 0.0}
+
+
+def _canonical_weight(value: BilinearWeights) -> BilinearWeights:
+    """Normalize sparse polynomial terms for compiler-side reassociation."""
+    return BilinearWeights.from_trusted_dok(
+        value.memory,
+        value.shape,
+        dok_ndarray(value.constant.shape, _canonical_terms(value.constant.keys)),
+        dok_ndarray(value.linear.shape, _canonical_terms(value.linear.keys)),
+        dok_ndarray(
+            value.quadratic.shape,
+            _canonical_terms(value.quadratic.keys, quadratic=True),
+        ),
+    )
+
+
+def _weight_degree(value: BilinearWeights) -> int:
+    if value.quadratic.keys:
+        return 2
+    if value.linear.keys:
+        return 1
+    return 0
+
+
+def _unwrap_weight(value):
+    return getattr(value, "value", value)
+
+
+def _epoch_degree(value):
+    return getattr(value, "degree", _weight_degree(_unwrap_weight(value)))
+
+
+def _same_roots(lhs, rhs):
+    return not hasattr(lhs, "roots") or not hasattr(rhs, "roots") or lhs.roots == rhs.roots
+
+
+def compiler_add(lhs: BilinearWeights, rhs: BilinearWeights) -> BilinearWeights:
+    """Add two compiler polynomials, canonically reducing sparse terms."""
+    lhs, rhs = _unwrap_weight(lhs), _unwrap_weight(rhs)
+    if lhs.memory != rhs.memory or lhs.shape != rhs.shape:
+        raise ValueError("bilinear operands must have matching memory and shape")
+    return _canonical_weight(lhs + rhs)
+
+
+def compiler_sub(lhs: BilinearWeights, rhs: BilinearWeights) -> BilinearWeights:
+    """Subtract two compiler polynomials, canonically reducing sparse terms."""
+    lhs, rhs = _unwrap_weight(lhs), _unwrap_weight(rhs)
+    if lhs.memory != rhs.memory or lhs.shape != rhs.shape:
+        raise ValueError("bilinear operands must have matching memory and shape")
+    return _canonical_weight(lhs - rhs)
+
+
+
+
+def compiler_mul(
+    lhs: BilinearWeights, rhs: BilinearWeights
+) -> BilinearWeights | None:
+    """Elementwise multiply compiler polynomials if degree remains bounded."""
+    left_degree, right_degree = _epoch_degree(lhs), _epoch_degree(rhs)
+    if left_degree + right_degree > 2:
+        return None
+    lhs, rhs = _unwrap_weight(lhs), _unwrap_weight(rhs)
+    if lhs.memory != rhs.memory or lhs.shape != rhs.shape:
+        raise ValueError("bilinear operands must have matching memory and shape")
+    if _weight_degree(lhs) + _weight_degree(rhs) > 2:
+        return None
+    output_shape = lhs.shape
+    constant, linear, quadratic = {}, {}, {}
+
+    def add(table, key, value):
+        if value:
+            table[key] = table.get(key, 0.0) + float(value)
+
+    def grouped(tensor, rank):
+        result = {}
+        for key, value in tensor.keys.items():
+            result.setdefault(key[:rank], []).append((key[rank:], value))
+        return result
+
+    output_rank = len(output_shape)
+    c_l, c_r = lhs.constant.keys, rhs.constant.keys
+    l_l, l_r = grouped(lhs.linear, output_rank), grouped(rhs.linear, output_rank)
+    q_l, q_r = grouped(lhs.quadratic, output_rank), grouped(rhs.quadratic, output_rank)
+    for output in np.ndindex(output_shape):
+        lc, rc = c_l.get(output, 0.0), c_r.get(output, 0.0)
+        add(constant, output, lc * rc)
+        for (i,), value in l_l.get(output, ()):
+            add(linear, (*output, i), value * rc)
+        for (i,), value in l_r.get(output, ()):
+            add(linear, (*output, i), value * lc)
+        for (i, j), value in q_l.get(output, ()):
+            add(quadratic, (*output, i, j), value * rc)
+        for (i, j), value in q_r.get(output, ()):
+            add(quadratic, (*output, i, j), value * lc)
+        for (i,), lv in l_l.get(output, ()):
+            for (j,), rv in l_r.get(output, ()):
+                add(quadratic, (*output, i, j), lv * rv)
+
+    return _canonical_weight(
+        BilinearWeights.from_trusted_dok(
+            lhs.memory,
+            output_shape,
+            dok_ndarray(output_shape, _canonical_terms(constant)),
+            dok_ndarray((*output_shape, lhs.memory.count), _canonical_terms(linear)),
+            dok_ndarray(
+                (*output_shape, lhs.memory.count, lhs.memory.count),
+                _canonical_terms(quadratic, quadratic=True),
+            ),
+        )
+    )
+
+def compiler_binary(operation, lhs, rhs):
+    """Apply compiler algebra to BilinearWeights or EpochValue-like wrappers."""
+    operation = getattr(operation, "name", operation)
+    if isinstance(operation, str):
+        operation = operation.lower()
+    if not _same_roots(lhs, rhs):
+        raise ValueError("epoch operands must share one root basis")
+    if operation == "add":
+        return compiler_add(lhs, rhs)
+    if operation == "sub":
+        return compiler_sub(lhs, rhs)
+    if operation == "mul":
+        return compiler_mul(lhs, rhs)
+    raise ValueError(f"unsupported compiler operation: {operation}")
+
+
+# Descriptive aliases used by compiler integrations.
+add_bilinear_weights = compiler_add
+subtract_bilinear_weights = compiler_sub
+multiply_bilinear_weights = compiler_mul
 
 
 def outer_product(lhs: dok_ndarray, rhs: dok_ndarray):
