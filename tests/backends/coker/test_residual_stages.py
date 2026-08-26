@@ -151,6 +151,7 @@ def test_residual_call_stage_binds_direct_stable_slots():
     )
 
     output, tangent = caller.push_forward(np.array([2.0]), np.array([3.0]))
+    assert caller(np.array([2.0])) == pytest.approx(np.sin(2.0))
 
     assert output == pytest.approx(np.sin(2.0))
     assert tangent == pytest.approx(np.cos(2.0) * 3.0)
