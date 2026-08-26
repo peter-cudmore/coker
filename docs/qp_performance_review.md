@@ -107,3 +107,19 @@ storage.
   production path; keep JSON out of the mapped runtime path.
 - [ ] Evaluate pinning the self-referential embedded OSQP instance only after
   target timing proves `refresh_self_pointers` material.
+
+## Historical compact-construction baseline
+
+The prior compact-QP construction report is consolidated here. On the same
+Windows 11 / Ryzen 7 7700 host, the 24-decision, 78 weighted-objective-row,
+66-constraint-row construction workload improved from 39.298 s to 2.722 s
+unprofiled; the serialized module remained 99,888 bytes. The applied changes
+were sparse left contraction, one shared multi-output coefficient graph, and
+smaller DOK merge copies.
+
+The later profile measured `create_opgraph` and symbolic
+`BilinearWeights` arithmetic as the remaining construction cost; payload export
+and runtime compilation were each insignificant. Before changing trace
+construction further, profile a representative repeated-construction workload
+separately from imports and require an equivalence benchmark for any direct
+coefficient-tape construction.

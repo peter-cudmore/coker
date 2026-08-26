@@ -1716,7 +1716,66 @@ fn bound_mapped_qp_program_rejects_short_coefficient_outputs_and_recovers_after_
         .unwrap();
     assert_eq!(diagnostics.status, QpSolveStatus::Solved);
     assert_eq!(&oversized_coefficient_outputs[6..], &[123.0, 123.0]);
+    let flat = [2.0f32, -2.0, 1.0, 0.0, 10.0, 0.0];
+    let mut flat_outputs = [0.0f32; 1];
+    let flat_diagnostics = bound
+        .execute_flat(
+            &flat,
+            MappedQpWorkspace::new(&mut evaluator_workspace, &mut oversized_coefficient_outputs),
+            &mut flat_outputs,
+        )
+        .unwrap();
+    assert_eq!(flat_diagnostics.status, QpSolveStatus::Solved);
+    assert!(flat_outputs[0].is_nan() && outputs[0].is_nan());
     assert_eq!(aligned_bytes.as_slice(), original_bytes.as_slice());
+}
+
+#[cfg(osqp_embedded)]
+#[test]
+fn prepared_flat_qp_stream_is_deterministic_f32_reference() {
+    let module = build_mapped_scalar_qp_module(2, 1, 6, 1, true);
+    let encoded = encode_into_aligned_bytes(&module);
+    let mapped = MappedModule::new_from_bytes(encoded.as_slice()).unwrap();
+    let qp = mapped.qp_program(2).unwrap();
+    let requirements = qp.workspace_requirements();
+    let mut arena = vec![core::mem::MaybeUninit::<u8>::uninit(); requirements.arena_bytes];
+    let mut prepared = unsafe { qp.prepare_detached(&mut arena) }.unwrap();
+    let mut evaluator_workspace = [0.0f32; 6];
+    let mut coefficient_outputs = [0.0f32; 6];
+    let mut outputs = [0.0f32; 1];
+    let stream = [
+        [2.0f32, -4.0, 1.0, 0.0, 10.0, 0.0],
+        [4.0f32, -4.0, 2.0, 0.0, 1.5, 0.0],
+    ];
+    let mut observed = [0.0f32; 2];
+    let mut statuses = [QpSolveStatus::Unsolved; 2];
+    for (index, parameters) in stream.iter().enumerate() {
+        let diagnostics = prepared
+            .execute_flat(
+                qp,
+                parameters,
+                MappedQpWorkspace::new(&mut evaluator_workspace, &mut coefficient_outputs),
+                &mut outputs,
+            )
+            .unwrap();
+        statuses[index] = diagnostics.status;
+        observed[index] = outputs[0];
+    }
+    assert_eq!(statuses, [QpSolveStatus::Solved, QpSolveStatus::Solved]);
+    let mut repeated = [0.0f32; 2];
+    for (index, parameters) in stream.iter().enumerate() {
+        prepared
+            .execute_flat(
+                qp,
+                parameters,
+                MappedQpWorkspace::new(&mut evaluator_workspace, &mut coefficient_outputs),
+                &mut outputs,
+            )
+            .unwrap();
+        repeated[index] = outputs[0];
+    }
+    assert_eq!(observed[0].to_bits(), repeated[0].to_bits());
+    assert_eq!(observed[1].to_bits(), repeated[1].to_bits());
 }
 
 #[cfg(not(osqp_embedded))]

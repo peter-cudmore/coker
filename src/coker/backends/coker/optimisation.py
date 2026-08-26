@@ -1033,7 +1033,10 @@ def _build_coefficient_function(
     )
     if direct is None:
         raise ValueError(
-            "Coker QP coefficient extraction requires raw bilinear provenance"
+            "Coker QP coefficient extraction requires direct, "
+            "provenance-preserving affine/bilinear expressions over declared "
+            "decision variables and parameters; inline opaque or "
+            "workspace-relocated intermediates"
         )
     if include_structure:
         return direct

@@ -1,5 +1,4 @@
 import numpy as np
-
 from coker import Scalar, VectorSpace, function, if_then_else
 from coker.backends.coker.core import create_opgraph
 from coker.backends.coker.runtime import CompiledGraph
@@ -44,7 +43,9 @@ def _assert_runtime_matches_graph(
 
 def test_runtime_matches_scalar_quadratic_graph():
     symbolic_function = function(
-        [Scalar("x")], implementation=lambda x: 3.0 * x + 4.0 * x * x
+        [Scalar("x")],
+        implementation=lambda x: 3.0 * x + 4.0 * x * x,
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function, args=(1.25,), tangents=(-0.5,)
@@ -55,6 +56,7 @@ def test_runtime_matches_matrix_transpose_and_concatenate_value_graph():
     symbolic_function = function(
         [VectorSpace("A", (2, 2)), VectorSpace("B", (2, 2))],
         implementation=lambda A, B: np.concatenate([A.T, B], axis=1),
+        backend="coker",
     )
     args = (
         np.array([[1.0, 2.0], [3.0, 4.0]]),
@@ -67,7 +69,9 @@ def test_runtime_matches_matrix_transpose_and_concatenate_value_graph():
 
 def test_runtime_matches_matrix_transpose_push_forward_graph():
     symbolic_function = function(
-        [VectorSpace("A", (2, 2))], implementation=lambda A: A.T
+        [VectorSpace("A", (2, 2))],
+        implementation=lambda A: A.T,
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function,
@@ -84,6 +88,7 @@ def test_runtime_matches_comparison_case_graph():
             np.array([1.0, x, -2.0]),
             np.array([0.0, x + 1.0, 2.0]),
         ),
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function, args=(-2.0,), tangents=(0.25,)
@@ -95,10 +100,14 @@ def test_runtime_matches_comparison_case_graph():
 
 def test_runtime_matches_nested_evaluate_graph():
     inner = function(
-        [VectorSpace("x", 2)], implementation=lambda x: np.dot(x, x) + 1.0
+        [VectorSpace("x", 2)],
+        implementation=lambda x: np.dot(x, x) + 1.0,
+        backend="coker",
     )
     symbolic_function = function(
-        [VectorSpace("x", 2)], implementation=lambda x: np.sqrt(inner(x))
+        [VectorSpace("x", 2)],
+        implementation=lambda x: np.sqrt(inner(x)),
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function,
@@ -111,10 +120,12 @@ def test_runtime_matches_nested_evaluate_with_constant_argument_graph():
     inner = function(
         [VectorSpace("x", 2), VectorSpace("offset", 2)],
         implementation=lambda x, offset: x + offset,
+        backend="coker",
     )
     symbolic_function = function(
         [VectorSpace("x", 2)],
         implementation=lambda x: inner(x, np.array([1.0, -2.0])),
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function,
@@ -127,10 +138,12 @@ def test_runtime_matches_vector_valued_nested_evaluate_graph():
     inner = function(
         [VectorSpace("x", 2)],
         implementation=lambda x: x + np.array([2.0, -1.0]),
+        backend="coker",
     )
     symbolic_function = function(
         [VectorSpace("x", 2)],
         implementation=lambda x: inner(x) * np.array([0.5, -2.0]),
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function,
@@ -141,7 +154,9 @@ def test_runtime_matches_vector_valued_nested_evaluate_graph():
 
 def test_runtime_matches_dot_graph():
     symbolic_function = function(
-        [VectorSpace("x", 3)], implementation=lambda x: np.dot(x, x)
+        [VectorSpace("x", 3)],
+        implementation=lambda x: np.dot(x, x),
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function,
@@ -149,15 +164,15 @@ def test_runtime_matches_dot_graph():
         tangents=(np.array([0.5, 0.25, -1.0]),),
     )
 
-
-def test_runtime_materialises_quadratic_dot_before_dependent_dot():
     def implementation(x):
         squared_norm = np.dot(x, x)
         vector = np.concatenate([squared_norm, x])
         return np.dot(vector, vector)
 
     symbolic_function = function(
-        [VectorSpace("x", 3)], implementation=implementation
+        [VectorSpace("x", 3)],
+        implementation=implementation,
+        backend="coker",
     )
     graph = create_opgraph(symbolic_function)
     assert not any(
@@ -170,11 +185,10 @@ def test_runtime_materialises_quadratic_dot_before_dependent_dot():
     squared_norm = np.dot(value, value)
     _assert_same(compiled_graph(value), squared_norm * (squared_norm + 1.0))
 
-
-def test_runtime_matches_cross_graph():
     symbolic_function = function(
         [VectorSpace("x", 3)],
         implementation=lambda x: np.cross(x, np.array([1.0, -2.0, 0.5])),
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function,
@@ -182,11 +196,10 @@ def test_runtime_matches_cross_graph():
         tangents=(np.array([-1.0, 0.5, 0.25]),),
     )
 
-
-def test_runtime_matches_mixed_constant_workspace_graph():
     symbolic_function = function(
         [VectorSpace("x", 3)],
         implementation=lambda x: x + np.array([1.0, -2.0, 3.5]),
+        backend="coker",
     )
     _assert_runtime_matches_graph(
         symbolic_function,
@@ -194,11 +207,10 @@ def test_runtime_matches_mixed_constant_workspace_graph():
         tangents=(np.array([0.5, 1.5, -0.5]),),
     )
 
-
-def test_lowered_coker_function_compiles_mapped_runtime_artifact():
     symbolic_function = function(
         [VectorSpace("x", 3)],
         implementation=lambda x: np.cross(x, np.array([1.0, -2.0, 0.5])),
+        backend="coker",
     )
 
     lowered = symbolic_function.lower()

@@ -119,10 +119,8 @@ def dot(x, y):
             assert m == 1
             yT = y.T
         return yT @ x
-
     if isinstance(x, BilinearWeights) and isinstance(y, BilinearWeights):
         return x.dot(y)
-
     raise NotImplementedError
 
 
