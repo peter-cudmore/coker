@@ -13,7 +13,7 @@ from coker.backends.optimisation import (
     build_problem_bindings,
     decision_degree,
 )
-from coker.backends.coker.lowering import create_opgraph
+from coker.backends.coker.lowering import create_function_table, create_opgraph
 from coker.backends.coker.qp_types import (
     CokerSolver,
     ExtractedQpProgram,
@@ -142,7 +142,8 @@ def extract_qp_program(
         )
     )
 
-    coefficient_graph = create_opgraph(coefficient_function)
+    coefficient_table = create_function_table(coefficient_function)
+    coefficient_graph = coefficient_table.entry
     p_indptr, p_indices = p_pattern
     a_indptr, a_indices = a_pattern
     return ExtractedQpProgram(
@@ -156,8 +157,8 @@ def extract_qp_program(
         p_indices=p_indices,
         a_indptr=a_indptr,
         a_indices=a_indices,
-        coefficient_function_id=coefficient_graph.function_id,
-        coefficient_payload=coefficient_graph.export_payload(),
+        coefficient_function_id=coefficient_table.entry_function_id,
+        coefficient_payload=coefficient_table.export_payload(),
         coefficient_slices=coefficient_slices,
         warm_start=warm_start,
     )
