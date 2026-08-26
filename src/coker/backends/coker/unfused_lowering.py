@@ -25,6 +25,8 @@ from coker.backends.coker.residual import (
     OutputMap,
     RetainedExpression,
     SlotOperand,
+    LinearTerm,
+    QuadraticTerm,
 )
 from coker.backends.coker.lowering_support import (
     _append_bilinear_value,
@@ -849,10 +851,17 @@ def _create_residual_opgraph(
     tape = function.tape
     semantic_dag = _build_semantic_dag(function)
     lifetimes = _schedule_residual_slots(function)
-    workspace_size = max(
+    base_workspace_size = max(
         (life.slot.start + life.slot.length for life in lifetimes.values()),
         default=0,
     )
+    temp_capacity = 2 * sum(
+        tape.dim[index].flat()
+        for index in semantic_dag.nodes
+        if index not in tape.input_indicies
+    )
+    workspace_size = base_workspace_size
+    temp_next = base_workspace_size
     input_bindings = []
     for index in tape.input_indicies:
         life = lifetimes[index]
@@ -863,7 +872,39 @@ def _create_residual_opgraph(
     values: Dict[int, object] = {}
     refs: Dict[int, Tuple[int, ...]] = {}
     stages = []
-    compiler_memory = MemorySpec(0, workspace_size)
+    compiler_memory = MemorySpec(0, workspace_size + temp_capacity)
+
+    def materialize_weights(value):
+        """Materialize compiler algebra at an explicit bilinear boundary."""
+        nonlocal temp_next, workspace_size
+        width = int(np.prod(value.shape))
+        start = temp_next
+        temp_next += width
+        workspace_size = max(workspace_size, temp_next)
+        rows = []
+        for row in range(width):
+            terms = {}
+            coordinate = np.unravel_index(row, value.shape)
+            constant = value.constant.keys.get(coordinate, 0.0)
+            if constant:
+                terms[(-1, -1)] = float(constant)
+            for key, coefficient in value.linear.keys.items():
+                if key[:-1] == coordinate and coefficient:
+                    terms[(-1, key[-1])] = terms.get((-1, key[-1]), 0.0) + float(coefficient)
+            for key, coefficient in value.quadratic.keys.items():
+                if key[:-2] == coordinate and coefficient:
+                    pair = tuple(sorted(key[-2:]))
+                    terms[pair] = terms.get(pair, 0.0) + float(coefficient)
+            rows.append(BilinearRow(
+                start + row,
+                tuple(
+                    BilinearTerm(None if left < 0 else left, None if right < 0 else right, coefficient)
+                    for (left, right), coefficient in sorted(terms.items())
+                    if coefficient
+                ),
+            ))
+        stages.append(BilinearStage(tuple(rows)))
+        return tuple(start + row for row in range(width))
 
     def project_slots(slots, shape):
         """Build a compiler expression over an ordered, possibly strided view."""
@@ -1019,9 +1060,16 @@ def _create_residual_opgraph(
         products = contraction_products(operation, lhs_shape, rhs_shape)
         if products is None:
             return False
-
         def scalar_operand(argument, coordinate, shape):
             if isinstance(argument, Tracer):
+                operand_value = values[argument.index]
+                if isinstance(operand_value, BilinearWeights):
+                    slots = refs.get(argument.index)
+                    if slots is None:
+                        slots = materialize_weights(operand_value)
+                        refs[argument.index] = slots
+                    flat = int(np.ravel_multi_index(coordinate, shape))
+                    return slots[flat], 1.0
                 slots = view_refs(argument.index)
                 flat = int(np.ravel_multi_index(coordinate, shape))
                 return slots[flat], 1.0
@@ -1088,7 +1136,36 @@ def _create_residual_opgraph(
             refs[index] = tuple(
                 life.slot.start + offset for offset in range(life.width)
             )
-            return SlotOperand(refs[index][min(row, life.width - 1)])
+            flat_width = int(np.prod(value.shape))
+            coordinate = np.unravel_index(
+                min(row, flat_width - 1), value.shape
+            )
+            scalar = scalar_weight(value, coordinate)
+            roots = sorted(
+                {key[-1] for key in scalar.linear.keys}
+                | {
+                    root
+                    for key in scalar.quadratic.keys
+                    for root in key[-2:]
+                }
+            )
+            root_index = {root: ordinal for ordinal, root in enumerate(roots)}
+            return RetainedExpression(
+                tuple(roots),
+                constant=float(scalar.constant.keys.get((0,), 0.0)),
+                linear=tuple(
+                    LinearTerm(root_index[key[-1]], float(coefficient))
+                    for key, coefficient in sorted(scalar.linear.keys.items())
+                    if coefficient
+                ),
+                quadratic=tuple(
+                    QuadraticTerm(
+                        root_index[key[-2]], root_index[key[-1]], float(coefficient)
+                    )
+                    for key, coefficient in sorted(scalar.quadratic.keys.items())
+                    if coefficient
+                ),
+            )
         if isinstance(value, (int, float, np.number)):
             return scalar_constant(value)
         array = np.asarray(value).reshape(-1)
