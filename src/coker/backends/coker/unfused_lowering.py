@@ -10,18 +10,21 @@ from coker.algebra.kernel import Function, Tracer
 from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP
 
 
-from coker.backends.coker.weights import BilinearWeights, compiler_binary
-from coker.backends.backend import get_backend_by_name
 from coker.backends.coker.ast_preprocessing import FunctionTable, SparseNet
-from coker.backends.coker.layers import (
-    OPAQUE_OP,
-    UNUSED_REF,
-    BilinearWorkspaceLayer,
-    FunctionEvaluationLayer,
-    GenericVectorLayer,
-    InputLayer,
-    OpaqueProgram,
-    OutputLayer,
+from coker.backends.coker.weights import BilinearWeights, compiler_binary
+from coker.backends.coker.residual import (
+    BilinearRow,
+    BilinearStage,
+    BilinearTerm,
+    CallStage,
+    InputBinding,
+    InputMap,
+    NonlinearOperation,
+    NonlinearStage,
+    OutputBinding,
+    OutputMap,
+    RetainedExpression,
+    SlotOperand,
 )
 from coker.backends.coker.lowering_support import (
     _append_bilinear_value,
@@ -617,7 +620,7 @@ def _schedule_residual_slots(function: Function) -> Dict[int, ValueLifetime]:
     # Reuse is enabled only when no scheduled frontier can retain a borrowed
     # view past the producer batch.  The conservative default handles the
     # mixed generic/algebraic case; pure residual DAGs may opt in below.
-    reuse_slots = False
+    reuse_slots = True
     semantic_dag = _build_semantic_dag(function)
     required = set(semantic_dag.nodes)
     emitted_ordinal = {
@@ -817,8 +820,212 @@ class _FunctionTableBuilder:
         return function_id, graph
 
 
+def _create_residual_opgraph(
+    function: Function, function_table_builder: _FunctionTableBuilder
+) -> SparseNet:
+    """Lower a tape directly to deterministic stable-slot residual stages.
 
-def _create_opgraph(
+    The temporary ``BilinearWeights`` values below are only a convenient
+    compiler algebra; emitted records contain absolute slots and no legacy
+    layers.  Each tape node is a separate stage, which mechanically prevents
+    intra-stage RAW hazards and preserves tape order.
+    """
+    tape = function.tape
+    semantic_dag = _build_semantic_dag(function)
+    lifetimes = _schedule_residual_slots(function)
+    workspace_size = max(
+        (life.slot.start + life.slot.length for life in lifetimes.values()),
+        default=0,
+    )
+    input_bindings = []
+    for index in tape.input_indicies:
+        life = lifetimes[index]
+        input_bindings.append(
+            InputBinding(tuple(range(life.slot.start, life.slot.start + life.width)))
+        )
+    input_map = InputMap(tuple(input_bindings))
+    values: Dict[int, object] = {}
+    refs: Dict[int, Tuple[int, ...]] = {}
+    stages = []
+    compiler_memory = MemorySpec(0, workspace_size)
+    for value_index, (value_operation, *value_arguments) in enumerate(tape.nodes):
+        if value_operation is OP.VALUE:
+            values[value_index] = _as_numpy_value(value_arguments[0])
+
+    for index in tape.input_indicies:
+        life = lifetimes[index]
+        refs[index] = tuple(life.slot.start + i for i in range(life.width))
+        values[index] = BilinearWeights.project(
+            compiler_memory,
+            MemorySpec(life.slot.start, life.width),
+            _node_shape(tape.dim[index]),
+        )
+
+    def scalar_constant(value):
+        return RetainedExpression(
+            (), constant=float(np.asarray(value).reshape(-1)[0])
+        )
+
+    def operand(value, index, row=0):
+        if index in refs:
+            slots = refs[index]
+            return SlotOperand(slots[min(row, len(slots) - 1)])
+        if isinstance(value, (int, float, np.number)):
+            return scalar_constant(value)
+        array = np.asarray(value).reshape(-1)
+        return scalar_constant(array[min(row, len(array) - 1)])
+
+    def emit_bilinear(index, value):
+        life = lifetimes[index]
+        output_shape = _node_shape(tape.dim[index])
+        rows = []
+        for row in range(life.width):
+            terms = []
+            constant = value.constant.keys.get((row,), 0.0)
+            if constant:
+                terms.append(BilinearTerm(None, None, float(constant)))
+            for key, coefficient in value.linear.keys.items():
+                if key[0] == row and coefficient:
+                    terms.append(BilinearTerm(None, key[1], float(coefficient)))
+            for key, coefficient in value.quadratic.keys.items():
+                if key[0] == row and coefficient:
+                    terms.append(BilinearTerm(key[1], key[2], float(coefficient)))
+            absolute = life.slot.start + row
+            translated = []
+            for term in terms:
+                left = None if term.left is None else term.left
+                right = None if term.right is None else term.right
+                translated.append(BilinearTerm(left, right, term.coefficient))
+            rows.append(BilinearRow(absolute, tuple(sorted(
+                translated,
+                key=lambda term: (-1 if term.left is None else term.left,
+                                 -1 if term.right is None else term.right),
+            ))))
+        values[index] = value
+        if rows:
+            stages.append(BilinearStage(tuple(rows)))
+        refs[index] = tuple(life.slot.start + i for i in range(life.width))
+
+    def view_refs(index):
+        value = values[index]
+        if isinstance(value, tuple):
+            return value
+        return refs[index]
+
+    for index in sorted(semantic_dag.nodes):
+        if index in tape.input_indicies:
+            life = lifetimes[index]
+            refs[index] = tuple(life.slot.start + i for i in range(life.width))
+            values[index] = BilinearWeights.project(
+                compiler_memory,
+                MemorySpec(life.slot.start, life.width),
+                _node_shape(tape.dim[index]),
+            )
+            continue
+        operation, *arguments = tape.nodes[index]
+        if operation is OP.VALUE:
+            values[index] = _as_numpy_value(arguments[0])
+            continue
+        if isinstance(operation, (ReshapeOP, ConcatenateOP)) or operation is OP.TRANSPOSE:
+            source_refs = []
+            for argument in arguments:
+                source_refs.extend(view_refs(argument.index))
+            if isinstance(operation, ReshapeOP):
+                source_refs = np.reshape(
+                    np.asarray(source_refs), _node_shape(tape.dim[index]),
+                    order=operation.order,
+                ).reshape(-1).tolist()
+            elif operation is OP.TRANSPOSE:
+                source_shape = _node_shape(tape.dim[arguments[0].index])
+                source_refs = np.transpose(
+                    np.asarray(source_refs).reshape(source_shape)
+                ).reshape(-1).tolist()
+            refs[index] = tuple(int(slot) for slot in source_refs)
+            values[index] = refs[index]
+            continue
+        if operation is OP.EVALUATE and isinstance(values.get(arguments[0].index), Function):
+            callee = values[arguments[0].index]
+            callee_id, callee_graph = function_table_builder.get_or_build(callee)
+            input_slots = tuple(
+                view_refs(argument.index) for argument in arguments[1:]
+                if isinstance(argument, Tracer)
+            )
+            life = lifetimes[index]
+            output_slots = tuple(life.slot.start + i for i in range(life.width))
+            stages.append(CallStage(callee_graph, input_slots, output_slots))
+            refs[index] = output_slots
+            values[index] = output_slots
+            continue
+        operands = []
+        for argument in arguments:
+            if isinstance(argument, Tracer):
+                operand_value = values[argument.index]
+                if argument.index in refs:
+                    operands.append(BilinearWeights.project(
+                        compiler_memory,
+                        MemorySpec(refs[argument.index][0], len(refs[argument.index])),
+                        _node_shape(tape.dim[argument.index]),
+                    ))
+                else:
+                    operands.append(operand_value)
+            else:
+                operands.append(argument)
+        if operation in {OP.ADD, OP.SUB, OP.MUL} and any(
+            isinstance(item, BilinearWeights) for item in operands
+        ):
+            normalized = []
+            shape = _node_shape(tape.dim[index])
+            for item in operands:
+                if isinstance(item, BilinearWeights):
+                    normalized.append(item)
+                else:
+                    normalized.append(_constant_to_bw(
+                        compiler_memory,
+                        np.full(shape, item) if np.isscalar(item) else item,
+                        shape,
+                    ))
+            result = compiler_binary({OP.ADD: "add", OP.SUB: "sub", OP.MUL: "mul"}[operation], *normalized)
+            if result is not None:
+                emit_bilinear(index, result)
+                continue
+        life = lifetimes[index]
+        rows = []
+        for row in range(life.width):
+            args = [
+                operand(
+                    values[arg.index] if isinstance(arg, Tracer) else arg,
+                    arg.index if isinstance(arg, Tracer) else -1,
+                    row,
+                )
+                for arg in arguments
+            ]
+            rows.append(NonlinearOperation(
+                life.slot.start + row, operation, args[0],
+                args[1] if len(args) > 1 else None,
+                args[2] if len(args) > 2 else None,
+            ))
+        stages.append(NonlinearStage(tuple(rows)))
+        refs[index] = tuple(life.slot.start + i for i in range(life.width))
+        values[index] = refs[index]
+
+    output_bindings = []
+    for output in function.output:
+        if output is None:
+            continue
+        output_refs = view_refs(output.index)
+        output_bindings.append(OutputBinding(tuple(output_refs), tuple(_node_shape(output.dim))))
+    graph = SparseNet(
+        workspace_size,
+        input_map,
+        OutputMap(tuple(output_bindings)),
+        residual_stages=tuple(stages),
+    )
+    graph.residual_lifetimes = lifetimes
+    graph.residual_workspace_size = workspace_size
+    return graph
+
+
+def _create_legacy_opgraph(
     function: Function,
     function_table_builder: _FunctionTableBuilder,
 ):
@@ -998,7 +1205,7 @@ def _create_opgraph(
                     destination_rows=range(
                         epoch_memory.count, generic_memory.count
                     ),
-                )
+            )
             )
         layers.append(
             GenericVectorLayer(
@@ -2000,6 +2207,12 @@ def _create_opgraph(
     graph.frontier_copy_rows = 0
     return graph
 
+
+def _create_opgraph(
+    function: Function,
+    function_table_builder: _FunctionTableBuilder,
+) -> SparseNet:
+    return _create_residual_opgraph(function, function_table_builder)
 
 def build_function_table(function: Function) -> FunctionTable:
     """Build the ordinary lowering module and own all nested programs."""
