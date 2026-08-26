@@ -3,7 +3,7 @@ from typing import Sequence
 
 import numpy as np
 
-from coker.backends.coker.ast_preprocessing import SparseNet
+from coker.backends.coker.ast_preprocessing import FunctionTable, SparseNet
 import coker._coker_runtime as coker_runtime
 
 
@@ -46,14 +46,20 @@ class CompiledGraph:
         self._tangent_outputs = np.empty(output_length, dtype=np.float32)
 
     @staticmethod
-    def compile(graph: SparseNet) -> "CompiledGraph":
-        payload = json.dumps(graph.export_payload()).encode("utf-8")
+    def compile(graph: SparseNet | FunctionTable) -> "CompiledGraph":
+        if isinstance(graph, FunctionTable):
+            function_table = graph
+            entry = function_table.entry
+        else:
+            function_table = FunctionTable([graph])
+            entry = graph
+        payload = json.dumps(function_table.export_payload()).encode("utf-8")
         program = coker_runtime.compile_exported_graph(payload)
         input_shapes = [
-            shape for _spec, shape in graph.input_layer.input_specs
+            shape for _spec, shape in entry.input_layer.input_specs
         ]
         output_shapes = [
-            shape.dim for _memory, shape in graph.output_layer.outputs
+            shape.dim for _memory, shape in entry.output_layer.outputs
         ]
         return CompiledGraph(
             program,

@@ -6,7 +6,7 @@ from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Function, Tracer
 from coker.algebra.ops import ModuleCallOP
 from coker.backends.backend import ArrayLike, Backend, get_backend_by_name
-from coker.backends.coker.lowering import create_opgraph
+from coker.backends.coker.lowering import create_function_table, create_opgraph
 from coker.backends.coker.module import CokerModule
 from coker.backends.coker.optimisation import (
     build_optimisation_problem as build_qp_optimisation_problem,
@@ -18,19 +18,24 @@ class CokerFunction:
 
     def __init__(self, function: Function):
         self.function = function
-        self._graph = None
+        self._function_table = None
+
+    @property
+    def function_table(self):
+        """Build the module-owned function table only when compilation needs it."""
+        if self._function_table is None:
+            self._function_table = create_function_table(self.function)
+        return self._function_table
 
     @property
     def graph(self):
-        """Build the Coker graph only when compilation needs it."""
-        if self._graph is None:
-            self._graph = create_opgraph(self.function)
-        return self._graph
+        """Return the table entry graph for host execution compatibility."""
+        return self.function_table.entry
 
     @property
     def function_id(self) -> int:
         """Return the graph's stable function-table identifier."""
-        return self.graph.function_id
+        return self.function_table.entry_function_id
 
     def __call__(self, inputs):
         """Evaluate through the reference interpreter on the Python host."""
@@ -41,7 +46,8 @@ class CokerFunction:
         """Compile this lowered graph into a mapped Coker bytecode module."""
         from coker.backends.coker.runtime import CompiledGraph
 
-        return bytes(CompiledGraph.compile(self.graph).program)
+        return bytes(CompiledGraph.compile(self.function_table).program)
+
 
     def compile_artifact(
         self, *, name: str = "coker_function", version: str = "1"
@@ -52,8 +58,7 @@ class CokerFunction:
         return _compile_artifact(self, name=name, version=version)
 
     def export_payload(self) -> dict[str, object]:
-        """Return the deterministic graph payload consumed by the compiler."""
-        return self.graph.export_payload()
+        return self.function_table.export_payload()
 
 
 class CokerBackend(Backend):

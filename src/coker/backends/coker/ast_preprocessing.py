@@ -150,15 +150,11 @@ class SparseNet:
         input_layer: InputLayer,
         output_layer: OutputLayer,
         intermediate_layers,
-        function_id: int = 0,
-        function_table=None,
     ):
         self.memory = memory
         self.input_layer = input_layer
         self.output_layer = output_layer
         self.intermediate_layers = intermediate_layers
-        self.function_id = function_id
-        self.function_table = function_table
 
     @property
     def layers(self):
@@ -199,16 +195,35 @@ class SparseNet:
             ],
         }
 
+class FunctionTable:
+    """Own the SparseNet programs that make up one lowered Coker module."""
+
+    def __init__(self, functions: list[SparseNet], entry_function_id: int = 0):
+        self._functions = tuple(functions)
+        self.entry_function_id = entry_function_id
+        if not self._functions:
+            raise ValueError("function table requires an entry program")
+        if not 0 <= entry_function_id < len(self._functions):
+            raise ValueError("entry function id is outside the function table")
+
+    @property
+    def entry(self) -> SparseNet:
+        """Return the program invoked at the module entry point."""
+        return self._functions[self.entry_function_id]
+
+    @property
+    def functions(self) -> tuple[SparseNet, ...]:
+        """Return the owned programs in stable function-id order."""
+        return self._functions
+
     def export_payload(self):
-        function_table = self.function_table or [self]
+        """Export the complete module while retaining table-level ownership."""
         return {
             "functions": [
                 {
-                    "function_id": graph.function_id,
+                    "function_id": function_id,
                     "program": graph.export_program_payload(),
                 }
-                for graph in sorted(
-                    function_table, key=lambda graph: graph.function_id
-                )
+                for function_id, graph in enumerate(self._functions)
             ]
         }

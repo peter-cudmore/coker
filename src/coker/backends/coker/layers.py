@@ -97,11 +97,11 @@ def _export_constant_value(value, shape):
     if isinstance(value, dok_ndarray):
         return {"kind": "tensor", "value": value.to_export_dict()}
     if isinstance(value, Function):
-        from coker.backends.coker.lowering import create_opgraph
+        from coker.backends.coker.lowering import create_function_table
 
         return {
             "kind": "function",
-            "value": create_opgraph(value).export_payload(),
+            "value": create_function_table(value).export_payload(),
         }
     if isinstance(value, (float, int, bool, np.bool_)):
         return {"kind": "scalar", "value": float(value)}

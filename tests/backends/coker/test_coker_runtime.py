@@ -1,6 +1,6 @@
 import numpy as np
 from coker import Scalar, VectorSpace, function, if_then_else
-from coker.backends.coker.core import create_opgraph
+from coker.backends.coker.lowering import create_function_table, create_opgraph
 from coker.backends.coker.runtime import CompiledGraph
 
 
@@ -21,8 +21,9 @@ def _assert_same(actual, expected):
 def _assert_runtime_matches_graph(
     symbolic_function, args, tangents=None, compare_push_forward=True
 ):
-    graph = create_opgraph(symbolic_function)
-    compiled_graph = CompiledGraph.compile(graph)
+    function_table = create_function_table(symbolic_function)
+    graph = function_table.entry
+    compiled_graph = CompiledGraph.compile(function_table)
 
     assert isinstance(compiled_graph.program, bytes)
     assert compiled_graph.program
@@ -174,13 +175,14 @@ def test_runtime_matches_dot_graph():
         implementation=implementation,
         backend="coker",
     )
-    graph = create_opgraph(symbolic_function)
+    function_table = create_function_table(symbolic_function)
+    graph = function_table.entry
     assert not any(
         layer.opaque_programs
         for layer in graph.layers
         if hasattr(layer, "opaque_programs")
     )
-    compiled_graph = CompiledGraph.compile(graph)
+    compiled_graph = CompiledGraph.compile(function_table)
     value = np.array([1.0, -2.0, 0.5])
     squared_norm = np.dot(value, value)
     _assert_same(compiled_graph(value), squared_norm * (squared_norm + 1.0))
@@ -219,6 +221,6 @@ def test_runtime_matches_dot_graph():
     assert isinstance(program, bytes)
     assert program
     assert (
-        CompiledGraph.compile(create_opgraph(symbolic_function)).program
+        CompiledGraph.compile(create_function_table(symbolic_function)).program
         == program
     )

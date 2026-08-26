@@ -14,22 +14,20 @@ from coker.backends.coker.lowering import (
     _raw_output_weights,
 )
 
+from coker.backends.coker.ast_preprocessing import FunctionTable
+
 class _FunctionTableBuilder:
     def __init__(self):
         self._function_ids_by_identity: Dict[int, int] = {}
         self._graphs_by_id: Dict[int, SparseNet | None] = {}
-
-    def build(self, function: Function) -> SparseNet:
-        _function_id, graph = self.get_or_build(function)
+    def build(self, function: Function) -> FunctionTable:
+        entry_function_id, _graph = self.get_or_build(function)
         ordered_graphs = [
             self._graphs_by_id[function_id]
             for function_id in range(len(self._graphs_by_id))
         ]
         assert all(graph_item is not None for graph_item in ordered_graphs)
-        function_table = list(ordered_graphs)
-        for graph_item in function_table:
-            graph_item.function_table = function_table
-        return graph
+        return FunctionTable(list(ordered_graphs), entry_function_id)
 
     def get_or_build(self, function: Function) -> Tuple[int, SparseNet]:
         function_identity = id(function)
@@ -45,14 +43,13 @@ class _FunctionTableBuilder:
         function_id = len(self._function_ids_by_identity)
         self._function_ids_by_identity[function_identity] = function_id
         self._graphs_by_id[function_id] = None
-        graph = _create_opgraph(function, self, function_id)
+        graph = _create_opgraph(function, self)
         self._graphs_by_id[function_id] = graph
         return function_id, graph
 
 def _create_opgraph(
     function: Function,
     function_table_builder: _FunctionTableBuilder,
-    function_id: int,
 ):
     tape = function.tape
     numpy_backend = get_backend_by_name("numpy", set_current=False)
@@ -608,7 +605,6 @@ def _create_opgraph(
         input_layer,
         output_layer,
         layers,
-        function_id=function_id,
     )
     # Kept as compile-time metadata for QP coefficient extraction. Runtime
     # graphs do not inspect this attribute.
@@ -620,6 +616,11 @@ def _create_opgraph(
     return graph
 
 
-def build_unfused_opgraph(function: Function) -> SparseNet:
-    """Build the ordinary graph-lowering path and its function table."""
+def build_function_table(function: Function) -> FunctionTable:
+    """Build the ordinary lowering module and own all nested programs."""
     return _FunctionTableBuilder().build(function)
+
+
+def build_unfused_opgraph(function: Function) -> SparseNet:
+    """Build the ordinary graph-lowering path for compatibility callers."""
+    return build_function_table(function).entry

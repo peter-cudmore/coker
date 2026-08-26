@@ -13,7 +13,7 @@ import scipy.sparse
 from coker.algebra.kernel import Function, Tracer
 from coker.algebra.ops import ConcatenateOP, OP, ReshapeOP
 from coker.backends.backend import get_backend_by_name
-from coker.backends.coker.ast_preprocessing import SparseNet
+from coker.backends.coker.ast_preprocessing import FunctionTable, SparseNet
 from coker.backends.coker.layers import (
     IDENTITY_OP,
     UNUSED_REF,
@@ -271,18 +271,26 @@ def create_compact_bilinear_opgraph(function: Function):
     return graph
 
 
-def create_unfused_opgraph(function: Function):
+def create_function_table(function: Function) -> FunctionTable:
+    """Lower a function module whose table owns every nested SparseNet."""
+    compact = create_compact_bilinear_opgraph(function)
+    if compact is not None:
+        return FunctionTable([compact])
+    from coker.backends.coker.unfused_lowering import build_function_table
+
+    return build_function_table(function)
+
+
+def create_unfused_opgraph(function: Function) -> SparseNet:
     """Lower a graph without materialising a whole-function bilinear tensor."""
     from coker.backends.coker.unfused_lowering import build_unfused_opgraph
 
     return build_unfused_opgraph(function)
 
 
-def create_opgraph(function: Function):
-    compact = create_compact_bilinear_opgraph(function)
-    if compact is not None:
-        return compact
-    return create_unfused_opgraph(function)
+def create_opgraph(function: Function) -> SparseNet:
+    """Return the entry program for compatibility host-graph callers."""
+    return create_function_table(function).entry
 
 
 def _generic_layer_weights(layer: GenericVectorLayer):
