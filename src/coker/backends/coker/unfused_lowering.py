@@ -864,6 +864,24 @@ def _create_residual_opgraph(
     refs: Dict[int, Tuple[int, ...]] = {}
     stages = []
     compiler_memory = MemorySpec(0, workspace_size)
+
+    def project_slots(slots, shape):
+        """Build a compiler expression over an ordered, possibly strided view."""
+        shape = tuple(shape) or (1,)
+        slots = tuple(slots)
+        if len(slots) != int(np.prod(shape)):
+            raise ValueError("view slot count does not match its logical shape")
+        linear = {
+            (*coordinate, slots[ordinal]): 1.0
+            for ordinal, coordinate in enumerate(np.ndindex(shape))
+        }
+        return BilinearWeights.from_trusted_dok(
+            compiler_memory,
+            shape,
+            dok_ndarray(shape, {}),
+            dok_ndarray((*shape, compiler_memory.count), linear),
+            dok_ndarray((*shape, compiler_memory.count, compiler_memory.count), {}),
+        )
     for value_index, node in enumerate(tape.nodes):
         if isinstance(node, Tracer):
             continue
@@ -1095,8 +1113,19 @@ def _create_residual_opgraph(
             )
         return refs[index]
 
-    for index in range(len(tape.nodes)):
-        if index not in semantic_dag.nodes:
+    for index, node in enumerate(tape.nodes):
+        if isinstance(node, Tracer):
+            continue
+        operation, *arguments = node
+        is_view = (
+            isinstance(operation, (ReshapeOP, ConcatenateOP))
+            or operation is OP.TRANSPOSE
+        )
+        if (
+            index not in semantic_dag.nodes
+            and operation is not OP.VALUE
+            and not is_view
+        ):
             continue
         if index in tape.input_indicies:
             life = lifetimes[index]
@@ -1112,21 +1141,63 @@ def _create_residual_opgraph(
             values[index] = _as_numpy_value(arguments[0])
             continue
         if isinstance(operation, (ReshapeOP, ConcatenateOP)) or operation is OP.TRANSPOSE:
-            source_refs = []
-            for argument in arguments:
-                source_refs.extend(view_refs(argument.index))
+            source_values = [values[argument.index] for argument in arguments]
             if isinstance(operation, ReshapeOP):
-                source_refs = np.reshape(
-                    np.asarray(source_refs), _node_shape(tape.dim[index]),
-                    order=operation.order,
-                ).reshape(-1).tolist()
+                source = source_values[0]
+                values[index] = (
+                    source.reshape(operation.newshape, order=operation.order)
+                    if isinstance(source, BilinearWeights)
+                    else np.reshape(source, operation.newshape, order=operation.order)
+                )
             elif operation is OP.TRANSPOSE:
-                source_shape = _node_shape(tape.dim[arguments[0].index])
-                source_refs = np.transpose(
-                    np.asarray(source_refs).reshape(source_shape)
-                ).reshape(-1).tolist()
-            refs[index] = tuple(int(slot) for slot in source_refs)
-            values[index] = refs[index]
+                source = source_values[0]
+                values[index] = (
+                    source.transpose()
+                    if isinstance(source, BilinearWeights)
+                    else np.transpose(source)
+                )
+            elif any(
+                isinstance(source, BilinearWeights) for source in source_values
+            ):
+                memories = [
+                    source.memory
+                    for source in source_values
+                    if isinstance(source, BilinearWeights)
+                ]
+                memory = max(
+                    memories, key=lambda candidate: (candidate.count, candidate.location)
+                )
+                values[index] = _concatenate_bilinear_operands(
+                    memory,
+                    [
+                        source.extend_memory(memory)
+                        if isinstance(source, BilinearWeights)
+                        and source.memory is not memory
+                        else source
+                        for source in source_values
+                    ],
+                    axis=operation.axis,
+                )
+            else:
+                values[index] = np.concatenate(source_values, axis=operation.axis)
+
+            if all(argument.index in refs for argument in arguments):
+                source_refs = [
+                    slot for argument in arguments for slot in refs[argument.index]
+                ]
+                if isinstance(operation, ReshapeOP):
+                    source_refs = np.reshape(
+                        source_refs,
+                        _node_shape(tape.dim[index]),
+                        order=operation.order,
+                    ).reshape(-1).tolist()
+                elif operation is OP.TRANSPOSE:
+                    source_refs = np.transpose(
+                        np.asarray(source_refs).reshape(
+                            _node_shape(tape.dim[arguments[0].index])
+                        )
+                    ).reshape(-1).tolist()
+                refs[index] = tuple(source_refs)
             continue
         if operation is OP.EVALUATE and isinstance(values.get(arguments[0].index), Function):
             callee = values[arguments[0].index]
@@ -1146,11 +1217,12 @@ def _create_residual_opgraph(
             if isinstance(argument, Tracer):
                 operand_value = values[argument.index]
                 if argument.index in refs:
-                    operands.append(BilinearWeights.project(
-                        compiler_memory,
-                        MemorySpec(refs[argument.index][0], len(refs[argument.index])),
-                        _node_shape(tape.dim[argument.index]) or (1,),
-                    ))
+                    operands.append(
+                        project_slots(
+                            refs[argument.index],
+                            _node_shape(tape.dim[argument.index]) or (1,),
+                        )
+                    )
                 else:
                     operands.append(operand_value)
         if operation in {OP.DOT, OP.MATMUL, OP.CROSS} and len(operands) == 2:

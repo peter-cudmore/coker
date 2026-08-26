@@ -175,3 +175,35 @@ def test_residual_alias_input_bindings_share_primal_and_tangent_slot():
 
     assert output == pytest.approx(9.0)
     assert tangent == pytest.approx(12.0)
+
+
+def test_compiler_preserves_aliases_across_nested_call_push_forward():
+    from coker import VectorSpace, function
+    from coker.backends.coker.lowering import create_function_table
+
+    inner = function(
+        [VectorSpace("x", 2)],
+        lambda x: np.concatenate([x * x + np.ones(2), x[:1]]),
+        backend="coker",
+    )
+    outer = function(
+        [VectorSpace("x", 2)],
+        lambda x: np.cross(
+            np.array([x[0], x[1], x[0]]),
+            np.array([x[1], x[0], x[1]]),
+        )
+        + inner(x),
+        backend="coker",
+    )
+    graph = create_function_table(outer).entry
+    value = np.array([0.25, -1.5])
+    tangent = np.array([0.5, -0.25])
+    actual, dactual = graph.push_forward(value, tangent)
+    expected = outer(value)
+    epsilon = 1e-6
+    expected_tangent = (
+        outer(value + epsilon * tangent) - outer(value - epsilon * tangent)
+    ) / (2.0 * epsilon)
+
+    np.testing.assert_allclose(actual, expected)
+    np.testing.assert_allclose(dactual, expected_tangent, atol=1e-7)
