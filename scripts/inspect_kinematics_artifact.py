@@ -14,11 +14,93 @@ import json
 import statistics
 import time
 from types import SimpleNamespace
+from typing import Any
+
 import numpy as np
 
 from coker import VectorSpace, function
+from coker.algebra.kernel import Tracer
+from coker.algebra.ops import ModuleCallOP, OP
 from coker.toolkits.kinematics import Inertia, Revolute, RigidBody
 from coker.toolkits.spatial import Isometry3, Screw
+
+
+def tape_dependency_diagnostic(
+    tape: Any, node_ids: set[int] | None = None
+) -> dict[str, object]:
+    """Describe degree-bearing tape dependencies for an over-budget artifact."""
+    selected = set(range(len(tape.nodes))) if node_ids is None else set(node_ids)
+    records = []
+    predecessors: dict[int, tuple[int, ...]] = {}
+    for node_id in sorted(selected):
+        operation, *arguments = tape.nodes[node_id]
+        deps = tuple(
+            sorted(
+                argument.index
+                for argument in arguments
+                if isinstance(argument, Tracer) and argument.index in selected
+            )
+        )
+        predecessors[node_id] = deps
+        operation_name = (
+            str(operation.name).lower()
+            if hasattr(operation, "name")
+            else type(operation).__name__
+        )
+        if node_id in getattr(tape, "input_indicies", ()):
+            degree = "input"
+        elif isinstance(operation, ModuleCallOP):
+            degree = "call"
+        elif getattr(operation, "is_bilinear", lambda: False)():
+            degree = "bilinear"
+        elif getattr(operation, "is_linear", lambda: False)():
+            degree = "linear"
+        elif operation is OP.VALUE:
+            degree = "constant"
+        else:
+            degree = "nonlinear"
+        records.append(
+            {
+                "node_id": node_id,
+                "operation": operation_name,
+                "degree": degree,
+                "predecessors": list(deps),
+            }
+        )
+
+    depth: dict[int, int] = {}
+    for node_id in sorted(selected):
+        depth[node_id] = 1 + max(
+            (depth[pred] for pred in predecessors[node_id]), default=0
+        )
+    critical_path = max(depth.values(), default=0)
+    ready_nodes = [node_id for node_id in sorted(selected) if not predecessors[node_id]]
+    nonlinear_nodes = {
+        record["node_id"]
+        for record in records
+        if record["degree"] in {"nonlinear", "call"}
+    }
+    nonlinear_depth: dict[int, int] = {}
+    for node_id in sorted(nonlinear_nodes):
+        nonlinear_depth[node_id] = 1 + max(
+            (
+                nonlinear_depth[pred]
+                for pred in predecessors[node_id]
+                if pred in nonlinear_nodes
+            ),
+            default=0,
+        )
+    return {
+        "nodes": records,
+        "ready_nodes": ready_nodes,
+        "critical_path": critical_path,
+        "nonlinear_call_nodes": sorted(nonlinear_nodes),
+        "nonlinear_call_depth": max(nonlinear_depth.values(), default=0),
+        "serial_nonlinear_call_chain": (
+            len(nonlinear_nodes) >= 2
+            and max(nonlinear_depth.values(), default=0) >= 2
+        ),
+    }
 
 
 def build_hexapod() -> RigidBody:
@@ -50,7 +132,8 @@ def compile_hexapod():
 def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32: int, *, require_v6: bool) -> dict[str, object]:
     programs = payload.get("functions", [])
     entry = programs[0]["program"]
-    layers = entry["intermediate_layers"]
+    layers = entry.get("intermediate_layers", [])
+    residual_stages = entry.get("residual_stages", ())
     kinds: dict[str, int] = {}
     generic_ops = bilinear_rows = bilinear_terms = explicit_copies = 0
     sparse_entries = identity_rows = bilinear_identity_rows = 0
@@ -140,6 +223,13 @@ def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32:
         )
     return {
         "layer_count": len(layers),
+        "residual_stage_count": len(residual_stages),
+        "residual_copy_rows": sum(
+            int(stage.get("copy_rows", stage.get("copies", 0)))
+            for stage in residual_stages
+            if isinstance(stage, dict)
+        ),
+        "residual_workspace_f32": max(int(workspace_f32), int(tangent_f32)),
         "algebraic_frontier_count": algebraic_frontier_count,
         "nonlinear_batch_count": nonlinear_batch_count,
         "generic_layer_count": generic_layers,
@@ -249,10 +339,17 @@ def main() -> None:
         }
     )
     if artifact.data[:8] == b"COKERB04":
-        if metrics["layer_count"] >= 75:
+        metrics["fk_target"] = 50
+        metrics["fk_target_met"] = metrics["layer_count"] < 50
+        if not metrics["fk_target_met"]:
+            metrics["dependency_diagnostic"] = tape_dependency_diagnostic(
+                lowered.function.tape
+            )
+            metrics["interim_target"] = "under-100 (evidence only)"
+            print(json.dumps(metrics, sort_keys=True))
             raise AssertionError(
-                "FK scheduled layer budget exceeded: "
-                f"{metrics['layer_count']} >= 75"
+                "FK scheduled layer budget target not met: "
+                f"{metrics['layer_count']} >= 50; dependency diagnostic included"
             )
         if any(
             metrics[name]

@@ -206,7 +206,7 @@ def test_hexapod_frontier_artifact_stays_within_layer_and_copy_budget():
 
     model, lowered, payload = compile_hexapod()
     metrics = payload_metrics(payload, 0, 0, require_v6=False)
-    assert metrics["layer_count"] < 75
+    assert metrics["layer_count"] < 50
     assert metrics["explicit_copy_rows"] == 0
     assert metrics["identity_relocation_rows"] == 0
     assert metrics["output_clear_rows"] == 0
@@ -229,4 +229,43 @@ def test_hexapod_lowered_matches_source_fk_and_jacobian():
         actual_jacobian, expected_jacobian, rtol=1e-12, atol=1e-12
     )
 
+
+
+def test_dependency_diagnostic_identifies_serial_nonlinear_chain():
+    from scripts.inspect_kinematics_artifact import tape_dependency_diagnostic
+
+    fn = function(
+        [VectorSpace("x", 1)],
+        implementation=lambda x: np.sin(np.sin(np.sin(x))),
+        backend="coker",
+    )
+    report = tape_dependency_diagnostic(fn.tape)
+    assert report["serial_nonlinear_call_chain"]
+    assert report["nonlinear_call_depth"] >= 3
+    nodes = {record["node_id"]: record for record in report["nodes"]}
+    nonlinear = [
+        node_id
+        for node_id, record in nodes.items()
+        if record["degree"] == "nonlinear"
+    ]
+    assert len(nonlinear) == 3
+    assert all(nodes[node_id]["operation"] == "sin" for node_id in nonlinear)
+    assert all(nodes[node_id]["predecessors"] for node_id in nonlinear[1:])
+
+
+def test_dependency_diagnostic_keeps_independent_ready_branches_separate():
+    from scripts.inspect_kinematics_artifact import tape_dependency_diagnostic
+
+    fn = function(
+        [VectorSpace("x", 1)],
+        implementation=lambda x: (np.sin(x), np.cos(x)),
+        backend="coker",
+    )
+    report = tape_dependency_diagnostic(fn.tape)
+    assert not report["serial_nonlinear_call_chain"]
+    assert report["nonlinear_call_depth"] == 1
+    nonlinear = [
+        record for record in report["nodes"] if record["degree"] == "nonlinear"
+    ]
+    assert {record["operation"] for record in nonlinear} == {"sin", "cos"}
 
