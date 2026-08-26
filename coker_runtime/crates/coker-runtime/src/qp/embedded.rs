@@ -67,6 +67,28 @@ impl<'module, 'arena> BoundMappedQpProgram<'module, 'arena> {
             outputs,
         )
     }
+    /// Executes this bound QP with one flat f32 parameter buffer.
+    ///
+    /// This is the source-runnable embedded reference entry point used by
+    /// trace harnesses. It uses the same evaluator, f32 coefficient
+    /// conversion, embedded OSQP update, solve, and status mapping as
+    /// [`Self::execute`], without allocating or rebuilding solver state.
+    pub fn execute_flat(
+        &mut self,
+        parameters: &[f32],
+        workspace: MappedQpWorkspace<'_>,
+        outputs: &mut [f32],
+    ) -> Result<QpSolveDiagnostics, RuntimeError> {
+        execute_qp_program(
+            self.program,
+            &self.arena,
+            &mut self.instance,
+            QpParameters::Flat(parameters),
+            None,
+            workspace,
+            outputs,
+        )
+    }
 }
 
 impl PreparedQpProgram {
@@ -94,7 +116,11 @@ impl PreparedQpProgram {
             outputs,
         )
     }
-    pub(crate) fn execute_flat(
+    /// Executes a detached prepared QP with one flat f32 parameter buffer.
+    ///
+    /// The arithmetic and status behavior is identical to mapped execution;
+    /// the caller owns all arena and scratch storage.
+    pub fn execute_flat(
         &mut self,
         program: MappedQpProgram<'_>,
         parameters: &[f32],

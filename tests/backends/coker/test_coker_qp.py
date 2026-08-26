@@ -514,7 +514,9 @@ def test_coker_qp_rejects_missing_bilinear_provenance(monkeypatch):
         lambda *_args: None,
     )
 
-    with pytest.raises(ValueError, match="raw bilinear provenance"):
+    with pytest.raises(
+        ValueError, match="provenance-preserving affine/bilinear"
+    ):
         coker_qp_optimisation._build_coefficient_function(
             cost.tape,
             cost,
