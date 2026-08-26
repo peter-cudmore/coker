@@ -912,8 +912,23 @@ def _create_residual_opgraph(
                 )
             )
         values[index] = value
-        if rows:
-            stages.extend(BilinearStage((row,)) for row in rows)
+        batch = []
+        batch_outputs = set()
+        for row in rows:
+            reads = {
+                slot
+                for term in row.terms
+                for slot in (term.left, term.right)
+                if slot is not None
+            }
+            if batch and reads & batch_outputs:
+                stages.append(BilinearStage(tuple(batch)))
+                batch = []
+                batch_outputs = set()
+            batch.append(row)
+            batch_outputs.add(row.output)
+        if batch:
+            stages.append(BilinearStage(tuple(batch)))
     def view_refs(index):
         value = values[index]
         if isinstance(value, tuple):
