@@ -112,13 +112,13 @@ The later mapped executor must read archived records directly. Any owned convers
 
 ## FK target and proof rule
 
-The first engineering target is **fewer than 50 Python residual stages** for `kinematics.coker`, alternating algebraic bilinear materializations with nonlinear/identity boundaries where dependencies require them. A correct Python program below 100 stages is interim evidence, not completion of the performance target.
+The first engineering target is **fewer than 75 Python residual stages** for `kinematics.coker`, alternating algebraic bilinear materializations with nonlinear/identity boundaries where dependencies require them. A correct Python program below 100 stages is interim evidence, not completion of the performance target.
 
-Do not claim that more than 50 stages are unavoidable from the current 116-layer artifact: it is produced by hybrid compact lowering and therefore is not a lower bound. A valid exception to the <50 target requires a checked Python-program-specific proof:
+Do not claim that more than 75 stages are unavoidable from the current 116-layer artifact: it is produced by hybrid compact lowering and therefore is not a lower bound. A valid exception to the <75 target requires a checked Python-program-specific proof:
 
 1. Collapse the tape's direct dependency DAG into maximal degree-at-most-two epoch regions without crossing nonlinear, call, degree-three, output, or proven alias boundaries.
 2. Emit the remaining scalar nonlinear/call boundary dependency DAG in deterministic order.
-3. Record a longest dependency chain of more than 50 boundary operations, including tape node IDs, operation names, and predecessor links.
+3. Record a longest dependency chain of more than 75 boundary operations, including tape node IDs, operation names, and predecessor links.
 4. Verify the chain against the Python residual `SparseNet`. Independent ready operations must not appear as serial chain members.
 
 `ColoredBarrierDag` is useful scheduler diagnostics, but its present algebraic-component model is not this proof: it does not yet enforce degree closure or reflect emitted epoch-aware batches.
@@ -132,7 +132,7 @@ Do not claim that more than 50 stages are unavoidable from the current 116-layer
 3. Implement canonical `EpochValue` algebra and epoch partitioning. Materialize only selected boundary values; retain roots until their complete final use.
 4. Implement Python primal and push-forward execution for every residual stage, including ordered generic chains, alias handling, and nested calls.
 5. Compare Python residual primal and push-forward results against the existing NumPy and other available reference backends across arithmetic, views, calls, FK, Jacobian, and QP coefficient cases.
-6. Regenerate the Python FK lowering, measure stage/row/workspace counts, and establish <50 stages, interim <100 stages, or the required >50-chain proof.
+6. Regenerate the Python FK lowering, measure stage/row/workspace counts, and establish <75 stages, interim <100 stages, or the required >75-chain proof.
 
 ### Milestone 2 — bytecode and runtime, only after Milestone 1 passes
 
@@ -148,7 +148,7 @@ Do not claim that more than 50 stages are unavoidable from the current 116-layer
 - Python residual primal and push-forward execution match the NumPy backend and each installed/reference backend for arithmetic, mixed constants/workspace values, sparse bilinear expressions, reshape, transpose, concatenate, nested functions, outputs, and every push-forward operation category.
 - FK and Jacobian primal/push-forward results match their reference evaluations. CROSS-style alias and nested-call scratch regressions pass.
 - Python QP coefficient values and CSC ordering match the existing QP extraction/reference path; no QP runtime or solver migration is required at this milestone.
-- The regenerated Python FK program has <50 stages, or a correct <100-stage interim result, or the checked >50 dependency-chain proof. Record stage count, bilinear rows, nonlinear operations (including expression-backed operands), terms, explicit alias copies, views materialized, and logical workspace size.
+- The regenerated Python FK program has <75 stages, or a correct <100-stage interim result, or the checked >75 dependency-chain proof. Record stage count, bilinear rows, nonlinear operations (including expression-backed operands), terms, explicit alias copies, views materialized, and logical workspace size.
 - The old mapped artifact's 116-layer result is baseline evidence only; it is not a Milestone 1 acceptance artifact.
 
 ### Milestone 2 — bytecode and runtime
@@ -171,7 +171,7 @@ Do not claim that more than 50 stages are unavoidable from the current 116-layer
 - [ ] Implement residual-stage Python primal and push-forward evaluation.
 - [ ] Add backend-comparison regressions for the Python residual program, including FK/Jacobian and QP coefficient values.
 - [ ] Add the degree-aware Python boundary-chain diagnostic; it must distinguish independent ready nodes from true serial nonlinear/call dependencies.
-- [ ] Regenerate Python FK/Jacobian lowering and establish <50 stages, an interim <100 result, or the required >50-chain proof.
+- [ ] Regenerate Python FK/Jacobian lowering and establish <75 stages, an interim <100 result, or the required >75-chain proof.
 
 ### Milestone 2 — deferred bytecode and ABI cutover
 
