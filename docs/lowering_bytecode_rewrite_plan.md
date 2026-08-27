@@ -720,8 +720,9 @@ repository.
    archive bytes, compile time, first evaluation time, and repeated evaluation
    time.
 4. Treat the historical layer count above 1,000 as the baseline defect. The
-   acceptance target is low hundreds of phases at most for each kinematic
-   artifact, without changing numerical semantics.
+   acceptance targets are low tens of phases for Forward Kinematics and low
+   hundreds at most for the Forward Spatial Jacobian, without changing
+   numerical semantics.
 
 ### Phase 12.2 — Hotspot analysis
 
@@ -759,9 +760,10 @@ Publish a hotspot report containing:
 - optimizations explicitly deferred because they require structural changes,
   target-specific SIMD, or altered numerical policy.
 
-Exit criterion: the documented hexapod workload reaches the low-hundreds phase
-target or reports an evidence-backed lower bound, and the report gives a
-reproducible baseline plus prioritized runtime optimization actions.
+Exit criterion: Forward Kinematics reaches the low-tens phase target and the
+Forward Spatial Jacobian reaches the low-hundreds target, or each exception has
+an evidence-backed lower bound. The report gives a reproducible baseline plus
+prioritized runtime optimization actions.
 
 ### Deferred optimization profiles
 
