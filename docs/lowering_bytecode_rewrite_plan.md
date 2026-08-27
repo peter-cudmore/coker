@@ -563,6 +563,206 @@ QP is not optional; it is deferred so the ordinary lowering architecture is stab
 11. Desktop benchmarks report B/N phase count, peak workspace, gather cost, archive bytes, B nnz, N-op count, compile time, and execution time.
 12. QP verification is added only in the final QP migration phase and covers coefficient parity, CSC correctness, mapped plans, and caller-owned solver buffers.
 
+## Phase 10 — Legacy Python lowering removal
+
+Phase 09 does not by itself permit deletion of the old Python lowering stack.
+The production ordinary `CokerFunction` path uses the Rust mapped artifact,
+but QP extraction, graph-runtime tests, and benchmarks still import the old
+graph representation and its bilinear metadata.
+
+### Blocking references
+
+- `src/coker/backends/coker/qp_extract.py` still calls
+  `create_function_table` and `create_opgraph` to build coefficient
+  evaluators and patterns.
+- `src/coker/backends/coker/layers.py` and `op_impl.py` still use
+  `BilinearWeights` for the legacy graph/layer execution model.
+- `tests/backends/coker/test_coker_runtime.py` directly exercises
+  `create_function_table` and `CompiledGraph`.
+- `benchmarks/benchmark_backends.py` constructs a legacy graph with
+  `create_opgraph`.
+- `lowering.py`, `unfused_lowering.py`, and `weights.py` form the legacy
+  Python lowering implementation and cannot be removed independently.
+### Phase 10.1 — QP producer cutover
+
+1. Add a PyO3 `compile_soa_qp` bridge returning the aligned unified QP artifact
+   owner and persistence bytes. Wire Python Tape-to-`TypedDag` and symbolic QP
+   declaration construction to that bridge.
+2. Route every production QP builder through the Rust symbolic-QP declaration
+   API and unified `SoaQpModule` artifact.
+3. Make Python supply only labelled symbolic declarations and evaluator tape
+   references. Rust derives coefficient output ordering, CSC patterns, maps,
+   QDLDL metadata, arena requirements, and the embedded plan.
+4. Execute unified QP artifacts through the mapped runtime using
+   caller-provided evaluator, update, arena, prepared-solver, and output
+   buffers.
+5. Remove production use of `qp_extract.py`; retain a Python reference
+   evaluator only where a test needs an oracle.
+
+Gate:
+
+- Rust/Python coefficient and CSC ordering parity over representative
+  parameters.
+- A single aligned archive binds evaluator, patterns, and plan together.
+- Repeated prepared solve writes caller outputs and allocates zero times.
+- Corrupt coefficient slices, CSC tables, plan ranges, and alignment fail
+  before evaluation or scatter.
+
+### Phase 10.2 — Legacy graph consumer removal
+
+1. Replace `CompiledGraph`/`FunctionTable` runtime tests with mapped-artifact
+   primal and JVP tests through `CokerFunction` or the Rust test API.
+2. Replace the legacy graph benchmark with the mapped Rust artifact benchmark;
+   retain phase count, workspace, gather cost, nnz, archive bytes, compile
+   time, and execution time reporting.
+3. Delete Python tests whose sole assertion is the internal `SparseNet`,
+   `FunctionTable`, layer, or `BilinearWeights` structure. Do not delete
+   behavioural tests; port them to the mapped artifact path first.
+4. Verify no production source, test, or benchmark imports
+   `create_opgraph`, `create_function_table`, `CompiledGraph`, or
+   `BilinearWeights`.
+
+Gate:
+
+- The complete Coker backend suite and mapped benchmark run without a legacy
+  graph import.
+- Python reference evaluation remains only an oracle, never a compiler or
+  executor.
+
+### Phase 10.3 — Atomic legacy-lowerer deletion
+
+After Phases 10.1 and 10.2 pass in the same change:
+
+1. Delete `lowering.py`, `unfused_lowering.py`, `weights.py`, and Python-only
+   `SparseNet`/layer execution support that has no non-lowering use.
+2. Delete the ordinary JSON graph export/compiler and old row-op/sparse-entry
+   execution paths.
+3. Remove compatibility aliases, dead imports, and obsolete internal tests;
+   do not leave shims.
+4. Re-run the complete Coker backend suite, Rust workspace tests, no-std
+   checks, and mapped artifact lifecycle/corruption tests.
+
+Exit criterion: no production Coker compilation or execution path contains
+Python lowering logic. The only retained Python numerical code is an explicit
+test oracle.
+
+## Phase 11 — Code quality, ownership, and module organization
+
+Run a deliberate cleanup after the functional migration is accepted. This phase
+changes organization and local implementation shape without broadening public
+behaviour.
+
+### Phase 11.1 — Module boundary audit
+
+1. Map each Rust crate and Python package by owned state, public entry points,
+   hot paths, and imports.
+2. Organize modules as a directed tree: a branch may call its descendants and
+   its narrow parent API, but unrelated branches must not call sideways.
+3. Replace cross-branch helpers with a small parent-owned boundary or move the
+   owned operation and state to one coherent branch. Do not introduce service
+   locators, registries, or bidirectional imports.
+4. Shrink public API surface to real ownership, archive, compiler, and runtime
+   boundaries. Remove forwarding wrappers and aliases that do not enforce an
+   invariant.
+
+### Phase 11.2 — File, flow, and ownership cleanup
+
+1. Treat 1,000 source lines as a review threshold, not an automatic split.
+   Split only where a file contains independently owned concepts; retain a
+   longer cohesive procedural implementation when linear flow is clearer.
+2. Prefer direct, phase-ordered functions with guard clauses over webs of tiny
+   helpers. Extract only a block with a distinct invariant or ownership
+   contract.
+3. Remove avoidable branch fan-out in compiler and interpreter hot paths by
+   separating phase setup from steady-state loops and by using validated table
+   kinds rather than repeated defensive mode checks.
+4. Make ownership explicit:
+   - Rust APIs identify mapped immutable input, caller-owned mutable buffers,
+     and compiler-owned construction storage.
+   - Python objects have one owner for each artifact, workspace, solver, and
+     lifecycle; remove ownership cycles and callback/reference retention that
+     prevents deterministic release.
+5. Preallocate when an upper bound is known. Construction may reserve exact
+   capacities; runtime paths must reuse caller-owned fixed buffers.
+6. Replace magic numbers with named constants at their semantic owner. Each
+   archive version, alignment, capacity, opcode sentinel, tolerance, and solver
+   layout value has one authoritative definition.
+7. Rename verbose layout-repeating identifiers to short domain names. Do not
+   repeat `soa` where the module already establishes that layout; preserve
+   explicit names only at cross-layout boundaries.
+
+### Phase 11.3 — Quality gates
+
+- All public Rust boundaries have rustdoc stating ownership, allocation, mapped
+  alignment, and error contracts where relevant.
+- Rust crate files over 1,000 lines have a recorded cohesion rationale or a
+  localized split.
+- No production Python ownership cycle remains in artifact/QP runtime paths.
+- `cargo clippy --workspace --all-targets -- -D warnings`, no-std checks, and
+  focused Python lifecycle tests pass.
+- Benchmark-sensitive changes retain Phase 12 before/after measurements.
+
+## Phase 12 — Hexapod kinematics lowering and repeated-evaluation performance
+
+Use the hexapod forward kinematics and forward spatial Jacobian as the
+representative production workload. Locate the test-suite model first; if it
+is absent, use `C:\projects\hexapod` without copying the model into the
+repository.
+
+### Phase 12.1 — Reproducible workload and baseline
+
+1. Record the exact model revision, input/output dimensions, parameter values,
+   backend settings, and release-build machine details.
+2. Compile independent forward-kinematics and forward-spatial-Jacobian
+   artifacts through the production Rust path.
+3. Record: total phase count by B/N/Case/Call/residual kind, B term count,
+   N row count, gather count, peak workspace/tangent/frame/solver storage,
+   archive bytes, compile time, first evaluation time, and repeated evaluation
+   time.
+4. Treat the historical layer count above 1,000 as the baseline defect. The
+   acceptance target is low hundreds of phases at most for each kinematic
+   artifact, without changing numerical semantics.
+
+### Phase 12.2 — Hotspot analysis
+
+1. Profile compiler stages separately: tape extraction, DAG analysis, workspace
+   planning, B construction/reduction, N/Case/call partitioning, archive
+   validation/finalization.
+2. Profile repeated bytecode calls separately from first call: phase dispatch,
+   sparse B term traversal, gathers, N rows, tangent propagation, bounds
+   checks, caller-buffer clearing, and Python/Rust boundary costs.
+3. Attribute archive bytes and evaluation time to concrete phase/table ranges;
+   report the largest contributors rather than only aggregate timings.
+4. Inspect upstream tape construction for avoidable scalarization, repeated
+   subexpressions, unnecessary reshape/concatenate/gather nodes, missed common
+   transforms, or output materialization that prevents DAG sharing.
+
+### Phase 12.3 — Measured minor fixes
+
+1. Apply only obvious non-structural improvements backed by the baseline:
+   canonical term merging, dead-value pruning, stable gather elimination,
+   capacity reservation, constant folding, or tape-construction sharing.
+2. Re-run primal and forward-JVP parity after every change. Do not trade away
+   mapped ownership, caller-owned execution buffers, deterministic ordering, or
+   numerical certificates for a phase-count result.
+3. Report before/after artifact bytes, phase counts, compile time, repeated
+   evaluation cost, and allocation count.
+
+### Phase 12.4 — Runtime optimization recommendations
+
+Publish a hotspot report containing:
+
+- the steady-state critical path and working-set estimate;
+- phase/table categories dominating repeated calls;
+- branch, bounds-check, cache locality, copy, and Python boundary costs;
+- safe next optimizations ranked by expected measured benefit;
+- optimizations explicitly deferred because they require structural changes,
+  target-specific SIMD, or altered numerical policy.
+
+Exit criterion: the documented hexapod workload reaches the low-hundreds phase
+target or reports an evidence-backed lower bound, and the report gives a
+reproducible baseline plus prioritized runtime optimization actions.
+
 ### Deferred optimization profiles
 
 STM32F7 and Raspberry Pi 4B profiling, target-specific policy calibration,
