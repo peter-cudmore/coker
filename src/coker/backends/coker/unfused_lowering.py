@@ -976,15 +976,44 @@ def _create_residual_opgraph(
         )
 
     def contraction_products(operation, lhs_shape, rhs_shape):
-        if operation is OP.DOT and lhs_shape == rhs_shape:
-            return [((), (k,), (k,)) for k in range(lhs_shape[0])]
+        if operation is OP.DOT:
+            if not lhs_shape or not rhs_shape:
+                return [((), (), ())]
+            if len(rhs_shape) == 1:
+                if lhs_shape[-1] != rhs_shape[0]:
+                    return None
+                lhs_batch = lhs_shape[:-1]
+                return [
+                    (
+                        batch,
+                        batch + (inner,),
+                        (inner,),
+                    )
+                    for batch in np.ndindex(lhs_batch)
+                    for inner in range(lhs_shape[-1])
+                ]
+            if lhs_shape[-1] != rhs_shape[-2]:
+                return None
+            lhs_batch = lhs_shape[:-1]
+            rhs_batch = rhs_shape[:-2]
+            return [
+                (
+                    lhs_prefix + rhs_prefix + (column,),
+                    lhs_prefix + (inner,),
+                    rhs_prefix + (inner, column),
+                )
+                for lhs_prefix in np.ndindex(lhs_batch)
+                for rhs_prefix in np.ndindex(rhs_batch)
+                for column in range(rhs_shape[-1])
+                for inner in range(lhs_shape[-1])
+            ]
         if operation is OP.CROSS and lhs_shape == rhs_shape == (3,):
             return [
                 ((0,), (1,), (2,)), ((0,), (2,), (1,)),
                 ((1,), (2,), (0,)), ((1,), (0,), (2,)),
                 ((2,), (0,), (1,)), ((2,), (1,), (0,)),
             ]
-        if operation is not OP.MATMUL:
+        if operation not in {OP.MATMUL, OP.DOT}:
             return None
         if len(lhs_shape) == len(rhs_shape) == 1:
             return [((), (k,), (k,)) for k in range(lhs_shape[0])]
@@ -999,6 +1028,14 @@ def _create_residual_opgraph(
                 ((j,), (k,), (k, j))
                 for j in range(rhs_shape[1])
                 for k in range(lhs_shape[0])
+            ]
+        if len(lhs_shape) >= 2 and len(rhs_shape) == 1:
+            if lhs_shape[-1] != rhs_shape[0]:
+                return None
+            return [
+                (batch, batch + (inner,), (inner,))
+                for batch in np.ndindex(lhs_shape[:-1])
+                for inner in range(lhs_shape[-1])
             ]
         if len(lhs_shape) < 2 or len(rhs_shape) < 2:
             return None
@@ -1136,6 +1173,8 @@ def _create_residual_opgraph(
             refs[index] = tuple(
                 life.slot.start + offset for offset in range(life.width)
             )
+            return SlotOperand(refs[index][min(row, life.width - 1)])
+        if isinstance(value, BilinearWeights):
             flat_width = int(np.prod(value.shape))
             coordinate = np.unravel_index(
                 min(row, flat_width - 1), value.shape
@@ -1237,6 +1276,26 @@ def _create_residual_opgraph(
             refs[index] = tuple(
                 life.slot.start + offset for offset in range(life.width)
             )
+        if index not in refs:
+            operation, *arguments = tape.nodes[index]
+            if isinstance(operation, ReshapeOP):
+                source_refs = view_refs(arguments[0].index)
+                refs[index] = tuple(np.reshape(
+                    source_refs, _node_shape(tape.dim[index]),
+                    order=operation.order
+                ).reshape(-1).tolist())
+            elif operation is OP.TRANSPOSE:
+                source_refs = view_refs(arguments[0].index)
+                refs[index] = tuple(np.transpose(
+                    np.asarray(source_refs).reshape(
+                        _node_shape(tape.dim[arguments[0].index])
+                    )
+                ).reshape(-1).tolist())
+            elif isinstance(operation, ConcatenateOP):
+                refs[index] = tuple(
+                    slot for argument in arguments
+                    for slot in view_refs(argument.index)
+                )
         return refs[index]
 
     for index, node in enumerate(tape.nodes):
