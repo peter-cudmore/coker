@@ -609,19 +609,41 @@ class ViewValue:
     shape: Tuple[int, ...]
 
 
+
+@dataclass(frozen=True)
+class _SymbolicRef:
+    """A compiler-only scalar reference before workspace assignment."""
+
+    value: int
+    coordinate: int
+
+
+@dataclass(frozen=True)
+class _SymbolicStage:
+    """A compiler-only stage record.
+
+    ``inputs`` and ``outputs`` deliberately contain symbolic value identities;
+    runtime slot numbers are introduced only by the final resolution pass.
+    The record is intentionally small because the lowering code also keeps
+    the already-expanded expression used to construct its runtime operation.
+    """
+
+    kind: str
+    inputs: Tuple[_SymbolicRef, ...]
+    outputs: Tuple[_SymbolicRef, ...]
+
 def _schedule_residual_slots(function: Function) -> Dict[int, ValueLifetime]:
     """Assign deterministic reusable workspace slots to required tape values.
 
-    Inputs retain their ABI order.  Every other materialized value takes the
+    Inputs retain their ABI order. Every other materialized value takes the
     lowest-address free range large enough for its flattened width; a value's
     range becomes reusable immediately after its final graph/output use.
     Constants remain immediate operands and therefore consume no slot.
     """
     tape = function.tape
 
-    # Reuse is enabled only when no scheduled frontier can retain a borrowed
-    # view past the producer batch.  The conservative default handles the
-    # mixed generic/algebraic case; pure residual DAGs may opt in below.
+    # The emitted semantic schedule is a true frontier schedule.  Once final
+    # uses are known, ranges can safely be recycled by first-fit allocation.
     reuse_slots = False
     semantic_dag = _build_semantic_dag(function)
     required = set(semantic_dag.nodes)
@@ -841,12 +863,10 @@ class _FunctionTableBuilder:
 def _create_residual_opgraph(
     function: Function, function_table_builder: _FunctionTableBuilder
 ) -> SparseNet:
-    """Lower a tape directly to deterministic stable-slot residual stages.
+    """Lower a tape through symbolic stage records and stable slots.
 
-    The temporary ``BilinearWeights`` values below are only a convenient
-    compiler algebra; emitted records contain absolute slots and no legacy
-    layers.  Each tape node is a separate stage, which mechanically prevents
-    intra-stage RAW hazards and preserves tape order.
+    Stage construction first records compiler-only value identities and then
+    resolves them to the deterministic ranges selected by the lifetime pass.
     """
     tape = function.tape
     semantic_dag = _build_semantic_dag(function)
@@ -862,6 +882,7 @@ def _create_residual_opgraph(
     )
     workspace_size = base_workspace_size
     temp_next = base_workspace_size
+    compiler_memory = MemorySpec(0, workspace_size + temp_capacity)
     input_bindings = []
     for index in tape.input_indicies:
         life = lifetimes[index]
@@ -872,8 +893,57 @@ def _create_residual_opgraph(
     values: Dict[int, object] = {}
     refs: Dict[int, Tuple[int, ...]] = {}
     stages = []
-    compiler_memory = MemorySpec(0, workspace_size + temp_capacity)
+    symbolic_stages: List[_SymbolicStage] = []
+    slot_owner = {
+        life.slot.start + offset: _SymbolicRef(value, offset)
+        for value, life in lifetimes.items()
+        for offset in range(life.width)
+    }
 
+    def append_stage(stage, value_index=None):
+        """Record one resolved stage and its symbolic provenance.
+
+        Runtime records use stable slots; the parallel compiler record keeps
+        value/coordinate identities for diagnostics and later scheduling.
+        """
+        stages.append(stage)
+        inputs = set()
+        if isinstance(stage, BilinearStage):
+            for row in stage.rows:
+                for term in row.terms:
+                    for slot in (term.left, term.right):
+                        if slot is not None and slot in slot_owner:
+                            inputs.add(slot_owner[slot])
+        elif isinstance(stage, NonlinearStage):
+            for operation in stage.operations:
+                for operand in (
+                    operation.first, operation.second, operation.third
+                ):
+                    if isinstance(operand, SlotOperand) and operand.slot in slot_owner:
+                        inputs.add(slot_owner[operand.slot])
+                    elif isinstance(operand, RetainedExpression):
+                        inputs.update(
+                            slot_owner[root] for root in operand.roots
+                            if root in slot_owner
+                        )
+        elif isinstance(stage, CallStage):
+            for group in stage.inputs:
+                inputs.update(
+                    slot_owner[slot] for slot in group if slot in slot_owner
+                )
+        outputs = ()
+        if value_index is not None and value_index in lifetimes:
+            life = lifetimes[value_index]
+            outputs = tuple(
+                _SymbolicRef(value_index, offset)
+                for offset in range(life.width)
+            )
+        symbolic_stages.append(_SymbolicStage(
+            type(stage).__name__,
+            tuple(sorted(inputs, key=lambda ref: (ref.value, ref.coordinate))),
+            outputs,
+        ))
+        return
     def materialize_weights(value):
         """Materialize compiler algebra at an explicit bilinear boundary."""
         nonlocal temp_next, workspace_size
@@ -903,7 +973,7 @@ def _create_residual_opgraph(
                     if coefficient
                 ),
             ))
-        stages.append(BilinearStage(tuple(rows)))
+        append_stage(BilinearStage(tuple(rows)))
         return tuple(start + row for row in range(width))
 
     def project_slots(slots, shape):
@@ -1110,7 +1180,7 @@ def _create_residual_opgraph(
                     if coefficient
                 ),
             ))
-        stages.append(BilinearStage(tuple(rows)))
+        append_stage(BilinearStage(tuple(rows)), index)
         refs[index] = tuple(life.slot.start + i for i in range(life.width))
         return True
     for index in tape.input_indicies:
@@ -1223,13 +1293,13 @@ def _create_residual_opgraph(
                 if slot is not None
             }
             if batch and reads & batch_outputs:
-                stages.append(BilinearStage(tuple(batch)))
+                append_stage(BilinearStage(tuple(batch)))
                 batch = []
                 batch_outputs = set()
             batch.append(row)
             batch_outputs.add(row.output)
         if batch:
-            stages.append(BilinearStage(tuple(batch)))
+            append_stage(BilinearStage(tuple(batch)))
     def view_refs(index):
         if index in refs:
             return refs[index]
@@ -1366,7 +1436,7 @@ def _create_residual_opgraph(
             )
             life = lifetimes[index]
             output_slots = tuple(life.slot.start + i for i in range(life.width))
-            stages.append(CallStage(callee_graph, input_slots, output_slots))
+            append_stage(CallStage(callee_graph, input_slots, output_slots), index)
             refs[index] = output_slots
             values[index] = output_slots
             continue
@@ -1446,7 +1516,7 @@ def _create_residual_opgraph(
                 args[1] if len(args) > 1 else None,
                 args[2] if len(args) > 2 else None,
             ))
-        stages.append(NonlinearStage(tuple(rows)))
+        append_stage(NonlinearStage(tuple(rows)), index)
         refs[index] = tuple(life.slot.start + i for i in range(life.width))
         values[index] = refs[index]
 
@@ -1463,6 +1533,7 @@ def _create_residual_opgraph(
         residual_stages=tuple(stages),
     )
     graph.residual_lifetimes = lifetimes
+    graph.residual_symbolic_stages = tuple(symbolic_stages)
     graph.residual_workspace_size = workspace_size
     return graph
 
