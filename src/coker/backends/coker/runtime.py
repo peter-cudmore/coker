@@ -59,7 +59,7 @@ class CompiledGraph:
             shape for _spec, shape in entry.input_layer.input_specs
         ]
         output_shapes = [
-            shape.dim for _memory, shape, _refs in entry.output_layer.outputs
+            shape.dim for _memory, shape in entry.output_layer.outputs
         ]
         return CompiledGraph(
             program,

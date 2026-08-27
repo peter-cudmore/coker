@@ -268,7 +268,10 @@ def create_compact_bilinear_opgraph(function: Function):
 
 
 def create_function_table(function: Function) -> FunctionTable:
-    """Lower a function module into stable-slot residual stages."""
+    """Lower a function module whose table owns every nested SparseNet."""
+    compact = create_compact_bilinear_opgraph(function)
+    if compact is not None:
+        return FunctionTable([compact])
     from coker.backends.coker.unfused_lowering import build_function_table
 
     return build_function_table(function)

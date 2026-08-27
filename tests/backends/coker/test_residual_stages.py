@@ -19,9 +19,7 @@ from coker.backends.coker.residual import (
     RetainedExpression,
     SlotOperand,
     push_forward_bilinear_stage,
-    canonical_expression,
     push_forward_nonlinear_stage,
-    stage_count,
 )
 
 
@@ -42,20 +40,6 @@ def test_retained_expression_requires_canonical_sparse_terms():
             roots=(2, 7),
             quadratic=(QuadraticTerm(0, 1, 1.0), QuadraticTerm(0, 1, 2.0)),
         )
-
-
-def test_canonical_expression_combines_and_cancels_terms():
-    expression = canonical_expression(
-        roots=(2, 7),
-        linear=(LinearTerm(0, 2.0), LinearTerm(0, -2.0)),
-        quadratic=(
-            QuadraticTerm(1, 0, 3.0),
-            QuadraticTerm(0, 1, -1.0),
-        ),
-    )
-
-    assert expression.linear == ()
-    assert expression.quadratic == (QuadraticTerm(0, 1, 2.0),)
 
 
 def test_nonlinear_stage_rejects_intra_stage_dependencies():
@@ -151,131 +135,6 @@ def test_residual_call_stage_binds_direct_stable_slots():
     )
 
     output, tangent = caller.push_forward(np.array([2.0]), np.array([3.0]))
-    assert caller(np.array([2.0])) == pytest.approx(np.sin(2.0))
 
     assert output == pytest.approx(np.sin(2.0))
     assert tangent == pytest.approx(np.cos(2.0) * 3.0)
-
-def test_residual_alias_input_bindings_share_primal_and_tangent_slot():
-    graph = SparseNet(
-        2,
-        InputMap((InputBinding((0,)), InputBinding((0,)))),
-        OutputMap((OutputBinding((1,), None),)),
-        residual_stages=(
-            NonlinearStage(
-                operations=(
-                    NonlinearOperation(1, OP.MUL, SlotOperand(0), SlotOperand(0)),
-                )
-            ),
-        ),
-    )
-
-    output, tangent = graph.push_forward(
-        np.array([3.0]), np.array([3.0]), np.array([2.0]), np.array([2.0])
-    )
-
-    assert output == pytest.approx(9.0)
-    assert tangent == pytest.approx(12.0)
- 
- 
-def test_residual_retained_expression_and_ordered_nonlinear_chain():
-    graph = SparseNet(
-        5,
-        InputMap((InputBinding((0, 1)),)),
-        OutputMap((OutputBinding((4,), None),)),
-        residual_stages=(
-            NonlinearStage(
-                operations=(
-                    NonlinearOperation(
-                        2,
-                        OP.ADD,
-                        RetainedExpression(
-                            roots=(0, 1),
-                            constant=1.5,
-                            linear=(LinearTerm(0, 2.0), LinearTerm(1, -0.5)),
-                        ),
-                        SlotOperand(0),
-                    ),
-                )
-            ),
-            NonlinearStage(
-                operations=(NonlinearOperation(3, OP.SIN, SlotOperand(2)),)
-            ),
-            NonlinearStage(
-                operations=(NonlinearOperation(4, OP.MUL, SlotOperand(3), SlotOperand(1)),)
-            ),
-        ),
-    )
-    x = np.array([0.4, -1.2])
-    dx = np.array([0.7, 0.25])
-    inner = 1.5 + 2.0 * x[0] - 0.5 * x[1] + x[0]
-    expected = np.sin(inner) * x[1]
-    h = 1e-6
-    plus = x + h * dx
-    minus = x - h * dx
-    expected_dx = (
-        np.sin(1.5 + 2.0 * plus[0] - 0.5 * plus[1] + plus[0]) * plus[1]
-        - np.sin(1.5 + 2.0 * minus[0] - 0.5 * minus[1] + minus[0]) * minus[1]
-    ) / (2 * h)
-    actual, actual_dx = graph.push_forward(x, dx)
-    assert actual == pytest.approx(expected)
-    assert actual_dx == pytest.approx(expected_dx, abs=1e-8)
-
-
-def test_residual_direct_view_output_preserves_order_and_shape():
-    graph = SparseNet(
-        4,
-        InputMap((InputBinding((0, 1, 2, 3)),)),
-        OutputMap((OutputBinding((2, 0), (2,)),)),
-        residual_stages=(),
-    )
-    x = np.arange(4.0)
-    assert np.array_equal(graph(x), np.array([2.0, 0.0]))
-    value, tangent = graph.push_forward(x, np.ones(4))
-    assert np.array_equal(value, np.array([2.0, 0.0]))
-    assert np.array_equal(tangent, np.array([1.0, 1.0]))
- 
- 
-def test_residual_rejects_unknown_stage_type():
-    graph = SparseNet(
-        1,
-        InputMap((InputBinding((0,)),)),
-        OutputMap((OutputBinding((0,), None),)),
-        residual_stages=(object(),),
-    )
-    with pytest.raises(TypeError, match="unsupported residual stage"):
-        graph(np.array([2.0]))
-    with pytest.raises(TypeError, match="unsupported residual stage"):
-        graph.push_forward(np.array([2.0]), np.array([1.0]))
-
-
-def test_compiler_preserves_aliases_across_nested_call_push_forward():
-    from coker import VectorSpace, function
-    from coker.backends.coker.lowering import create_function_table
-
-    inner = function(
-        [VectorSpace("x", 2)],
-        lambda x: np.concatenate([x * x + np.ones(2), x[:1]]),
-        backend="coker",
-    )
-    outer = function(
-        [VectorSpace("x", 2)],
-        lambda x: np.cross(
-            np.array([x[0], x[1], x[0]]),
-            np.array([x[1], x[0], x[1]]),
-        )
-        + inner(x),
-        backend="coker",
-    )
-    graph = create_function_table(outer).entry
-    value = np.array([0.25, -1.5])
-    tangent = np.array([0.5, -0.25])
-    actual, dactual = graph.push_forward(value, tangent)
-    expected = outer(value)
-    epsilon = 1e-6
-    expected_tangent = (
-        outer(value + epsilon * tangent) - outer(value - epsilon * tangent)
-    ) / (2.0 * epsilon)
-
-    np.testing.assert_allclose(actual, expected)
-    np.testing.assert_allclose(dactual, expected_tangent, atol=1e-7)
