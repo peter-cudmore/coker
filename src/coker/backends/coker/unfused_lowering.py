@@ -943,93 +943,68 @@ def _create_residual_opgraph(
         )
 
     def assemble_weights(scalars, shape):
-        """Flatten contraction rows using their logical output coordinates."""
-        source_shape = tuple(shape)
-        shape = (int(np.prod(source_shape)),)
-        coordinate_rank = max(
-            (len(coordinate) for coordinate in scalars), default=0
-        )
-        coordinate_shape = tuple(
-            max(coordinate[axis] for coordinate in scalars if coordinate) + 1
-            for axis in range(coordinate_rank)
-        )
-        if coordinate_rank > 1 and int(np.prod(coordinate_shape)) != shape[0]:
-            return None
+        """Flatten contraction rows using their declared logical coordinates."""
+        source_shape = tuple(shape) or (1,)
+        flat_shape = (int(np.prod(source_shape)),)
         constant, linear, quadratic = {}, {}, {}
         for coordinate, value in scalars.items():
-            if len(coordinate) > 1:
-                coordinate = (
-                    int(np.ravel_multi_index(coordinate, coordinate_shape)),
-                )
-            elif not coordinate:
-                coordinate = (0,)
-            for key, coefficient in value.constant.keys.items():
-                if coefficient: constant[coordinate] = coefficient
+            coordinate = (
+                (0,)
+                if not coordinate and len(source_shape) == 1
+                else tuple(coordinate)
+            )
+            if len(coordinate) != len(source_shape):
+                raise ValueError("contraction coordinate rank does not match output")
+            flat = int(np.ravel_multi_index(coordinate, source_shape))
+            flat_coordinate = (flat,)
+            for coefficient in value.constant.keys.values():
+                if coefficient:
+                    constant[flat_coordinate] = (
+                        constant.get(flat_coordinate, 0.0) + coefficient
+                    )
             for key, coefficient in value.linear.keys.items():
-                if coefficient: linear[(*coordinate, key[-1])] = coefficient
+                if coefficient:
+                    linear[(*flat_coordinate, key[-1])] = (
+                        linear.get((*flat_coordinate, key[-1]), 0.0) + coefficient
+                    )
             for key, coefficient in value.quadratic.keys.items():
-                if coefficient: quadratic[(*coordinate, key[-2], key[-1])] = coefficient
+                if coefficient:
+                    quadratic[(*flat_coordinate, key[-2], key[-1])] = (
+                        quadratic.get(
+                            (*flat_coordinate, key[-2], key[-1]), 0.0
+                        ) + coefficient
+                    )
         return BilinearWeights.from_trusted_dok(
-            compiler_memory, shape, dok_ndarray(shape, constant),
-            dok_ndarray((*shape, compiler_memory.count), linear),
-            dok_ndarray((*shape, compiler_memory.count, compiler_memory.count), quadratic),
+            compiler_memory, flat_shape, dok_ndarray(flat_shape, constant),
+            dok_ndarray((*flat_shape, compiler_memory.count), linear),
+            dok_ndarray((*flat_shape, compiler_memory.count, compiler_memory.count), quadratic),
         )
 
     def contraction_products(operation, lhs_shape, rhs_shape):
-        if operation is OP.DOT:
-            if not lhs_shape or not rhs_shape:
-                return [((), (), ())]
-            if len(rhs_shape) == 1:
-                if lhs_shape[-1] != rhs_shape[0]:
-                    return None
-                lhs_batch = lhs_shape[:-1]
-                return [
-                    (
-                        batch,
-                        batch + (inner,),
-                        (inner,),
-                    )
-                    for batch in np.ndindex(lhs_batch)
-                    for inner in range(lhs_shape[-1])
-                ]
-            if lhs_shape[-1] != rhs_shape[-2]:
-                return None
-            lhs_batch = lhs_shape[:-1]
-            rhs_batch = rhs_shape[:-2]
-            return [
-                (
-                    lhs_prefix + rhs_prefix + (column,),
-                    lhs_prefix + (inner,),
-                    rhs_prefix + (inner, column),
-                )
-                for lhs_prefix in np.ndindex(lhs_batch)
-                for rhs_prefix in np.ndindex(rhs_batch)
-                for column in range(rhs_shape[-1])
-                for inner in range(lhs_shape[-1])
-            ]
         if operation is OP.CROSS and lhs_shape == rhs_shape == (3,):
             return [
                 ((0,), (1,), (2,)), ((0,), (2,), (1,)),
                 ((1,), (2,), (0,)), ((1,), (0,), (2,)),
                 ((2,), (0,), (1,)), ((2,), (1,), (0,)),
             ]
-        if operation not in {OP.MATMUL, OP.DOT}:
+        if operation is OP.MATMUL:
+            if not lhs_shape or not rhs_shape or lhs_shape[-1] != rhs_shape[0]:
+                return None
+            return [
+                (
+                    lhs_prefix + rhs_suffix,
+                    lhs_prefix + (inner,),
+                    (inner,) + rhs_suffix,
+                )
+                for lhs_prefix in np.ndindex(lhs_shape[:-1])
+                for rhs_suffix in np.ndindex(rhs_shape[1:])
+                for inner in range(lhs_shape[-1])
+            ]
+        if operation is not OP.DOT:
             return None
-        if len(lhs_shape) == len(rhs_shape) == 1:
-            return [((), (k,), (k,)) for k in range(lhs_shape[0])]
-        if len(lhs_shape) == 2 and len(rhs_shape) == 1:
-            return [
-                ((i,), (i, k), (k,))
-                for i in range(lhs_shape[0])
-                for k in range(lhs_shape[1])
-            ]
-        if len(lhs_shape) == 1 and len(rhs_shape) == 2:
-            return [
-                ((j,), (k,), (k, j))
-                for j in range(rhs_shape[1])
-                for k in range(lhs_shape[0])
-            ]
-        if len(lhs_shape) >= 2 and len(rhs_shape) == 1:
+        if not lhs_shape or not rhs_shape:
+            return [((), (), ())]
+        if len(rhs_shape) == 1:
             if lhs_shape[-1] != rhs_shape[0]:
                 return None
             return [
@@ -1037,27 +1012,16 @@ def _create_residual_opgraph(
                 for batch in np.ndindex(lhs_shape[:-1])
                 for inner in range(lhs_shape[-1])
             ]
-        if len(lhs_shape) < 2 or len(rhs_shape) < 2:
-            return None
         if lhs_shape[-1] != rhs_shape[-2]:
             return None
-        batch_shape = np.broadcast_shapes(lhs_shape[:-2], rhs_shape[:-2])
-
-        def broadcast_coordinate(batch, source_batch):
-            padding = len(batch) - len(source_batch)
-            return tuple(
-                0 if extent == 1 else batch[padding + axis]
-                for axis, extent in enumerate(source_batch)
-            )
-
         return [
             (
-                batch + (row, column),
-                broadcast_coordinate(batch, lhs_shape[:-2]) + (row, inner),
-                broadcast_coordinate(batch, rhs_shape[:-2]) + (inner, column),
+                lhs_prefix + rhs_prefix + (column,),
+                lhs_prefix + (inner,),
+                rhs_prefix + (inner, column),
             )
-            for batch in np.ndindex(batch_shape)
-            for row in range(lhs_shape[-2])
+            for lhs_prefix in np.ndindex(lhs_shape[:-1])
+            for rhs_prefix in np.ndindex(rhs_shape[:-2])
             for column in range(rhs_shape[-1])
             for inner in range(lhs_shape[-1])
         ]
@@ -1080,7 +1044,7 @@ def _create_residual_opgraph(
             result[output] = term if output not in result else compiler_binary("add", result[output], term)
         return assemble_weights(result, output_shape or (1,))
     def materialize_contraction(index, operation, arguments, output_shape):
-        """Emit a contraction over already-materialized scalar slots."""
+        """Emit an entire contraction as one value/batch bilinear row group."""
         if len(arguments) != 2:
             return False
         lhs_arg, rhs_arg = arguments
@@ -1097,7 +1061,13 @@ def _create_residual_opgraph(
         products = contraction_products(operation, lhs_shape, rhs_shape)
         if products is None:
             return False
+        logical_output_shape = tuple(output_shape) or (1,)
+        life = lifetimes[index]
+        if int(np.prod(logical_output_shape)) != life.width:
+            return False
+
         def scalar_operand(argument, coordinate, shape):
+            flat = int(np.ravel_multi_index(coordinate, shape))
             if isinstance(argument, Tracer):
                 operand_value = values[argument.index]
                 if isinstance(operand_value, BilinearWeights):
@@ -1105,12 +1075,10 @@ def _create_residual_opgraph(
                     if slots is None:
                         slots = materialize_weights(operand_value)
                         refs[argument.index] = slots
-                    flat = int(np.ravel_multi_index(coordinate, shape))
                     return slots[flat], 1.0
-                slots = view_refs(argument.index)
-                flat = int(np.ravel_multi_index(coordinate, shape))
-                return slots[flat], 1.0
-            return None, float(np.asarray(argument)[coordinate])
+                return view_refs(argument.index)[flat], 1.0
+            array = np.asarray(argument)
+            return None, float(array.reshape(-1)[flat])
 
         terms_by_output = {}
         for ordinal, (output, left, right) in enumerate(products):
@@ -1128,29 +1096,21 @@ def _create_residual_opgraph(
                 pair = tuple(sorted(pair))
             terms = terms_by_output.setdefault(output, {})
             terms[pair] = terms.get(pair, 0.0) + coefficient
-        life = lifetimes[index]
-        logical_output_shape = tuple(
-            max(output[axis] for output in terms_by_output if output) + 1
-            for axis in range(max((len(output) for output in terms_by_output), default=0))
-        )
-        if logical_output_shape and int(np.prod(logical_output_shape)) != life.width:
-            return False
+
         rows = []
-        for output, terms in terms_by_output.items():
-            flat_output = (
-                0
-                if not output
-                else int(np.ravel_multi_index(output, logical_output_shape))
-            )
+        for output in np.ndindex(logical_output_shape):
+            flat_output = int(np.ravel_multi_index(output, logical_output_shape))
             rows.append(BilinearRow(
                 life.slot.start + flat_output,
                 tuple(
                     BilinearTerm(left, right, coefficient)
-                    for (left, right), coefficient in sorted(terms.items())
+                    for (left, right), coefficient in sorted(
+                        terms_by_output.get(output, {}).items()
+                    )
                     if coefficient
                 ),
             ))
-        stages.append(BilinearStage(tuple(sorted(rows, key=lambda row: row.output))))
+        stages.append(BilinearStage(tuple(rows)))
         refs[index] = tuple(life.slot.start + i for i in range(life.width))
         return True
     for index in tape.input_indicies:
@@ -1443,6 +1403,9 @@ def _create_residual_opgraph(
                 index, operation, value_arguments, _node_shape(tape.dim[index]) or (1,)
             ):
                 continue
+            raise ValueError(
+                f"unsupported {operation.name} contraction shape at tape node {index}"
+            )
         if operation in {OP.ADD, OP.SUB, OP.MUL} and any(
             isinstance(item, BilinearWeights) for item in operands
         ):
@@ -1460,7 +1423,7 @@ def _create_residual_opgraph(
             try:
                 result = compiler_binary(
                     {OP.ADD: "add", OP.SUB: "sub", OP.MUL: "mul"}[operation],
-                    *normalized,
+                    *normalized
                 )
             except (TypeError, ValueError, AssertionError):
                 result = None

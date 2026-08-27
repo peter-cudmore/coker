@@ -222,3 +222,33 @@ def test_runtime_matches_dot_graph():
     )
 
 
+
+def test_runtime_matches_nested_dot_through_concatenated_operand():
+    symbolic_function = function(
+        [VectorSpace("x", 2)],
+        implementation=lambda x: np.dot(
+            np.concatenate([x, x + np.array([1.0, -2.0])]),
+            np.concatenate([x, x + np.array([1.0, -2.0])]),
+        ),
+        backend="coker",
+    )
+    _assert_runtime_matches_graph(
+        symbolic_function,
+        args=(np.array([2.0, -1.0]),),
+        tangents=(np.array([0.5, -0.25]),),
+    )
+
+
+def test_runtime_matches_broadcast_batched_matmul_graph():
+    symbolic_function = function(
+        [VectorSpace("a", (2, 3, 4)), VectorSpace("b", (4, 2))],
+        implementation=lambda a, b: np.matmul(a, b),
+        backend="coker",
+    )
+    a = np.arange(24.0).reshape(2, 3, 4)
+    b = np.arange(8.0).reshape(4, 2)
+    _assert_runtime_matches_graph(
+        symbolic_function,
+        args=(a, b),
+        tangents=(np.ones_like(a), np.full_like(b, 0.5)),
+    )
