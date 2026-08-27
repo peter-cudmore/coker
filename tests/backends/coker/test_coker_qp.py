@@ -526,38 +526,6 @@ def test_coker_qp_rejects_missing_bilinear_provenance(monkeypatch):
         )
 
 
-def test_coker_qp_weighted_norm_avoids_dense_cost_fusion(monkeypatch):
-    from coker.backends.coker import core
-
-    pattern = SparseMatrixBuilder(
-        np.vstack([np.eye(48, dtype=bool), np.ones((1, 48), dtype=bool)])
-    )
-    with ProblemBuilder(
-        arguments=[pattern.data_space("weight_data")]
-    ) as builder:
-        (weight_data,) = builder.arguments
-        x = builder.new_variable("x", shape=(48,), initial_value=np.zeros(48))
-        cost = weighted_norm(pattern.matrix(weight_data), x)
-        bindings = _build_bindings(cost, [weight_data])
-
-        original_create_opgraph = core.create_opgraph
-
-        def create_opgraph(function):
-            if function.output[0] is cost:
-                raise AssertionError("weighted objective must not be fused")
-            return original_create_opgraph(function)
-
-        monkeypatch.setattr(core, "create_opgraph", create_opgraph)
-        extracted = extract_qp_program(
-            cost,
-            [],
-            [x],
-            bindings.decision_indices,
-            bindings.decision_bindings,
-            bindings.parameter_bindings,
-        )
-
-    assert extracted.coefficient_slices["px"].length == 1176
 
 
 def test_coker_qp_affine_residual_adjusts_parameterized_bounds():

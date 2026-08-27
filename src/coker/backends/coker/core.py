@@ -1,63 +1,141 @@
-"""Coker backend facade and lowered-function handle."""
+"""Coker backend facade and Rust-compiled function handle."""
 
 from typing import Dict, List, Tuple, Type
 
+import numpy as np
+
 from coker.algebra.dimensions import FunctionSpace
-from coker.algebra.kernel import Function, Tracer
-from coker.algebra.ops import ModuleCallOP
+from coker.algebra.kernel import Function, Tracer, TapeInner
+from coker.algebra.ops import ModuleCallOP, OP
 from coker.backends.backend import ArrayLike, Backend, get_backend_by_name
-from coker.backends.coker.lowering import create_function_table, create_opgraph
 from coker.backends.coker.module import CokerModule
 from coker.backends.coker.optimisation import (
     build_optimisation_problem as build_qp_optimisation_problem,
 )
 
 
+def _shape(dim) -> list[int]:
+    return [] if dim.is_scalar() else [int(v) for v in dim.dim]
+
+
+def _flatten_constant(value):
+    if hasattr(value, "toarray"):
+        value = value.toarray()
+    return np.asarray(value, dtype=np.float64).reshape(-1).tolist()
+
+def _is_value(raw) -> bool:
+    return isinstance(raw, tuple) and len(raw) == 2 and raw[0] is OP.VALUE
+
+
 class CokerFunction:
-    """A Coker-lowered function graph and its backend-specific operations."""
+    """A Python tape compiled and executed by the mapped Rust runtime."""
 
     def __init__(self, function: Function):
         self.function = function
-        self._function_table = None
+        self._artifact = None
+        self._program = None
+
+    def _compile(self):
+        try:
+            import coker_compiler
+        except ImportError as error:
+            raise RuntimeError("coker_compiler extension is required") from error
+        # Reserve each function's module ID before descending into callees.
+        # This keeps the entry function at index zero even when its tape
+        # contains nested calls, while allowing call nodes to refer to stable
+        # IDs during recursive discovery.
+        dag_ids, dags, building = {}, [], set()
+
+        def build(function):
+            key = id(function)
+            if key in dag_ids:
+                if key in building:
+                    raise ValueError("recursive ordinary calls are unsupported")
+                return dags[dag_ids[key]]
+            function_id = len(dags)
+            dag_ids[key] = function_id
+            dags.append(None)
+            building.add(key)
+            tape = function.tape
+            constants, refs = [], {}
+            for index in range(len(tape.nodes)):
+                raw = tape.nodes[index]
+                if _is_value(raw):
+                    refs[index] = len(constants)
+                    constants.append((raw[1], _shape(tape.dim[index])))
+            callees = []
+            for index in range(len(tape.nodes)):
+                raw = tape.nodes[index]
+                if index not in tape.input_indicies and isinstance(raw[0], ModuleCallOP):
+                    callees.append(raw[0].module)
+            for callee in callees:
+                build(callee)
+            operands = sum(
+                0 if i in tape.input_indicies or _is_value(tape.nodes[i])
+                else len(tape.nodes[i]) - 1 for i in range(len(tape.nodes))
+            )
+            scalars = sum(len(_flatten_constant(v)) + len(s) for v, s in constants)
+            scalars += sum(len(_shape(dim)) for dim in tape.dim)
+            builder = coker_compiler.Builder(
+                len(tape.nodes), operands, len(constants), scalars,
+                len(tape.input_indicies), len(function.output), len(callees),
+            )
+            for value, shape in constants:
+                builder.push_constant(_flatten_constant(value), shape)
+            for index in range(len(tape.nodes)):
+                raw = tape.nodes[index]
+                if index in tape.input_indicies:
+                    builder.push_node(index, OP.VALUE.value, [], _shape(tape.dim[index]))
+                elif _is_value(raw):
+                    builder.push_node(index, OP.VALUE.value, [], _shape(tape.dim[index]), refs[index])
+                else:
+                    operation, *args = raw
+                    if isinstance(operation, ModuleCallOP):
+                        tag = OP.EVALUATE.value
+                        function_reference = dag_ids[id(operation.module)]
+                    elif isinstance(operation, OP):
+                        tag, function_reference = operation.value, None
+                    else:
+                        raise NotImplementedError(f"unsupported ordinary node {operation!r}")
+                    operands_for_node = [a.index if isinstance(a, Tracer) else int(a) for a in args]
+                    builder.push_node(index, tag, operands_for_node, _shape(tape.dim[index]), None, function_reference)
+            for position, index in enumerate(tape.input_indicies):
+                builder.push_input(tape.input_names[position], index)
+            for position, output in enumerate(function.output):
+                if not isinstance(output, Tracer):
+                    raise NotImplementedError("ordinary outputs must be traced values")
+                builder.push_output(str(position), output.index)
+            dag = builder.finish_tape()
+            dags[function_id] = dag
+            building.remove(key)
+            return dag
+        build(self.function)
+        self._artifact = (
+            dags[0].compile_artifact() if len(dags) == 1
+            else coker_compiler.compile_module(dags)
+        )
+        self._program = self._artifact
 
     @property
-    def function_table(self):
-        """Build the table only when compilation needs it."""
-        if self._function_table is None:
-            self._function_table = create_function_table(self.function)
-        return self._function_table
-
-    @property
-    def graph(self):
-        """Return the table entry graph for host execution compatibility."""
-        return self.function_table.entry
-
-    @property
-    def function_id(self) -> int:
-        """Return the graph's stable function-table identifier."""
-        return self.function_table.entry_function_id
+    def artifact(self):
+        if self._program is None:
+            self._compile()
+        return self._artifact.to_bytes()
 
     def __call__(self, inputs):
-        """Evaluate through the reference interpreter on the Python host."""
-        numpy_backend = get_backend_by_name("numpy", set_current=False)
-        return numpy_backend.evaluate(self.function, inputs)
-
-    def compile_bytecode(self) -> bytes:
-        """Compile this lowered graph into a mapped Coker bytecode module."""
-        from coker.backends.coker.runtime import CompiledGraph
-
-        return bytes(CompiledGraph.compile(self.function_table).program)
-
-    def compile_artifact(
-        self, *, name: str = "coker_function", version: str = "1"
-    ):
-        """Compile this lowered Coker function into a mapped artifact."""
-        from coker.backends.coker.artifacts import _compile_artifact
-
-        return _compile_artifact(self, name=name, version=version)
-
-    def export_payload(self) -> dict[str, object]:
-        return self.function_table.export_payload()
+        if self._program is None:
+            self._compile()
+        arrays = inputs if isinstance(inputs, (tuple, list)) else (inputs,)
+        flat = [np.asarray(value, dtype=np.float32).reshape(-1).tolist() for value in arrays]
+        result = self._program.execute(flat)
+        outputs = []
+        cursor = 0
+        for output in self.function.output:
+            size = int(np.prod(output.dim.dim)) if not output.dim.is_scalar() else 1
+            values = np.asarray(result[cursor:cursor + size], dtype=float)
+            outputs.append(values.reshape(output.dim.dim) if not output.dim.is_scalar() else float(values[0]))
+            cursor += size
+        return outputs
 
 
 class CokerBackend(Backend):
@@ -79,36 +157,12 @@ class CokerBackend(Backend):
     def evaluate(self, function, inputs: ArrayLike):
         if all(output is None for output in function.output):
             return function.output
-
-        if any(
-            isinstance(function.tape.dim[input_index], FunctionSpace)
-            for input_index in function.tape.input_indicies
-        ):
-            numpy_backend = get_backend_by_name("numpy", set_current=False)
-            return numpy_backend.evaluate(function, inputs)
-
-        graph = create_opgraph(function)
-        return [graph(*inputs)]
+        return CokerFunction(function)(inputs)
 
     def reshape(self, array: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
         raise NotImplementedError
 
     def lower(self, function: Function):
-        if (
-            any(
-                isinstance(function.tape.nodes[index][0], ModuleCallOP)
-                for index in range(len(function.tape.nodes))
-                if index not in function.tape.input_indicies
-            )
-            or any(
-                isinstance(function.tape.dim[input_index], FunctionSpace)
-                for input_index in function.tape.input_indicies
-            )
-            or any(output is None for output in function.output)
-        ):
-            numpy_backend = get_backend_by_name("numpy", set_current=False)
-            return numpy_backend.lower(function)
-
         return CokerFunction(function)
 
     def build_optimisation_problem(

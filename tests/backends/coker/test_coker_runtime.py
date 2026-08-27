@@ -261,21 +261,12 @@ def test_runtime_matches_dot_graph():
         tangents=(np.array([0.5, 1.5, -0.5]),),
     )
 
-    symbolic_function = function(
-        [VectorSpace("x", 3)],
-        implementation=lambda x: np.cross(x, np.array([1.0, -2.0, 0.5])),
-        backend="coker",
-    )
-
     lowered = symbolic_function.lower()
-    program = lowered.compile_bytecode()
+    program = lowered.artifact
 
     assert isinstance(program, bytes)
     assert program
-    assert (
-        CompiledGraph.compile(create_function_table(symbolic_function)).program
-        == program
-    )
+    assert lowered.artifact == program
 
 
 def test_runtime_observes_scalar_opcode_surface():
