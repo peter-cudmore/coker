@@ -1168,6 +1168,8 @@ def _create_residual_opgraph(
         )
 
     def operand(value, index, row=0):
+        if index in refs:
+            return SlotOperand(refs[index][min(row, len(refs[index]) - 1)])
         if isinstance(value, BilinearWeights) and index in lifetimes:
             life = lifetimes[index]
             refs[index] = tuple(
@@ -1249,6 +1251,7 @@ def _create_residual_opgraph(
                     )),
                 )
             )
+        refs[index] = tuple(life.slot.start + i for i in range(life.width))
         values[index] = value
         batch = []
         batch_outputs = set()
@@ -1268,7 +1271,12 @@ def _create_residual_opgraph(
         if batch:
             stages.append(BilinearStage(tuple(batch)))
     def view_refs(index):
+        if index in refs:
+            return refs[index]
         value = values[index]
+        if isinstance(value, BilinearWeights):
+            refs[index] = materialize_weights(value)
+            return refs[index]
         if isinstance(value, tuple):
             return value
         if index not in refs and index in lifetimes:
@@ -1303,7 +1311,8 @@ def _create_residual_opgraph(
                 ).reshape(-1).tolist())
         return refs[index]
 
-    for index, node in enumerate(tape.nodes):
+    for index in semantic_dag.order:
+        node = tape.nodes[index]
         if isinstance(node, Tracer):
             continue
         operation, *arguments = node
