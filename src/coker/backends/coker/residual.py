@@ -397,7 +397,7 @@ def apply_nonlinear_stage(
 def push_forward_nonlinear_stage(
     stage: NonlinearStage, workspace: np.ndarray, dworkspace: np.ndarray
 ) -> None:
-    """Evaluate one nonlinear stage and its tangent into existing workspaces."""
+    """Evaluate one nonlinear stage and its tangent in existing workspaces."""
     for operation in stage.operations:
         first, dfirst = _operand_push_forward(
             operation.first, workspace, dworkspace

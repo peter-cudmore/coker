@@ -3,9 +3,9 @@
 Run from the repository root with the project environment active:
     python scripts/inspect_kinematics_artifact.py --calls 1000
 
-The command emits one JSON object containing artifact/layout metrics followed by
-steady-state mapped-host timing (microseconds). It intentionally uses the same
-model and invocation on the v5 baseline and v6 branch.
+The command emits artifact/layout metrics and steady-state mapped-host timing
+(microseconds). It intentionally uses the same model and invocation on the v5
+baseline and v6 branch.
 """
 
 from __future__ import annotations
@@ -161,7 +161,8 @@ def payload_metrics(
     if require_v6 and (identity_rows or explicit_copies or output_clear_rows):
         raise AssertionError(
             "forbidden relocation/copy/output-clear rows: "
-            f"identity={identity_rows}, copies={explicit_copies}, output_clear={output_clear_rows}"
+            f"identity={identity_rows}, copies={explicit_copies}, "
+            f"output_clear={output_clear_rows}"
         )
     return {
         "layer_count": len(layers),
@@ -222,11 +223,16 @@ def main() -> None:
     if not np.allclose(outputs, expected, rtol=1e-5, atol=1e-5):
         diff = np.abs(outputs - expected)
         max_index = int(np.argmax(diff))
+        max_absolute = float(diff[max_index])
+        expected_at_max = float(expected[max_index])
+        max_relative = float(
+            diff[max_index] / max(abs(expected_at_max), 1e-6)
+        )
         raise AssertionError(
-            f"mapped artifact output differs: max_abs={float(diff[max_index])}, "
-            f"max_rel={float(diff[max_index] / max(abs(float(expected[max_index])), 1e-6))}, "
-            f"max_index={max_index}, actual={float(outputs[max_index])}, "
-            f"expected={float(expected[max_index])}, output_specs={info['output_specs']}, "
+            f"mapped artifact output differs: max_abs={max_absolute}, "
+            f"max_rel={max_relative}, max_index={max_index}, "
+            f"actual={float(outputs[max_index])}, expected={expected_at_max}, "
+            f"output_specs={info['output_specs']}, "
             f"actual_nonzero={int(np.count_nonzero(outputs))}, "
             f"expected_nonzero={int(np.count_nonzero(expected))}, "
             f"output_shape={outputs.shape}, expected_shape={expected.shape}"
@@ -282,8 +288,10 @@ def main() -> None:
             "host_us_max": max(samples),
             "calls": args.calls,
             "warmup": args.warmup,
-            "command": "python scripts/inspect_kinematics_artifact.py --calls %d --warmup %d"
-            % (args.calls, args.warmup),
+            "command": (
+                "python scripts/inspect_kinematics_artifact.py "
+                "--calls %d --warmup %d" % (args.calls, args.warmup)
+            ),
         }
     )
     if artifact.data[:8] == b"COKERB04":
