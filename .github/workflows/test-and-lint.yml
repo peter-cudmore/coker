@@ -27,11 +27,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install package
         run: uv sync --group ci --extra casadi --extra jax
-      - name: Build runtime wheel
-        run: uv run maturin build --manifest-path coker_runtime/crates/coker-python/Cargo.toml -o target/wheels
-      - name: Extract runtime wheel
+      - name: Build runtime wheels
         run: |
-          uv run python -c "import pathlib, shutil, zipfile; output = pathlib.Path('target/wheel_extract'); shutil.rmtree(output, ignore_errors=True); wheel = max(pathlib.Path('target/wheels').glob('coker-*.whl')); zipfile.ZipFile(wheel).extractall(output)"
+          uv run maturin build --manifest-path coker_runtime/crates/coker-python/Cargo.toml -o target/wheels
+          uv run maturin build --manifest-path coker_runtime/crates/coker-compiler-python/Cargo.toml -o target/wheels
+      - name: Extract runtime wheels
+        run: |
+          uv run python -c "import pathlib, shutil, zipfile; output = pathlib.Path('target/wheel_extract'); shutil.rmtree(output, ignore_errors=True); output.mkdir(); [zipfile.ZipFile(wheel).extractall(output) for wheel in pathlib.Path('target/wheels').glob('*.whl')]"
       - name: Run default test suite
         run: uv run pytest -m "not perf" -o pythonpath=target/wheel_extract
 
