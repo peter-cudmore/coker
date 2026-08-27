@@ -120,10 +120,19 @@ class RuntimeQpProgram:
 
     @classmethod
     def compile(cls, extracted_qp) -> "RuntimeQpProgram":
+        import coker_compiler
+
         payload = json.dumps(extracted_qp.export_payload()).encode("utf-8")
-        return cls(coker_runtime.compile_exported_qp(payload))
+        program = bytes(coker_compiler.compile_exported_qp(payload))
+        return cls(program)
 
     def solve(self, runtime_args, *, warm_start):
+        """Solve and return an owned solution snapshot.
+
+        This host convenience API copies the reusable internal buffer. For
+        allocation-free repeated solves, use the extension's ``solve_into``
+        method with a caller-owned output buffer.
+        """
         inputs = [_runtime_input_buffer(arg) for arg in runtime_args]
         initial = (
             None

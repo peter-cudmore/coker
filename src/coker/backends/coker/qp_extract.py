@@ -57,6 +57,7 @@ def build_optimisation_problem(
         bindings.decision_bindings,
         bindings.parameter_bindings,
         initial_conditions,
+        extracted=extracted,
     )
     return CokerSolver(
         tape=tape,
@@ -187,16 +188,25 @@ def compile_qp_problem(
     decision_bindings: list[InputBinding],
     parameter_bindings: list[InputBinding],
     initial_conditions: dict[int, object],
+    *,
+    extracted: ExtractedQpProgram | None = None,
 ) -> RuntimeQpProgram:
+    """Compile one explicit QP payload through the Rust compiler.
+
+    ``extracted`` is supplied by the public builder so coefficient lowering is
+    performed exactly once.  The fallback keeps this low-level helper
+    compatible for callers that already use it directly.
+    """
     _ = backend, initial_conditions
-    extracted = extract_qp_program(
-        cost,
-        constraints,
-        outputs,
-        decision_indices,
-        decision_bindings,
-        parameter_bindings,
-    )
+    if extracted is None:
+        extracted = extract_qp_program(
+            cost,
+            constraints,
+            outputs,
+            decision_indices,
+            decision_bindings,
+            parameter_bindings,
+        )
     from coker.backends.coker.runtime import RuntimeQpProgram
 
     return RuntimeQpProgram.compile(extracted)

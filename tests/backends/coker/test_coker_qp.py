@@ -234,6 +234,21 @@ def test_runtime_qp_compile_load_solve_round_trip():
     assert solve_info.success
 
 
+
+def test_runtime_qp_solve_into_reuses_caller_buffer_after_source_lifecycle():
+    compiled = _compile_parameterized_runtime_qp()
+    source = bytes(compiled.program)
+    loaded = RuntimeQpProgram(source)
+    del source
+
+    target_value = np.array([3.0, -1.0], dtype=np.float32)
+    output = np.empty(2, dtype=np.float64)
+    success, status = loaded._runtime.solve_into([target_value], output, None)
+
+    assert success
+    assert status == "Solved"
+    assert np.allclose(output, target_value, atol=1e-6)
+
 def test_runtime_qp_push_forward_matches_parameter_only_contract():
     compiled = _compile_parameterized_runtime_qp()
     loaded = RuntimeQpProgram(compiled.program)
