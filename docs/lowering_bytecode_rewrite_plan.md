@@ -117,16 +117,19 @@ builder = coker_compiler.Builder(
 )
 builder.push_constant(...)
 builder.push_node(...)
-artifact = builder.build(policy=...)  # CompiledArtifact owner, not bytes
+artifact = builder.build(policy=...)  # Phase 08: CompiledArtifact owner, not bytes
 ```
 
 The builder owns Rust vectors sized from those capacities. Python injects
 constants and node records but performs no lowering or graph optimization.
 `push_node` enforces the declared sequence and operand bounds immediately.
-`build` releases the GIL, runs the pure-Rust graph/compiler pipeline, validates
-the final archive, and returns a `CompiledArtifact` backed by compiler-created
-aligned Rust storage. Runtime programs borrow that owner; the Python artifact
-object retains the storage for at least as long as any execution handle.
+Phase 04 first provides the owned-model finalizer and aligned archive owner
+independently of production lowering. Until the executable ordinary subset is
+complete, `build` continues to produce the existing artifact. Phase 08
+switches it to the pure-Rust graph/compiler pipeline and returns a
+`CompiledArtifact` backed by compiler-created aligned Rust storage. Runtime
+programs borrow that owner; the Python artifact object retains the storage for
+at least as long as any execution handle.
 
 `CompiledArtifact.to_bytes()` exists only for persistence or transport. Bytes
 returned to Python are not an execution backing store. Loading a persisted

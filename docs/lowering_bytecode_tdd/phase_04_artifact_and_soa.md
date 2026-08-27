@@ -2,7 +2,11 @@
 
 ## Goal
 
-Introduce the versioned rkyv bytecode artifact and Python `CompiledArtifact` owner without replacing numerical execution yet.
+Introduce the versioned rkyv bytecode artifact and aligned Rust-owned
+`CompiledArtifact` storage without replacing numerical execution or switching
+the production Python builder. Phase 04 exposes a construction/finalization
+API for synthetic owned models; Phase 08 makes `Builder.build()` use it after
+the ordinary executable subset exists.
 
 ## Tasks
 
@@ -19,21 +23,22 @@ Introduce the versioned rkyv bytecode artifact and Python `CompiledArtifact` own
   - Serialize the owned model into compiler-created aligned storage.
   - Validate the aligned archived view before returning it.
   - A validation failure returns no artifact.
-- [ ] Implement Python `CompiledArtifact`.
-  - `Builder.build()` returns this owner, not Python bytes.
+- [ ] Implement aligned `CompiledArtifact` ownership.
+  - Finalization returns allocation-base-aligned storage, not a padded `Vec<u8>`.
   - `to_bytes()` is persistence only.
   - `load_path()` maps a persisted artifact read-only and rejects an unaligned payload rather than copying it.
-  - Execution handles borrow the owner and cannot outlive it.
+  - Future execution handles borrow the owner and cannot outlive it.
 - [ ] Implement bind-time validation only.
   - Validate mapped header, alignment, lengths, and table bounds once when creating a runtime handle.
   - Numerical calls must not redo archive validation.
 
 ## Acceptance criteria
 
-- [ ] An owned model round-trips through an aligned archive and exposes borrowed archived views.
+- [ ] A synthetic owned model round-trips through an aligned archive and exposes borrowed archived views.
 - [ ] Corrupt header, offset, alignment, and table-range fixtures are rejected at finalization or bind time.
 - [ ] `to_bytes()` cannot be passed back as an implicit execution backing store.
-- [ ] No runtime execution path has been changed yet.
+- [ ] The legacy numerical execution path is unchanged.
+- [ ] Production `Builder.build()` is unchanged; Phase 08 owns that cutover.
 
 ## Do not do
 
