@@ -1402,6 +1402,8 @@ def _create_residual_opgraph(
                     )
                 else:
                     operands.append(operand_value)
+            else:
+                operands.append(argument)
         if operation in {OP.DOT, OP.MATMUL, OP.CROSS} and len(operands) == 2:
             contraction_operands = [
                 item if isinstance(item, BilinearWeights) else _constant_to_bw(
