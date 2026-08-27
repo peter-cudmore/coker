@@ -178,21 +178,29 @@ class SparseNet:
             if not isinstance(input_layer, InputLayer) or not isinstance(
                 output_layer, OutputLayer
             ):
-                raise TypeError("legacy SparseNet requires legacy input/output maps")
+                raise TypeError(
+                    "legacy SparseNet requires legacy input/output maps"
+                )
         else:
             if not isinstance(memory, int) or memory < 0:
                 raise TypeError("residual SparseNet requires a workspace size")
             if not isinstance(input_layer, InputMap) or not isinstance(
                 output_layer, OutputMap
             ):
-                raise TypeError("residual SparseNet requires residual input/output maps")
+                raise TypeError(
+                    "residual SparseNet requires residual input/output maps"
+                )
         self.memory = memory
         self.input_layer = input_layer
         self.output_layer = output_layer
         self.intermediate_layers = (
             list(residual_stages)
             if residual_stages is not None
-            else ([] if intermediate_layers is None else list(intermediate_layers))
+            else (
+                []
+                if intermediate_layers is None
+                else list(intermediate_layers)
+            )
         )
         self.residual_stages = residual_stages
 
@@ -232,7 +240,9 @@ class SparseNet:
             n_args = len(self.input_layer.bindings)
             x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
             if len(dx) != n_args:
-                raise ValueError("residual push_forward requires one tangent per input")
+                raise ValueError(
+                    "residual push_forward requires one tangent per input"
+                )
             workspace = self._residual_workspace(*x)
             dworkspace = self._residual_workspace(*dx)
             for stage in self.residual_stages:

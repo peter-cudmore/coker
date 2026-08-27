@@ -98,9 +98,7 @@ def test_sparse_net_executes_residual_stages_without_memory_spec():
         InputMap((InputBinding((0, 1)),)),
         OutputMap((OutputBinding((3,), None),)),
         residual_stages=(
-            BilinearStage(
-                rows=(BilinearRow(2, (BilinearTerm(0, 1, 2.0),)),)
-            ),
+            BilinearStage(rows=(BilinearRow(2, (BilinearTerm(0, 1, 2.0),)),)),
             NonlinearStage(
                 operations=(NonlinearOperation(3, OP.SIN, SlotOperand(2)),)
             ),

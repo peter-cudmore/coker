@@ -7,6 +7,7 @@ The command emits one JSON object containing artifact/layout metrics followed by
 steady-state mapped-host timing (microseconds). It intentionally uses the same
 model and invocation on the v5 baseline and v6 branch.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,7 +33,9 @@ def build_hexapod() -> RigidBody:
                 joint=Revolute(Screw.w_z()),
                 inertia=Inertia.zero(),
             )
-        model.add_effector(parent, Isometry3(translation=np.array([0.2, 0.0, 0.0])))
+        model.add_effector(
+            parent, Isometry3(translation=np.array([0.2, 0.0, 0.0]))
+        )
     return model
 
 
@@ -47,7 +50,13 @@ def compile_hexapod():
     return model, lowered, payload
 
 
-def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32: int, *, require_v6: bool) -> dict[str, object]:
+def payload_metrics(
+    payload: dict[str, object],
+    workspace_f32: int,
+    tangent_f32: int,
+    *,
+    require_v6: bool,
+) -> dict[str, object]:
     programs = payload.get("functions", [])
     entry = programs[0]["program"]
     layers = entry["intermediate_layers"]
@@ -71,7 +80,9 @@ def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32:
         reason = layer.get("frontier_closure_reason")
         if reason:
             reason = str(reason)
-            frontier_closure_reasons[reason] = frontier_closure_reasons.get(reason, 0) + 1
+            frontier_closure_reasons[reason] = (
+                frontier_closure_reasons.get(reason, 0) + 1
+            )
         memory_in = layer.get("memory_in", {})
         memory_out = layer.get("memory_out", {})
         workspace_bytes_touched += 4 * (
@@ -82,7 +93,11 @@ def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32:
             generic_ops += len(ops)
             identity_rows += sum(
                 (
-                    (op.get("op", {}).get("value") if isinstance(op.get("op"), dict) else op.get("op"))
+                    (
+                        op.get("op", {}).get("value")
+                        if isinstance(op.get("op"), dict)
+                        else op.get("op")
+                    )
                     == "identity"
                 )
                 for op in ops
@@ -90,7 +105,9 @@ def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32:
         elif kind in {"bilinear", "scheduled_bilinear"}:
             if kind == "bilinear":
                 entries = layer.get("weights", {}).get("entries", [])
-                bilinear_rows += len({int(entry["index"][0]) for entry in entries})
+                bilinear_rows += len(
+                    {int(entry["index"][0]) for entry in entries}
+                )
                 sparse_entries += len(entries)
                 for entry in entries:
                     row, left, right = entry["index"]
@@ -109,21 +126,27 @@ def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32:
                 layer_identity = 0
                 for row in rows:
                     selected = terms[
-                        int(row["term_start"]): int(row["term_start"]) + int(row["term_count"])
+                        int(row["term_start"]) : int(row["term_start"])
+                        + int(row["term_count"])
                     ]
                     if (
                         len(selected) == 1
                         and int(selected[0].get("right", 0)) == 0
-                        and int(selected[0].get("left", 0)) == int(row["output"]) + 1
+                        and int(selected[0].get("left", 0))
+                        == int(row["output"]) + 1
                         and float(selected[0].get("value", 0.0)) == 1.0
                     ):
                         bilinear_identity_rows += 1
                         layer_identity += 1
-                        identity_groups.append((layer_index, kind, row, selected[0]))
+                        identity_groups.append(
+                            (layer_index, kind, row, selected[0])
+                        )
                 identity_rows += layer_identity
         elif kind in {"copy", "explicit_copy"}:
             explicit_copies += int(layer.get("count", 1))
-        output_clear_rows += int(layer.get("output_clear_rows", layer.get("clear_rows", 0)))
+        output_clear_rows += int(
+            layer.get("output_clear_rows", layer.get("clear_rows", 0))
+        )
         output_clear_bytes += 4 * int(layer.get("output_clear_bytes", 0))
     exported_reasons = entry.get("frontier_closure_reasons", ())
     if not frontier_closure_reasons and isinstance(exported_reasons, dict):
@@ -132,7 +155,9 @@ def payload_metrics(payload: dict[str, object], workspace_f32: int, tangent_f32:
     elif not frontier_closure_reasons:
         for reason in exported_reasons:
             reason = str(reason)
-            frontier_closure_reasons[reason] = frontier_closure_reasons.get(reason, 0) + 1
+            frontier_closure_reasons[reason] = (
+                frontier_closure_reasons.get(reason, 0) + 1
+            )
     if require_v6 and (identity_rows or explicit_copies or output_clear_rows):
         raise AssertionError(
             "forbidden relocation/copy/output-clear rows: "
@@ -171,7 +196,9 @@ def main() -> None:
     import coker._coker_runtime as runtime
 
     if hasattr(lowered, "compile_artifact"):
-        artifact = lowered.compile_artifact(name="hexapod_kinematics", version="6")
+        artifact = lowered.compile_artifact(
+            name="hexapod_kinematics", version="6"
+        )
     else:
         artifact = SimpleNamespace(data=bytes(lowered.compile_bytecode()))
     program = runtime.load_program(artifact.data)
@@ -222,8 +249,12 @@ def main() -> None:
             ]
         )
         expected_tangent = ((plus - minus) / (2 * epsilon)).astype(np.float32)
-        if not np.allclose(tangent_outputs, expected_tangent, rtol=2e-3, atol=2e-3):
-            raise AssertionError("mapped artifact tangent differs from Python graph")
+        if not np.allclose(
+            tangent_outputs, expected_tangent, rtol=2e-3, atol=2e-3
+        ):
+            raise AssertionError(
+                "mapped artifact tangent differs from Python graph"
+            )
 
     metrics = payload_metrics(
         payload,
@@ -234,18 +265,25 @@ def main() -> None:
     metrics.update(
         {
             "artifact_bytes": len(artifact.data),
-            "artifact_magic": artifact.data[:8].decode("ascii", errors="replace"),
+            "artifact_magic": artifact.data[:8].decode(
+                "ascii", errors="replace"
+            ),
             "artifact_version": int.from_bytes(artifact.data[8:10], "little"),
             "logical_primal_workspace_f32": int(info["workspace_size"]),
-            "required_primal_workspace_f32": int(info["required_workspace_size"]),
+            "required_primal_workspace_f32": int(
+                info["required_workspace_size"]
+            ),
             "logical_tangent_workspace_f32": int(info["workspace_size"]),
-            "required_tangent_workspace_f32": int(info["required_workspace_size"]),
+            "required_tangent_workspace_f32": int(
+                info["required_workspace_size"]
+            ),
             "host_us_median": statistics.median(samples),
             "host_us_p95": float(np.percentile(samples, 95)),
             "host_us_max": max(samples),
             "calls": args.calls,
             "warmup": args.warmup,
-            "command": "python scripts/inspect_kinematics_artifact.py --calls %d --warmup %d" % (args.calls, args.warmup),
+            "command": "python scripts/inspect_kinematics_artifact.py --calls %d --warmup %d"
+            % (args.calls, args.warmup),
         }
     )
     if artifact.data[:8] == b"COKERB04":
@@ -262,7 +300,9 @@ def main() -> None:
                 "output_clear_rows",
             )
         ):
-            raise AssertionError("FK artifact contains forbidden relocation/copy/clear rows")
+            raise AssertionError(
+                "FK artifact contains forbidden relocation/copy/clear rows"
+            )
     print(json.dumps(metrics, sort_keys=True))
 
 

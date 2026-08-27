@@ -53,12 +53,18 @@ class RetainedExpression:
 
     def __post_init__(self):
         if tuple(sorted(set(self.roots))) != self.roots:
-            raise ValueError("retained expression roots must be unique and sorted")
+            raise ValueError(
+                "retained expression roots must be unique and sorted"
+            )
         if any(root < 0 for root in self.roots):
             raise ValueError("retained expression roots must be non-negative")
         root_count = len(self.roots)
-        if any(term.root < 0 or term.root >= root_count for term in self.linear):
-            raise ValueError("linear term root is outside retained expression roots")
+        if any(
+            term.root < 0 or term.root >= root_count for term in self.linear
+        ):
+            raise ValueError(
+                "linear term root is outside retained expression roots"
+            )
         previous = None
         for term in self.quadratic:
             if not 0 <= term.left <= term.right < root_count:
@@ -105,17 +111,32 @@ class NonlinearStage:
 
     def __post_init__(self):
         outputs = tuple(operation.output for operation in self.operations)
-        if tuple(sorted(outputs)) != outputs or len(set(outputs)) != len(outputs):
-            raise ValueError("nonlinear stage outputs must be unique and sorted")
+        if tuple(sorted(outputs)) != outputs or len(set(outputs)) != len(
+            outputs
+        ):
+            raise ValueError(
+                "nonlinear stage outputs must be unique and sorted"
+            )
         stage_outputs = set(outputs)
         for operation in self.operations:
-            for operand in (operation.first, operation.second, operation.third):
-                if isinstance(operand, SlotOperand) and operand.slot in stage_outputs:
-                    raise ValueError("nonlinear stage has an output dependency")
+            for operand in (
+                operation.first,
+                operation.second,
+                operation.third,
+            ):
+                if (
+                    isinstance(operand, SlotOperand)
+                    and operand.slot in stage_outputs
+                ):
+                    raise ValueError(
+                        "nonlinear stage has an output dependency"
+                    )
                 if isinstance(operand, RetainedExpression) and any(
                     root in stage_outputs for root in operand.roots
                 ):
-                    raise ValueError("nonlinear stage has an expression dependency")
+                    raise ValueError(
+                        "nonlinear stage has an expression dependency"
+                    )
 
 
 @dataclass(frozen=True)
@@ -131,9 +152,13 @@ class BilinearTerm:
 
     def __post_init__(self):
         if self.left is not None and self.left < 0:
-            raise ValueError("bilinear left operand requires a non-negative slot")
+            raise ValueError(
+                "bilinear left operand requires a non-negative slot"
+            )
         if self.right is not None and self.right < 0:
-            raise ValueError("bilinear right operand requires a non-negative slot")
+            raise ValueError(
+                "bilinear right operand requires a non-negative slot"
+            )
         left = -1 if self.left is None else self.left
         right = -1 if self.right is None else self.right
         if left > right:
@@ -151,8 +176,10 @@ class BilinearRow:
         if self.output < 0:
             raise ValueError("bilinear output requires a non-negative slot")
         pairs = tuple(
-            (-1 if term.left is None else term.left,
-             -1 if term.right is None else term.right)
+            (
+                -1 if term.left is None else term.left,
+                -1 if term.right is None else term.right,
+            )
             for term in self.terms
         )
         if pairs != tuple(sorted(pairs)) or len(set(pairs)) != len(pairs):
@@ -167,8 +194,12 @@ class BilinearStage:
 
     def __post_init__(self):
         outputs = tuple(row.output for row in self.rows)
-        if tuple(sorted(outputs)) != outputs or len(set(outputs)) != len(outputs):
-            raise ValueError("bilinear stage outputs must be unique and sorted")
+        if tuple(sorted(outputs)) != outputs or len(set(outputs)) != len(
+            outputs
+        ):
+            raise ValueError(
+                "bilinear stage outputs must be unique and sorted"
+            )
         output_set = set(outputs)
         for row in self.rows:
             for term in row.terms:
@@ -199,7 +230,9 @@ def _operand_push_forward(
         return value, float(dworkspace[operand.slot])
     tangent = 0.0
     for term in operand.linear:
-        tangent += term.coefficient * float(dworkspace[operand.roots[term.root]])
+        tangent += term.coefficient * float(
+            dworkspace[operand.roots[term.root]]
+        )
     for term in operand.quadratic:
         left = operand.roots[term.left]
         right = operand.roots[term.right]
@@ -210,7 +243,9 @@ def _operand_push_forward(
     return value, tangent
 
 
-def _scalar_value(op: OP | str, first: float, second: float | None, third: float | None):
+def _scalar_value(
+    op: OP | str, first: float, second: float | None, third: float | None
+):
     if op == "identity" or op == "constant":
         return first
     if op == OP.SIN:
@@ -293,7 +328,9 @@ def _scalar_push_forward(
     if op == OP.PWR or op == OP.INT_PWR:
         if first == 0.0:
             return value, 0.0
-        return value, value * (dsecond * np.log(first) + second * dfirst / first)
+        return value, value * (
+            dsecond * np.log(first) + second * dfirst / first
+        )
     if op == OP.ARCTAN2:
         return value, (second * dfirst - first * dsecond) / (
             first * first + second * second
@@ -327,14 +364,18 @@ def push_forward_bilinear_stage(
             left = 1.0 if term.left is None else float(workspace[term.left])
             right = 1.0 if term.right is None else float(workspace[term.right])
             dleft = 0.0 if term.left is None else float(dworkspace[term.left])
-            dright = 0.0 if term.right is None else float(dworkspace[term.right])
+            dright = (
+                0.0 if term.right is None else float(dworkspace[term.right])
+            )
             value += term.coefficient * left * right
             tangent += term.coefficient * (dleft * right + left * dright)
         workspace[row.output] = value
         dworkspace[row.output] = tangent
 
 
-def apply_nonlinear_stage(stage: NonlinearStage, workspace: np.ndarray) -> None:
+def apply_nonlinear_stage(
+    stage: NonlinearStage, workspace: np.ndarray
+) -> None:
     """Evaluate one independent nonlinear stage into an existing workspace."""
     for operation in stage.operations:
         first = _operand_value(operation.first, workspace)
@@ -397,13 +438,17 @@ class InputMap:
 
     bindings: Tuple[InputBinding, ...]
 
-    def write_into(self, args: Tuple[object, ...], workspace: np.ndarray) -> None:
+    def write_into(
+        self, args: Tuple[object, ...], workspace: np.ndarray
+    ) -> None:
         if len(args) != len(self.bindings):
             raise ValueError("input count does not match residual input map")
         for binding, argument in zip(self.bindings, args, strict=True):
             values = np.asarray(argument).reshape(-1, order="C")
             if values.size != len(binding.slots):
-                raise ValueError("input width does not match residual input map")
+                raise ValueError(
+                    "input width does not match residual input map"
+                )
             workspace[np.asarray(binding.slots, dtype=np.intp)] = values
 
 
@@ -417,8 +462,12 @@ class OutputBinding:
     def __post_init__(self):
         if not self.slots or any(slot < 0 for slot in self.slots):
             raise ValueError("output binding requires non-negative slots")
-        if self.shape is not None and int(np.prod(self.shape)) != len(self.slots):
-            raise ValueError("output shape does not match residual output slots")
+        if self.shape is not None and int(np.prod(self.shape)) != len(
+            self.slots
+        ):
+            raise ValueError(
+                "output shape does not match residual output slots"
+            )
 
 
 @dataclass(frozen=True)
@@ -459,7 +508,9 @@ class CallStage:
             raise ValueError("call outputs must be unique")
 
 
-def _call_arguments(stage: CallStage, workspace: np.ndarray) -> tuple[np.ndarray, ...]:
+def _call_arguments(
+    stage: CallStage, workspace: np.ndarray
+) -> tuple[np.ndarray, ...]:
     return tuple(
         workspace[np.asarray(slots, dtype=np.intp)] for slots in stage.inputs
     )
@@ -474,9 +525,13 @@ def _flatten_call_outputs(value: object) -> np.ndarray:
 
 def apply_call_stage(stage: CallStage, workspace: np.ndarray) -> None:
     """Evaluate one nested residual call into direct stable output slots."""
-    values = _flatten_call_outputs(stage.callee(*_call_arguments(stage, workspace)))
+    values = _flatten_call_outputs(
+        stage.callee(*_call_arguments(stage, workspace))
+    )
     if values.size != len(stage.outputs):
-        raise ValueError("call result width does not match stable output bindings")
+        raise ValueError(
+            "call result width does not match stable output bindings"
+        )
     workspace[np.asarray(stage.outputs, dtype=np.intp)] = values
 
 
@@ -490,7 +545,9 @@ def push_forward_call_stage(
     values = _flatten_call_outputs(value)
     dvalues = _flatten_call_outputs(tangent)
     if values.size != len(stage.outputs) or dvalues.size != len(stage.outputs):
-        raise ValueError("call result width does not match stable output bindings")
+        raise ValueError(
+            "call result width does not match stable output bindings"
+        )
     output_slots = np.asarray(stage.outputs, dtype=np.intp)
     workspace[output_slots] = values
     dworkspace[output_slots] = dvalues
