@@ -1292,10 +1292,15 @@ def _create_residual_opgraph(
                     )
                 ).reshape(-1).tolist())
             elif isinstance(operation, ConcatenateOP):
-                refs[index] = tuple(
-                    slot for argument in arguments
-                    for slot in view_refs(argument.index)
-                )
+                refs[index] = tuple(np.concatenate(
+                    [
+                        np.asarray(view_refs(argument.index)).reshape(
+                            _node_shape(tape.dim[argument.index]) or (1,)
+                        )
+                        for argument in arguments
+                    ],
+                    axis=operation.axis,
+                ).reshape(-1).tolist())
         return refs[index]
 
     for index, node in enumerate(tape.nodes):
@@ -1359,20 +1364,27 @@ def _create_residual_opgraph(
                 values[index] = np.concatenate(source_values, axis=operation.axis)
 
             if all(argument.index in refs for argument in arguments):
-                source_refs = [
-                    slot for argument in arguments for slot in refs[argument.index]
-                ]
                 if isinstance(operation, ReshapeOP):
                     source_refs = np.reshape(
-                        source_refs,
+                        refs[arguments[0].index],
                         _node_shape(tape.dim[index]),
                         order=operation.order,
                     ).reshape(-1).tolist()
                 elif operation is OP.TRANSPOSE:
                     source_refs = np.transpose(
-                        np.asarray(source_refs).reshape(
+                        np.asarray(refs[arguments[0].index]).reshape(
                             _node_shape(tape.dim[arguments[0].index])
                         )
+                    ).reshape(-1).tolist()
+                else:
+                    source_refs = np.concatenate(
+                        [
+                            np.asarray(refs[argument.index]).reshape(
+                                _node_shape(tape.dim[argument.index]) or (1,)
+                            )
+                            for argument in arguments
+                        ],
+                        axis=operation.axis,
                     ).reshape(-1).tolist()
                 refs[index] = tuple(source_refs)
             continue
