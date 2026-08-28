@@ -190,11 +190,12 @@ class Tape:
     NONE = -1
     MAP_TO_NONE = -2
 
-    def __init__(self):
+    def __init__(self, backend: str | None = None):
         self._inner = TapeInner(self)
         self.dim = []
         self.input_indicies = []
         self.input_names = []
+        self.backend = backend
         self._substitutions: dict = {}
 
     def add_substitution(self, foreign: "Tracer", local: "Tracer"):
@@ -674,6 +675,36 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
 
             return clip_scalar(value, lower, upper)
 
+        if func is np.linalg.norm and args[0].dim.is_vector():
+            value = args[0]
+            order = kwargs.get("ord", args[1] if len(args) > 1 else None)
+            if order in (None, 2):
+                return np.sqrt(np.dot(value, value))
+            if order == 1:
+                return sum(
+                    abs(value[index]) for index in range(value.shape[0])
+                )
+            raise NotImplementedError(
+                f"np.linalg.norm order {order!r} is not supported"
+            )
+        if (
+            func is np.linalg.norm
+            and args[0].dim.is_matrix()
+            and args[0].tape.backend == "coker"
+            and kwargs.get("ord", args[1] if len(args) > 1 else None) == 1
+        ):
+            value = args[0]
+            column_norms = [
+                sum(abs(value[row, column]) for row in range(value.shape[0]))
+                for column in range(value.shape[1])
+            ]
+            result = column_norms[0]
+            for column_norm in column_norms[1:]:
+                result = if_then_else(
+                    result <= column_norm, column_norm, result
+                )
+            return result
+
         try:
             if func == np.reshape:
                 shape = (
@@ -1049,7 +1080,7 @@ def function(
         >>> f(np.array([1.0, 0.0, 0.0]))
         array([1., 0., 0.])
     """
-    with TraceContext() as tape:
+    with TraceContext(backend=backend) as tape:
         args = [tape.input(v) for v in arguments]
         output = implementation(*args)
         result = _normalise_result(output, tape)
@@ -1186,12 +1217,13 @@ _local.trace = []
 
 
 class TraceContext:
-    def __init__(self, tape: "Tape | None" = None):
+    def __init__(self, tape: "Tape | None" = None, backend: str | None = None):
         self._tape = tape
+        self._backend = backend
 
     def __enter__(self):
         if self._tape is None:
-            self._tape = Tape()
+            self._tape = Tape(self._backend)
         _local.trace.append(self._tape)
         return self._tape
 

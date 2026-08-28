@@ -8,6 +8,10 @@ The rewrite is a clean bytecode-format cutover. Legacy bytecode artifacts requir
 
 QP compilation is required work, but is deliberately the final migration phase. Ordinary tape lowering, bytecode, runtime execution, Python bindings, and their verification must be complete before QP extraction and lowering move from Python into Rust.
 
+### Deferred residual execution
+
+Residual B execution and workspace-span reuse are deferred until Phase 12 is complete. Until then, ordinary lowering MUST use append-only logical workspace spans and ordinary overwrite B phases; it MUST NOT introduce residual ownership transfer.
+
 ## Goals
 
 1. Reduce numerical bytecode execution to two phase kinds:
@@ -370,54 +374,30 @@ Phase-local `u16` indices bound a phase width; the compiler splits larger phases
 
 B terms are sorted by output row for sequential output sweeps. N operations remain topological, while contiguous same-op runs provide a future SIMD dispatch boundary without changing the archive format.
 
-### Gather only for un-fusible reshaping
+### Phase-boundary gathers and ping-pong banks
 
-Dependency-aware scheduling leaves live values in their allocated workspace
-spans. A `GatherPhase` materializes a contiguous snapshot only when the
-required static scalar reindexing cannot be folded into an existing overwrite
-B operation. Its source-index table supports reshape, transpose/permutation,
-slice, concatenation, repeated indices, and broadcast-style duplication. It
-copies selected global workspace coordinates into a fresh contiguous output span
-in stored source-index order.
+Ordinary execution uses two disjoint absolute caller-workspace bank ranges.
+For every scheduled phase, the compiler gathers live-through values needed by
+the next phase into its read bank, then emits B, N, Case, Call, and ordinary
+gather writes into the opposite bank. The following phase swaps bank roles.
 
-Gather is semantically a degenerate overwrite B map: each output is one
-linear homogeneous term. It is a distinct data-movement execution layer only
-to avoid storing and evaluating a general sparse tensor for a pure reshape.
-It does not add nonlinear functionality or alter the B/N algebra.
+The compiler resolves static mappings before final bank placement. It tracks
+the live frontier at each phase boundary and allocates compact offsets within
+each bank; static reshape, permutation, slice, concatenate, repeated index,
+and broadcast mappings become source-to-destination gathers when they cannot
+be folded into their consuming operation. A phase's source and destination
+ranges are concrete `u32` workspace offsets in the existing archive format.
+No new runtime frame fields are required.
 
-The compiler binds only values used by the following phase. Other live values
-remain in their global workspace spans for later phases, so no identity
-passthrough is needed. Gather cost includes index-table bytes, loads, stores,
-and scratch/workspace high-water mark. The scheduler must fold the mapping
-into an existing B phase whenever legal and only emit `GatherPhase` otherwise.
+Ordinary phases never write their read bank. A gather copies only into the
+opposite bank; it is not a post-execution restore of a temporary output.
+Primal and tangent execution use identical bank offsets and mappings in their
+corresponding caller-provided workspaces.
 
-Primal and tangent execution perform the same gather into their corresponding
-caller-provided workspace spans. Neither path allocates or copies archived
-bytecode.
-
-Residual layers deliberately have no gather input. They operate only on one
-contiguous same-span workspace region, and their dependency proof is over that
-region's phase-local coordinates.
-
-### Nonlinear local frame
-
-An N phase evaluates in a caller-provided contiguous frame of `frame_len`
-scalars. The immutable input prefix is `frame[0..input_len]`, copied from the
-contiguous `input_base` span. Temporary and result slots occupy
-`frame[input_len..frame_len]`. `output_frame_start..output_frame_start +
-output_len` identifies the final result span copied to `output_base`.
-
-For every N opcode:
-
-- `dst` is in `input_len..frame_len` and is written exactly once;
-- each argument is either in `0..input_len` or is a destination defined by an
-  earlier opcode in the phase's topological stream;
-- no opcode writes an input-prefix slot;
-- final output-frame slots are defined before the phase completes.
-
-Archive validation proves these rules statically. Tangent execution uses an
-identically indexed tangent frame, so every primal input, temporary, and output
-has a corresponding directional derivative slot.
+The scheduler's ready-frontier property means nodes in an N phase have no
+same-phase producer dependency. N rows therefore read only their phase input
+bank and write only the opposite output bank; no N-local frame, temporary
+slot stream, or output copy is required.
 
 ### Separate overwrite and residual layers
 

@@ -4,6 +4,14 @@
 
 Execute compact overwrite B phases and explicit gather phases from mapped SoA bytecode. Reach parity for constants, linear maps, degree-two polynomial operations, and static reindexing.
 
+## Workspace-bank responsibility
+
+This phase owns the physical ordinary-phase workspace contract. It must reserve
+disjoint read/write banks for B and gather execution; Phase 06 extends those
+same banks to N, Case, and Call. Do not repair a later overlap by writing to a
+temporary span and gathering back: select the final disjoint destination during
+bank placement.
+
 ## Tasks
 
 - [ ] Implement compiler emission for `OverwriteBilinearPhase`.

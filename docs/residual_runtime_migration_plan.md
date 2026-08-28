@@ -6,6 +6,15 @@ Replace compact-and-copy workspace lowering with residual slot scheduling for ev
 
 The current FK artifact has 3,090 layers and 414,044 generic identity rows. The migration eliminates relocation as a runtime operation rather than merely merging its layers.
 
+> **Status: superseded for ordinary-phase workspace placement.** The stable
+> global-slot, first-fit reuse, and exact alias-scratch design below is not the
+> active CI-recovery architecture. Ordinary B/N/Case/Call/gather phases now use
+> compiler-assigned ping-pong live-frontier banks as specified in
+> `lowering_bytecode_rewrite_plan.md` and the Phase 06 recovery checklist.
+> Retain this document only for its residual certification, QP, no-std, and
+> caller-owned-buffer requirements. A residual remains the only certified
+> same-span execution phase; ordinary phases have disjoint read/write banks.
+
 ## Non-negotiable runtime contract
 
 - [ ] Preserve `no_std` execution and require no global allocator.

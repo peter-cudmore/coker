@@ -234,7 +234,6 @@ def test_runtime_qp_compile_load_solve_round_trip():
     assert solve_info.success
 
 
-
 def test_runtime_qp_solve_into_reuses_caller_buffer_after_source_lifecycle():
     compiled = _compile_parameterized_runtime_qp()
     source = bytes(compiled.program)
@@ -248,6 +247,7 @@ def test_runtime_qp_solve_into_reuses_caller_buffer_after_source_lifecycle():
     assert success
     assert status == "Solved"
     assert np.allclose(output, target_value, atol=1e-6)
+
 
 def test_runtime_qp_push_forward_matches_parameter_only_contract():
     compiled = _compile_parameterized_runtime_qp()
@@ -539,8 +539,6 @@ def test_coker_qp_rejects_missing_bilinear_provenance(monkeypatch):
             bindings.decision_bindings,
             bindings.parameter_bindings,
         )
-
-
 
 
 def test_coker_qp_affine_residual_adjusts_parameterized_bounds():
