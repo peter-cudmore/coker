@@ -13,6 +13,7 @@ Read `../lowering_bytecode_rewrite_plan.md` first. These files turn that archite
 | [07](phase_07_reduction_and_residuals.md) | Reducers and conservative residual B layers | Residual/factorization choice is validated and deterministic. |
 | [08](phase_08_ordinary_parity_and_cleanup.md) | Production ordinary Rust backend | Existing ordinary Python suite passes; legacy ordinary lowering removed. |
 | [09](phase_09_qp_migration.md) | Rust QP compiler and embedded runtime path | QP parity and caller-owned no-std execution pass. |
+| [13](phase_13_compiler_runtime_simplification.md) | Profile-led Rust compiler/runtime simplification | Every accepted reduction has measured evidence and retains mapped, caller-buffer, no-std contracts. |
 
 ## Working rules
 

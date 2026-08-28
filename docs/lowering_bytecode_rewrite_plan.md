@@ -670,6 +670,20 @@ behaviour.
 7. Rename verbose layout-repeating identifiers to short domain names. The
    module establishes storage layout; cross-layout boundaries use concrete
    archive terminology instead.
+### Phase 11.2.1 — Cohesion audit
+
+- `coker-bytecode/src/artifact.rs`: **deferred to Phase 13; not a cohesion
+  exception.** It contains three independently owned regions: owned-model
+  validation, ordinary artifact binding, and unified-QP artifact binding.
+  Phase 13 must profile and then split those regions or record measured
+  evidence that their shared private archive validation makes colocation the
+  lower-complexity result. Phase 11 does not claim this file is complete.
+- `coker-runtime/src/qp/mod.rs`: recorded cohesion exception. It owns the QP
+  runtime boundary: archived metadata views, evaluator selection, workspace
+  requirements, and the host/embedded feature boundary. Execution is already
+  isolated in `qp/embedded.rs`; splitting the remaining declarations would add
+  re-exports and borrow-threading without separating independent behavior.
+
 
 ### Phase 11.3 — Quality gates
 
