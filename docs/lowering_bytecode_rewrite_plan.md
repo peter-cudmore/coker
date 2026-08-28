@@ -672,12 +672,13 @@ behaviour.
    archive terminology instead.
 ### Phase 11.2.1 — Cohesion audit
 
-- `coker-bytecode/src/artifact.rs`: **deferred to Phase 13; not a cohesion
-  exception.** It contains three independently owned regions: owned-model
-  validation, ordinary artifact binding, and unified-QP artifact binding.
-  Phase 13 must profile and then split those regions or record measured
-  evidence that their shared private archive validation makes colocation the
-  lower-complexity result. Phase 11 does not claim this file is complete.
+- `coker-bytecode/src/artifact.rs`: completed localized split. The 58-line
+  facade now owns archive header/constants and canonical exports; `data.rs`
+  owns model tables, `owned_validation.rs` owns compiler-model validation,
+  `archived_validation.rs` owns mapped validation, `ordinary.rs` owns ordinary
+  artifact binding, and `qp.rs` owns unified-QP binding. Each implementation
+  file is below the review threshold; no validation framework or compatibility
+  wrapper was introduced.
 - `coker-runtime/src/qp/mod.rs`: recorded cohesion exception. It owns the QP
   runtime boundary: archived metadata views, evaluator selection, workspace
   requirements, and the host/embedded feature boundary. Execution is already
