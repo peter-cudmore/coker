@@ -7,7 +7,7 @@ from coker.algebra.kernel import Function, Tracer
 
 from coker.algebra.ops import ConcatenateOP, ModuleCallOP, OP, ReshapeOP
 
-__all__ = ["function_to_typed_dag"]
+__all__ = ["function_to_typed_dag", "module_to_typed_dags"]
 
 
 def _shape(dim) -> list[int]:
@@ -24,15 +24,13 @@ def _is_value(raw) -> bool:
     return isinstance(raw, tuple) and len(raw) == 2 and raw[0] is OP.VALUE
 
 
-def function_to_typed_dag(
+def _convert(
     function: Function,
     *,
     output_labels=None,
     bound_functions=None,
-    return_all=False,
 ):
-    """Convert a traced function tape into the Rust
-    typed-DAG representation."""
+    """Build the root DAG and every ordinary callee reachable from it."""
     import coker_compiler
 
     if bound_functions is None:
@@ -218,4 +216,32 @@ def function_to_typed_dag(
         return dag
 
     build(function)
-    return tuple(dags) if return_all else dags[0]
+    return tuple(dags)
+
+
+def function_to_typed_dag(
+    function: Function,
+    *,
+    output_labels=None,
+    bound_functions=None,
+):
+    """Convert one root function to its typed-DAG representation."""
+    return _convert(
+        function,
+        output_labels=output_labels,
+        bound_functions=bound_functions,
+    )[0]
+
+
+def module_to_typed_dags(
+    function: Function,
+    *,
+    output_labels=None,
+    bound_functions=None,
+):
+    """Convert a root function and its ordinary callees to typed DAGs."""
+    return _convert(
+        function,
+        output_labels=output_labels,
+        bound_functions=bound_functions,
+    )

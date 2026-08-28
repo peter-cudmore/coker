@@ -32,11 +32,10 @@ class CokerFunction:
             raise RuntimeError(
                 "coker_compiler extension is required"
             ) from error
-        dags = _conversion.function_to_typed_dag(
+        dags = _conversion.module_to_typed_dags(
             self.function,
             output_labels=self._output_labels,
             bound_functions=self._bound_functions,
-            return_all=True,
         )
         self._artifact = (
             dags[0].compile_artifact()
