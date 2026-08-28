@@ -16,8 +16,6 @@ from coker.backends.optimisation import (
     normalise_runtime_args,
 )
 
-OSQP_INFINITY = 1.0e30
-
 
 class RuntimeQpProgram(Protocol):
     def solve(

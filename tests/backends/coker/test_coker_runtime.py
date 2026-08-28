@@ -204,7 +204,6 @@ def test_runtime_matches_dot_graph():
         tangents=(np.array([0.5, 0.25, -1.0]),),
     )
 
-
     symbolic_function = function(
         [VectorSpace("x", 3)],
         implementation=lambda x: np.cross(x, np.array([1.0, -2.0, 0.5])),

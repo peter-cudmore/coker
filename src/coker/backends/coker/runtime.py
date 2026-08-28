@@ -1,6 +1,7 @@
 import numpy as np
 
 import coker._coker_runtime as coker_runtime
+from coker.backends.coker.conversion import function_to_typed_dag
 
 
 def _runtime_input_buffer(arg) -> np.ndarray:
@@ -26,9 +27,6 @@ class RuntimeQpProgram:
         self._input_lengths = list(self._info["input_specs"])
         self._output_length = int(self._info["output_spec"])
         self._solution = np.empty(self._output_length, dtype=np.float64)
-        self._tangent_solution = np.empty(
-            self._output_length, dtype=np.float64
-        )
 
     @property
     def program(self) -> bytes:
@@ -42,7 +40,6 @@ class RuntimeQpProgram:
         import coker_compiler
 
         from coker.algebra.kernel import Function, Tracer
-        from coker.backends.coker.core import function_to_typed_dag
 
         source_function = Function(
             extracted_qp.source_tape,

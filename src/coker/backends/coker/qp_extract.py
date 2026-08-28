@@ -15,9 +15,7 @@ from coker.backends.optimisation import (
 from coker.backends.coker.qp_types import (
     CokerSolver,
     ExtractedQpProgram,
-    OutputSlice,
     RuntimeQpProgram,
-    OSQP_INFINITY,
 )
 
 

@@ -8,8 +8,6 @@ import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
-import coker._coker_runtime as _runtime
-
 
 @dataclass(frozen=True)
 class ArtifactMetadata:
@@ -227,6 +225,5 @@ def _rust_identifier(value: str) -> str:
 __all__ = [
     "ArtifactMetadata",
     "CompiledArtifact",
-    "compile_qp_artifact",
     "write_artifact",
 ]
