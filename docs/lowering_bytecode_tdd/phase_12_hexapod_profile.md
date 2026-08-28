@@ -27,3 +27,19 @@ The initial attempt instead failed on the unrelated `ARCHIVE_MAX_FRAME_DEPTH` ch
 ## Next measurement gate
 
 Do not raise `ARCHIVE_MAX_PHASES` to hide this defect. Add compiler-stage and emitted-table counters, then reduce the B/N/gather phase partitioning until this exact workload archives successfully. Only then collect the required first-call and steady-state timing and table-range attribution.
+
+## Deferred phase-compaction experiment
+
+The 2026-08-28 experiment coalesced N headers per scheduled nonlinear phase
+and removed intermediate static-mapping phases through recursively resolved
+operand indices. Focused ordinary compiler tests passed, but the full Python
+suite failed nine QP tests: coefficient evaluator outputs include contiguous
+workspace boundaries beyond ordinary declared function outputs. Eliminating
+their materialization caused OSQP to read incorrect coefficients; for example,
+the expected solution `[3.0, -1.0]` became `[0.27272728, -0.09090908]`.
+
+Commit `6ef6eb5` was reverted by `3cd4930`. No part of that compaction remains
+in the branch. Resume this work only after coefficient-evaluator ownership and
+its contiguous-output contract have been simplified and made explicit. The
+future implementation must test ordinary mapped intermediates and mapped QP
+coefficient outputs together before removing any mapping materialization.
