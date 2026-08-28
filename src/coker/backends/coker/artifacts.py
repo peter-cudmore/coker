@@ -157,8 +157,6 @@ class CompiledArtifact:
         return artifact, constants
 
 
-
-
 def write_artifact(
     artifact: CompiledArtifact,
     artifact_path: str | Path,
