@@ -46,7 +46,7 @@ class RuntimeQpProgram:
             [Tracer(extracted_qp.source_tape, extracted_qp.cost_node)],
         )
         dag = function_to_typed_dag(source_function)
-        artifact = coker_compiler.compile_soa_qp_source(
+        artifact = coker_compiler.compile_archive_qp_source(
             dag,
             extracted_qp.n,
             extracted_qp.m,

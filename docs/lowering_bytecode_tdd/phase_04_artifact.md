@@ -1,4 +1,4 @@
-# Phase 04 — SoA artifact, aligned ownership, and one-time validation
+# Phase 04 — Archived artifact, aligned ownership, and one-time validation
 
 ## Goal
 
@@ -14,7 +14,7 @@ the ordinary executable subset exists.
   - Keep magic, version, payload alignment, and payload offset explicit.
   - Document every maximum: function count, phase count, frame depth, local indices, terms, and workspace.
   - Legacy artifacts must fail with a clear version error.
-- [ ] Define archived SoA tables for program/function headers, overwrite B, residual B, gather, N, and call phases.
+- [ ] Define archived tables for program/function headers, overwrite B, residual B, gather, N, and call phases.
   - Use contiguous arrays for hot data; do not retain AoS sparse entries in the new format.
   - Keep immutable metadata separated from caller-owned execution state.
 - [ ] Implement owned-model validation.

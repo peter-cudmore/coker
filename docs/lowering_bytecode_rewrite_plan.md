@@ -317,9 +317,9 @@ Prune before scheduling and after factorization.
 - Prune empty phases.
 - Coalesce adjacent compatible phases only if B-frame semantics and the cost model permit it.
 
-## SoA bytecode
+## Archived bytecode
 
-Replace `Layer`, `BilinearLayer`, `GenericLayer`, `RowOp`, `SparseTensor`, and AoS `SparseEntry` execution storage with directly mapped SoA tables.
+Replace `Layer`, `BilinearLayer`, `GenericLayer`, `RowOp`, `SparseTensor`, and AoS `SparseEntry` execution storage with directly mapped columnar tables.
 
 ```text
 Program
@@ -445,7 +445,7 @@ unproved overlapping source/destination span.
 
 ## Runtime
 
-Runtime kernels borrow archived SoA slices and execute through direct iterative loops:
+Runtime kernels borrow archived table slices and execute through direct iterative loops:
 
 - `execute_overwrite_bilinear_phase`;
 - `push_forward_overwrite_bilinear_phase`;
@@ -495,7 +495,7 @@ Create pure-Rust modules for:
 - canonical monomials;
 - reducers;
 - workspace scheduling;
-- SoA bytecode emission;
+- archived bytecode emission;
 - structural/algebraic validation.
 
 ### 2. PyO3 ordinary compilation entry point
@@ -504,7 +504,7 @@ Replace Python lowering and JSON export with tape traversal into the Rust compil
 
 ### 3. Bytecode and runtime cutover
 
-Version-bump the bytecode. Implement mapped SoA validation and execution. Remove ordinary runtime dependence on legacy layer structures.
+Version-bump the bytecode. Implement mapped archive validation and execution. Remove ordinary runtime dependence on legacy layer structures.
 
 ### 4. Ordinary-path cleanup
 
@@ -565,11 +565,11 @@ graph representation and its bilinear metadata.
   Python lowering implementation and cannot be removed independently.
 ### Phase 10.1 — QP producer cutover
 
-1. Add a PyO3 `compile_soa_qp` bridge returning the aligned unified QP artifact
+1. Add a PyO3 `compile_archive_qp` bridge returning the aligned unified QP artifact
    owner and persistence bytes. Wire Python Tape-to-`TypedDag` and symbolic QP
    declaration construction to that bridge.
 2. Route every production QP builder through the Rust symbolic-QP declaration
-   API and unified `SoaQpModule` artifact.
+   API and unified `QpModule` artifact.
 3. Make Python supply only labelled symbolic declarations and evaluator tape
    references. Rust derives coefficient output ordering, CSC patterns, maps,
    QDLDL metadata, arena requirements, and the embedded plan.
@@ -667,9 +667,9 @@ behaviour.
 6. Replace magic numbers with named constants at their semantic owner. Each
    archive version, alignment, capacity, opcode sentinel, tolerance, and solver
    layout value has one authoritative definition.
-7. Rename verbose layout-repeating identifiers to short domain names. Do not
-   repeat `soa` where the module already establishes that layout; preserve
-   explicit names only at cross-layout boundaries.
+7. Rename verbose layout-repeating identifiers to short domain names. The
+   module establishes storage layout; cross-layout boundaries use concrete
+   archive terminology instead.
 
 ### Phase 11.3 — Quality gates
 

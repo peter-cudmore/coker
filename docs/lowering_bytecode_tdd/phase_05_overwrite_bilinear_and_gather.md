@@ -2,7 +2,7 @@
 
 ## Goal
 
-Execute compact overwrite B phases and explicit gather phases from mapped SoA bytecode. Reach parity for constants, linear maps, degree-two polynomial operations, and static reindexing.
+Execute compact overwrite B phases and explicit gather phases from mapped archived bytecode. Reach parity for constants, linear maps, degree-two polynomial operations, and static reindexing.
 
 ## Workspace-bank responsibility
 
