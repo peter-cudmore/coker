@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from coker import SparseMatrixBuilder, VectorSpace
+from coker import VectorSpace
 from coker.backends.coker.core import CokerBackend
 from coker.backends.coker import qp_extract as coker_qp_optimisation
 from coker.backends.coker.qp_extract import extract_qp_program
@@ -41,20 +41,6 @@ def _compile_parameterized_runtime_qp() -> RuntimeQpProgram:
     return RuntimeQpProgram.compile(extracted)
 
 
-def _extract_single_qp_program_payload(extracted):
-    payload = extracted.export_payload()
-    assert set(payload) == {"functions", "qp_programs"}
-    assert len(payload["qp_programs"]) == 1
-    qp_payload = payload["qp_programs"][0]
-    coefficient_function = next(
-        function_payload
-        for function_payload in payload["functions"]
-        if function_payload["function_id"]
-        == qp_payload["coefficient_function_id"]
-    )
-    return payload, coefficient_function, qp_payload
-
-
 def test_extracts_constant_qp_coefficients():
     with ProblemBuilder() as builder:
         x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
@@ -71,54 +57,13 @@ def test_extracts_constant_qp_coefficients():
         bindings.parameter_bindings,
     )
 
-    payload, coefficient_function, qp_payload = (
-        _extract_single_qp_program_payload(extracted)
-    )
-    embedded_plan = qp_payload["embedded_plan"]
     assert extracted.n == 2
     assert extracted.m == 2
-    assert extracted.p_indptr == [0, 1, 2]
-    assert extracted.p_indices == [0, 1]
-    assert extracted.a_indptr == [0, 1, 2]
-    assert extracted.a_indices == [0, 1]
-    assert extracted.coefficient_slices["q"].length == 2
-    assert "program" not in payload
-    assert qp_payload["function_id"] != qp_payload["coefficient_function_id"]
-    assert (
-        qp_payload["input_specs"]
-        == coefficient_function["program"]["input_layer"]["inputs"]
-    )
-    assert qp_payload["output_spec"] == {
-        "memory": {"location": 0, "count": extracted.n}
-    }
-    assert qp_payload["p_pattern"] == {
-        "nrows": extracted.n,
-        "ncols": extracted.n,
-        "nnz": len(extracted.p_indices),
-        "indptr": extracted.p_indptr,
-        "indices": extracted.p_indices,
-    }
-    assert qp_payload["a_pattern"] == {
-        "nrows": extracted.m,
-        "ncols": extracted.n,
-        "nnz": len(extracted.a_indices),
-        "indptr": extracted.a_indptr,
-        "indices": extracted.a_indices,
-    }
-    assert (
-        qp_payload["coefficient_outputs"]["q"]
-        == extracted.coefficient_slices["q"].to_export_dict()
-    )
-    assert embedded_plan["qdldl_plan"]["p_pattern"] == qp_payload["p_pattern"]
-    assert embedded_plan["qdldl_plan"]["a_pattern"] == qp_payload["a_pattern"]
-    symbolic_l = embedded_plan["qdldl_plan"]["symbolic_l"]["l_pattern"]
-    assert symbolic_l == {
-        "nrows": 4,
-        "ncols": 4,
-        "nnz": 2,
-        "indptr": [0, 1, 2, 2, 2],
-        "indices": [2, 3],
-    }
+    assert extracted.cost_node == cost.index
+    assert len(extracted.residual_nodes) == 2
+    assert all(isinstance(node, int) for node in extracted.residual_nodes)
+    assert len(extracted.lower_nodes) == 2
+    assert len(extracted.upper_nodes) == 2
 
 
 def test_qp_preserves_structural_off_diagonal_hessian_entries():
@@ -136,8 +81,8 @@ def test_qp_preserves_structural_off_diagonal_hessian_entries():
         bindings.parameter_bindings,
     )
 
-    assert extracted.p_indptr == [0, 1, 3]
-    assert extracted.p_indices == [0, 0, 1]
+    assert extracted.cost_node == cost.index
+    assert extracted.residual_nodes == []
     RuntimeQpProgram.compile(extracted)
 
 
@@ -194,31 +139,11 @@ def test_extracts_parameterized_qp_coefficients():
     )
 
     assert extracted.m == 2
-    assert extracted.p_indptr == [0, 1, 2]
-    assert extracted.a_indptr == [0, 1, 2]
-    assert extracted.coefficient_slices["px"].length == 2
-    assert extracted.coefficient_slices["ax"].length == 2
-    _payload, coefficient_function, qp_payload = (
-        _extract_single_qp_program_payload(extracted)
-    )
-    assert "parameter_inputs" not in qp_payload
-    assert "settings" not in qp_payload
-    assert qp_payload["required_primal_workspace_size"] == extracted.n
-    assert qp_payload["required_tangent_workspace_size"] == extracted.n
-    assert (
-        qp_payload["input_specs"]
-        == coefficient_function["program"]["input_layer"]["inputs"]
-    )
-    assert (
-        qp_payload["coefficient_outputs"]["px"]
-        == extracted.coefficient_slices["px"].to_export_dict()
-    )
-    assert (
-        qp_payload["coefficient_outputs"]["ax"]
-        == extracted.coefficient_slices["ax"].to_export_dict()
-    )
-    assert qp_payload["embedded_plan"]["settings"]["warm_start"] is True
-    assert qp_payload["embedded_plan"]["settings"]["linsys_solver"] == "Qdldl"
+    assert extracted.cost_node == cost.index
+    assert len(extracted.residual_nodes) == 1
+    assert isinstance(extracted.residual_nodes[0], int)
+    assert len(extracted.lower_nodes) == 1
+    assert len(extracted.upper_nodes) == 1
 
 
 def test_runtime_qp_compile_load_solve_round_trip():
@@ -231,6 +156,20 @@ def test_runtime_qp_compile_load_solve_round_trip():
     assert np.allclose(solution, target_value, atol=1e-6)
     assert solve_info.backend == "coker"
     assert solve_info.solver == "osqp"
+    assert solve_info.success
+
+
+def test_qp_artifact_path_does_not_retain_legacy_graph_lowering():
+    """QP coefficient compilation must be entirely Rust-owned."""
+    assert "create_opgraph" not in vars(coker_qp_optimisation)
+    compiled = _compile_parameterized_runtime_qp()
+    loaded = RuntimeQpProgram(bytes(compiled.program))
+
+    solution, solve_info = loaded.solve(
+        (np.array([3.0, -1.0]),), warm_start=None
+    )
+
+    assert np.allclose(solution, np.array([3.0, -1.0]), atol=1e-6)
     assert solve_info.success
 
 
@@ -366,140 +305,6 @@ def test_coker_qp_solves_parameterized_problem():
     assert problem.solve_info.success
 
 
-def test_coker_qp_parameterized_box_coefficients_and_solution():
-    from coker.backends.coker.qp_extract import _build_coefficient_function
-
-    with ProblemBuilder(
-        arguments=[
-            VectorSpace("target", 2),
-            VectorSpace("lower", 2),
-            VectorSpace("upper", 2),
-        ]
-    ) as builder:
-        target, lower, upper = builder.arguments
-        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
-        cost = np.dot(x - target, x - target)
-        constraints = [x >= lower, x <= upper]
-        bindings = _build_bindings(cost, [target, lower, upper])
-        coefficient_function, slices = _build_coefficient_function(
-            cost.tape,
-            cost,
-            constraints,
-            bindings.decision_bindings,
-            bindings.parameter_bindings,
-        )
-
-    parameters = (
-        np.array([3.0, -4.0]),
-        np.array([-1.0, -2.0]),
-        np.array([2.0, 1.0]),
-    )
-    coefficients = np.asarray(coefficient_function(*parameters), dtype=float)
-    lower_slice = slices["l"]
-    upper_slice = slices["u"]
-    assert np.allclose(
-        coefficients[
-            lower_slice.start : lower_slice.start + lower_slice.length
-        ],
-        [-1.0, -2.0, -2.0, -1.0],
-    )
-    assert np.allclose(
-        coefficients[
-            upper_slice.start : upper_slice.start + upper_slice.length
-        ],
-        [1.0e30, 1.0e30, 1.0e30, 1.0e30],
-    )
-    matrix_slice = slices["ax"]
-    assert np.allclose(
-        coefficients[
-            matrix_slice.start : matrix_slice.start + matrix_slice.length
-        ],
-        [1.0, -1.0, 1.0, -1.0],
-    )
-    runtime_qp = RuntimeQpProgram.compile(
-        extract_qp_program(
-            cost,
-            constraints,
-            [x],
-            bindings.decision_indices,
-            bindings.decision_bindings,
-            bindings.parameter_bindings,
-        )
-    )
-    solution, info = runtime_qp.solve(parameters, warm_start=np.zeros(2))
-    assert info.success
-    assert np.allclose(solution, [2.0, -2.0], atol=1.0e-3)
-
-
-def test_coker_qp_extracts_sparse_weighted_norm_coefficients():
-    from coker.backends.coker.qp_extract import _build_coefficient_function
-
-    weights = SparseMatrixBuilder(
-        np.array([[True, True], [False, True], [True, False]])
-    )
-    with ProblemBuilder(
-        arguments=[weights.data_space("weight_data"), VectorSpace("target", 2)]
-    ) as builder:
-        weight_data, target = builder.arguments
-        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
-        cost = weighted_norm(weights.matrix(weight_data), x - target)
-        bindings = _build_bindings(cost, [weight_data, target])
-        coefficient_function, slices = _build_coefficient_function(
-            cost.tape,
-            cost,
-            [],
-            bindings.decision_bindings,
-            bindings.parameter_bindings,
-        )
-
-    coefficients = np.asarray(
-        coefficient_function(
-            np.array([2.0, 3.0, 5.0, 7.0]), np.array([11.0, 13.0])
-        ),
-        dtype=float,
-    )
-    px = slices["px"]
-    q = slices["q"]
-    r = slices["r"]
-    assert np.allclose(
-        coefficients[px.start : px.start + px.length], [26.0, 20.0, 148.0]
-    )
-    assert np.allclose(
-        coefficients[q.start : q.start + q.length], [-546.0, -2144.0]
-    )
-    assert np.allclose(coefficients[r.start : r.start + r.length], [16939.0])
-
-
-def test_coker_qp_emits_weighted_hessian_in_csc_order():
-    from coker.backends.coker.qp_extract import _build_coefficient_function
-
-    weights = SparseMatrixBuilder(np.ones((3, 3), dtype=bool))
-    with ProblemBuilder(
-        arguments=[weights.data_space("weight_data")]
-    ) as builder:
-        (weight_data,) = builder.arguments
-        x = builder.new_variable("x", shape=(3,), initial_value=np.zeros(3))
-        cost = weighted_norm(weights.matrix(weight_data), x)
-        bindings = _build_bindings(cost, [weight_data])
-        coefficient_function, slices = _build_coefficient_function(
-            cost.tape,
-            cost,
-            [],
-            bindings.decision_bindings,
-            bindings.parameter_bindings,
-        )
-
-    coefficients = np.asarray(
-        coefficient_function(np.arange(1.0, 10.0)),
-        dtype=float,
-    )
-    px = slices["px"]
-    assert np.allclose(
-        coefficients[px.start : px.start + px.length],
-        [28.0, 64.0, 154.0, 100.0, 244.0, 388.0],
-    )
-
-
 def test_coker_qp_rejects_dense_weighted_norm():
     with ProblemBuilder() as builder:
         x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
@@ -515,70 +320,6 @@ def test_coker_qp_rejects_dense_weighted_norm():
             bindings.decision_bindings,
             bindings.parameter_bindings,
         )
-
-
-def test_coker_qp_rejects_missing_bilinear_provenance(monkeypatch):
-    with ProblemBuilder() as builder:
-        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
-        cost = np.dot(x, x)
-        bindings = _build_bindings(cost, [])
-
-    monkeypatch.setattr(
-        coker_qp_optimisation,
-        "_bilinear_coefficient_function",
-        lambda *_args: None,
-    )
-
-    with pytest.raises(
-        ValueError, match="provenance-preserving affine/bilinear"
-    ):
-        coker_qp_optimisation._build_coefficient_function(
-            cost.tape,
-            cost,
-            [],
-            bindings.decision_bindings,
-            bindings.parameter_bindings,
-        )
-
-
-def test_coker_qp_affine_residual_adjusts_parameterized_bounds():
-    from coker.backends.coker.qp_extract import _build_coefficient_function
-
-    with ProblemBuilder(
-        arguments=[
-            VectorSpace("target", 2),
-            VectorSpace("offset", 2),
-            VectorSpace("lower", 2),
-            VectorSpace("upper", 2),
-        ]
-    ) as builder:
-        target, offset, lower, upper = builder.arguments
-        x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
-        cost = np.dot(x - target, x - target)
-        constraints = [x + offset >= lower, x + offset <= upper]
-        bindings = _build_bindings(cost, [target, offset, lower, upper])
-        coefficient_function, slices = _build_coefficient_function(
-            cost.tape,
-            cost,
-            constraints,
-            bindings.decision_bindings,
-            bindings.parameter_bindings,
-        )
-
-    parameters = (
-        np.array([0.0, 0.0]),
-        np.array([3.0, -4.0]),
-        np.array([1.0, -7.0]),
-        np.array([8.0, 2.0]),
-    )
-    coefficients = np.asarray(coefficient_function(*parameters), dtype=float)
-    lower_slice = slices["l"]
-    assert np.allclose(
-        coefficients[
-            lower_slice.start : lower_slice.start + lower_slice.length
-        ],
-        [-2.0, -3.0, -5.0, -6.0],
-    )
 
 
 def test_coker_qp_updates_warm_start_between_solves():

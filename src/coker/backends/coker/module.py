@@ -27,7 +27,3 @@ class CokerModule:
             self.last_solve_info = getattr(
                 self._solver, "last_solve_info", None
             )
-
-    def export_payload(self) -> dict[str, object]:
-        """Return the wrapped solver's deterministic Coker payload."""
-        return self._solver.export_payload()

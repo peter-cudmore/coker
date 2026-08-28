@@ -4,8 +4,7 @@ import numpy as np
 import pytest
 
 from coker import Scalar, VectorSpace, function, if_then_else
-from coker.backends.coker.lowering import create_function_table
-from coker.backends.coker.runtime import CompiledGraph
+from coker.algebra.kernel import Function
 
 
 @dataclass(frozen=True)
@@ -20,34 +19,50 @@ DESKTOP_RUNTIME_POLICY = RuntimeObservationPolicy(
 )
 
 
+def _assert_same(actual, expected):
+    if isinstance(expected, list):
+        assert isinstance(actual, list)
+        assert len(actual) == len(expected)
+        for actual_item, expected_item in zip(actual, expected, strict=True):
+            _assert_same(actual_item, expected_item)
+        return
+    np.testing.assert_allclose(actual, expected)
+
+
 def _assert_runtime_observation(
     symbolic_function,
     args,
-    tangents,
+    tangents=None,
     policy=DESKTOP_RUNTIME_POLICY,
 ):
-    """Compare the current desktop runtime with the existing Coker graph."""
-    graph = create_function_table(symbolic_function).entry
-    compiled_graph = CompiledGraph.compile(graph)
+    """Compare mapped execution and JVPs against the NumPy tape oracle."""
+    oracle = Function(
+        symbolic_function.tape, symbolic_function.output, backend="numpy"
+    )
+    lowered = symbolic_function.lower()
+    expected_value = oracle(*args)
+    actual_value = lowered(args)
+    _assert_same(actual_value, expected_value)
+    assert isinstance(lowered.artifact, bytes)
+    assert lowered.artifact
 
-    expected_value = graph(*args)
-    actual_value = compiled_graph(*args)
-    np.testing.assert_allclose(
-        actual_value,
-        expected_value,
-        rtol=policy.relative_tolerance,
-        atol=policy.absolute_tolerance,
+    if tangents is None:
+        return
+
+    actual_value, actual_tangent = lowered.push_forward(*args, *tangents)
+    _assert_same(actual_value, expected_value)
+    step = 1.0e-4
+    upper = tuple(
+        np.asarray(value) + step * np.asarray(tangent)
+        for value, tangent in zip(args, tangents, strict=True)
     )
-    expected_value, expected_tangent = graph.push_forward(*args, *tangents)
-    actual_value, actual_tangent = compiled_graph.push_forward(
-        *args, *tangents
+    lower = tuple(
+        np.asarray(value) - step * np.asarray(tangent)
+        for value, tangent in zip(args, tangents, strict=True)
     )
-    np.testing.assert_allclose(
-        actual_value,
-        expected_value,
-        rtol=policy.relative_tolerance,
-        atol=policy.absolute_tolerance,
-    )
+    expected_tangent = (
+        np.asarray(oracle(*upper)) - np.asarray(oracle(*lower))
+    ) / (2.0 * step)
     np.testing.assert_allclose(
         actual_tangent,
         expected_tangent,
@@ -56,42 +71,14 @@ def _assert_runtime_observation(
     )
 
 
-def _assert_same(actual, expected):
-    if isinstance(expected, list):
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected, strict=False):
-            _assert_same(actual_item, expected_item)
-        return
-    if isinstance(expected, np.ndarray):
-        assert isinstance(actual, np.ndarray)
-        assert np.allclose(actual, expected)
-        return
-    assert np.allclose(actual, expected)
-
-
 def _assert_runtime_matches_graph(
     symbolic_function, args, tangents=None, compare_push_forward=True
 ):
-    function_table = create_function_table(symbolic_function)
-    graph = function_table.entry
-    compiled_graph = CompiledGraph.compile(function_table)
-
-    assert isinstance(compiled_graph.program, bytes)
-    assert compiled_graph.program
-
-    graph_value = graph(*args)
-    compiled_value = compiled_graph(*args)
-    _assert_same(compiled_value, graph_value)
-
-    if not compare_push_forward:
-        return
-
-    assert tangents is not None
-    graph_push_forward = graph.push_forward(*args, *tangents)
-    compiled_push_forward = compiled_graph.push_forward(*args, *tangents)
-    _assert_same(compiled_push_forward[0], graph_push_forward[0])
-    _assert_same(compiled_push_forward[1], graph_push_forward[1])
+    _assert_runtime_observation(
+        symbolic_function,
+        args,
+        tangents if compare_push_forward else None,
+    )
 
 
 def test_runtime_matches_scalar_quadratic_graph():
@@ -217,27 +204,6 @@ def test_runtime_matches_dot_graph():
         tangents=(np.array([0.5, 0.25, -1.0]),),
     )
 
-    def implementation(x):
-        squared_norm = np.dot(x, x)
-        vector = np.concatenate([squared_norm, x])
-        return np.dot(vector, vector)
-
-    symbolic_function = function(
-        [VectorSpace("x", 3)],
-        implementation=implementation,
-        backend="coker",
-    )
-    function_table = create_function_table(symbolic_function)
-    graph = function_table.entry
-    assert not any(
-        layer.opaque_programs
-        for layer in graph.layers
-        if hasattr(layer, "opaque_programs")
-    )
-    compiled_graph = CompiledGraph.compile(function_table)
-    value = np.array([1.0, -2.0, 0.5])
-    squared_norm = np.dot(value, value)
-    _assert_same(compiled_graph(value), squared_norm * (squared_norm + 1.0))
 
     symbolic_function = function(
         [VectorSpace("x", 3)],
@@ -328,16 +294,13 @@ def test_runtime_observes_special_float_values_without_crashing(value):
         ),
         backend="coker",
     )
-    compiled_graph = CompiledGraph.compile(
-        create_function_table(symbolic_function)
-    )
+    lowered = symbolic_function.lower()
+    output = lowered(value)
+    pushed_output, pushed_tangent = lowered.push_forward(value, 1.0)
 
-    output = compiled_graph(value)
-    pushed_output, pushed_tangent = compiled_graph.push_forward(value, 1.0)
-
-    assert np.asarray(output).shape == (4,)
-    assert np.asarray(pushed_output).shape == (4,)
-    assert np.asarray(pushed_tangent).shape == (4,)
+    assert np.asarray(output[0]).shape == (4,)
+    assert np.asarray(pushed_output[0]).shape == (4,)
+    assert np.asarray(pushed_tangent[0]).shape == (4,)
 
 
 def test_runtime_observes_fork_join_unused_branch_and_deep_calls():

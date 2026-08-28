@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import re
 from types import MappingProxyType
@@ -158,49 +157,6 @@ class CompiledArtifact:
         return artifact, constants
 
 
-def _compile_artifact(
-    lowered_function: Any,
-    *,
-    name: str = "coker_function",
-    version: str = "1",
-) -> CompiledArtifact:
-    """Compile a Coker-lowered function into a mapped runtime artifact."""
-    payload = json.dumps(
-        lowered_function.export_payload(),
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    data = bytes(_runtime.compile_exported_graph(payload))
-    return CompiledArtifact(
-        data,
-        _ordinary_metadata(
-            data,
-            _runtime.program_info(data),
-            lowered_function.function_id,
-            name,
-            version,
-        ),
-    )
-
-
-def compile_qp_artifact(
-    extracted_qp: Any,
-    *,
-    name: str = "coker_qp",
-    version: str = "1",
-) -> CompiledArtifact:
-    """Compile an extracted fixed QP through the exported QP compiler."""
-    payload = json.dumps(
-        extracted_qp.export_payload(), sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    data = bytes(_runtime.compile_exported_qp(payload))
-    if hasattr(_runtime, "qp_program_info"):
-        info = _runtime.qp_program_info(data)
-    else:
-        mapped = _runtime.load_qp_program(data)
-        info = dict(mapped.info())
-        info.update(mapped.workspace_requirements())
-    return CompiledArtifact(data, _qp_metadata(data, info, name, version))
 
 
 def write_artifact(

@@ -1,9 +1,5 @@
-import json
-from typing import Sequence
-
 import numpy as np
 
-from coker.backends.coker.ast_preprocessing import FunctionTable, SparseNet
 import coker._coker_runtime as coker_runtime
 
 
@@ -15,101 +11,17 @@ def _runtime_input_buffer(arg) -> np.ndarray:
     raise TypeError(f"Unsupported runtime input {type(arg)}")
 
 
-def _restore_output(flat_output: Sequence[float], shape):
-    if shape is None:
-        assert len(flat_output) == 1
-        return float(flat_output[0])
-    return np.asarray(flat_output, dtype=float).reshape(shape, order="C")
-
-
-class CompiledGraph:
-
-    def __init__(
-        self,
-        program: bytes,
-        input_shapes: Sequence[tuple[int, ...] | None] | None = None,
-        output_shapes: Sequence[tuple[int, ...] | None] | None = None,
-    ):
-        self.program = program
-        self._runtime = coker_runtime.load_program(self.program)
-        self._info = self._runtime.info()
-        self._input_lengths = list(self._info["input_specs"])
-        self._output_lengths = list(self._info["output_specs"])
-        self._input_shapes = list(
-            input_shapes or [None] * len(self._input_lengths)
-        )
-        self._output_shapes = list(
-            output_shapes or [None] * len(self._output_lengths)
-        )
-        output_length = sum(self._output_lengths)
-        self._outputs = np.empty(output_length, dtype=np.float32)
-        self._tangent_outputs = np.empty(output_length, dtype=np.float32)
-
-    @staticmethod
-    def compile(graph: SparseNet | FunctionTable) -> "CompiledGraph":
-        if isinstance(graph, FunctionTable):
-            function_table = graph
-            entry = function_table.entry
-        else:
-            function_table = FunctionTable([graph])
-            entry = graph
-        payload = json.dumps(function_table.export_payload()).encode("utf-8")
-        program = coker_runtime.compile_exported_graph(payload)
-        input_shapes = [
-            shape for _spec, shape in entry.input_layer.input_specs
-        ]
-        output_shapes = [
-            shape.dim for _memory, shape in entry.output_layer.outputs
-        ]
-        return CompiledGraph(
-            program,
-            input_shapes=input_shapes,
-            output_shapes=output_shapes,
-        )
-
-    def __call__(self, *args):
-        assert len(args) == len(self._input_lengths)
-        inputs = [_runtime_input_buffer(arg) for arg in args]
-        self._runtime.execute_into(inputs, self._outputs)
-        return self._restore_outputs(self._outputs)
-
-    def push_forward(self, *tangent_spaces):
-        n_args = len(self._input_lengths)
-        x, dx = tangent_spaces[0:n_args], tangent_spaces[n_args:]
-        assert len(x) == n_args
-        assert len(dx) == n_args
-        inputs = [_runtime_input_buffer(arg) for arg in x]
-        tangents = [_runtime_input_buffer(arg) for arg in dx]
-        self._runtime.push_forward_into(
-            inputs,
-            tangents,
-            self._outputs,
-            self._tangent_outputs,
-        )
-        return self._restore_outputs(self._outputs), self._restore_outputs(
-            self._tangent_outputs
-        )
-
-    def _restore_outputs(self, flat_outputs):
-        restored = []
-        offset = 0
-        for output_length, shape in zip(
-            self._output_lengths, self._output_shapes, strict=False
-        ):
-            next_offset = offset + output_length
-            restored.append(
-                _restore_output(flat_outputs[offset:next_offset], shape)
-            )
-            offset = next_offset
-        if len(restored) == 1:
-            return restored[0]
-        return restored
-
-
 class RuntimeQpProgram:
-    def __init__(self, program: bytes):
-        self.program = bytes(program)
-        self._runtime = coker_runtime.load_qp_program(self.program)
+    def __init__(self, program):
+        self._artifact = (
+            program if hasattr(program, "_mapped_qp_capsule") else None
+        )
+        self._program = None if self._artifact is not None else bytes(program)
+        self._runtime = (
+            coker_runtime.load_compiled_qp_program(self._artifact)
+            if self._artifact is not None
+            else coker_runtime.load_qp_program(self._program)
+        )
         self._info = self._runtime.info()
         self._input_lengths = list(self._info["input_specs"])
         self._output_length = int(self._info["output_spec"])
@@ -118,13 +30,37 @@ class RuntimeQpProgram:
             self._output_length, dtype=np.float64
         )
 
+    @property
+    def program(self) -> bytes:
+        """Export a persistence copy; execution retains the mapped artifact."""
+        if self._artifact is not None:
+            return self._artifact.to_bytes()
+        return self._program
+
     @classmethod
     def compile(cls, extracted_qp) -> "RuntimeQpProgram":
         import coker_compiler
 
-        payload = json.dumps(extracted_qp.export_payload()).encode("utf-8")
-        program = bytes(coker_compiler.compile_exported_qp(payload))
-        return cls(program)
+        from coker.algebra.kernel import Function, Tracer
+        from coker.backends.coker.core import function_to_typed_dag
+
+        source_function = Function(
+            extracted_qp.source_tape,
+            [Tracer(extracted_qp.source_tape, extracted_qp.cost_node)],
+        )
+        dag = function_to_typed_dag(source_function)
+        artifact = coker_compiler.compile_soa_qp_source(
+            dag,
+            extracted_qp.n,
+            extracted_qp.m,
+            [binding.index for binding in extracted_qp.parameter_bindings],
+            [binding.index for binding in extracted_qp.decision_bindings],
+            extracted_qp.cost_node,
+            extracted_qp.residual_nodes,
+            extracted_qp.lower_nodes,
+            extracted_qp.upper_nodes,
+        )
+        return cls(artifact)
 
     def solve(self, runtime_args, *, warm_start):
         """Solve and return an owned solution snapshot.
