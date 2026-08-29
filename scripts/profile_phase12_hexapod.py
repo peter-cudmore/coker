@@ -1,4 +1,4 @@
-"""Reproducible Phase 12 desktop baseline for the hexapod kinematics workload."""
+"""Reproducible desktop baseline for Phase 12 hexapod kinematics."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 HEXAPOD_PY = Path(r"C:\projects\hexapod\hexapod_py")
 sys.path[:0] = [str(ROOT / "src"), str(HEXAPOD_PY)]
 
-from coker import VectorSpace, function
-from coker.backends.coker import CokerBackend
-from hexapod.model import build_hexapod_model
+from coker import VectorSpace, function  # noqa: E402
+from coker.backends.coker import CokerBackend  # noqa: E402
+from hexapod.model import build_hexapod_model  # noqa: E402
 
 REPETITIONS = 10
 SAMPLES = 3
@@ -28,13 +28,18 @@ def make_functions():
     angles = VectorSpace("angles", model.total_joints())
 
     def forward_kinematics(q):
-        return np.concatenate([x.translation for x in model.forward_kinematics(q)])
+        return np.concatenate(
+            [x.translation for x in model.forward_kinematics(q)]
+        )
 
     def forward_spatial_jacobian(q):
         return np.concatenate(model.spatial_manipulator_jacobian(q), axis=0)
 
     return (
-        ("forward_kinematics", function([angles], forward_kinematics, backend="coker")),
+        (
+            "forward_kinematics",
+            function([angles], forward_kinematics, backend="coker"),
+        ),
         (
             "forward_spatial_jacobian",
             function([angles], forward_spatial_jacobian, backend="coker"),
@@ -70,7 +75,9 @@ def profile(name, source, input_value):
 
 def main():
     input_value = np.zeros(24, dtype=np.float32)
-    results = [profile(name, source, input_value) for name, source in make_functions()]
+    results = [
+        profile(name, source, input_value) for name, source in make_functions()
+    ]
     print(
         json.dumps(
             {
@@ -81,7 +88,10 @@ def main():
                 },
                 "workload": {
                     "model": str(HEXAPOD_PY / "hexapod" / "model.py"),
-                    "input_value": "24 f32 zeros (free-body pose plus six three-joint legs)",
+                    "input_value": (
+                        "24 f32 zeros "
+                        "(free-body pose plus six three-joint legs)"
+                    ),
                 },
                 "results": results,
             },
