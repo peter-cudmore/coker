@@ -225,8 +225,21 @@ policy is considered.
   The rebuilt compiler extension's binding tests (15) and non-performance
   Python suite (294, 2 performance tests deselected) passed; Black and flake8
   passed.
-- **Phase 12 smoke check:** both hexapod artifact lowerings emitted
-  successfully. No timing/profile or compaction measurement was run.
+- **Phase 12 smoke check:** construction reaches the deferred lazy compile
+  boundary, but both hexapod artifacts still fail finalization with
+  `archive header count exceeds maximum`. No timing/profile or compaction
+  measurement was run.
+
+## Follow-up simplification record — 2026-08-30
+
+- Deleted 4,042 lines of unlinked legacy layer/static-module executors and
+  their unreachable bytecode executor duplicate.
+- Added compiler-only `static_mapping_ns` and
+  `static_mapping_index_allocations` diagnostics, exposed through the compiler
+  extension artifact info.
+- The hexapod workload cannot yet publish these diagnostics because archive
+  finalization remains blocked by `ARCHIVE_MAX_PHASES`. The mapping-index
+  refactor is therefore intentionally deferred: no materiality evidence exists.
 
 ## Exit criteria
 
