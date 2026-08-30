@@ -13,8 +13,8 @@ from coker.toolkits.codesign import (
     bounded,
     weighted_norm,
 )
-from coker.backends.coker.optimisation import extract_qp_program
-from coker.backends.coker.runtime import RuntimeQpProgram
+from coker_backend.optimisation import extract_qp_program
+from coker_backend.runtime import RuntimeQpProgram
 from coker.backends.optimisation import build_problem_bindings
 
 

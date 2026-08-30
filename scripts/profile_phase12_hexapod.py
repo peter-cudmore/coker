@@ -16,7 +16,7 @@ HEXAPOD_PY = Path(r"C:\projects\hexapod\hexapod_py")
 sys.path[:0] = [str(ROOT / "src"), str(HEXAPOD_PY)]
 
 from coker import VectorSpace, function  # noqa: E402
-from coker.backends.coker import CokerBackend  # noqa: E402
+from coker_backend import CokerBackend  # noqa: E402
 from hexapod.model import build_hexapod_model  # noqa: E402
 
 REPETITIONS = 10

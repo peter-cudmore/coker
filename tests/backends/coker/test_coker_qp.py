@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 
 from coker import VectorSpace
-from coker.backends.coker.core import CokerBackend
-from coker.backends.coker import qp_extract as coker_qp_optimisation
-from coker.backends.coker.qp_extract import extract_qp_program
+from coker_backend.core import CokerBackend
+from coker_backend import qp_extract as coker_qp_optimisation
+from coker_backend.qp_extract import extract_qp_program
 from coker.backends.optimisation import build_problem_bindings
 from coker.toolkits.codesign import Minimise, ProblemBuilder, SolveInfo
 
