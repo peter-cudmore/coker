@@ -23,8 +23,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
-      - name: Install package and Rust backends
-        run: uv sync --group ci --extra casadi --extra jax --extra coker-rs
+      - name: Install test dependencies
+        run: uv sync --group ci --extra casadi --extra jax
       - name: Run default test suite
         run: uv run pytest -m "not perf"
 
@@ -39,8 +39,8 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - name: Install package and Rust backends
-        run: uv sync --group ci --extra casadi --extra jax --extra coker-rs
+      - name: Install test dependencies
+        run: uv sync --group ci --extra casadi --extra jax
       - name: Run perf suite
         run: uv run pytest -m perf
 

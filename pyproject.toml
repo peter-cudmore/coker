@@ -36,10 +36,6 @@ jax = [
     "jax>=0.10,<0.11; python_version >= '3.11'",
 ]
 
-coker-rs = [
-    "coker-runtime @ git+ssh://git@github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-python",
-    "coker-compiler @ git+ssh://git@github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-compiler-python",
-]
 
 [dependency-groups]
 dev = [

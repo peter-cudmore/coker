@@ -2,7 +2,7 @@ import importlib
 
 import warnings
 
-backends = ["numpy", "sympy", "coker"]
+backends = ["numpy", "sympy"]
 variational_backends = []
 
 try:
