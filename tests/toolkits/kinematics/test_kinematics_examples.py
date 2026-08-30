@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from coker import function, VectorSpace
+from coker.algebra.ops import OP
 from coker.toolkits.kinematics import RigidBody, Revolute, Inertia
 from coker.toolkits.spatial import Rotation3, Isometry3, SE3Adjoint, Screw
 
@@ -1037,6 +1038,15 @@ def test_hexapod_leg(backend):
             implementation=impl,
             backend=backend,
         )
+        operations = [node[0] for node in symbolic_fk.tape.nodes._nodes]
+        nonlinear_count = sum(
+            operation.is_nonlinear()
+            for operation in operations
+            if isinstance(operation, OP)
+        )
+        assert len(symbolic_fk.tape) < 611
+        assert nonlinear_count < 159
+        assert operations.count(OP.ARCTAN2) == 0
 
         for test_value in test_values:
             (fk,) = leg_model.forward_kinematics(test_value)

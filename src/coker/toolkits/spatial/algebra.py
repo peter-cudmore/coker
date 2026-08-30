@@ -30,8 +30,33 @@ class Rotation3:
                 angle = 0
         except NotImplementedError:
             pass
-        self.axis = axis
-        self.angle = angle
+        self._axis = axis
+        self._angle = angle
+        self._quaternion = None
+
+    @property
+    def axis(self):
+        self._materialise_axis_angle()
+        return self._axis
+
+    @property
+    def angle(self):
+        self._materialise_axis_angle()
+        return self._angle
+
+    def _materialise_axis_angle(self):
+        if self._axis is not None:
+            return
+
+        q = self._quaternion
+        if isinstance(q.q_0, (float, int, np.floating)) and q.q_0 == 1:
+            self._axis = e_z.copy()
+            self._angle = 0
+            return
+
+        axis, magnitude = normalise(q.v)
+        self._axis = axis
+        self._angle = 2 * np.arctan2(magnitude, q.q_0)
 
     @staticmethod
     def cast(other) -> "Rotation3":
@@ -75,32 +100,28 @@ class Rotation3:
         return Rotation3(axis, angle)
 
     def inverse(self):
-        return Rotation3(self.axis, -self.angle)
+        return Rotation3.from_quaterion(self.as_quaternion().inverse())
 
     def as_quaternion(self):
-        return UnitQuaternion.from_axis_angle(self.axis, self.angle)
+        if self._quaternion is None:
+            self._quaternion = UnitQuaternion.from_axis_angle(
+                self._axis, self._angle
+            )
+        return self._quaternion
 
     @staticmethod
     def from_quaterion(q: UnitQuaternion):
-        try:
-            if isinstance(q.q_0, (float, int)) and q.q_0 == 1:
-                return Rotation3.zero()
-        except NotImplementedError:
-            pass
-        u, r = normalise(q.v)
-        theta = 2 * np.arctan2(r, q.q_0)
-        #        theta = 2 * np.arccos(q.q_0)
-        #        r = np.sqrt(1 - q.q_0 * q.q_0)  # sin(theta/2)
-        #        u = q.v / r
-        return Rotation3(axis=u, angle=theta)
+        result = Rotation3.__new__(Rotation3)
+        result._axis = None
+        result._angle = None
+        result._quaternion = q
+        return result
 
     def __mul__(self, other: "Rotation3"):
         q_1 = self.as_quaternion()
         q_2 = other.as_quaternion()
 
-        q_21 = q_2 * q_1
-
-        return Rotation3.from_quaterion(q_21)
+        return Rotation3.from_quaterion(q_2 * q_1)
 
     def apply(self, other: np.ndarray):
         return self.as_quaternion().conjugate(other)
@@ -117,11 +138,9 @@ class Rotation3:
         )
 
     def as_matrix(self):
-        k = hat(self.axis)
-        s = np.sin(self.angle)
-        c = np.cos(self.angle)
-
-        return np.eye(3) + s * k + (1 - c) * (k @ k)
+        q = self.as_quaternion()
+        k = hat(q.v)
+        return np.eye(3) + 2 * q.q_0 * k + 2 * (k @ k)
 
 
 class Isometry3:
