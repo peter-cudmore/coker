@@ -46,3 +46,37 @@ def test_builder_cannot_finish_twice():
     assert dag.counts() == (1, 0, 0, 0, 0)
     with pytest.raises(ValueError, match="already been called"):
         builder.finish_tape()
+
+
+def _build_source_qp_fixture():
+    builder = coker_compiler.Builder(2, 2, 0, 0, 1, 0, 0)
+    builder.push_node(0, 0, [], [])
+    builder.push_node(1, 3, [0, 0], [])
+    builder.push_input("x", 0)
+    return builder.finish_tape()
+
+
+def test_symbolic_qp_declaration_compiles_source_qp():
+    dag = _build_source_qp_fixture()
+    declaration = coker_compiler.SymbolicQpDeclaration(
+        1, 0, ([], [0]), 1, [], ([], [])
+    )
+    artifact = coker_compiler.compile_archive_qp_source(dag, declaration)
+    assert artifact.to_bytes()
+
+
+def test_symbolic_qp_declaration_rejects_invalid_bound_types():
+    with pytest.raises(
+        ValueError, match="QP bound must be a node ID or numeric sequence"
+    ):
+        coker_compiler.SymbolicQpDeclaration(
+            1, 0, ([], [0]), 0, [], (["invalid"], [])
+        )
+
+
+def test_source_qp_binding_requires_symbolic_declaration_object():
+    dag = _build_source_qp_fixture()
+    with pytest.raises(TypeError):
+        coker_compiler.compile_archive_qp_source(
+            dag, 1, 0, ([], [0]), 1, [], ([], [])
+        )

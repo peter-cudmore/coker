@@ -48,14 +48,23 @@ class RuntimeQpProgram:
         dag = function_to_typed_dag(source_function)
         artifact = coker_compiler.compile_archive_qp_source(
             dag,
-            extracted_qp.n,
-            extracted_qp.m,
-            [binding.index for binding in extracted_qp.parameter_bindings],
-            [binding.index for binding in extracted_qp.decision_bindings],
-            extracted_qp.cost_node,
-            extracted_qp.residual_nodes,
-            extracted_qp.lower_nodes,
-            extracted_qp.upper_nodes,
+            coker_compiler.SymbolicQpDeclaration(
+                extracted_qp.n,
+                extracted_qp.m,
+                (
+                    [
+                        binding.index
+                        for binding in extracted_qp.parameter_bindings
+                    ],
+                    [
+                        binding.index
+                        for binding in extracted_qp.decision_bindings
+                    ],
+                ),
+                extracted_qp.cost_node,
+                extracted_qp.residual_nodes,
+                (extracted_qp.lower_nodes, extracted_qp.upper_nodes),
+            ),
         )
         return cls(artifact)
 

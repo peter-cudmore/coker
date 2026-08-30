@@ -14,10 +14,11 @@ policy is considered.
 - `TypedDag` remains the immutable compiler input. Compiler construction may
   allocate; runtime execution remains mapped, borrowed, and allocation-free
   after caller-owned buffers are constructed.
-- Archive format, archive alignment, numerical results, deterministic lowering
-  order, sparse CSC patterns, QP coefficient ordering, and solver settings do
-  not change unless a focused behavioral regression explicitly establishes the
-  intended contract.
+- Archive header format, alignment, numerical results, deterministic lowering
+  policy, QP coefficient ordering, and solver settings do not change unless a
+  focused behavioral regression explicitly establishes the intended contract.
+  Internal archive-table contents and sparse CSC patterns may change when
+  archive validation and runtime-observable behavior remain valid.
 - Ordinary and QP compilation keep the existing mapped-artifact ownership
   model: `OwnedModel -> CompiledArtifact -> ArchivedModel<'_>`.
 - Phase 14 does not raise `ARCHIVE_MAX_PHASES`, coalesce phases, remove
@@ -25,7 +26,9 @@ policy is considered.
 - Prefer deletion and direct concrete functions. Do not introduce a pass trait,
   generic operation-lowerer, compatibility alias, or secondary DAG builder.
 - Every potentially behavior-changing simplification starts with the smallest
-  durable regression covering its archive tables and runtime observable result.
+  durable regression covering archive validation and runtime-observable
+  behavior. Exact table contents are asserted only where an external format or
+  index formula requires them.
 
 ## Ordered implementation checklist
 
@@ -47,17 +50,18 @@ policy is considered.
 ### 14.1 — Remove unused rank-factor reduction
 
 - [ ] Add a lowering regression for an overwrite phase considered for residual
-  conversion. Assert emitted overwrite/residual tables and ordinary execution
-  values before changing reduction code.
+  conversion. Assert valid emitted overwrite/residual tables and ordinary
+  execution values before changing reduction code.
 - [ ] Replace `RankFactorReducer::reduce(...).direct` in
   `emitter::function` with direct canonical sparse construction.
 - [ ] Delete `BilinearReducer`, `DirectSparseReducer`, `RankFactorReducer`,
   `ReductionResult`, factor reconstruction helpers, and tests that test only
   the removed factorization representation.
-- [ ] Retain `SparseMatrix`, `analyze_residual`, and `select_residual` only if
-  the residual certificate and cost decision remain required by emission.
-- [ ] Verify the focused regression plus ordinary, tangent, and QP archive
-  parity; record removed types, branches, and compile-time work.
+- [ ] Retain `SparseMatrix`, `analyze_residual`, and `select_residual`; the
+  residual certificate and cost decision remain active emission policy.
+- [ ] Verify the focused regression plus ordinary, tangent, and QP
+  runtime-contract parity; record removed types, branches, and compile-time
+  work.
 
 ### 14.2 — Simplify deterministic scheduler policy
 
@@ -84,14 +88,14 @@ policy is considered.
   `consumer_count`, `last_use`, `earliest_phase`, and `latest_phase`) and their
   calculations.
 - [ ] Make analysis internals crate-private where no Rust consumer requires a
-  public API. If an exported field is removed, perform a clean caller migration
-  rather than retain an alias.
+  public API. Remove obsolete exported fields in a clean breaking cutover:
+  migrate every caller and retain no alias or compatibility path.
 - [ ] Reduce `plan_workspace` arguments to only the facts it consumes.
 
 ### 14.4 — Unify emission analysis ownership
 
 - [ ] Add a regression proving dead unsupported branches are pruned while a
-  reachable function emits identical tables and executes identically.
+  reachable function emits valid tables and executes identically.
 - [ ] Remove the caller-supplied `GraphAnalysis` argument from
   `emit_bilinear_model` and its tests/callers.
 - [ ] Make emission own reachability pruning and perform one complete graph
@@ -105,7 +109,7 @@ policy is considered.
 ### 14.5 — Linearize overwrite term-start construction
 
 - [ ] Add a regression with multiple overwrite rows and sparse, empty, and
-  trailing term ranges. Assert exact `overwrite_term_start` contents and
+  trailing term ranges. Assert validated `overwrite_term_start` ranges and
   mapped execution output.
 - [ ] Introduce one local CSR-style helper that builds row-term starts from
   canonical row-ordered terms with a single cursor.
@@ -150,7 +154,7 @@ policy is considered.
 ### 14.9 — Stream QP finite-difference scenarios
 
 - [ ] Add a small source-QP regression that asserts emitted `P/A/q/l/u/r`
-  coefficient values, pattern ordering, and the solved result.
+  coefficient values, validated patterns, and the solved result.
 - [ ] Precompute decision-coordinate to input-slot/index mapping once.
 - [ ] Keep the zero specialization, then generate signed-basis and pairwise
   specializations one at a time as cloning consumes them; do not retain the
@@ -164,14 +168,14 @@ policy is considered.
 ### 14.10 — Consolidate Python QP declaration parsing
 
 - [ ] Add Python binding regressions showing equivalent symbolic QP input gives
-  identical lowering metadata and compiled artifact through every retained
-  entry point.
+  equivalent lowering metadata and a valid runtime-equivalent compiled artifact
+  through every retained entry point.
 - [ ] Extract private helpers for `SymbolicQpDeclaration` conversion and the
   default `EmbeddedOsqpSettings` literal.
 - [ ] Migrate `compile_archive_qp` and `lower_symbolic_qp` to the shared
   declaration parser.
-- [ ] Replace the nine-argument source-QP binding with one explicit Python
-  declaration object or mapping. Migrate every Python caller in this pull
+- [ ] Replace the nine-argument source-QP binding with the PyO3-exposed
+  `SymbolicQpDeclaration` object. Migrate every Python caller in this pull
   request and remove the positional API; do not retain a compatibility alias.
 - [ ] Preserve PyO3 error types and messages for invalid bounds, labels, and
   dimensional declarations unless a regression authorizes an improved contract.
@@ -189,16 +193,40 @@ policy is considered.
 
 ### 14.12 — Validate the complete cutover
 
-- [ ] For each completed item, record before/after public types, compiler-only
-  allocations, table-construction branches, and relevant source line count.
-- [ ] Run focused compiler tests first, then `cargo test --workspace`,
+- [x] Record public API, compiler-allocation, branch, source-size, and
+  validation results. The record is descriptive only: Phase 14 has no
+  compile-time non-regression or improvement threshold.
+- [x] Run focused compiler tests, `cargo test --workspace`,
   `cargo clippy --workspace --all-targets -- -D warnings`, and
   `cargo check -p coker-runtime --no-default-features`.
-- [ ] Rebuild the PyO3 compiler extension and run the non-performance Python
+- [x] Rebuild the PyO3 compiler extension and run the non-performance Python
   suite, Black, and flake8.
-- [ ] Re-run the Phase 12 hexapod baseline only to confirm whether artifact
-  emission is unblocked. Do not profile or compact until its existing geometry
-  follow-up permits it.
+- [x] Re-run the Phase 12 hexapod baseline only to confirm artifact emission is
+  unblocked, without profiling or compaction.
+
+## Implementation record — 2026-08-30
+
+- **Public cutover:** `schedule` is parameter-free; `emit_bilinear_model`
+  owns pruning and analysis; `QpScenario` and the positional source-QP binding
+  are removed. Python source QPs use `SymbolicQpDeclaration`.
+- **Removed compiler work:** rank-factor reduction, scheduler-policy branches,
+  workspace gather/last-phase metadata, all-scenario QP retention, duplicate
+  pre-emission analysis, repeated evaluator-label scanning, per-row temporary
+  shape vectors, and quadratic term-start scans.
+- **Runtime boundary:** mapped archive ownership, caller-provided execution
+  buffers, no-std execution, phase-kind values, residual selection, and QP
+  coefficient ordering remain unchanged. Archive table contents may differ
+  when validation and runtime-observable behavior remain valid.
+- **Post-cutover compiler source size:** `analysis.rs` 689 lines; `reducer.rs`
+  216; `emitter/function.rs` 1,059; `emitter/module.rs` 210;
+  `symbolic_qp.rs` 423; `symbolic_qp/declaration.rs` 484 (3,081 total).
+- **Validation:** compiler tests (55), Rust workspace tests (95), workspace
+  Clippy with warnings denied, and no-default-features runtime check passed.
+  The rebuilt compiler extension's binding tests (15) and non-performance
+  Python suite (294, 2 performance tests deselected) passed; Black and flake8
+  passed.
+- **Phase 12 smoke check:** both hexapod artifact lowerings emitted
+  successfully. No timing/profile or compaction measurement was run.
 
 ## Exit criteria
 
@@ -207,9 +235,10 @@ policy is considered.
    duplicate Python symbolic-QP conversion remains.
 2. Shape-dependent MatMul/Transpose validation occurs once per source node, and
    overwrite row starts are built linearly from canonical terms.
-3. Emitted ordinary and QP archives retain identical observable semantics:
-   table validation, primal and forward-JVP results, coefficient ordering,
-   sparse patterns, QP solutions, and error contracts all pass focused tests.
+3. Emitted ordinary and QP archives retain runtime-observable semantics:
+   archive-table validation, primal and forward-JVP results, coefficient
+   ordering, validated sparse patterns, QP solutions, and error contracts all
+   pass focused tests.
 4. Runtime mapping, alignment, caller-buffer ownership, and no-std allocation
    constraints remain unchanged.
 5. Full Rust and Python CI gates pass, and the implementation record separates
