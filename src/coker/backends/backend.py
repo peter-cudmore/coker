@@ -1,7 +1,8 @@
 from abc import ABCMeta, abstractmethod
-from typing import Any, Tuple, Type
+from collections.abc import Callable
+from typing import Any, Dict, List, Tuple, Type
+
 from coker.algebra.kernel import Function, Tracer
-from typing import List, Dict
 
 from coker.dynamics import VariationalProblem, SolverParameters
 
@@ -143,18 +144,33 @@ class VariationalSolver:
         return self.solve(**kwargs)
 
 
+def register_backend(name: str, factory: Callable[[], Backend]) -> None:
+    """Registers an importable backend factory under ``name``.
+
+    Registering the same factory more than once is harmless. Registering a
+    different factory for an existing name fails so backend selection cannot
+    depend on import order.
+    """
+    existing = __registered_backends.get(name)
+    if existing is not None and existing is not factory:
+        raise ValueError(f"Backend {name!r} is already registered")
+    __registered_backends[name] = factory
+
+
+__registered_backends: dict[str, Callable[[], Backend]] = {}
+
+
 __known_backends = {}
 
 
 def instantiate_backend(name: str):
-    if name == "numpy":
+    factory = __registered_backends.get(name)
+    if factory is not None:
+        backend = factory()
+    elif name == "numpy":
         import coker.backends.numpy.core
 
         backend = coker.backends.numpy.core.NumpyBackend()
-    elif name == "coker":
-        import coker.backends.coker
-
-        backend = coker.backends.coker.CokerBackend()
     elif name == "jax":
         import coker.backends.jax
 

@@ -1,10 +1,7 @@
 """Tests for higher-order function composition across backends.
 
-Verifies that a function compiled with the default ("coker") backend can be
-passed as a FunctionSpace argument into a "casadi"-compiled outer function
-and evaluated correctly.  This pattern appears in Mechanica whenever a
-body-level CasADi system calls individual compartment evaluators whose
-boundary-flow inputs are Python callables.
+Verifies that a CasADi-backed function can be passed as a ``FunctionSpace``
+argument into a CasADi-compiled outer function and evaluated correctly.
 """
 
 import importlib
@@ -27,13 +24,13 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 
 
-def test_scalar_coker_function_in_casadi_outer():
-    """coker-backend scalar f passed into casadi-backend outer function."""
+def test_scalar_casadi_function_in_casadi_outer():
+    """CasADi-backed scalar function passed into a CasADi outer function."""
 
     inner = function(
         arguments=[Scalar("x")],
         implementation=lambda x: x**2,
-        backend="coker",
+        backend="casadi",
     )
 
     outer = function(
@@ -75,14 +72,14 @@ def test_plain_callable_in_casadi_outer():
 # ---------------------------------------------------------------------------
 
 
-def test_vector_coker_function_in_casadi_outer():
-    """coker-backend vector f(x)->y passed into casadi-backend outer."""
+def test_vector_casadi_function_in_casadi_outer():
+    """CasADi-backed vector function passed into a CasADi outer function."""
 
     # inner: R^2 -> R^2, doubles each element
     inner = function(
         arguments=[VectorSpace("x", 2)],
         implementation=lambda x: 2 * x,
-        backend="coker",
+        backend="casadi",
     )
 
     outer = function(
@@ -122,7 +119,7 @@ def test_casadi_outer_passes_symbolic_arg_to_inner():
     inner = function(
         arguments=[Scalar("x")],
         implementation=lambda x: np.sin(x),
-        backend="coker",
+        backend="casadi",
     )
 
     # outer: f, a, x -> f(a * x)
@@ -144,18 +141,17 @@ def test_casadi_outer_passes_symbolic_arg_to_inner():
 
 
 # ---------------------------------------------------------------------------
-# Nested: coker inner called from casadi middle, middle from casadi outer
+# Nested: CasADi leaf called from CasADi middle and outer functions
 # ---------------------------------------------------------------------------
 
 
 def test_three_level_nesting():
-    """Three-level nesting: coker leaf inside casadi middle inside
-    casadi outer."""
+    """Three-level nesting with CasADi-backed leaf, middle, and outer."""
 
     leaf = function(
         arguments=[Scalar("x")],
         implementation=lambda x: x + 1,
-        backend="coker",
+        backend="casadi",
     )
 
     middle = function(

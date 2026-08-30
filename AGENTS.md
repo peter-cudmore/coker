@@ -21,3 +21,8 @@ The embedding application owns every mutable execution buffer. Workspace, tangen
 QP bytecode MUST embed its coefficient evaluator and sparse CSC patterns in the same mapped artifact. The QP runtime MUST borrow those archived tables, execute the evaluator into caller-provided coefficient buffers, scatter directly into caller-provided OSQP update buffers, and reuse a caller-provided/prebuilt solver workspace. It MUST NOT deserialize a QP into vectors, rebuild dense matrices, construct a solver per solve, or allocate solution/status values during `solve`.
 
 The currently selected `osqp` Rust crate is `std`/allocator-oriented and is not acceptable on the no-std execution path without a compatible lower-level integration. Use a no-std-capable OSQP C build or a thin FFI wrapper configured with caller-supplied allocator/workspace hooks; gate host conveniences behind a `std` feature.
+
+## Bug-fix workflow
+
+For every hypothesized bug fix, first add the smallest behavioral regression that reproduces the suspected cause. Implement only after that test demonstrates the diagnosis; remove the test afterward only when it provides no durable contract coverage.
+

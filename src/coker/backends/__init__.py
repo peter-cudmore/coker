@@ -11,11 +11,16 @@ To add:
 """
 
 from coker.backends.evaluator import evaluate
-from coker.backends.backend import get_backend_by_name, get_current_backend
+from coker.backends.backend import (
+    get_backend_by_name,
+    get_current_backend,
+    register_backend,
+)
 
 
 __all__ = [
     "evaluate",
     "get_backend_by_name",
     "get_current_backend",
+    "register_backend",
 ]
