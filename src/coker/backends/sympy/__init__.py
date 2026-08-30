@@ -167,7 +167,10 @@ class SympyBackend(Backend):
 
         try:
             value = sp.nsimplify(array, tolerance=1e-10)
-            out = np.array(value, dtype=float)
+            out = np.array(
+                value.tolist() if hasattr(value, "tolist") else value,
+                dtype=float,
+            )
             if out.shape == ():
                 return out.item()
             return out

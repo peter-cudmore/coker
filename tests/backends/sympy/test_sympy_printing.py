@@ -1,3 +1,5 @@
+import warnings
+
 import coker
 from coker.backends.backend import get_backend_by_name
 import sympy as sp
@@ -67,3 +69,13 @@ def test_matrix_norm_lowering():
         sp.Abs(sp.Symbol("A_0_1")) + sp.Abs(sp.Symbol("A_1_1")),
     )
     assert sp.simplify(out - expected) == 0
+
+def test_constant_matrix_conversion_accepts_numpy_copy_keyword():
+    backend = get_backend_by_name("sympy")
+    matrix = sp.ImmutableMatrix([[1, 2], [3, 4]])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        result = backend.to_numpy_array(matrix)
+
+    assert np.array_equal(result, np.array([[1.0, 2.0], [3.0, 4.0]]))
