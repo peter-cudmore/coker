@@ -31,9 +31,6 @@ def _build_two_link_model(base=Isometry3.identity()):
     return model
 
 
-
-
-
 @pytest.mark.parametrize(
     ("joint", "coordinates", "angles", "expected"),
     [
@@ -136,6 +133,7 @@ def test_to_function_matches_direct_fk_and_jacobian(branched):
     assert np.allclose(positions, expected_positions)
     assert np.allclose(jacobians, expected_jacobians)
 
+
 def test_unit_revolute_jacobian_has_known_spatial_and_cartesian_columns():
     model = RigidBody()
     link = model.add_link(
@@ -152,8 +150,6 @@ def test_unit_revolute_jacobian_has_known_spatial_and_cartesian_columns():
 
     assert np.allclose(spatial[:, 0], np.array([0, 0, 1, 0, 0, 0]))
     assert np.allclose(cartesian[:, 0], np.array([0, 1, 0]))
-
-
 
 
 def test_single_pendulum_energy_and_inverse_dynamics():

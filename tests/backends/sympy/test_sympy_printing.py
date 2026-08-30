@@ -70,6 +70,7 @@ def test_matrix_norm_lowering():
     )
     assert sp.simplify(out - expected) == 0
 
+
 def test_constant_matrix_conversion_accepts_numpy_copy_keyword():
     backend = get_backend_by_name("sympy")
     matrix = sp.ImmutableMatrix([[1, 2], [3, 4]])
