@@ -37,8 +37,8 @@ jax = [
 ]
 
 coker-rs = [
-    "coker-runtime @ git+https://github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-python",
-    "coker-compiler @ git+https://github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-compiler-python",
+    "coker-runtime @ git+ssh://git@github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-python",
+    "coker-compiler @ git+ssh://git@github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-compiler-python",
 ]
 
 [dependency-groups]
