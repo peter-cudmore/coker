@@ -23,19 +23,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install package
-        run: uv sync --group ci --extra casadi --extra jax
-      - name: Build runtime wheels
-        run: |
-          uv run maturin build --manifest-path coker_runtime/crates/coker-python/Cargo.toml -o target/wheels
-          uv run maturin build --manifest-path coker_runtime/crates/coker-compiler-python/Cargo.toml -o target/wheels
-      - name: Extract runtime wheels
-        run: |
-          uv run python -c "import pathlib, shutil, zipfile; output = pathlib.Path('target/wheel_extract'); shutil.rmtree(output, ignore_errors=True); output.mkdir(); [zipfile.ZipFile(wheel).extractall(output) for wheel in pathlib.Path('target/wheels').glob('*.whl')]"
+      - name: Install package and Rust backends
+        run: uv sync --group ci --extra casadi --extra jax --extra coker-rs
       - name: Run default test suite
-        run: uv run pytest -m "not perf" -o pythonpath=target/wheel_extract
+        run: uv run pytest -m "not perf"
 
   perf:
     name: Run perf tests
@@ -48,32 +39,11 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - name: Install package
-        run: uv sync --group ci --extra casadi --extra jax
+      - name: Install package and Rust backends
+        run: uv sync --group ci --extra casadi --extra jax --extra coker-rs
       - name: Run perf suite
         run: uv run pytest -m perf
 
-  rust-runtime:
-    name: Rust workspace checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Run Rust clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-        working-directory: coker_runtime
-      - name: Run Rust tests
-        run: cargo test --workspace
-        working-directory: coker_runtime
-      - name: Run no_std clippy
-        run: cargo clippy -p coker-runtime --no-default-features -- -D warnings
-        working-directory: coker_runtime
-      - name: Check no_std runtime
-        run: cargo check -p coker-runtime --no-default-features
-        working-directory: coker_runtime
 
   linter-name:
     name: runner / black and flake8

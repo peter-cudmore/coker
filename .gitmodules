@@ -1,4 +1,0 @@
-[submodule "coker_runtime/crates/coker-osqp-ffi/osqp"]
-	path = coker_runtime/crates/coker-osqp-ffi/osqp
-	url = https://github.com/peter-cudmore/osqp.git
-	branch = master

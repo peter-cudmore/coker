@@ -1,6 +1,6 @@
 import numpy as np
 
-import coker._coker_runtime as coker_runtime
+import coker_runtime
 from coker.backends.coker.conversion import function_to_typed_dag
 
 

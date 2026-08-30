@@ -1,6 +1,6 @@
 [build-system]
-requires = ["maturin>=1.7,<2"]
-build-backend = "maturin"
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "coker"
@@ -36,6 +36,11 @@ jax = [
     "jax>=0.10,<0.11; python_version >= '3.11'",
 ]
 
+coker-rs = [
+    "coker-runtime @ git+https://github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-python",
+    "coker-compiler @ git+https://github.com/peter-cudmore/coker_rs.git@main#subdirectory=crates/coker-compiler-python",
+]
+
 [dependency-groups]
 dev = [
     "black==25.1.0",
@@ -48,7 +53,6 @@ ci = [
     "pytest-mypy",
     "black==25.1.0",
     "flake8>=7.1.1,<8",
-    "maturin>=1.7,<2",
 ]
 docs = [
     "sphinx>=7.0",
@@ -68,10 +72,3 @@ markers = [
 [tool.black]
 line-length = 79
 target-version = ["py310", "py311", "py312", "py313"]
-
-[tool.maturin]
-bindings = "pyo3"
-manifest-path = "coker_runtime/crates/coker-python/Cargo.toml"
-python-source = "src"
-python-packages = ["coker"]
-module-name = "coker._coker_runtime"
