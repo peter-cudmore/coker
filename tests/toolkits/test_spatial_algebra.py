@@ -28,9 +28,7 @@ def test_rotation_group_action_and_inverse():
 
 
 def test_isometry_composition_inverse_and_homogeneous_action():
-    transform = Isometry3(
-        rotation=Rotation3(E_Z, np.pi / 2), translation=E_X
-    )
+    transform = Isometry3(rotation=Rotation3(E_Z, np.pi / 2), translation=E_X)
     point = np.array([1.0, 0.0, 0.0])
     homogeneous_point = np.array([[1.0], [0.0], [0.0], [1.0]])
 

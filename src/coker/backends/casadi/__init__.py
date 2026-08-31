@@ -6,7 +6,7 @@ import numpy as np
 from coker import Dimension, Function
 from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Tracer
-from coker.algebra.ops import Noop, ReshapeOP, ModuleCallOP
+from coker.algebra.ops import Noop, ReshapeOP
 from coker.backends.backend import ArrayLike, Backend
 from coker.backends.casadi.casadi import (
     call_parameterised_op,
@@ -124,14 +124,6 @@ class CasadiBackend(Backend):
         # Fall back to evaluate-based wrapper for cases that ca.Function cannot
         # handle: FunctionSpace inputs (partially evaluated functions) or None
         # outputs (e.g. from zero-row matmul).
-        if any(
-            isinstance(function.tape.nodes[index][0], ModuleCallOP)
-            for index in range(len(function.tape.nodes))
-            if index not in function.tape.input_indicies
-        ):
-            # Module calls are numerical-only. The generic evaluator handles
-            # them without changing the enclosing function's backend.
-            return super().lower(function)
         if any(
             isinstance(shape, FunctionSpace)
             for shape in function.input_shape()
