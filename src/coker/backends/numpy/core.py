@@ -7,7 +7,7 @@ import scipy as scp
 
 from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer, Noop
-from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP, ModuleCallOP
+from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
 from coker.backends.backend import Backend, ArrayLike, SolverParameters
 from coker.backends.numpy.optimisation import build_optimisation_problem
@@ -164,12 +164,6 @@ class NumpyBackend(Backend):
     def lower(self, function):
         from coker.backends.evaluator import _build_plan, _cast_outputs
 
-        if any(
-            isinstance(function.tape.nodes[index][0], ModuleCallOP)
-            for index in range(len(function.tape.nodes))
-            if index not in function.tape.input_indicies
-        ):
-            return super().lower(function)
         plan = _build_plan(function.tape, self)
         tape = function.tape
         outputs = function.output

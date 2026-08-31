@@ -3,7 +3,6 @@ import numpy as np
 
 import coker
 from coker.backends.backend import Backend
-from coker.algebra.ops import ModuleCallOP, ModuleOutputOP
 from coker.algebra.kernel import Tracer, OP
 
 
@@ -192,14 +191,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         op, *nodes = graph.nodes[w]
 
         args = [cast_node(n) for n in nodes]
-        if isinstance(op, ModuleCallOP):
-            value = op.module(*args)
-            workspace[w] = value
-            continue
-        if isinstance(op, ModuleOutputOP):
-            (module_result,) = args
-            value = module_result[op.output_index]
-        elif op == OP.VALUE:
+        if op == OP.VALUE:
             (value,) = args
         else:
             try:

@@ -41,16 +41,22 @@ def _build_two_link_model(base=Isometry3.identity()):
 )
 def test_joint_coordinate_contract(joint, coordinates, angles, expected):
     model = RigidBody()
-    link = model.add_link(model.WORLD, Isometry3.identity(), joint, UNIT_INERTIA)
+    link = model.add_link(
+        model.WORLD, Isometry3.identity(), joint, UNIT_INERTIA
+    )
     model.add_effector(link, Isometry3(translation=E_X))
 
     assert model.total_joints() == coordinates
-    assert np.allclose(model.forward_kinematics(angles)[0].translation, expected)
+    assert np.allclose(
+        model.forward_kinematics(angles)[0].translation, expected
+    )
 
 
 def test_free_joint_exposes_six_motion_coordinates():
     model = RigidBody()
-    link = model.add_link(model.WORLD, Isometry3.identity(), Free(), UNIT_INERTIA)
+    link = model.add_link(
+        model.WORLD, Isometry3.identity(), Free(), UNIT_INERTIA
+    )
     model.add_effector(link, Isometry3(translation=E_X))
     angles = np.array([1.0, 2.0, 3.0, 0.0, 0.0, np.pi / 2])
 
@@ -113,20 +119,27 @@ def test_to_function_matches_direct_fk_and_jacobian(branched):
             )
         parents.append(parent)
     for parent in parents:
-        model.add_effector(parent, Isometry3(translation=np.array([0.2, 0.0, 0.0])))
+        model.add_effector(
+            parent, Isometry3(translation=np.array([0.2, 0.0, 0.0]))
+        )
 
     angles = np.linspace(-0.4, 0.4, model.total_joints())
     direct = model.forward_kinematics(angles)
     spatial = model.spatial_manipulator_jacobian(angles)
-    expected_positions = np.concatenate([transform.translation for transform in direct])
+    expected_positions = np.concatenate(
+        [transform.translation for transform in direct]
+    )
     expected_jacobians = np.concatenate(
         [
-            jacobian[3:, :] + np.cross(jacobian[:3, :].T, transform.translation).T
+            jacobian[3:, :]
+            + np.cross(jacobian[:3, :].T, transform.translation).T
             for transform, jacobian in zip(direct, spatial)
         ]
     )
     compiled = function(
-        [VectorSpace("q", model.total_joints())], model.to_function(), backend="numpy"
+        [VectorSpace("q", model.total_joints())],
+        model.to_function(),
+        backend="numpy",
     )
     positions, jacobians = compiled(angles)
 
@@ -155,7 +168,9 @@ def test_unit_revolute_jacobian_has_known_spatial_and_cartesian_columns():
 def test_single_pendulum_energy_and_inverse_dynamics():
     length = 0.5
     inertia = Inertia(
-        centre_of_mass=Isometry3(translation=np.array([0.0, 0.0, -length / 2])),
+        centre_of_mass=Isometry3(
+            translation=np.array([0.0, 0.0, -length / 2])
+        ),
         mass=1.0,
         moments=np.array([1.0, 0.0, 0.0, 1.0, 0.0, 1.0]),
     )
@@ -173,14 +188,15 @@ def test_single_pendulum_energy_and_inverse_dynamics():
     rotational_inertia = 1.0
     effective_inertia = rotational_inertia + (length / 2) ** 2
     expected_energy = -9.8 * length / 2 * np.cos(q[0])
-    expected_torque = (
-        effective_inertia * ddq[0] + 9.8 * length / 2 * np.sin(q[0])
+    expected_torque = effective_inertia * ddq[0] + 9.8 * length / 2 * np.sin(
+        q[0]
     )
 
     assert np.allclose(model.potential_energy(q, gravity), expected_energy)
     assert np.allclose(model.mass_matrix(q), np.array([[effective_inertia]]))
     assert np.allclose(
-        model.inverse_dynamics(q, dq, ddq, gravity), np.array([expected_torque])
+        model.inverse_dynamics(q, dq, ddq, gravity),
+        np.array([expected_torque]),
     )
 
 
@@ -194,7 +210,9 @@ def _build_hexapod_leg():
             Revolute(Screw(rotation=axis)),
             Inertia.zero(),
         )
-    model.add_effector(parent, Isometry3(translation=np.array([0.16, 0.0, -0.03])))
+    model.add_effector(
+        parent, Isometry3(translation=np.array([0.16, 0.0, -0.03]))
+    )
     return model
 
 
