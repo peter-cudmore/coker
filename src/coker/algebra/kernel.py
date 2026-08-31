@@ -197,6 +197,7 @@ class Tape:
         self.input_names = []
         self.backend = backend
         self._substitutions: dict = {}
+        self._node_hashmap: dict[int, int] = {}
 
     def add_substitution(self, foreign: "Tracer", local: "Tracer"):
         """Register a rewrite rule for substituting a traced value.
@@ -283,20 +284,31 @@ class Tape:
             for a in args
         ]
 
+        node_hash = hash((op, *args))
+        if node_hash in self._node_hashmap:
+            return self._node_hashmap[node_hash]
+
         out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
         self.nodes.push_op(op, *args)
         self.dim.append(out_dim)
+        self._node_hashmap[node_hash] = index
         return index
 
     def insert_value(self, arg):
         if arg is None:
             return None
         assert not isinstance(arg, Tracer)
+
+        node_hash = hash((OP.VALUE, self.nodes.constant_hash(arg)))
+        if node_hash in self._node_hashmap:
+            return Tracer(self, self._node_hashmap[node_hash])
+
         dim = get_dim_by_class(arg)
         idx = len(self.dim)
         self.nodes.push_op(OP.VALUE, arg)
         self.dim.append(dim)
+        self._node_hashmap[node_hash] = idx
         return Tracer(self, idx)
 
     def input(self, v: VectorSpace | Scalar):

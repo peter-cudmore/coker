@@ -9,8 +9,31 @@ from coker import (
 )
 from coker.algebra import get_projection
 from coker.algebra import zeros
-from coker.algebra.kernel import TraceContext
+from coker.algebra.kernel import Tape, TraceContext
 from ..util import is_close
+
+
+def test_repeated_unary_operation_reuses_tape_node():
+    tape = Tape()
+    x = tape.input(Scalar("x"))
+
+    y = np.sin(x)
+    z = np.sin(x)
+
+    assert y.index == z.index
+    assert len(tape) == 2
+
+
+def test_repeated_matrix_product_reuses_constant_and_operation_nodes():
+    tape = Tape()
+    x = tape.input(VectorSpace("x", 2))
+    p = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    y = p @ x
+    z = p @ x
+
+    assert y.index == z.index
+    assert len(tape) == 3
 
 
 def test_symbolic_scalar(backend):
