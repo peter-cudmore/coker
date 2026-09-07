@@ -228,3 +228,84 @@ def test_bounded_horizon_requires_positive_lower_bound():
             make_parameterised_integrator(),
             t_final=BoundedVariable("T", -1, 10, guess=1),
         )
+
+
+def test_sysopt_decay_integral_matches_closed_form_quadrature():
+    """The builder integral follows the decay quadrature contract."""
+    decay = create_control_system(
+        parameters=VectorSpace("p", 1),
+        control=FunctionSpace(
+            "u",
+            arguments=[Scalar("t")],
+            output=[Scalar("u(t)")],
+        ),
+        x0=lambda _p: np.array([1.0]),
+        xdot=lambda _t, x, _u, p: -p[0] * x,
+        backend="numpy",
+    )
+    horizon = 2.0
+    rate = 0.7
+    with VariationalProblemBuilder(
+        decay,
+        t_final=horizon,
+        parameters=[BoundedVariable("a", 0.1, 2.0, guess=rate)],
+        backend="numpy",
+    ) as builder:
+        running = builder.integrate(builder.output(builder.t)[0] ** 2)
+        problem = builder.build(Minimise(running))
+
+    times = np.linspace(0.0, horizon, 1001)
+    values = np.exp(-rate * times)
+    quadrature = np.array(
+        [
+            problem.system.dqdt(
+                time,
+                np.array([value]),
+                None,
+                lambda _time: np.array([0.0]),
+                np.array([rate]),
+            )[0]
+            for time, value in zip(times, values)
+        ]
+    )
+    expected = (1.0 - np.exp(-2.0 * rate * horizon)) / (2.0 * rate)
+    np.testing.assert_allclose(
+        np.trapezoid(quadrature, times), expected, rtol=2e-5
+    )
+
+
+def test_sysopt_codesign_free_horizon_keeps_decisions_and_scopes():
+    """A free horizon retains bounded control and terminal/path contracts."""
+    system = make_parameterised_integrator()
+    horizon = BoundedVariable("T", 0.1, 4.0, guess=1.0)
+    control = PiecewiseConstantVariable(
+        "u", sample_rate=8, lower_bound=-1.0, upper_bound=1.0
+    )
+    with VariationalProblemBuilder(
+        system, t_final=horizon, control=[control]
+    ) as builder:
+        energy = builder.integrate(builder.input(builder.t) ** 2)
+        problem = builder.build(
+            Minimise(energy + (builder.state(builder.t_final)[0] - 1) ** 2),
+            subject_to=[
+                builder.state(builder.t_final)[0] == 1,
+                builder.input(builder.t) <= 1,
+                builder.input(builder.t) >= -1,
+            ],
+        )
+
+    assert problem.horizon_decision is horizon
+    assert problem.horizon_decision.lower_bound == 0.1
+    assert problem.horizon_decision.upper_bound == 4.0
+    assert problem.horizon_decision.guess == 1.0
+    assert problem.decision_declarations == [horizon, control]
+    assert len(problem.terminal_constraints) == 1
+    assert len(problem.path_constraints) == 2
+    assert all(
+        constraint.temporal_binding == "terminal"
+        for constraint in problem.terminal_constraints
+    )
+    assert all(
+        constraint.temporal_binding == "path"
+        for constraint in problem.path_constraints
+    )
