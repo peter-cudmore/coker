@@ -103,6 +103,7 @@ class VariationalProblemBuilder:
         self._quadrature_initial: list[float] = []
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
+        self._timed_values: dict[int, str] = {}
         self._closed = False
         self._make_symbols()
 
@@ -222,8 +223,9 @@ class VariationalProblemBuilder:
             "terminal": self._t_final,
             "initial": self._t_initial,
         }[binding]
-        # Preserve the endpoint dependency without changing the value.
-        return value + 0 * marker
+        tagged = value + 0 * marker
+        self._timed_values[tagged.index] = binding
+        return tagged
 
     def state(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
@@ -231,12 +233,11 @@ class VariationalProblemBuilder:
 
     def input(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
-        if isinstance(self._input, Noop):
-            return self._input
         if isinstance(self._input.dim, FunctionSpace):
-            return self._input(
+            value = self._input(
                 time if isinstance(time, Tracer) else self._t_initial
             )
+            return self._with_time(value, self._t if time is None else time)
         return self._with_time(self._input, self._t if time is None else time)
 
     def output(self, time: Optional[object] = None) -> Tracer:
@@ -482,32 +483,18 @@ class VariationalProblemBuilder:
         )
 
     def _classify_time(self, expression: Tracer) -> str:
-        found: set[str] = set()
-
-        def visit(value: object) -> None:
-            if isinstance(value, Tracer):
-                if value.tape is not self._trace:
-                    raise ValueError("constraint contains a foreign trace")
-                if value.index == self._t.index:
-                    found.add("path")
-                elif value.index == self._t_final.index:
-                    found.add("terminal")
-                elif value.index == self._t_initial.index:
-                    found.add("initial")
-                else:
-                    node = value.tape.nodes[value.index]
-                    if isinstance(node, Tracer):
-                        return
-                    for arg in node[1:]:
-                        visit(arg)
-            elif isinstance(value, (tuple, list)):
-                for item in value:
-                    visit(item)
-
-        visit(expression)
-        if "path" in found:
+        if expression.tape is not self._trace:
+            raise ValueError("constraint contains a foreign trace")
+        matches = []
+        for index, binding in self._timed_values.items():
+            dependents = self._trace.find_dependents(
+                Tracer(self._trace, index)
+            )
+            if expression.index in dependents:
+                matches.append(binding)
+        if "path" in matches:
             return "path"
-        if "initial" in found:
+        if "initial" in matches:
             return "initial"
         return "terminal"
 
