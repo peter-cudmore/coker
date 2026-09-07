@@ -368,23 +368,15 @@ def create_variational_solver(
         xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
     )
 
-    def constraint_parts(constraint):
-        """Return a residual and explicit bounds for old/new records."""
-        if hasattr(constraint, "residual"):
-            return (
-                constraint.residual,
-                constraint.lower_bound,
-                constraint.upper_bound,
-            )
-        # Imperative constraints retain a Function value and numeric bounds.
-        return constraint.value, constraint.lower, constraint.upper
-
     def append_constraint(constraint, args):
-        residual, lower, upper = constraint_parts(constraint)
-        (value,) = casadi.evaluate(residual, args)
+        (value,) = casadi.evaluate(constraint.residual, args)
         g_constraints.append(value)
-        g_constraint_lowers.append(casadi.to_backend_array(lower))
-        g_constraint_uppers.append(casadi.to_backend_array(upper))
+        g_constraint_lowers.append(
+            casadi.to_backend_array(constraint.lower_bound)
+        )
+        g_constraint_uppers.append(
+            casadi.to_backend_array(constraint.upper_bound)
+        )
 
     g_constraints = []
     g_constraint_lowers = []
@@ -505,10 +497,9 @@ def create_variational_solver(
     end_args = (t_end, x_end_val, z_end_val, u_end, p, q_end_val)
 
     for constraint in problem.terminal_constraints:
-        residual, lower, upper = constraint_parts(constraint)
-        (g_inner,) = casadi.evaluate(residual, end_args)
-        g_lower = casadi.to_backend_array(lower)
-        g_upper = casadi.to_backend_array(upper)
+        (g_inner,) = casadi.evaluate(constraint.residual, end_args)
+        g_lower = casadi.to_backend_array(constraint.lower_bound)
+        g_upper = casadi.to_backend_array(constraint.upper_bound)
         assert g_lower.shape == g_inner.shape == g_upper.shape
         g = ca.vertcat(g, g_inner)
         lbg = ca.vertcat(lbg, g_lower)
