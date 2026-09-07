@@ -3,6 +3,7 @@ import pytest
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.dynamics import (
     BoundedVariable,
+    FinalTimeMapping,
     VariationalProblem,
     VariationalSolution,
 )
@@ -747,3 +748,27 @@ def test_casadi_initial_point_constraint_is_enforced(variational_backend):
     )
     solution = problem()
     assert solution.parameter_solutions["x0"] >= 1.0 - 1e-4
+
+
+def test_free_horizon_keeps_horizon_and_parameter_offsets():
+    """The horizon slot must not displace system parameter bounds."""
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 1),
+        x0=lambda p: p,
+        xdot=lambda _x, _p: 0,
+        backend="numpy",
+    )
+    horizon = BoundedVariable("T", 0.5, 2.0, guess=1.0)
+    parameter = BoundedVariable("p", 2.0, 3.0, guess=2.5)
+    problem = VariationalProblem(
+        loss=lambda f, p: (f(1.0, p) - 2.0) ** 2,
+        system=system,
+        t_final=horizon,
+        final_time_map=FinalTimeMapping(declaration=horizon, decision_index=0),
+        parameters=[parameter],
+        backend="casadi",
+    )
+
+    solution = problem()
+    assert 0.5 <= solution.t_final <= 2.0
+    assert 2.0 <= solution.parameter_solutions["p"] <= 3.0
