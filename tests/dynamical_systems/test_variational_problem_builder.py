@@ -156,3 +156,75 @@ def test_integrate_rejects_vector_integrands_before_lowering():
     with VariationalProblemBuilder(system, t_final=1.0) as builder:
         with pytest.raises(ValueError, match="integrand must be scalar"):
             builder.integrate(builder.state(builder.t))
+
+
+def test_fixed_horizon_is_not_a_decision():
+    system = make_parameterised_integrator()
+    with VariationalProblemBuilder(system, t_final=2.0) as builder:
+        problem = builder.build(Minimise(builder.state(builder.t)[0] ** 2))
+
+    assert problem.final_time_map.is_fixed
+    assert problem.final_time_map.value == 2.0
+    assert problem.horizon_decision is None
+
+
+def test_bounded_horizon_is_first_class_and_not_a_parameter():
+    system = make_parameterised_integrator()
+    horizon = BoundedVariable("T", 0.1, 10.0, guess=1.0)
+    parameter = BoundedVariable("mass", 1.0, 10.0, guess=2.0)
+    parameter_map = np.array([[1.0]])
+    with VariationalProblemBuilder(
+        system,
+        t_final=horizon,
+        parameters=[parameter],
+        system_parameter_map=parameter_map,
+    ) as builder:
+        problem = builder.build(Minimise(builder.state(builder.t)[0] ** 2))
+
+    assert problem.final_time_map.is_free
+    assert problem.final_time_map.declaration is horizon
+    assert problem.horizon_decision is horizon
+    assert problem.parameters == [parameter]
+    np.testing.assert_array_equal(problem.system_parameter_map, parameter_map)
+    assert problem.decision_declarations == [horizon]
+
+
+def test_free_horizon_retains_control_and_temporal_constraint_scopes():
+    system = make_parameterised_integrator()
+    horizon = BoundedVariable("T", 0.1, 10.0, guess=1.0)
+    control = PiecewiseConstantVariable(
+        "u", sample_rate=4, lower_bound=-1, upper_bound=1
+    )
+    with VariationalProblemBuilder(
+        system, t_final=horizon, control=[control]
+    ) as builder:
+        terminal = builder.state(builder.t_final)[0] == 1
+        path = builder.input(builder.t) <= 1
+        problem = builder.build(
+            Minimise(builder.state(builder.t_final)[0] ** 2),
+            subject_to=[terminal, path],
+        )
+
+    assert problem.decision_declarations == [horizon, control]
+    assert len(problem.terminal_constraints) == 1
+    assert len(problem.path_constraints) == 1
+    assert problem.terminal_constraints[0].temporal_binding == "terminal"
+    assert problem.path_constraints[0].temporal_binding == "path"
+
+
+@pytest.mark.parametrize("invalid", [0, -1, "T", None, True])
+def test_horizon_declaration_must_be_positive_number_or_bounded_variable(
+    invalid,
+):
+    with pytest.raises((TypeError, ValueError), match="t_final"):
+        VariationalProblemBuilder(
+            make_parameterised_integrator(), t_final=invalid
+        )
+
+
+def test_bounded_horizon_requires_positive_lower_bound():
+    with pytest.raises(ValueError, match="t_final"):
+        VariationalProblemBuilder(
+            make_parameterised_integrator(),
+            t_final=BoundedVariable("T", -1, 10, guess=1),
+        )

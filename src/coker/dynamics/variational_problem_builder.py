@@ -7,6 +7,7 @@ import numpy as np
 
 from coker.algebra.kernel import (
     Function,
+    FunctionSpace,
     InequalityExpression,
     Noop,
     OP,
@@ -21,6 +22,7 @@ from coker.dynamics.types import (
     BoundedVariable,
     ControlVariable,
     DynamicalSystem,
+    FinalTimeMapping,
     LossFunction,
     ParameterVariable,
     TranscriptionOptions,
@@ -75,9 +77,30 @@ class VariationalProblemBuilder:
         transcription_options: Optional[TranscriptionOptions] = None,
         system_parameter_map: Optional[np.ndarray] = None,
     ):
-        if isinstance(t_final, (int, float)) and t_final <= 0:
-            raise ValueError("t_final must be positive")
-        if not isinstance(t_final, (int, float, BoundedVariable)):
+        if isinstance(t_final, bool):
+            raise TypeError(
+                "t_final must be a positive float or BoundedVariable"
+            )
+        if isinstance(t_final, (int, float, np.number)):
+            if float(t_final) <= 0:
+                raise ValueError("t_final must be positive")
+        elif isinstance(t_final, BoundedVariable):
+            if t_final.lower_bound <= 0:
+                raise ValueError(
+                    "t_final BoundedVariable lower_bound must be positive"
+                )
+            if t_final.upper_bound < t_final.lower_bound:
+                raise ValueError(
+                    "t_final BoundedVariable upper_bound must not be below "
+                    "lower_bound"
+                )
+            if not (
+                t_final.lower_bound <= t_final.guess <= t_final.upper_bound
+            ):
+                raise ValueError(
+                    "t_final BoundedVariable guess must be within bounds"
+                )
+        else:
             raise TypeError(
                 "t_final must be a positive float or BoundedVariable"
             )
@@ -191,6 +214,10 @@ class VariationalProblemBuilder:
         self._require_open()
         if isinstance(self._input, Noop):
             return self._input
+        if isinstance(self._input.dim, FunctionSpace):
+            return self._input(
+                time if isinstance(time, Tracer) else self._t_initial
+            )
         return self._with_time(self._input, self._t if time is None else time)
 
     def output(self, time: Optional[object] = None) -> Tracer:
@@ -415,13 +442,21 @@ class VariationalProblemBuilder:
             self._validate_trace(loss, "cost")
 
         return VariationalProblem(
+            path_constraints=path,
             loss=loss,
             system=self.system,
             t_final=self.t_final_declaration,
             control=self.control or None,
             parameters=self._parameter_declarations or None,
             system_parameter_map=self.system_parameter_map,
-            path_constraints=path,
+            final_time_map=(
+                FinalTimeMapping(
+                    declaration=self.t_final_declaration,
+                    decision_index=0,
+                )
+                if isinstance(self.t_final_declaration, BoundedVariable)
+                else FinalTimeMapping(value=float(self.t_final_declaration))
+            ),
             terminal_constraints=terminal,
             initial_constraints=initial,
             transcription_options=self.transcription_options
@@ -444,6 +479,8 @@ class VariationalProblemBuilder:
                     found.add("initial")
                 else:
                     node = value.tape.nodes[value.index]
+                    if isinstance(node, Tracer):
+                        return
                     for arg in node[1:]:
                         visit(arg)
             elif isinstance(value, (tuple, list)):

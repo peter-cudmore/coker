@@ -275,11 +275,34 @@ class TranscriptionOptions:
     interation_callback: Optional[VariationalIterationCallback] = None
 
 
+@dataclass(frozen=True)
+class FinalTimeMapping:
+    """Explicit representation of a fixed or free final time.
+
+    ``decision_index`` is relative to the horizon decision block and is
+    intentionally separate from ``system_parameter_map``.  Phase 5 can use
+    this record when introducing normalized-time transcription.
+    """
+
+    value: float | None = None
+    declaration: Optional[BoundedVariable] = None
+    decision_index: Optional[int] = None
+
+    @property
+    def is_fixed(self) -> bool:
+        return self.declaration is None
+
+    @property
+    def is_free(self) -> bool:
+        return self.declaration is not None
+
+
 @dataclass
 class VariationalProblem:
     loss: LossFunction | Tracer
-    system: DynamicalSystem
     t_final: object
+    system: DynamicalSystem
+    final_time_map: FinalTimeMapping = field(default_factory=FinalTimeMapping)
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
     system_parameter_map: Optional[np.ndarray] = None
@@ -294,6 +317,20 @@ class VariationalProblem:
         default_factory=TranscriptionOptions
     )
     backend: Optional[str] = "casadi"
+
+    @property
+    def horizon_decision(self) -> Optional[BoundedVariable]:
+        """Return the free final-time declaration, when present."""
+        return self.final_time_map.declaration
+
+    @property
+    def decision_declarations(self) -> List[ParameterMixin]:
+        """Return horizon and control declarations in decision order."""
+        decisions: List[ParameterMixin] = []
+        if self.horizon_decision is not None:
+            decisions.append(self.horizon_decision)
+        decisions.extend(self.control or [])
+        return decisions
 
     def __post_init__(self):
         if self.system_parameter_map is not None:
