@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from coker import FunctionSpace, Scalar, VectorSpace, function
@@ -125,3 +126,33 @@ def test_unsupported_concrete_time_is_rejected():
     with VariationalProblemBuilder(system, t_final=1.0) as builder:
         with pytest.raises(ValueError, match="allowed bindings"):
             builder.state(0.5)
+
+
+def test_integrate_registers_scalar_channels_without_mutating_source():
+    system = make_parameterised_integrator()
+    original_dqdt = system.dqdt
+    with VariationalProblemBuilder(
+        system, t_final=2.0, backend="numpy"
+    ) as builder:
+        q_running = builder.integrate(builder.output(builder.t)[0] ** 2)
+        q_constant = builder.integrate(builder.parameters()[0] ** 2)
+        problem = builder.build(Minimise(q_running + 2 * q_constant))
+
+    assert q_running.dim.is_scalar()
+    assert q_constant.dim.is_scalar()
+    assert system.dqdt is original_dqdt
+    assert problem.system is not system
+    assert len(problem.system.dqdt.output) == 1
+    assert problem.system.dqdt.output_shape()[0].flat() == 2
+
+    derivative = problem.system.dqdt(
+        0.0, np.array([3.0]), None, lambda _t: np.array([0.0]), np.array([2.0])
+    )
+    np.testing.assert_allclose(derivative, [9.0, 4.0])
+
+
+def test_integrate_rejects_vector_integrands_before_lowering():
+    system = make_parameterised_integrator()
+    with VariationalProblemBuilder(system, t_final=1.0) as builder:
+        with pytest.raises(ValueError, match="integrand must be scalar"):
+            builder.integrate(builder.state(builder.t))

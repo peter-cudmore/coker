@@ -1,6 +1,6 @@
 """Context-managed construction of :class:`VariationalProblem` values."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Sequence
 
 import numpy as np
@@ -15,6 +15,7 @@ from coker.algebra.kernel import (
     TraceContext,
     Tracer,
     VectorSpace,
+    function,
 )
 from coker.dynamics.types import (
     BoundedVariable,
@@ -26,6 +27,17 @@ from coker.dynamics.types import (
     VariationalProblem,
 )
 from coker.toolkits.codesign import Minimise
+
+
+@dataclass(frozen=True)
+class _Quadrature:
+    """Symbolic dynamic quadrature channel registered by the builder."""
+
+    integrand: Tracer
+    state: Tracer
+    initial_state: float
+    channel: int
+    trace_id: int
 
 
 @dataclass(frozen=True)
@@ -69,8 +81,8 @@ class VariationalProblemBuilder:
             raise TypeError(
                 "t_final must be a positive float or BoundedVariable"
             )
-
         self.system = system
+        self._base_system = system
         self.t_final_declaration = t_final
         self.backend = backend
         self.transcription_options = transcription_options
@@ -82,6 +94,9 @@ class VariationalProblemBuilder:
         self.terminal_constraints: list[InequalityExpression] = []
         self.initial_constraints: list[InequalityExpression] = []
         self._lowered_constraints: list[_LoweredConstraint] = []
+        self._quadratures: list[_Quadrature] = []
+        self._quadrature_derivative: list[Tracer] = []
+        self._quadrature_initial: list[float] = []
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
         self._closed = False
@@ -224,7 +239,115 @@ class VariationalProblemBuilder:
         self._time_binding(time)
 
     def integrate(self, expression: Tracer) -> Tracer:
-        raise NotImplementedError("integrate is implemented in Phase 3")
+        """Register a scalar integrand and return its accumulated state.
+
+        The returned tracer is a distinct quadrature channel.  Its initial
+        value is zero and its derivative is the supplied expression; the
+        derivative channels are exposed on ``system.dqdt`` for the dynamics
+        transcription.
+        """
+        self._require_open()
+        if not isinstance(expression, Tracer):
+            raise TypeError("integrand must be a symbolic scalar expression")
+        self._validate_trace(expression, "integrand")
+        if not expression.dim.is_scalar():
+            raise ValueError("integrand must be scalar")
+
+        channel = len(self._quadratures)
+        state = self._trace.input(Scalar(f"q_{channel}"))
+        record = _Quadrature(
+            integrand=expression,
+            state=state,
+            initial_state=0.0,
+            channel=channel,
+            trace_id=id(self._trace),
+        )
+        self._quadratures.append(record)
+        self._quadrature_derivative.append(expression)
+        self._quadrature_initial.append(record.initial_state)
+        self._sync_quadrature_system()
+        return state
+
+    def _clone_expression(self, expression: Tracer, target: Tape, mapping):
+        """Copy an expression graph onto the dynamics function tape."""
+        key = (id(expression.tape), expression.index)
+        if key in mapping:
+            return mapping[key]
+        op, *args = expression.tape.nodes[expression.index]
+        cloned_args = [
+            (
+                self._clone_expression(arg, target, mapping)
+                if isinstance(arg, Tracer)
+                else arg
+            )
+            for arg in args
+        ]
+        result = target.append(op, *cloned_args)
+        cloned = Tracer(target, result)
+        mapping[key] = cloned
+        return cloned
+
+    def _sync_quadrature_system(self) -> None:
+        """Create copied system with appended quadrature channels."""
+        if not self._quadrature_derivative:
+            return
+
+        base = self._base_system
+        spaces = base.dxdt.input_spaces()
+        tape = Tape(self.backend)
+        args = [tape.input(space) for space in spaces]
+        mapping = {
+            (id(self._trace), self._t.index): args[0],
+            (id(self._trace), self._state.index): args[1],
+        }
+        for source, target in zip(
+            (self._algebraic, self._input, self._parameters), args[2:]
+        ):
+            if isinstance(source, Tracer):
+                mapping[(id(self._trace), source.index)] = target
+
+        outputs = []
+        if isinstance(base.dqdt, Function):
+            existing = base.dqdt.call_inline(*args)
+            outputs.append(existing)
+        outputs.extend(
+            self._clone_expression(expression, tape, mapping)
+            for expression in self._quadrature_derivative
+        )
+        with TraceContext(tape):
+            combined = np.concatenate(
+                [np.reshape(output, (1,)) for output in outputs]
+            )
+        derivative = Function(
+            tape, combined, self.backend, name="builder_quadratures"
+        )
+        self.system = self._system_with_quadratures(base, derivative)
+
+    def _system_with_quadratures(
+        self, base: DynamicalSystem, derivative: Function
+    ) -> DynamicalSystem:
+        """Return a copied system with an augmented q output."""
+
+        _t, _x, _z, _u, _p, q_dim = base.y.input_shape()
+        existing_q_size = 0 if q_dim is None else q_dim.flat()
+        q_size = existing_q_size + len(self._quadrature_derivative)
+        y_spaces = base.y.input_spaces()
+        y_spaces[-1] = VectorSpace("q", q_size)
+
+        def output(*values):
+            q = values[-1]
+            if existing_q_size:
+                q = q[:existing_q_size]
+                if q_dim.is_scalar():
+                    q = q[0]
+            else:
+                q = None
+            return base.y.call_inline(*values[:-1], q)
+
+        output_function = function(
+            y_spaces, output, backend=self.backend, name="builder_output"
+        )
+        return replace(base, dqdt=derivative, y=output_function)
 
     def build(
         self,
