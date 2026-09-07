@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -39,15 +41,19 @@ def test_variational_problem_builder_collects_problem_terms():
     control = PiecewiseConstantVariable("u", sample_rate=4)
     parameter = BoundedVariable("initial_state", -1, 1, guess=0.25)
 
-    with VariationalProblemBuilder(system, t_final=2.0) as builder:
-        builder.minimise(
-            lambda solution, input_law, p: solution(2.0, input_law, p) ** 2
-        )
-        builder.add_input(control)
-        builder.add_parameter(parameter)
-        builder.add_path_constraint(constraint)
-        builder.add_terminal_constraint(constraint)
-        problem = builder.build()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        with VariationalProblemBuilder(system, t_final=2.0) as builder:
+            builder.minimise(
+                lambda solution, input_law, p: solution(2.0, input_law, p) ** 2
+            )
+            builder.add_input(control)
+            builder.add_parameter(parameter)
+            builder.add_path_constraint(constraint)
+            builder.add_terminal_constraint(constraint)
+            problem = builder.build()
+
+    assert [warning.category for warning in caught] == [DeprecationWarning] * 5
 
     assert problem.system is system
     assert problem.t_final == 2.0
@@ -55,6 +61,17 @@ def test_variational_problem_builder_collects_problem_terms():
     assert problem.parameters == [parameter]
     assert problem.path_constraints == [constraint]
     assert problem.terminal_constraints == [constraint]
+
+
+def test_functional_builder_does_not_emit_deprecation_warnings():
+    system = make_parameterised_integrator()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        with VariationalProblemBuilder(system, t_final=1.0) as builder:
+            problem = builder.build(
+                Minimise(builder.output(builder.t)[0] ** 2)
+            )
+    assert problem.system is system
 
 
 def test_variational_problem_builder_requires_a_loss():

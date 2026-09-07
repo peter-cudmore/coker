@@ -23,6 +23,65 @@ from an initial-condition function and an ``xdot`` function. If you pass a
 parameter space, the system becomes directly usable inside a
 :class:`~coker.dynamics.VariationalProblem`.
 
+Functional problem building
+---------------------------
+
+New code should use :class:`coker.dynamics.VariationalProblemBuilder`.  The
+builder is functional: declare controls and parameters at construction time,
+then pass a :class:`coker.toolkits.codesign.Minimise` objective and
+``subject_to`` comparisons to ``build``.  The imperative ``minimise`` and
+``add_*`` methods remain available for compatibility but emit
+``DeprecationWarning``.
+
+For example, a fixed-horizon path-planning problem can constrain the input and
+terminal state without constructing a loss callback:
+
+.. code-block:: python
+
+   from coker.dynamics import VariationalProblemBuilder
+   from coker.toolkits.codesign import Minimise
+
+   with VariationalProblemBuilder(
+       system,
+       t_final=5.0,
+       control=[control],
+   ) as problem:
+       x = problem.state(problem.t)
+       u = problem.input(problem.t)
+       x_goal = problem.state(problem.t_final)
+       built = problem.build(
+           Minimise(problem.integrate(u @ u) + x_goal @ x_goal),
+           subject_to=[u <= 1, u >= -1, x_goal == goal],
+       )
+
+For data fitting, declare the unknown as a bounded parameter and use the
+symbolic observed output directly in the objective:
+
+.. code-block:: python
+
+   with VariationalProblemBuilder(
+       system,
+       t_final=1.0,
+       parameters=[value],
+   ) as problem:
+       observed = 2.0
+       built = problem.build(
+           Minimise((problem.output(problem.t_final)[0] - observed) ** 2)
+       )
+
+The builder classifies comparisons by their time binding: expressions at
+``t`` are path constraints, expressions at ``0`` are initial point
+constraints, expressions at ``t_final`` (and parameter-only expressions) are
+terminal point constraints.  A numeric ``t_final`` is fixed; a
+``BoundedVariable`` declaration makes the horizon a free decision.  The
+``integrate`` operation denotes the dynamic quadrature
+``\int_0^T expr(t) dt`` rather than numerical sampling in the builder.
+``state(time)`` exposes the differential state, while ``output(time)`` is the
+observed system output (and may include algebraic or quadrature channels).
+The current executable lowering boundary is the CasADi backend; symbolic
+construction is backend-independent, but solving a built problem currently
+requires CasADi.
+
 Worked parameter-fitting example
 --------------------------------
 
