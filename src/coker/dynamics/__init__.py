@@ -1,4 +1,8 @@
 from coker.dynamics.dynamical_system import create_autonomous_ode, direct_sum
+from coker.dynamics.variational_problem_builder import (
+    VariationalProblemBuilder,
+)
+
 from coker.dynamics.transcription_helpers import (
     InterpolatingPoly,
     evaluate_legendre_polynomial,
@@ -60,6 +64,7 @@ __all__ = [
     "TranscriptionOptions",
     "ValueType",
     "VariationalProblem",
+    "VariationalProblemBuilder",
     "VariationalSolution",
     "VariationalIterationCallback",
     "SolveFailure",

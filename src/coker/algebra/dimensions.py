@@ -170,9 +170,13 @@ class FunctionSpace:
     def input_dimensions(self):
         return [
             (
-                Dimension(None)
-                if isinstance(arg, Scalar)
-                else Dimension(arg.dimension)
+                arg
+                if isinstance(arg, FunctionSpace)
+                else (
+                    Dimension(None)
+                    if isinstance(arg, Scalar)
+                    else Dimension(arg.dimension)
+                )
             )
             for arg in self.arguments
         ]
