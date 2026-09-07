@@ -1,7 +1,6 @@
 """Context-managed construction of :class:`VariationalProblem` values."""
 
-from __future__ import annotations
-
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
@@ -10,12 +9,12 @@ from coker.algebra.kernel import (
     Function,
     InequalityExpression,
     Noop,
+    OP,
     Scalar,
     Tape,
     TraceContext,
     Tracer,
     VectorSpace,
-    OP,
 )
 from coker.dynamics.types import (
     BoundedVariable,
@@ -27,6 +26,22 @@ from coker.dynamics.types import (
     VariationalProblem,
 )
 from coker.toolkits.codesign import Minimise
+
+
+@dataclass(frozen=True)
+class _LoweredConstraint:
+    """Immutable symbolic constraint record produced by the builder."""
+
+    operation: OP
+    residual: Tracer
+    lower_bound: float
+    upper_bound: float
+    trace_id: int
+    temporal_binding: str
+
+    @property
+    def trace_identity(self) -> int:
+        return self.trace_id
 
 
 class VariationalProblemBuilder:
@@ -65,6 +80,8 @@ class VariationalProblemBuilder:
         self._parameter_declarations = list(parameters or [])
         self.path_constraints: list[InequalityExpression] = []
         self.terminal_constraints: list[InequalityExpression] = []
+        self.initial_constraints: list[InequalityExpression] = []
+        self._lowered_constraints: list[_LoweredConstraint] = []
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
         self._closed = False
@@ -73,6 +90,7 @@ class VariationalProblemBuilder:
     def _make_symbols(self) -> None:
         t = self._trace.input(Scalar("t"))
         terminal = self._trace.input(Scalar("t_final"))
+        initial = self._trace.input(Scalar("t_0"))
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
         x = self._trace.input(VectorSpace("x", x_dim.flat()))
         u = (
@@ -85,9 +103,17 @@ class VariationalProblemBuilder:
             if self.system.parameters is not None
             else Noop()
         )
-        self._t, self._t_final, self._state, self._input, self._parameters = (
+        (
+            self._t,
+            self._t_final,
+            self._t_initial,
+            self._state,
+            self._input,
+            self._parameters,
+        ) = (
             t,
             terminal,
+            initial,
             x,
             u,
             p,
@@ -132,33 +158,40 @@ class VariationalProblemBuilder:
     ) -> None:
         self.terminal_constraints.append(constraint)
 
-    def state(self, time: Optional[Tracer] = None) -> Tracer:
-        self._require_open()
-        if time is not None:
-            self._validate_time(time)
-        return self._state
+    def _with_time(self, value: Tracer, time: object) -> Tracer:
+        binding = self._time_binding(time)
+        marker = {
+            "path": self._t,
+            "terminal": self._t_final,
+            "initial": self._t_initial,
+        }[binding]
+        # Preserve the endpoint dependency without changing the value.
+        return value + 0 * marker
 
-    def input(self, time: Optional[Tracer] = None) -> Tracer:
+    def state(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
-        if time is not None:
-            self._validate_time(time)
-        return self._input
+        return self._with_time(self._state, self._t if time is None else time)
 
-    def output(self, time: Optional[Tracer] = None) -> Tracer:
+    def input(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
-        if time is None:
-            time = self._t
-        self._validate_time(time)
+        if isinstance(self._input, Noop):
+            return self._input
+        return self._with_time(self._input, self._t if time is None else time)
+
+    def output(self, time: Optional[object] = None) -> Tracer:
+        self._require_open()
+        time = self._t if time is None else time
+        self._time_binding(time)
         if isinstance(self.system.y, Function):
             return self.system.y.call_inline(
-                time,
-                self._state,
+                time if isinstance(time, Tracer) else self._t_initial,
+                self.state(time),
                 self._algebraic,
-                self._input,
+                self.input(time),
                 self._parameters,
                 Noop(),
             )
-        return self._state
+        return self.state(time)
 
     def parameters_symbol(self) -> Tracer:
         self._require_open()
@@ -167,9 +200,28 @@ class VariationalProblemBuilder:
     def parameters(self) -> Tracer:
         return self.parameters_symbol()
 
-    def _validate_time(self, time: Tracer) -> None:
+    def _time_binding(self, time: object) -> str:
+        if isinstance(time, (int, float, np.number)):
+            if float(time) == 0:
+                return "initial"
+            raise ValueError(
+                "unsupported concrete time; allowed bindings are "
+                "0, t, and t_final"
+            )
         if not isinstance(time, Tracer) or time.tape is not self._trace:
-            raise ValueError("time marker belongs to a foreign trace")
+            raise ValueError(
+                "time marker belongs to a foreign or unrecognised trace"
+            )
+        if time.index == self._t.index:
+            return "path"
+        if time.index == self._t_final.index:
+            return "terminal"
+        raise ValueError(
+            "unsupported time binding; allowed bindings are 0, t, and t_final"
+        )
+
+    def _validate_time(self, time: object) -> None:
+        self._time_binding(time)
 
     def integrate(self, expression: Tracer) -> Tracer:
         raise NotImplementedError("integrate is implemented in Phase 3")
@@ -201,6 +253,7 @@ class VariationalProblemBuilder:
                 raise ValueError("Minimise cost must be scalar")
 
         constraints = list(subject_to or [])
+        lowered: list[_LoweredConstraint] = []
         for constraint in constraints:
             if not isinstance(constraint, Tracer):
                 raise TypeError("constraints must be symbolic comparisons")
@@ -208,6 +261,32 @@ class VariationalProblemBuilder:
             op = constraint.tape.op(constraint.index)
             if op not in {OP.EQUAL, OP.LESS_EQUAL, OP.LESS_THAN}:
                 raise TypeError("constraints must be symbolic comparisons")
+            residual, lower, upper = Tracer(
+                self._trace, constraint.index
+            ).as_halfplane_bound()
+            binding = self._classify_time(residual)
+            lowered.append(
+                _LoweredConstraint(
+                    operation=op,
+                    residual=residual,
+                    lower_bound=lower,
+                    upper_bound=upper,
+                    trace_id=id(self._trace),
+                    temporal_binding=binding,
+                )
+            )
+
+        path = list(self.path_constraints)
+        terminal = list(self.terminal_constraints)
+        initial = list(self.initial_constraints)
+        for record in lowered:
+            if record.temporal_binding == "path":
+                path.append(record)
+            elif record.temporal_binding == "initial":
+                initial.append(record)
+            else:
+                terminal.append(record)
+        self._lowered_constraints = lowered
 
         if isinstance(loss, Tracer):
             self._validate_trace(loss, "cost")
@@ -219,12 +298,41 @@ class VariationalProblemBuilder:
             control=self.control or None,
             parameters=self._parameter_declarations or None,
             system_parameter_map=self.system_parameter_map,
-            path_constraints=self.path_constraints,
-            terminal_constraints=self.terminal_constraints,
+            path_constraints=path,
+            terminal_constraints=terminal,
+            initial_constraints=initial,
             transcription_options=self.transcription_options
             or TranscriptionOptions(),
             backend=self.backend,
         )
+
+    def _classify_time(self, expression: Tracer) -> str:
+        found: set[str] = set()
+
+        def visit(value: object) -> None:
+            if isinstance(value, Tracer):
+                if value.tape is not self._trace:
+                    raise ValueError("constraint contains a foreign trace")
+                if value.index == self._t.index:
+                    found.add("path")
+                elif value.index == self._t_final.index:
+                    found.add("terminal")
+                elif value.index == self._t_initial.index:
+                    found.add("initial")
+                else:
+                    node = value.tape.nodes[value.index]
+                    for arg in node[1:]:
+                        visit(arg)
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    visit(item)
+
+        visit(expression)
+        if "path" in found:
+            return "path"
+        if "initial" in found:
+            return "initial"
+        return "terminal"
 
     def _validate_trace(self, expression: Tracer, label: str) -> None:
         if expression.tape is not self._trace:

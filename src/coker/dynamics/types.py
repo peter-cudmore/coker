@@ -287,6 +287,9 @@ class VariationalProblem:
     terminal_constraints: List[InequalityExpression] = field(
         default_factory=list
     )
+    initial_constraints: List[InequalityExpression] = field(
+        default_factory=list
+    )
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
     )
