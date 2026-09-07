@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -23,6 +23,91 @@ from coker.toolkits.codesign.optimisation import (
     SolveFailure,
     solve_info_from_casadi_stats,
 )
+
+
+@dataclass(frozen=True)
+class DecisionLayout:
+    """Contiguous decision-vector blocks and their associated values."""
+
+    horizon_size: int
+    path_size: int
+    control_size: int
+    parameter_size: int
+    horizon_lower: float = -ca.inf
+    horizon_guess: float = 1.0
+    horizon_upper: float = ca.inf
+
+    @property
+    def horizon_slice(self):
+        return slice(0, self.horizon_size)
+
+    @property
+    def path_slice(self):
+        start = self.horizon_size
+        return slice(start, start + self.path_size)
+
+    @property
+    def control_slice(self):
+        start = self.horizon_size + self.path_size
+        return slice(start, start + self.control_size)
+
+    @property
+    def parameter_slice(self):
+        start = self.horizon_size + self.path_size + self.control_size
+        return slice(start, start + self.parameter_size)
+
+    @property
+    def size(self):
+        return (
+            self.horizon_size
+            + self.path_size
+            + self.control_size
+            + self.parameter_size
+        )
+
+    def vector(self, horizon, path, control, parameters):
+        blocks = [path, control, parameters]
+        if self.horizon_size:
+            blocks.insert(0, horizon)
+        return ca.vertcat(*blocks)
+
+    def bounds(self, path_lower, control_lower, parameter_lower):
+        horizon = (
+            ca.DM(
+                [
+                    self.horizon_lower,
+                ]
+            )
+            if self.horizon_size
+            else ca.DM.zeros(0, 1)
+        )
+        return self.vector(
+            horizon,
+            path_lower,
+            ca.vertcat(*control_lower),
+            parameter_lower,
+        )
+
+    def guess(self, path, control, parameters):
+        horizon = (
+            ca.DM([self.horizon_guess])
+            if self.horizon_size
+            else ca.DM.zeros(0, 1)
+        )
+        return self.vector(horizon, path, control, parameters)
+
+    def upper_bounds(self, path_upper, control_upper, parameter_upper):
+        horizon = (
+            ca.DM([self.horizon_upper])
+            if self.horizon_size
+            else ca.DM.zeros(0, 1)
+        )
+        return self.vector(
+            horizon,
+            path_upper,
+            ca.vertcat(*control_upper),
+            parameter_upper,
+        )
 
 
 def noop(*_args):
@@ -172,7 +257,6 @@ def create_variational_solver(
         intervals=intervals,
         degrees=colocation_points,
     )
-
     proj_x = ca.hcat([ca.MX.eye(x_size), ca.MX.zeros(x_size, z_size + q_size)])
     proj_z = ca.hcat(
         [
@@ -247,14 +331,22 @@ def create_variational_solver(
     )
 
     parameter_names = list(p_output_map.indices)
+    horizon = problem.final_time_map.declaration
+    layout = DecisionLayout(
+        horizon_size=int(free_horizon),
+        path_size=int(poly_collection.symbols().shape[0]),
+        control_size=int(u_symbols.shape[0]),
+        parameter_size=int(p_symbols.shape[0]),
+        horizon_lower=horizon.lower_bound if horizon else -ca.inf,
+        horizon_guess=horizon.guess if horizon else 1.0,
+        horizon_upper=horizon.upper_bound if horizon else ca.inf,
+    )
+
     parameter_indices = dict(p_output_map.indices)
 
     path_symbols = poly_collection.symbols()
-    decision_variables = ca.vertcat(
-        *([horizon_symbol] if free_horizon else []),
-        path_symbols,
-        u_symbols,
-        p_symbols,
+    decision_variables = layout.vector(
+        horizon_symbol, path_symbols, u_symbols, p_symbols
     )
 
     equalities = []
@@ -363,8 +455,10 @@ def create_variational_solver(
 
     path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
     path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
-    lower_bound_base = ca.vertcat(path_lower_bound, *u_lower, p_lower_base)
-    upper_bound_base = ca.vertcat(path_upper_bound, *u_upper, p_upper_base)
+    lower_bound_base = layout.bounds(path_lower_bound, u_lower, p_lower_base)
+    upper_bound_base = layout.upper_bounds(
+        path_upper_bound, u_upper, p_upper_base
+    )
 
     def solution_proxy(*args):
         if control_factory is None:
@@ -439,6 +533,7 @@ def create_variational_solver(
     )
     assemble_solution = CasadiSolutionAssembler(
         problem=problem,
+        decision_layout=layout,
         output_function=f_out,
         poly_collection=poly_collection,
         projectors=projectors,
@@ -467,9 +562,8 @@ def create_variational_solver(
         ca.DM.zeros(q_size, 1),
     )
     n_reps = int(path_symbols.shape[0] / state_guess.shape[0])
-    decision_variables_0 = ca.vertcat(
-        ca.repmat(state_guess, n_reps), u_guess, p_guess_base
-    )
+    path_guess = ca.repmat(state_guess, n_reps)
+    decision_variables_0 = layout.guess(path_guess, u_guess, p_guess_base)
 
     init_solver = None
     if problem.transcription_options.initialise_near_guess:
@@ -488,7 +582,7 @@ def create_variational_solver(
     nlp_spec = {"f": cost, "x": decision_variables, "g": g}
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, nlp_solver_options)
 
-    parameter_offset = int(path_symbols.shape[0] + u_symbols.shape[0])
+    parameter_offset = layout.parameter_slice.start
 
     def map_arguments(
         fixed_parameters: Dict[str, ParameterVariable],
@@ -554,6 +648,7 @@ class CasadiSolutionAssembler:
         self,
         *,
         problem: VariationalProblem,
+        decision_layout: DecisionLayout,
         output_function: ca.Function,
         poly_collection: "SymbolicPolyCollection",
         projectors: Tuple[
@@ -564,6 +659,7 @@ class CasadiSolutionAssembler:
         decode_controls: Optional[Callable[[ca.DM], list]],
     ):
         self.problem = problem
+        self.decision_layout = decision_layout
         self.output_function = output_function
         self.poly_collection = poly_collection
         self.projectors = projectors
@@ -601,7 +697,11 @@ class CasadiSolutionAssembler:
             path=path,
             control_solutions=control_solutions,
             output=self.problem.system.y,
-            t_final=self.problem.t_final,
+            t_final=(
+                float(decision_variables[self.decision_layout.horizon_slice])
+                if self.decision_layout.horizon_size
+                else self.problem.t_final
+            ),
             solve_info=solve_info,
             path_constraint_exprs=self.problem.path_constraints,
             terminal_constraint_exprs=self.problem.terminal_constraints,
