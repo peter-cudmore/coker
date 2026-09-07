@@ -18,6 +18,7 @@ from coker.algebra.kernel import (
     Function,
     Noop,
     InequalityExpression,
+    Tracer,
     function,
 )
 import numpy as np
@@ -161,7 +162,7 @@ class DynamicalSystem:
         (out,) = self.y.output_shape()
         args = [t.to_space("t")]
         if self.inputs is not Noop():
-            args.append(u.to_space("u"))
+            args.append(u if isinstance(u, FunctionSpace) else u.to_space("u"))
         if p is not None:
             args.append(p.to_space("p"))
         return FunctionSpace("y", args, [out.to_space("y")])
@@ -237,6 +238,7 @@ Solution = Union[
     DynamicalSystem, Callable[[Scalar, ControlLaw, ValueType], Scalar]
 ]
 LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
+SymbolicLoss = Union[LossFunction, Tracer]
 
 
 class VariationalIterationCallback:
@@ -275,9 +277,9 @@ class TranscriptionOptions:
 
 @dataclass
 class VariationalProblem:
-    loss: LossFunction
+    loss: LossFunction | Tracer
     system: DynamicalSystem
-    t_final: float
+    t_final: object
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
     system_parameter_map: Optional[np.ndarray] = None
@@ -315,20 +317,22 @@ class VariationalProblem:
         if self.control is not None:
             assert self.system.inputs is not Noop()
 
+        if isinstance(self.loss, Tracer):
+            return
         if not isinstance(self.loss, Function):
             solution_space = self.system.output_as_function_space()
+            parameter_space = VectorSpace("p", len(self.parameters or []))
             if self.parameters:
-                parameter_space = (
-                    VectorSpace("p", len(self.parameters))
-                    if self.parameters
-                    else None
-                )
                 solution_space.arguments[-1] = parameter_space
-            loss = function(
-                arguments=[solution_space, parameter_space],
+
+            loss_arguments = [solution_space]
+            if self.control:
+                loss_arguments.append(self.system.inputs)
+            loss_arguments.append(parameter_space)
+            self.loss = function(
+                arguments=loss_arguments,
                 implementation=self.loss,
             )
-            self.loss = loss
 
     def get_solver(self, backend: Optional[str] = None):
         from coker.backends import get_backend_by_name
