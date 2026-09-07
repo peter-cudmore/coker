@@ -328,6 +328,15 @@ def _normalize_constraints(constraints):
     ]
 
 
+@dataclass(frozen=True)
+class QuadratureSpec:
+    """A builder-owned running integral channel."""
+
+    integrand: Tracer
+    initial_state: float = 0.0
+    channel: int = 0
+
+
 @dataclass
 class VariationalProblem:
     loss: LossFunction | Tracer
@@ -337,6 +346,7 @@ class VariationalProblem:
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
     system_parameter_map: Optional[np.ndarray] = None
+    quadratures: List[QuadratureSpec] = field(default_factory=list)
     path_constraints: List[InequalityExpression] = field(default_factory=list)
     terminal_constraints: List[InequalityExpression] = field(
         default_factory=list

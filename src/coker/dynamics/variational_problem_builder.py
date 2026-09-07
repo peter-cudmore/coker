@@ -1,6 +1,6 @@
 """Context-managed construction of :class:`VariationalProblem` values."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import warnings
 from typing import Optional, Sequence
 
@@ -17,7 +17,6 @@ from coker.algebra.kernel import (
     TraceContext,
     Tracer,
     VectorSpace,
-    function,
 )
 from coker.dynamics.types import (
     BoundedVariable,
@@ -27,6 +26,7 @@ from coker.dynamics.types import (
     FinalTimeMapping,
     LossFunction,
     ParameterVariable,
+    QuadratureSpec,
     TranscriptionOptions,
     VariationalProblem,
 )
@@ -302,99 +302,16 @@ class VariationalProblemBuilder:
 
         channel = len(self._quadratures)
         state = self._trace.input(Scalar(f"q_{channel}"))
-        record = _Quadrature(
-            integrand=expression,
-            state=state,
-            initial_state=0.0,
-            channel=channel,
-            trace_id=id(self._trace),
+        self._quadratures.append(
+            QuadratureSpec(
+                integrand=expression,
+                initial_state=0.0,
+                channel=channel,
+            )
         )
-        self._quadratures.append(record)
         self._quadrature_derivative.append(expression)
-        self._quadrature_initial.append(record.initial_state)
-        self._sync_quadrature_system()
+        self._quadrature_initial.append(0.0)
         return state
-
-    def _clone_expression(self, expression: Tracer, target: Tape, mapping):
-        """Copy an expression graph onto the dynamics function tape."""
-        key = (id(expression.tape), expression.index)
-        if key in mapping:
-            return mapping[key]
-        op, *args = expression.tape.nodes[expression.index]
-        cloned_args = [
-            (
-                self._clone_expression(arg, target, mapping)
-                if isinstance(arg, Tracer)
-                else arg
-            )
-            for arg in args
-        ]
-        result = target.append(op, *cloned_args)
-        cloned = Tracer(target, result)
-        mapping[key] = cloned
-        return cloned
-
-    def _sync_quadrature_system(self) -> None:
-        """Create copied system with appended quadrature channels."""
-        if not self._quadrature_derivative:
-            return
-
-        base = self._base_system
-        spaces = base.dxdt.input_spaces()
-        tape = Tape(self.backend)
-        args = [tape.input(space) for space in spaces]
-        mapping = {
-            (id(self._trace), self._t.index): args[0],
-            (id(self._trace), self._state.index): args[1],
-        }
-        for source, target in zip(
-            (self._algebraic, self._input, self._parameters), args[2:]
-        ):
-            if isinstance(source, Tracer):
-                mapping[(id(self._trace), source.index)] = target
-
-        outputs = []
-        if isinstance(base.dqdt, Function):
-            existing = base.dqdt.call_inline(*args)
-            outputs.append(existing)
-        outputs.extend(
-            self._clone_expression(expression, tape, mapping)
-            for expression in self._quadrature_derivative
-        )
-        with TraceContext(tape):
-            combined = np.concatenate(
-                [np.reshape(output, (1,)) for output in outputs]
-            )
-        derivative = Function(
-            tape, combined, self.backend, name="builder_quadratures"
-        )
-        self.system = self._system_with_quadratures(base, derivative)
-
-    def _system_with_quadratures(
-        self, base: DynamicalSystem, derivative: Function
-    ) -> DynamicalSystem:
-        """Return a copied system with an augmented q output."""
-
-        _t, _x, _z, _u, _p, q_dim = base.y.input_shape()
-        existing_q_size = 0 if q_dim is None else q_dim.flat()
-        q_size = existing_q_size + len(self._quadrature_derivative)
-        y_spaces = base.y.input_spaces()
-        y_spaces[-1] = VectorSpace("q", q_size)
-
-        def output(*values):
-            q = values[-1]
-            if existing_q_size:
-                q = q[:existing_q_size]
-                if q_dim.is_scalar():
-                    q = q[0]
-            else:
-                q = None
-            return base.y.call_inline(*values[:-1], q)
-
-        output_function = function(
-            y_spaces, output, backend=self.backend, name="builder_output"
-        )
-        return replace(base, dqdt=derivative, y=output_function)
 
     def build(
         self,
@@ -466,6 +383,7 @@ class VariationalProblemBuilder:
             t_final=self.t_final_declaration,
             control=self.control or None,
             parameters=self._parameter_declarations or None,
+            quadratures=list(self._quadratures),
             system_parameter_map=self.system_parameter_map,
             final_time_map=(
                 FinalTimeMapping(

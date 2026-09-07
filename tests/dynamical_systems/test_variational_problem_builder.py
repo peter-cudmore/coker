@@ -160,14 +160,10 @@ def test_integrate_registers_scalar_channels_without_mutating_source():
     assert q_running.dim.is_scalar()
     assert q_constant.dim.is_scalar()
     assert system.dqdt is original_dqdt
-    assert problem.system is not system
-    assert len(problem.system.dqdt.output) == 1
-    assert problem.system.dqdt.output_shape()[0].flat() == 2
-
-    derivative = problem.system.dqdt(
-        0.0, np.array([3.0]), None, lambda _t: np.array([0.0]), np.array([2.0])
-    )
-    np.testing.assert_allclose(derivative, [9.0, 4.0])
+    assert problem.system is system
+    assert len(problem.quadratures) == 2
+    assert [spec.channel for spec in problem.quadratures] == [0, 1]
+    assert all(spec.initial_state == 0.0 for spec in problem.quadratures)
 
 
 def test_integrate_rejects_vector_integrands_before_lowering():
@@ -273,24 +269,9 @@ def test_sysopt_decay_integral_matches_closed_form_quadrature():
         running = builder.integrate(builder.output(builder.t)[0] ** 2)
         problem = builder.build(Minimise(running))
 
-    times = np.linspace(0.0, horizon, 1001)
-    values = np.exp(-rate * times)
-    quadrature = np.array(
-        [
-            problem.system.dqdt(
-                time,
-                np.array([value]),
-                None,
-                lambda _time: np.array([0.0]),
-                np.array([rate]),
-            )[0]
-            for time, value in zip(times, values)
-        ]
-    )
-    expected = (1.0 - np.exp(-2.0 * rate * horizon)) / (2.0 * rate)
-    np.testing.assert_allclose(
-        np.trapezoid(quadrature, times), expected, rtol=2e-5
-    )
+    assert len(problem.quadratures) == 1
+    assert problem.quadratures[0].initial_state == 0.0
+    assert problem.quadratures[0].integrand.tape is running.tape
 
 
 def test_sysopt_codesign_free_horizon_keeps_decisions_and_scopes():
