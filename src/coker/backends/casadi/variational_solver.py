@@ -242,7 +242,7 @@ def create_variational_solver(
     z_size = z_dim.flat() if z_dim else 0
     q_size = (q_dim.flat() if q_dim else 0) + len(problem.quadratures)
     tolerance = problem.transcription_options.absolute_tolerance
-    free_horizon = problem.final_time_map.is_free
+    free_horizon = problem.horizon_decision is not None
 
     intervals = split_at_non_differentiable_points(
         problem.control if problem.control else [],
@@ -336,13 +336,11 @@ def create_variational_solver(
         proj_p = ca.DM.eye(p.shape[0])
 
     horizon_symbol = (
-        ca.MX.sym(problem.final_time_map.declaration.name)
-        if free_horizon
-        else None
+        ca.MX.sym(problem.horizon_decision.name) if free_horizon else None
     )
 
     parameter_names = list(p_output_map.indices)
-    horizon = problem.final_time_map.declaration
+    horizon = problem.horizon_decision
     layout = DecisionLayout(
         horizon_size=int(free_horizon),
         path_size=int(poly_collection.symbols().shape[0]),
