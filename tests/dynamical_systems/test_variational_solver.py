@@ -5,10 +5,12 @@ from coker.dynamics import (
     BoundedVariable,
     VariationalProblem,
     VariationalSolution,
-    create_autonomous_ode,
 )
 from coker.toolkits.codesign import SolveFailure
-from coker.dynamics.dynamical_system import create_control_system
+from coker.dynamics.dynamical_system import (
+    create_autonomous_ode,
+    create_control_system,
+)
 
 # Dynamics
 # xdot = a x + u
@@ -684,3 +686,64 @@ def test_reentrant_solver_warm_starts_from_previous_solution(
         np.asarray(solver._solver.calls[1]["lam_g0"]),
         np.asarray(solver._solver.results[0]["lam_g"]),
     )
+
+
+def test_casadi_path_state_constraint_is_enforced(variational_backend):
+    if variational_backend != "casadi":
+        pytest.skip("CasADi lowering regression")
+
+    def x0(p):
+        return p[0]
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 1),
+        x0=x0,
+        xdot=lambda _x, _p: 0,
+        backend="numpy",
+    )
+    path_bound = function(
+        system.y.input_spaces(),
+        lambda _t, x, _z, _u, _p, _q: 1.0 - x[0],
+        backend="casadi",
+    )
+    problem = VariationalProblem(
+        loss=lambda f, p: (f(1.0, p) - 2.0) ** 2,
+        system=system,
+        parameters=[BoundedVariable("x0", 0.5, 3.0, guess=2.0)],
+        t_final=1.0,
+        path_constraints=[path_bound >= 0],
+        backend="casadi",
+    )
+
+    solution = problem()
+    assert solution.parameter_solutions["x0"] <= 1.0 + 1e-4
+
+
+def test_casadi_initial_point_constraint_is_enforced(variational_backend):
+    if variational_backend != "casadi":
+        pytest.skip("CasADi lowering regression")
+
+    def x0(p):
+        return p[0]
+
+    system = create_autonomous_ode(
+        parameters=VectorSpace("p", 1),
+        x0=x0,
+        xdot=lambda _x, _p: 0,
+        backend="numpy",
+    )
+    initial_bound = function(
+        system.y.input_spaces(),
+        lambda _t, _x, _z, _u, p, _q: p[0] - 1.0,
+        backend="casadi",
+    )
+    problem = VariationalProblem(
+        loss=lambda f, p: (f(1.0, p) - 2.0) ** 2,
+        system=system,
+        parameters=[BoundedVariable("x0", 0.5, 3.0, guess=2.0)],
+        t_final=1.0,
+        initial_constraints=[initial_bound >= 0],
+        backend="casadi",
+    )
+    solution = problem()
+    assert solution.parameter_solutions["x0"] >= 1.0 - 1e-4

@@ -156,10 +156,11 @@ def create_variational_solver(
     z_size = z_dim.flat() if z_dim else 0
     q_size = q_dim.flat() if q_dim else 0
     tolerance = problem.transcription_options.absolute_tolerance
+    free_horizon = problem.final_time_map.is_free
 
     intervals = split_at_non_differentiable_points(
         problem.control if problem.control else [],
-        problem.t_final,
+        1.0 if free_horizon else problem.t_final,
         problem.transcription_options,
     )
     colocation_points = [problem.transcription_options.minimum_degree] * len(
@@ -193,22 +194,25 @@ def create_variational_solver(
     def dynamics(*args):
         return casadi.evaluate(problem.system.dxdt, args)
 
+    def quadrature(*args):
+        if problem.system.dqdt is not None:
+            return casadi.evaluate(problem.system.dqdt, args)
+        return noop
+
     def algebraic(*args):
         if problem.system.g:
             return casadi.evaluate(problem.system.g, args)
         return noop
 
-    def quadrature(*args):
-        if problem.system.dqdt:
-            return casadi.evaluate(problem.system.dqdt, args)
-        return noop
-
     control_variables = problem.control or []
     control_factory = (
-        ControlFactory(control_variables, problem.t_final)
+        ControlFactory(
+            control_variables, 1.0 if free_horizon else problem.t_final
+        )
         if control_variables
         else None
     )
+
     if control_factory is None:
         u_symbols = ca.MX.zeros(0, 1)
         u_lower = []
@@ -236,11 +240,22 @@ def create_variational_solver(
     else:
         proj_p = ca.DM.eye(p.shape[0])
 
+    horizon_symbol = (
+        ca.MX.sym(problem.final_time_map.declaration.name)
+        if free_horizon
+        else None
+    )
+
     parameter_names = list(p_output_map.indices)
     parameter_indices = dict(p_output_map.indices)
 
     path_symbols = poly_collection.symbols()
-    decision_variables = ca.vertcat(path_symbols, u_symbols, p_symbols)
+    decision_variables = ca.vertcat(
+        *([horizon_symbol] if free_horizon else []),
+        path_symbols,
+        u_symbols,
+        p_symbols,
+    )
 
     equalities = []
     (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
@@ -261,35 +276,69 @@ def create_variational_solver(
         xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
     )
 
+    def constraint_parts(constraint):
+        """Return a residual and explicit bounds for old/new records."""
+        if hasattr(constraint, "residual"):
+            return (
+                constraint.residual,
+                constraint.lower_bound,
+                constraint.upper_bound,
+            )
+        # Imperative constraints retain a Function value and numeric bounds.
+        return constraint.value, constraint.lower, constraint.upper
+
+    def append_constraint(constraint, args):
+        residual, lower, upper = constraint_parts(constraint)
+        (value,) = casadi.evaluate(residual, args)
+        g_constraints.append(value)
+        g_constraint_lowers.append(casadi.to_backend_array(lower))
+        g_constraint_uppers.append(casadi.to_backend_array(upper))
+
+    g_constraints = []
+    g_constraint_lowers = []
+    g_constraint_uppers = []
+    q_initial = ca.DM.zeros(q_size, 1)
+    u_initial = control_eval(t0)
+    initial_args = (t0, proj_x @ x0_symbol, z0_val, u_initial, p, q_initial)
+    for constraint in problem.initial_constraints:
+        append_constraint(constraint, initial_args)
+
+    interval_dynamics = []
+    interval_quadratures = []
     for poly in poly_collection.polys:
         interval_dynamics = []
         interval_quadratures = []
         for t, v, dv in poly.knot_points():
+            physical_t = horizon_symbol * t if free_horizon else t
             x = proj_x @ v
             z = proj_z @ v
             if z_size > 0:
                 z += z0_val
-
             dx = proj_x @ dv
-            (dynamics_ij,) = dynamics(t, x, z, control_eval, proj_p @ p)
+            (dynamics_ij,) = dynamics(
+                physical_t, x, z, control_eval(t), proj_p @ p
+            )
+            scale = horizon_symbol if free_horizon else 1
             interval_dynamics.append(dynamics_ij)
-            equalities.append(dx - dynamics_ij)
+            equalities.append(dx - scale * dynamics_ij)
 
             if q_size > 0:
                 dq = proj_q @ dv
                 (quadrature_ij,) = quadrature(
-                    t, x, z, control_eval, proj_p @ p
+                    physical_t, x, z, control_eval(t), proj_p @ p
                 )
+                quadrature_ij = scale * quadrature_ij
                 equalities.append(dq - quadrature_ij)
                 interval_quadratures.append(quadrature_ij)
 
             if z_size > 0:
-                (alg,) = algebraic(t, x, z, control_eval, proj_p @ p)
+                (alg,) = algebraic(
+                    physical_t, x, z, control_eval(t), proj_p @ p
+                )
                 equalities.append(alg)
 
         _, v_start = poly.start_point()
         _, v_end = poly.end_point()
-
         d_x = ca.hcat(interval_dynamics)
         weights = ca.DM(poly.weights[0, :-1])
         equalities.append(proj_x @ v_end - proj_x @ v_start - d_x @ weights)
@@ -299,6 +348,19 @@ def create_variational_solver(
                 proj_q @ v_end - proj_q @ v_start - d_q @ weights
             )
 
+    # Path constraints apply at interval endpoints and collocation knots.
+    for poly in poly_collection.polys:
+        for t, v in (poly.start_point(), poly.end_point()):
+            physical_t = horizon_symbol * t if free_horizon else t
+            x = proj_x @ v
+            z = proj_z @ v
+            if z_size > 0:
+                z += z0_val
+            q = proj_q @ v
+            args = (physical_t, x, z, control_eval(t), proj_p @ p, q)
+            for constraint in problem.path_constraints:
+                append_constraint(constraint, args)
+
     path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
     path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
     lower_bound_base = ca.vertcat(path_lower_bound, *u_lower, p_lower_base)
@@ -306,10 +368,14 @@ def create_variational_solver(
 
     def solution_proxy(*args):
         if control_factory is None:
-            tau, p_val = args
-            u_val = ca.MX.zeros(u_symbols.shape)
+            if len(args) == 1:
+                tau, p_val = args[0], p
+            else:
+                tau, p_val = args
+            u_val = control_eval(tau)
         else:
-            tau, u_val, p_val = args
+            tau, control_val, p_val = args
+            u_val = control_val(tau)
         inner = poly_collection(tau)
         x_tau = proj_x @ inner
         z_tau = proj_z @ inner
@@ -327,25 +393,28 @@ def create_variational_solver(
             problem.loss, [solution_proxy, control_factory, p]
         )
 
-    g = ca.vertcat(*[e for e in equalities if e is not None])
-    ubg = tolerance * ca.DM.ones(g.shape)
-    lbg = -tolerance * ca.DM.ones(g.shape)
+    equality_values = [e for e in equalities if e is not None]
+    g = ca.vertcat(*equality_values, *g_constraints)
+    equality_size = sum(e.shape[0] for e in equality_values)
+    ubg = ca.vertcat(
+        tolerance * ca.DM.ones(equality_size, 1), *g_constraint_uppers
+    )
+    lbg = ca.vertcat(
+        -tolerance * ca.DM.ones(equality_size, 1), *g_constraint_lowers
+    )
 
     t_end, v_end = poly_collection.polys[-1].end_point()
     x_end_val = proj_x @ v_end
     z_end_val = proj_z @ v_end
     q_end_val = proj_q @ v_end
-    u_end = (
-        control_eval(t_end)
-        if control_factory is not None
-        else control_eval(t_end)
-    )
+    u_end = control_eval(t_end)
     end_args = (t_end, x_end_val, z_end_val, u_end, p, q_end_val)
 
     for constraint in problem.terminal_constraints:
-        (g_inner,) = casadi.evaluate(constraint.value, end_args)
-        g_lower = casadi.to_backend_array(constraint.lower)
-        g_upper = casadi.to_backend_array(constraint.upper)
+        residual, lower, upper = constraint_parts(constraint)
+        (g_inner,) = casadi.evaluate(residual, end_args)
+        g_lower = casadi.to_backend_array(lower)
+        g_upper = casadi.to_backend_array(upper)
         assert g_lower.shape == g_inner.shape == g_upper.shape
         g = ca.vertcat(g, g_inner)
         lbg = ca.vertcat(lbg, g_lower)
