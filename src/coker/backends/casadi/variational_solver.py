@@ -499,10 +499,13 @@ def create_variational_solver(
         return y_val
 
     if control_factory is None:
-        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
+        (cost,) = casadi.evaluate(
+            problem.objective.expression, [solution_proxy, p]
+        )
     else:
         (cost,) = casadi.evaluate(
-            problem.loss, [solution_proxy, control_factory, p]
+            problem.objective.expression,
+            [solution_proxy, control_factory, p],
         )
 
     equality_values = [e for e in equalities if e is not None]
