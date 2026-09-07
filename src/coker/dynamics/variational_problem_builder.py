@@ -44,6 +44,19 @@ class _Quadrature:
     trace_id: int
 
 
+@dataclass
+class _LegacyProblemState:
+    loss: Optional[LossFunction] = None
+    path_constraints: list[InequalityExpression] = None
+    terminal_constraints: list[InequalityExpression] = None
+    initial_constraints: list[InequalityExpression] = None
+
+    def __post_init__(self):
+        self.path_constraints = list(self.path_constraints or [])
+        self.terminal_constraints = list(self.terminal_constraints or [])
+        self.initial_constraints = list(self.initial_constraints or [])
+
+
 class VariationalProblemBuilder:
     """Build a variational problem from one, context-owned symbolic trace."""
 
@@ -91,12 +104,9 @@ class VariationalProblemBuilder:
         self.backend = backend
         self.transcription_options = transcription_options
         self.system_parameter_map = system_parameter_map
-        self.loss: Optional[LossFunction] = None
+        self._legacy = _LegacyProblemState()
         self.control = list(control or [])
         self._parameter_declarations = list(parameters or [])
-        self.path_constraints: list[InequalityExpression] = []
-        self.terminal_constraints: list[InequalityExpression] = []
-        self.initial_constraints: list[InequalityExpression] = []
         self._lowered_constraints: list[ConstraintSpec] = []
         self._quadratures: list[_Quadrature] = []
         self._quadrature_derivative: list[Tracer] = []
@@ -107,9 +117,30 @@ class VariationalProblemBuilder:
         self._closed = False
         self._make_symbols()
 
+    @property
+    def loss(self):
+        return self._legacy.loss
+
+    @loss.setter
+    def loss(self, value):
+        self._legacy.loss = value
+
+    @property
+    def path_constraints(self):
+        return self._legacy.path_constraints
+
+    @property
+    def terminal_constraints(self):
+        return self._legacy.terminal_constraints
+
+    @property
+    def initial_constraints(self):
+        return self._legacy.initial_constraints
+
     def _make_symbols(self) -> None:
         t = self._trace.input(Scalar("t"))
         terminal = self._trace.input(Scalar("t_final"))
+
         initial = self._trace.input(Scalar("t_0"))
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
         x = self._trace.input(VectorSpace("x", x_dim.flat()))
