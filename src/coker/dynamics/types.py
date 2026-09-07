@@ -329,6 +329,13 @@ def _normalize_constraints(constraints):
 
 
 @dataclass(frozen=True)
+class ObjectiveSpec:
+    """Canonical variational objective expression."""
+
+    expression: Function | Tracer
+
+
+@dataclass(frozen=True)
 class QuadratureSpec:
     """A builder-owned running integral channel."""
 
@@ -358,6 +365,7 @@ class VariationalProblem:
         default_factory=TranscriptionOptions
     )
     backend: Optional[str] = "casadi"
+    objective: ObjectiveSpec = field(init=False)
 
     @property
     def horizon_decision(self) -> Optional[BoundedVariable]:
@@ -406,13 +414,12 @@ class VariationalProblem:
             assert self.system.inputs is not Noop()
 
         if isinstance(self.loss, Tracer):
-            return
-        if not isinstance(self.loss, Function):
+            self.objective = ObjectiveSpec(self.loss)
+        elif not isinstance(self.loss, Function):
             solution_space = self.system.output_as_function_space()
             parameter_space = VectorSpace("p", len(self.parameters or []))
             if self.parameters:
                 solution_space.arguments[-1] = parameter_space
-
             loss_arguments = [solution_space]
             if self.control:
                 loss_arguments.append(self.system.inputs)
@@ -421,6 +428,9 @@ class VariationalProblem:
                 arguments=loss_arguments,
                 implementation=self.loss,
             )
+            self.objective = ObjectiveSpec(self.loss)
+        else:
+            self.objective = ObjectiveSpec(self.loss)
 
     def get_solver(self, backend: Optional[str] = None):
         from coker.backends import get_backend_by_name
