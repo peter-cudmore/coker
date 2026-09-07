@@ -59,8 +59,10 @@ def test_variational_problem_builder_collects_problem_terms():
     assert problem.t_final == 2.0
     assert problem.control == [control]
     assert problem.parameters == [parameter]
-    assert problem.path_constraints == [constraint]
-    assert problem.terminal_constraints == [constraint]
+    assert problem.path_constraints[0].residual is constraint.value
+    assert problem.path_constraints[0].lower_bound == constraint.lower
+    assert problem.path_constraints[0].upper_bound == constraint.upper
+    assert problem.terminal_constraints[0].residual is constraint.value
 
 
 def test_functional_builder_does_not_emit_deprecation_warnings():

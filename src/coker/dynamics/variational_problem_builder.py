@@ -21,6 +21,7 @@ from coker.algebra.kernel import (
 )
 from coker.dynamics.types import (
     BoundedVariable,
+    ConstraintSpec,
     ControlVariable,
     DynamicalSystem,
     FinalTimeMapping,
@@ -43,29 +44,8 @@ class _Quadrature:
     trace_id: int
 
 
-@dataclass(frozen=True)
-class _LoweredConstraint:
-    """Immutable symbolic constraint record produced by the builder."""
-
-    operation: OP
-    residual: Tracer
-    lower_bound: float
-    upper_bound: float
-    trace_id: int
-    temporal_binding: str
-
-    @property
-    def trace_identity(self) -> int:
-        return self.trace_id
-
-
 class VariationalProblemBuilder:
-    """Build a variational problem from one, context-owned symbolic trace.
-
-    The symbolic accessors are intentionally scoped to the builder context.
-    The imperative ``minimise`` and ``add_*`` methods remain available while
-    callers migrate to :meth:`build`.
-    """
+    """Build a variational problem from one, context-owned symbolic trace."""
 
     def __init__(
         self,
@@ -117,7 +97,7 @@ class VariationalProblemBuilder:
         self.path_constraints: list[InequalityExpression] = []
         self.terminal_constraints: list[InequalityExpression] = []
         self.initial_constraints: list[InequalityExpression] = []
-        self._lowered_constraints: list[_LoweredConstraint] = []
+        self._lowered_constraints: list[ConstraintSpec] = []
         self._quadratures: list[_Quadrature] = []
         self._quadrature_derivative: list[Tracer] = []
         self._quadrature_initial: list[float] = []
@@ -442,7 +422,7 @@ class VariationalProblemBuilder:
                 raise ValueError("Minimise cost must be scalar")
 
         constraints = list(subject_to or [])
-        lowered: list[_LoweredConstraint] = []
+        lowered: list[ConstraintSpec] = []
         for constraint in constraints:
             if not isinstance(constraint, Tracer):
                 raise TypeError("constraints must be symbolic comparisons")
@@ -455,12 +435,10 @@ class VariationalProblemBuilder:
             ).as_halfplane_bound()
             binding = self._classify_time(residual)
             lowered.append(
-                _LoweredConstraint(
-                    operation=op,
+                ConstraintSpec(
                     residual=residual,
                     lower_bound=lower,
                     upper_bound=upper,
-                    trace_id=id(self._trace),
                     temporal_binding=binding,
                 )
             )

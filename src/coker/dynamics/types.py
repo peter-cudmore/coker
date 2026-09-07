@@ -297,6 +297,37 @@ class FinalTimeMapping:
         return self.declaration is not None
 
 
+@dataclass(frozen=True)
+class ConstraintSpec:
+    """Backend-neutral normalized comparison constraint."""
+
+    residual: Function | Tracer
+    lower_bound: object
+    upper_bound: object
+    temporal_binding: Optional[str] = None
+
+    @classmethod
+    def from_expression(
+        cls, constraint: InequalityExpression
+    ) -> "ConstraintSpec":
+        return cls(
+            residual=constraint.value,
+            lower_bound=constraint.lower,
+            upper_bound=constraint.upper,
+        )
+
+
+def _normalize_constraints(constraints):
+    return [
+        (
+            item
+            if isinstance(item, ConstraintSpec)
+            else ConstraintSpec.from_expression(item)
+        )
+        for item in constraints
+    ]
+
+
 @dataclass
 class VariationalProblem:
     loss: LossFunction | Tracer
@@ -333,6 +364,13 @@ class VariationalProblem:
         return decisions
 
     def __post_init__(self):
+        self.path_constraints = _normalize_constraints(self.path_constraints)
+        self.terminal_constraints = _normalize_constraints(
+            self.terminal_constraints
+        )
+        self.initial_constraints = _normalize_constraints(
+            self.initial_constraints
+        )
         if self.system_parameter_map is not None:
             expected_shape = (
                 self.system.parameters.size,
