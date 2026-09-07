@@ -6,6 +6,7 @@ import casadi as ca
 import numpy as np
 
 from coker.backends.backend import VariationalSolver, get_backend_by_name
+from coker.backends.casadi.casadi import lower as lower_casadi
 from coker.dynamics import (
     BoundedVariable,
     ConstantControlVariable,
@@ -239,7 +240,7 @@ def create_variational_solver(
     x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
     x_size = x_dim.flat()
     z_size = z_dim.flat() if z_dim else 0
-    q_size = q_dim.flat() if q_dim else 0
+    q_size = (q_dim.flat() if q_dim else 0) + len(problem.quadratures)
     tolerance = problem.transcription_options.absolute_tolerance
     free_horizon = problem.final_time_map.is_free
 
@@ -287,6 +288,16 @@ def create_variational_solver(
         if problem.system.g:
             return casadi.evaluate(problem.system.g, args)
         return noop
+
+    def registered_quadratures(args):
+        values = []
+        for spec in problem.quadratures:
+            workspace = dict(zip(spec.integrand.tape.input_indicies, args))
+            _, outputs = lower_casadi(
+                spec.integrand.tape, [spec.integrand], workspace
+            )
+            values.append(outputs[0])
+        return values
 
     control_variables = problem.control or []
     control_factory = (
@@ -408,10 +419,25 @@ def create_variational_solver(
 
             if q_size > 0:
                 dq = proj_q @ dv
-                (quadrature_ij,) = quadrature(
-                    physical_t, x, z, control_eval(t), proj_p @ p
+                quadrature_values = []
+                if q_dim:
+                    (base_quadrature,) = quadrature(
+                        physical_t, x, z, control_eval(t), proj_p @ p
+                    )
+                    quadrature_values.append(base_quadrature)
+                quadrature_values.extend(
+                    registered_quadratures(
+                        (
+                            physical_t,
+                            x,
+                            z,
+                            control_eval(t),
+                            proj_p @ p,
+                            proj_q @ v,
+                        )
+                    )
                 )
-                quadrature_ij = scale * quadrature_ij
+                quadrature_ij = scale * ca.vertcat(*quadrature_values)
                 equalities.append(dq - quadrature_ij)
                 interval_quadratures.append(quadrature_ij)
 
