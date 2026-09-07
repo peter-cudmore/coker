@@ -1,6 +1,7 @@
 """Context-managed construction of :class:`VariationalProblem` values."""
 
 from dataclasses import dataclass, replace
+import warnings
 from typing import Optional, Sequence
 
 import numpy as np
@@ -179,21 +180,59 @@ class VariationalProblemBuilder:
         return self._t_final
 
     def minimise(self, loss: LossFunction) -> None:
-        """Set the loss for the legacy imperative API."""
+        """Set the loss for the legacy imperative API.
+
+        .. deprecated::
+           Use :meth:`build` with a :class:`~coker.toolkits.codesign.Minimise`
+           objective instead.
+        """
+        warnings.warn(
+            "VariationalProblemBuilder.minimise() is deprecated; use build()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.loss = loss
 
     def add_input(self, control: ControlVariable) -> None:
+        """Add a control using the deprecated imperative API."""
+        warnings.warn(
+            "VariationalProblemBuilder.add_input() is deprecated; "
+            "pass control= to the constructor",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.control.append(control)
 
     def add_parameter(self, parameter: ParameterVariable) -> None:
+        """Add a parameter using the deprecated imperative API."""
+        warnings.warn(
+            "VariationalProblemBuilder.add_parameter() is deprecated; "
+            "pass parameters= to the constructor",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._parameter_declarations.append(parameter)
 
     def add_path_constraint(self, constraint: InequalityExpression) -> None:
+        """Add a path constraint using the deprecated imperative API."""
+        warnings.warn(
+            "VariationalProblemBuilder.add_path_constraint() is deprecated; "
+            "pass subject_to= to build()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.path_constraints.append(constraint)
 
     def add_terminal_constraint(
         self, constraint: InequalityExpression
     ) -> None:
+        """Add a terminal constraint using the deprecated imperative API."""
+        warnings.warn(
+            "VariationalProblemBuilder.add_terminal_constraint() is "
+            "deprecated; pass subject_to= to build()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.terminal_constraints.append(constraint)
 
     def _with_time(self, value: Tracer, time: object) -> Tracer:
