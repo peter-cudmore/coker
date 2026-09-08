@@ -454,16 +454,13 @@ class VariationalProblemBuilder:
     def _classify_time(self, expression: Tracer) -> TemporalBinding:
         if expression.tape is not self._trace:
             raise ValueError("constraint contains a foreign trace")
-        matches: list[TemporalBinding] = []
-        for index, binding in self._timed_values.items():
-            dependents = self._trace.find_dependents(
-                Tracer(self._trace, index)
-            )
-            if expression.index in dependents:
-                matches.append(binding)
-        if TemporalBinding.PATH in matches:
+
+        # Scope is inferred from ordinary trajectory-evaluation arguments.
+        # TemporalBinding tags remain attached for backend lowering, but are
+        # deliberately not consulted here.
+        if self._trace.depends_on(expression, self._t):
             return TemporalBinding.PATH
-        if TemporalBinding.INITIAL in matches:
+        if self._trace.depends_on(expression, self._t_initial):
             return TemporalBinding.INITIAL
         return TemporalBinding.TERMINAL
 
