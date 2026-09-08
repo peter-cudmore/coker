@@ -246,7 +246,7 @@ def create_variational_solver(
 
     intervals = split_at_non_differentiable_points(
         problem.control if problem.control else [],
-        1.0 if free_horizon else problem.t_final,
+        1.0,
         problem.transcription_options,
     )
     colocation_points = [problem.transcription_options.minimum_degree] * len(
@@ -301,11 +301,7 @@ def create_variational_solver(
 
     control_variables = problem.control or []
     control_factory = (
-        ControlFactory(
-            control_variables, 1.0 if free_horizon else problem.t_final
-        )
-        if control_variables
-        else None
+        ControlFactory(control_variables, 1.0) if control_variables else None
     )
 
     if control_factory is None:
@@ -338,6 +334,7 @@ def create_variational_solver(
     horizon_symbol = (
         ca.MX.sym(problem.horizon_decision.name) if free_horizon else None
     )
+    duration = horizon_symbol if free_horizon else float(problem.t_final)
 
     parameter_names = list(p_output_map.indices)
     horizon = problem.horizon_decision
@@ -402,7 +399,7 @@ def create_variational_solver(
         interval_dynamics = []
         interval_quadratures = []
         for t, v, dv in poly.knot_points():
-            physical_t = horizon_symbol * t if free_horizon else t
+            physical_t = duration * t
             x = proj_x @ v
             z = proj_z @ v
             if z_size > 0:
@@ -411,7 +408,7 @@ def create_variational_solver(
             (dynamics_ij,) = dynamics(
                 physical_t, x, z, control_eval(t), proj_p @ p
             )
-            scale = horizon_symbol if free_horizon else 1
+            scale = duration
             interval_dynamics.append(dynamics_ij)
             equalities.append(dx - scale * dynamics_ij)
 
@@ -459,7 +456,7 @@ def create_variational_solver(
     # Path constraints apply at interval endpoints and collocation knots.
     for poly in poly_collection.polys:
         for t, v in (poly.start_point(), poly.end_point()):
-            physical_t = horizon_symbol * t if free_horizon else t
+            physical_t = duration * t
             x = proj_x @ v
             z = proj_z @ v
             if z_size > 0:
@@ -479,12 +476,14 @@ def create_variational_solver(
     def solution_proxy(*args):
         if control_factory is None:
             if len(args) == 1:
-                tau, p_val = args[0], p
+                time, p_val = args[0], p
             else:
-                tau, p_val = args
+                time, p_val = args
+            tau = time if free_horizon else time / duration
             u_val = control_eval(tau)
         else:
-            tau, control_val, p_val = args
+            time, control_val, p_val = args
+            tau = time if free_horizon else time / duration
             u_val = control_val(tau)
         inner = poly_collection(tau)
         x_tau = proj_x @ inner
@@ -492,7 +491,7 @@ def create_variational_solver(
         q_tau = proj_q @ inner
         (y_val,) = casadi.evaluate(
             problem.system.y,
-            [tau, x_tau, z_tau, u_val, proj_p @ p_val, q_tau],
+            [time, x_tau, z_tau, u_val, proj_p @ p_val, q_tau],
         )
         return y_val
 
@@ -521,7 +520,14 @@ def create_variational_solver(
     z_end_val = proj_z @ v_end
     q_end_val = proj_q @ v_end
     u_end = control_eval(t_end)
-    end_args = (t_end, x_end_val, z_end_val, u_end, p, q_end_val)
+    end_args = (
+        duration * t_end,
+        x_end_val,
+        z_end_val,
+        u_end,
+        p,
+        q_end_val,
+    )
 
     for constraint in problem.terminal_constraints:
         (g_inner,) = casadi.evaluate(constraint.residual, end_args)

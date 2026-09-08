@@ -277,41 +277,6 @@ class TranscriptionOptions:
 
 
 @dataclass(frozen=True)
-class FinalTimeMapping:
-    """Explicit representation of a fixed or free final time.
-
-    ``decision_index`` is relative to the horizon decision block and is
-    intentionally separate from ``system_parameter_map``.  Phase 5 can use
-    this record when introducing normalized-time transcription.
-    """
-
-    value: float | None = None
-    declaration: Optional[BoundedVariable] = None
-    decision_index: Optional[int] = None
-
-    @property
-    def is_fixed(self) -> bool:
-        return self.declaration is None
-
-    @property
-    def is_free(self) -> bool:
-        return self.declaration is not None
-
-
-@dataclass(frozen=True)
-class FixedHorizon:
-    value: float
-
-
-@dataclass(frozen=True)
-class FreeHorizon:
-    declaration: BoundedVariable
-
-
-Horizon = FixedHorizon | FreeHorizon
-
-
-@dataclass(frozen=True)
 class ConstraintSpec:
     """Backend-neutral normalized comparison constraint."""
 
@@ -360,13 +325,11 @@ class QuadratureSpec:
 @dataclass
 class VariationalProblem:
     loss: LossFunction | Tracer
-    t_final: object
+    t_final: float | BoundedVariable
     system: DynamicalSystem
-    final_time_map: FinalTimeMapping = field(default_factory=FinalTimeMapping)
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
     system_parameter_map: Optional[np.ndarray] = None
-    horizon: Horizon = field(init=False)
     quadratures: List[QuadratureSpec] = field(default_factory=list)
     path_constraints: List[InequalityExpression] = field(default_factory=list)
     terminal_constraints: List[InequalityExpression] = field(
@@ -384,10 +347,10 @@ class VariationalProblem:
 
     @property
     def horizon_decision(self) -> Optional[BoundedVariable]:
-        """Return the free final-time declaration, when present."""
-        if isinstance(self.horizon, FreeHorizon):
-            return self.horizon.declaration
-        return None
+        """Return the duration declaration when duration is optimized."""
+        return (
+            self.t_final if isinstance(self.t_final, BoundedVariable) else None
+        )
 
     @property
     def decision_declarations(self) -> List[ParameterMixin]:
@@ -399,14 +362,6 @@ class VariationalProblem:
         return decisions
 
     def __post_init__(self):
-        fixed_value = self.final_time_map.value
-        if fixed_value is None:
-            fixed_value = self.t_final
-        self.horizon = (
-            FreeHorizon(self.final_time_map.declaration)
-            if self.final_time_map.is_free
-            else FixedHorizon(float(fixed_value))
-        )
         self.path_constraints = _normalize_constraints(self.path_constraints)
         self.terminal_constraints = _normalize_constraints(
             self.terminal_constraints

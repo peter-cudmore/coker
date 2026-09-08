@@ -3,7 +3,6 @@ import pytest
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.dynamics import (
     BoundedVariable,
-    FinalTimeMapping,
     VariationalProblem,
     VariationalSolution,
 )
@@ -764,7 +763,6 @@ def test_free_horizon_keeps_horizon_and_parameter_offsets():
         loss=lambda f, p: (f(1.0, p) - 2.0) ** 2,
         system=system,
         t_final=horizon,
-        final_time_map=FinalTimeMapping(declaration=horizon, decision_index=0),
         parameters=[parameter],
         backend="casadi",
     )

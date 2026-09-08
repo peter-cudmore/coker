@@ -237,8 +237,7 @@ def test_fixed_horizon_is_not_a_decision():
     with VariationalProblemBuilder(system, t_final=2.0) as builder:
         problem = builder.build(Minimise(builder.state(builder.t)[0] ** 2))
 
-    assert problem.final_time_map.is_fixed
-    assert problem.final_time_map.value == 2.0
+    assert problem.t_final == 2.0
     assert problem.horizon_decision is None
 
 
@@ -255,8 +254,7 @@ def test_bounded_horizon_is_first_class_and_not_a_parameter():
     ) as builder:
         problem = builder.build(Minimise(builder.state(builder.t)[0] ** 2))
 
-    assert problem.final_time_map.is_free
-    assert problem.final_time_map.declaration is horizon
+    assert problem.t_final is horizon
     assert problem.horizon_decision is horizon
     assert problem.parameters == [parameter]
     np.testing.assert_array_equal(problem.system_parameter_map, parameter_map)
