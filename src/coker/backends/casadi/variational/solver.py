@@ -255,7 +255,7 @@ def create_variational_solver(
     parameter_names = list(p_output_map.indices)
     horizon = problem.horizon_decision
     layout = DecisionLayout(
-        horizon_size=int(free_horizon),
+        horizon_size=1 if free_horizon else 0,
         path_size=int(poly_collection.symbols().shape[0]),
         control_size=int(u_symbols.shape[0]),
         parameter_size=int(p_symbols.shape[0]),
