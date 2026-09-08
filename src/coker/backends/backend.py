@@ -186,6 +186,8 @@ def instantiate_backend(name: str):
     else:
         raise ValueError(f"Unknown backend: {name}")
 
+    # Backend identity is part of the callable/lowering contract.
+    backend.name = name
     __backends[name] = backend
     return backend
 

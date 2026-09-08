@@ -1,9 +1,10 @@
 import weakref
+from collections import defaultdict
 
 import numpy as np
 import scipy as sp
+from abc import ABC, abstractmethod
 from typing import Callable, Union, Tuple, List, Optional, Set, Iterable, Any
-from collections import defaultdict
 
 from coker.algebra.dimensions import (
     Dimension,
@@ -828,7 +829,25 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return self._emit(OP.EVALUATE, self, *args)
 
 
-class Function:
+class SymbolicCallable(ABC):
+    """Common call/lowering contract for symbolic callable graph values.
+
+    Implementations accept concrete values or tracers and expose ``lower``
+    for backend-specific execution.  Variational problems intentionally do
+    not participate because their solver interface is different.
+    """
+
+    _coker_symbolic_callable = True
+
+    @abstractmethod
+    def __call__(self, *args):
+        raise NotImplementedError
+
+    @abstractmethod
+    def lower(self):
+        raise NotImplementedError
+
+class Function(SymbolicCallable):
     """A compiled Coker function.
 
     Created by :func:`function`.  Holds the traced computation graph and
@@ -919,7 +938,7 @@ class Function:
             return None
 
         elif isinstance(self.tape.dim[index], FunctionSpace):
-            if isinstance(arg, Function):
+            if isinstance(arg, SymbolicCallable):
                 return arg
 
             try:

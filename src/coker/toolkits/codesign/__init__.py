@@ -7,6 +7,7 @@ import numpy as np
 from coker.algebra.dimensions import Dimension, FunctionSpace
 from coker.algebra.kernel import (
     OP,
+    SymbolicCallable,
     Tape,
     TraceContext,
     Tracer,
@@ -46,12 +47,12 @@ class _ProgramCall:
         return self._program.call_numeric(*args)
 
 
-class MathematicalProgram:
+class MathematicalProgram(SymbolicCallable):
     """An optimisation module that maps parameters to an objective and outputs.
 
-    Concrete calls execute the configured optimisation backend. Calls made
-    while tracing emit ``OP.EVALUATE`` nodes, allowing the program to compose
-    with ordinary Coker functions.
+    ``backend`` is the solver backend selected by :class:`ProblemBuilder`.
+    ``lower()`` always lowers with that same backend; a program cannot be
+    embedded in a graph lowered by a different backend.
     """
 
     def __init__(
@@ -59,10 +60,12 @@ class MathematicalProgram:
         input_shape: Tuple[Dimension, ...],
         output_shape: Tuple[Dimension, ...],
         implementation: Callable,
+        backend: Optional[str] = None,
     ):
         self.input_shape = input_shape
         self.output_shape = output_shape
         self._impl = implementation
+        self.backend = backend
         self.solve_info = None
 
     @property
@@ -75,6 +78,11 @@ class MathematicalProgram:
             raise ValueError(
                 f"Expected {len(self.input_shape)} arguments, got {len(args)}"
             )
+        for index, (arg, expected) in enumerate(zip(args, self.input_shape)):
+            if isinstance(arg, Tracer) and arg.dim != expected:
+                raise ValueError(
+                    f"Argument {index} has shape {arg.dim}, expected {expected}"
+                )
 
     def call_numeric(self, *args):
         """Solve with concrete arguments and return objective followed by outputs."""
@@ -115,6 +123,11 @@ class MathematicalProgram:
             raise RuntimeError(
                 "call_symbolic() requires an active Coker tracing context"
             )
+        if self.backend is not None and tape.backend != self.backend:
+            raise ValueError(
+                f"MathematicalProgram uses backend {self.backend!r}, "
+                f"but the enclosing graph uses {tape.backend!r}"
+            )
         call = _ProgramCall(self)
         arguments = [
             dim.to_space(f"input_{i}") for i, dim in enumerate(self.input_shape)
@@ -133,15 +146,20 @@ class MathematicalProgram:
             return self.call_symbolic(*args)
         return self.call_numeric(*args)
 
-    def lower(self, backend: str = "numpy"):
-        """Lower this program's symbolic call graph with ``backend``."""
+    def lower(self):
+        """Lower this program using its configured solver backend."""
+        backend_name = self.backend or "numpy"
+        from coker.backends import get_backend_by_name
+
+        # Resolve early so unavailable backends fail before graph execution.
+        get_backend_by_name(backend_name, set_current=False)
         return function(
             arguments=[
                 dim.to_space(f"input_{i}")
                 for i, dim in enumerate(self.input_shape)
             ],
             implementation=cast(Callable, self.call_symbolic),
-            backend=backend,
+            backend=backend_name,
         )
 
     def export_payload(self) -> dict[str, object]:
@@ -220,22 +238,28 @@ class ProblemBuilder:
         assert self.outputs
         from coker.backends import get_backend_by_name, get_current_backend
 
-        backend = (
-            get_backend_by_name(backend)
-            if backend is not None
-            else get_current_backend()
-        )
+        backend_name = backend
+        if backend_name is None:
+            current = get_current_backend()
+            backend_name = getattr(current, "name", None)
+            if backend_name is None:
+                raise RuntimeError(
+                    "Current backend does not expose a stable backend name"
+                )
+        backend_impl = get_backend_by_name(backend_name)
 
-        implementation = backend.build_optimisation_problem(
+        implementation = backend_impl.build_optimisation_problem(
             self.objective.expression,
             self.constraints,
             self.arguments,
             [self.objective.expression, *self.outputs],
             self._normalise_initial_conditions(),
         )
-        impl = backend.make_optimisation_module(implementation)
+        impl = backend_impl.make_optimisation_module(implementation)
 
-        return MathematicalProgram(self.input_shape, self.output_shape, impl)
+        return MathematicalProgram(
+            self.input_shape, self.output_shape, impl, backend=backend_name
+        )
 
     def __enter__(self):
         assert self.tape is not None
