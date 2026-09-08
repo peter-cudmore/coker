@@ -18,6 +18,11 @@ from coker.algebra.kernel import (
     Tracer,
     VectorSpace,
 )
+from coker.dynamics.trajectory_normalization import (
+    _InputSignal,
+    _OutputSignal,
+    _StateSignal,
+)
 from coker.dynamics.types import (
     BoundedVariable,
     ConstraintSpec,
@@ -140,29 +145,28 @@ class VariationalProblemBuilder:
 
     def _make_symbols(self) -> None:
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
-
-        # Canonical private trajectory descriptions.  Function-valued symbols
-        # are evaluated by the public accessors; downstream lowering still
-        # accepts concrete values as constant trajectory arguments.
         self._state_trajectory = FunctionSpace(
-            "x",
-            arguments=[Scalar("t")],
-            output=[VectorSpace("x", x_dim.flat())],
+            "_state", [Scalar("t")], [VectorSpace("x", x_dim.flat())]
         )
         self._input_trajectory = (
-            self.system.inputs
+            FunctionSpace(
+                "_input",
+                list(self.system.inputs.arguments),
+                list(self.system.inputs.output),
+            )
             if isinstance(self.system.inputs, FunctionSpace)
             else None
         )
-
+        self._output_trajectory = FunctionSpace(
+            "_output", [Scalar("t")], list(self.system.y.output_shape())
+        )
         t = self._trace.input(Scalar("t"))
         terminal = self._trace.input(Scalar("t_final"))
-
         initial = self._trace.input(Scalar("t_0"))
         state = self._trace.input(self._state_trajectory)
         u = (
-            self._trace.input(self.system.inputs)
-            if not isinstance(self.system.inputs, Noop)
+            self._trace.input(self._input_trajectory)
+            if self._input_trajectory is not None
             else Noop()
         )
         p = (
@@ -170,21 +174,12 @@ class VariationalProblemBuilder:
             if self.system.parameters is not None
             else Noop()
         )
-        (
-            self._t,
-            self._t_final,
-            self._t_initial,
-            self._state,
-            self._input,
-            self._parameters,
-        ) = (
-            t,
-            terminal,
-            initial,
-            state,
-            u,
-            p,
-        )
+        output = self._trace.input(self._output_trajectory)
+        self._receiver_roles = {state.index: _StateSignal, output.index: _OutputSignal}
+        if isinstance(u, Tracer):
+            self._receiver_roles[u.index] = _InputSignal
+        self._t, self._t_final, self._t_initial = t, terminal, initial
+        self._state, self._input, self._parameters, self._output = state, u, p, output
         self._algebraic = (
             self._trace.input(VectorSpace("z", z_dim.flat()))
             if z_dim is not None and not z_dim.is_scalar() and z_dim.flat()
@@ -284,27 +279,23 @@ class VariationalProblemBuilder:
 
     def input(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
-        if isinstance(self._input.dim, FunctionSpace):
+        marker_time = self._t if time is None else time
+        if isinstance(self._input, Tracer):
             value = self._input(
                 time if isinstance(time, Tracer) else self._t_initial
             )
-            return self._with_time(value, self._t if time is None else time)
-        return self._with_time(self._input, self._t if time is None else time)
+        else:
+            value = self._input
+        return self._with_time(value, marker_time)
 
     def output(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
         time = self._t if time is None else time
         self._time_binding(time)
-        if isinstance(self.system.y, Function):
-            return self.system.y.call_inline(
-                time if isinstance(time, Tracer) else self._t_initial,
-                self.state(time),
-                self._algebraic,
-                self.input(time),
-                self._parameters,
-                Noop(),
-            )
-        return self.state(time)
+        return self._with_time(
+            self._output(time if isinstance(time, Tracer) else self._t_initial),
+            time,
+        )
 
     def parameters_symbol(self) -> Tracer:
         self._require_open()
