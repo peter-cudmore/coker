@@ -1,4 +1,6 @@
 import abc
+from enum import Enum, auto
+
 from typing import (
     TYPE_CHECKING,
     Callable,
@@ -310,6 +312,18 @@ class FreeHorizon:
 Horizon = FixedHorizon | FreeHorizon
 
 
+class TemporalBinding(Enum):
+    """Classify the time scope of a normalized variational constraint.
+
+    Constraint scope is semantic state, not a user-provided string.  Add new
+    scopes here rather than introducing string-valued matches.
+    """
+
+    INITIAL = auto()
+    PATH = auto()
+    TERMINAL = auto()
+
+
 @dataclass(frozen=True)
 class ConstraintSpec:
     """Backend-neutral normalized comparison constraint."""
@@ -317,7 +331,7 @@ class ConstraintSpec:
     residual: Function | Tracer
     lower_bound: object
     upper_bound: object
-    temporal_binding: Optional[str] = None
+    temporal_binding: Optional[TemporalBinding] = None
 
     @classmethod
     def from_expression(

@@ -28,6 +28,7 @@ from coker.dynamics.types import (
     ParameterVariable,
     QuadratureSpec,
     TranscriptionOptions,
+    TemporalBinding,
     VariationalProblem,
 )
 from coker.toolkits.codesign import Minimise
@@ -113,7 +114,7 @@ class VariationalProblemBuilder:
         self._quadrature_initial: list[float] = []
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
-        self._timed_values: dict[int, str] = {}
+        self._timed_values: dict[int, TemporalBinding] = {}
         self._closed = False
         self._make_symbols()
 
@@ -250,9 +251,9 @@ class VariationalProblemBuilder:
     def _with_time(self, value: Tracer, time: object) -> Tracer:
         binding = self._time_binding(time)
         marker = {
-            "path": self._t,
-            "terminal": self._t_final,
-            "initial": self._t_initial,
+            TemporalBinding.PATH: self._t,
+            TemporalBinding.TERMINAL: self._t_final,
+            TemporalBinding.INITIAL: self._t_initial,
         }[binding]
         tagged = value + 0 * marker
         self._timed_values[tagged.index] = binding
@@ -293,10 +294,10 @@ class VariationalProblemBuilder:
     def parameters(self) -> Tracer:
         return self.parameters_symbol()
 
-    def _time_binding(self, time: object) -> str:
+    def _time_binding(self, time: object) -> TemporalBinding:
         if isinstance(time, (int, float, np.number)):
             if float(time) == 0:
-                return "initial"
+                return TemporalBinding.INITIAL
             raise ValueError(
                 "unsupported concrete time; allowed bindings are "
                 "0, t, and t_final"
@@ -306,9 +307,9 @@ class VariationalProblemBuilder:
                 "time marker belongs to a foreign or unrecognised trace"
             )
         if time.index == self._t.index:
-            return "path"
+            return TemporalBinding.PATH
         if time.index == self._t_final.index:
-            return "terminal"
+            return TemporalBinding.TERMINAL
         raise ValueError(
             "unsupported time binding; allowed bindings are 0, t, and t_final"
         )
@@ -396,9 +397,9 @@ class VariationalProblemBuilder:
         terminal = list(self.terminal_constraints)
         initial = list(self.initial_constraints)
         for record in lowered:
-            if record.temporal_binding == "path":
+            if record.temporal_binding is TemporalBinding.PATH:
                 path.append(record)
-            elif record.temporal_binding == "initial":
+            elif record.temporal_binding is TemporalBinding.INITIAL:
                 initial.append(record)
             else:
                 terminal.append(record)
@@ -431,21 +432,21 @@ class VariationalProblemBuilder:
             backend=self.backend,
         )
 
-    def _classify_time(self, expression: Tracer) -> str:
+    def _classify_time(self, expression: Tracer) -> TemporalBinding:
         if expression.tape is not self._trace:
             raise ValueError("constraint contains a foreign trace")
-        matches = []
+        matches: list[TemporalBinding] = []
         for index, binding in self._timed_values.items():
             dependents = self._trace.find_dependents(
                 Tracer(self._trace, index)
             )
             if expression.index in dependents:
                 matches.append(binding)
-        if "path" in matches:
-            return "path"
-        if "initial" in matches:
-            return "initial"
-        return "terminal"
+        if TemporalBinding.PATH in matches:
+            return TemporalBinding.PATH
+        if TemporalBinding.INITIAL in matches:
+            return TemporalBinding.INITIAL
+        return TemporalBinding.TERMINAL
 
     def _validate_trace(self, expression: Tracer, label: str) -> None:
         if expression.tape is not self._trace:
