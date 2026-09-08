@@ -389,6 +389,7 @@ class VariationalProblem:
     initial_constraints: List[InequalityExpression] = field(
         default_factory=list
     )
+    trajectory_requirements: List[object] = field(default_factory=list)
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
     )
