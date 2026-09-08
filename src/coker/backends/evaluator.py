@@ -10,6 +10,7 @@ from coker.algebra.kernel import (
 )
 
 _SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | CallableReference
+_SYMBOLIC_TYPES = Tracer | _SYMBOLIC_CALLABLE_TYPES
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ def _build_plan(graph, backend):
             else:
                 resolved.append(backend.to_backend_array(a))
         value = resolved[0] if op == OP.VALUE else backend.call(op, *resolved)
-        if not isinstance(value, (Tracer, _SYMBOLIC_CALLABLE_TYPES)):
+        if not isinstance(value, _SYMBOLIC_TYPES):
             value = backend.reshape(value, graph.dim[i])
         workspace[i] = value
     # Pass 3 — build execution steps for dynamic non-input nodes only.
@@ -115,7 +116,7 @@ def _build_plan(graph, backend):
         for a in args:
             if isinstance(a, Tracer) and a.tape is graph:
                 arg_indices.append(a.index)
-            elif isinstance(a, (Tracer, _SYMBOLIC_CALLABLE_TYPES)):
+            elif isinstance(a, _SYMBOLIC_TYPES):
                 arg_indices.append(alloc_inline(a))
             else:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
@@ -208,7 +209,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
 
         workspace[w] = (
             backend.reshape(value, graph.dim[w])
-            if not isinstance(value, (Tracer, _SYMBOLIC_CALLABLE_TYPES))
+            if not isinstance(value, _SYMBOLIC_TYPES)
             else value
         )
 
