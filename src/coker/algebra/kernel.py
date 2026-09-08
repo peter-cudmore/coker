@@ -205,12 +205,11 @@ class CallableReference:
         self.function_space = function_space
         self._result_index = result_index
 
-    @property
-    def _owner(self):
-        return self._tape().nodes._callable_archive[self._archive_index]
-
     def __call__(self, *args):
-        return self._owner(*args)[self._result_index]
+        callable_value = self._tape().nodes._callable_archive[
+            self._archive_index
+        ]
+        return callable_value(*args)[self._result_index]
 
 
 class Tape:
