@@ -69,11 +69,12 @@ class MathematicalProgram(SymbolicCallable):
         for index, (arg, expected) in enumerate(zip(args, self.input_shape)):
             if isinstance(arg, Tracer) and arg.dim != expected:
                 raise ValueError(
-                    f"Argument {index} has shape {arg.dim}, expected {expected}"
+                    f"Argument {index} has shape {arg.dim}, "
+                    f"expected {expected}"
                 )
 
     def _call_numeric(self, *args):
-        """Solve with concrete arguments and return objective followed by outputs."""
+        """Solve with concrete arguments; return objective and outputs."""
         self._validate_arguments(args)
 
         try:
@@ -104,12 +105,13 @@ class MathematicalProgram(SymbolicCallable):
         )
 
     def _call_symbolic(self, *args):
-        """Emit objective and output evaluations on the active symbolic tape."""
+        """Emit objective and output evaluations on the symbolic tape."""
         self._validate_arguments(args)
         tape = TraceContext.get_local_tape()
         if tape is None:
             raise RuntimeError(
-                "symbolic program calls require an active Coker tracing context"
+                "symbolic program calls require an active Coker "
+                "tracing context"
             )
         if self.backend is not None and tape.backend != self.backend:
             raise ValueError(
