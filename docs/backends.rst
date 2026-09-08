@@ -83,11 +83,12 @@ allows a normal Coker function to use a solved objective or output:
        backend="numpy",
    )
 
-``program.compile(backend="numpy")`` creates an equivalent
-``Function`` directly. Select the backend that should lower the enclosing
-symbolic graph; the optimisation program itself remains an opaque numerical
-operation and runs its configured solver when evaluated. Derivatives through
-an argmin or argmax are not defined.
+``program.lower()`` returns a ``Function`` using the solver backend selected
+when the program was built. Lowering does not accept a second backend: this
+prevents an outer graph from selecting a backend that cannot execute the
+program's solver callable. An unavailable backend or an unsupported
+solver/backend combination is rejected while building or lowering, before
+evaluation. Derivatives through an argmin or argmax are not defined.
 
 ``numpy``, ``casadi``, and ``coker`` support host-side program composition.
 The JAX backend does not construct optimisation programs.

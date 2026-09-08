@@ -1,19 +1,16 @@
 from typing import Any, Callable, NamedTuple
 import numpy as np
 
-import coker
 from coker.backends.backend import Backend
-from coker.algebra.kernel import Tracer, OP
+from coker.algebra.kernel import OP, SymbolicCallable, Tracer
 
 
 def _is_symbolic_callable(value) -> bool:
-    """Return whether ``value`` must remain a callable graph value."""
-    return (
-        isinstance(value, coker.Function)
-        or getattr(value, "_coker_function_space", None) is not None
+    """Return whether ``value`` is a symbolic callable graph value."""
+    return isinstance(value, SymbolicCallable) or (
+        getattr(value, "_coker_function_space", None) is not None
         or getattr(value, "_coker_symbolic_callable", False)
     )
-
 
 
 # ---------------------------------------------------------------------------
