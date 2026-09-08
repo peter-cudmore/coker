@@ -19,11 +19,7 @@ from coker.dynamics.controls import (
     ParameterVariable,
 )
 from coker.dynamics.system import DynamicalSystem
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from coker.dynamics.variational.solution import VariationalSolution
+from coker.dynamics.variational.solution import VariationalSolution
 
 
 class VariationalIterationCallback:
@@ -31,7 +27,7 @@ class VariationalIterationCallback:
     def __call__(
         self,
         iterate: int,
-        solution: "VariationalSolution",
+        solution: VariationalSolution,
         **kwargs,
     ) -> bool:
         """Handle callbacks at the end of each optimisation step.
@@ -190,5 +186,5 @@ class VariationalProblem:
             self
         )
 
-    def __call__(self) -> "VariationalSolution":
+    def __call__(self) -> VariationalSolution:
         return self.get_solver().solve()

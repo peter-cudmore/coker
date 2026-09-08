@@ -1,13 +1,12 @@
-from typing import TYPE_CHECKING, Callable, Iterator, List, Tuple
+from typing import Callable, Iterator, List, Tuple
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from coker.dynamics.transcription.collocation import InterpolatingPoly
+from coker.dynamics.transcription.collocation import InterpolatingPoly
 
 
 class InterpolatingPolyCollection:
-    def __init__(self, polys: List["InterpolatingPoly"]):
+    def __init__(self, polys: List[InterpolatingPoly]):
         self.polys = polys
         self._size = sum(p.size() for p in polys)
         self.intervals = [p.interval for p in polys]
