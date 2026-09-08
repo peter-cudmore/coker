@@ -7,7 +7,7 @@ from coker.dynamics import (
     VariationalSolution,
 )
 from coker.toolkits.codesign import SolveFailure
-from coker.dynamics.dynamical_system import (
+from coker.dynamics.system import (
     create_autonomous_ode,
     create_control_system,
 )

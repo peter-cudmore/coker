@@ -5,7 +5,7 @@ from coker import VectorSpace, FunctionSpace, function, Scalar
 from coker.algebra.dimensions import Dimension
 from coker.algebra.kernel import Noop
 
-from .types import DynamicsSpec, DynamicalSystem
+from .model import DynamicsSpec, DynamicalSystem
 from ..algebra import is_scalar
 from typing import Tuple
 

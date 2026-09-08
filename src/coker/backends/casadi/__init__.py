@@ -8,7 +8,7 @@ from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
 from coker.backends.backend import ArrayLike, Backend
-from coker.backends.casadi.casadi import (
+from coker.backends.casadi.lower import (
     call_parameterised_op,
     impls,
     lower as _lower_to_casadi,
@@ -16,7 +16,9 @@ from coker.backends.casadi.casadi import (
     substitute,
 )
 from coker.backends.casadi.optimiser import build_optimisation_problem
-from coker.backends.casadi.variational_solver import create_variational_solver
+from coker.backends.casadi.variational.solver import (
+    create_variational_solver,
+)
 from coker.dynamics import VariationalProblem
 
 __all__ = ["CasadiBackend"]

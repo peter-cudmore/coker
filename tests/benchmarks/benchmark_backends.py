@@ -13,8 +13,11 @@ import time
 import numpy as np
 
 from coker import function, VectorSpace
-from coker.dynamics import create_autonomous_ode
-from coker.dynamics.types import VariationalProblem, BoundedVariable
+from coker.dynamics import (
+    BoundedVariable,
+    VariationalProblem,
+    create_autonomous_ode,
+)
 from coker.backends.backend import get_backend_by_name
 from coker.backends.numpy.core import NumpySolverParameters, Solver
 

@@ -1,9 +1,30 @@
-from coker.dynamics.dynamical_system import create_autonomous_ode, direct_sum
-from coker.dynamics.variational_problem_builder import (
-    VariationalProblemBuilder,
-)
+"""Dynamical-system modelling and variational optimisation API."""
 
-from coker.dynamics.transcription_helpers import (
+from coker.dynamics.controls import (
+    BoundedVariable,
+    Constant,
+    ConstantControlSolution,
+    ConstantControlVariable,
+    ControlLaw,
+    ControlSolution,
+    ControlVariable,
+    LossFunction,
+    ParameterMixin,
+    ParameterVariable,
+    PiecewiseConstantVariable,
+    PiecewiseControlSolution,
+    Solution,
+    SpikeControlSolution,
+    SpikeVariable,
+    ValueType,
+)
+from coker.dynamics.system import create_autonomous_ode, direct_sum
+from coker.dynamics.model import (
+    DynamicsSpec,
+    DynamicalSystem,
+    SolverParameters,
+)
+from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     evaluate_legendre_polynomial,
     expand_coefficients,
@@ -12,32 +33,16 @@ from coker.dynamics.transcription_helpers import (
     lgr_points,
     split_at_non_differentiable_points,
 )
-from coker.dynamics.types import (
-    BoundedVariable,
-    Constant,
-    ConstantControlSolution,
-    ConstantControlVariable,
-    ControlLaw,
-    ControlSolution,
-    ControlVariable,
-    DynamicalSystem,
-    DynamicsSpec,
-    InterpolatingPolyCollection,
-    LossFunction,
-    ParameterMixin,
-    ParameterVariable,
-    PiecewiseConstantVariable,
-    PiecewiseControlSolution,
-    Solution,
-    SolverParameters,
-    SpikeControlSolution,
-    SpikeVariable,
+from coker.dynamics.variational.builder import VariationalProblemBuilder
+from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
+from coker.dynamics.variational.problem import (
+    ConstraintSpec,
+    QuadratureSpec,
     TranscriptionOptions,
-    ValueType,
-    VariationalProblem,
-    VariationalSolution,
     VariationalIterationCallback,
+    VariationalProblem,
 )
+from coker.dynamics.variational.solution import VariationalSolution
 from coker.toolkits.codesign.optimisation import SolveFailure, SolveInfo
 
 __all__ = [
@@ -45,6 +50,7 @@ __all__ = [
     "Constant",
     "ConstantControlSolution",
     "ConstantControlVariable",
+    "ConstraintSpec",
     "ControlLaw",
     "ControlSolution",
     "ControlVariable",
@@ -57,6 +63,7 @@ __all__ = [
     "ParameterVariable",
     "PiecewiseConstantVariable",
     "PiecewiseControlSolution",
+    "QuadratureSpec",
     "Solution",
     "SolverParameters",
     "SpikeControlSolution",

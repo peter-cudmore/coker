@@ -14,12 +14,14 @@ from coker.algebra.kernel import (
     Tracer,
     VectorSpace,
 )
-from coker.dynamics.types import (
+from coker.dynamics.controls import (
     BoundedVariable,
-    ConstraintSpec,
     ControlVariable,
-    DynamicalSystem,
     ParameterVariable,
+)
+from coker.dynamics.model import DynamicalSystem
+from coker.dynamics.variational.problem import (
+    ConstraintSpec,
     QuadratureSpec,
     TranscriptionOptions,
     VariationalProblem,
