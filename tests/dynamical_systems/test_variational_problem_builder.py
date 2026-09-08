@@ -93,7 +93,7 @@ def test_constraints_are_placed_by_public_temporal_scope():
             b.state(b.t)[0] <= 1,
             b.state(0)[0] == 0,
             b.state(b.t_final)[0] == 1,
-            b.parameters()[0] >= 0,
+            b.parameters[0] >= 0,
         ]
     )
 
@@ -169,7 +169,7 @@ def test_integrate_registers_scalar_channels_without_mutating_source():
         system, t_final=2.0, backend="numpy"
     ) as builder:
         q_running = builder.integrate(builder.output(builder.t)[0] ** 2)
-        q_constant = builder.integrate(builder.parameters()[0] ** 2)
+        q_constant = builder.integrate(builder.parameters[0] ** 2)
         problem = builder.build(Minimise(q_running + 2 * q_constant))
 
     assert q_running.dim.is_scalar()

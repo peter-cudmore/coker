@@ -170,6 +170,7 @@ class VariationalProblemBuilder:
             time if isinstance(time, Tracer) else self._t_initial
         )
 
+    @property
     def parameters(self) -> Tracer:
         self._require_open()
         return self._parameters
