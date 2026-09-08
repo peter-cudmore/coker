@@ -126,7 +126,7 @@ class MathematicalProgram(SymbolicCallable):
         result_space = VectorSpace(
             "program_result", sum(dim.flat() for dim in result_dimensions)
         )
-        reference = tape._callable_reference(
+        reference = tape._create_callable_reference(
             self, FunctionSpace("program", arguments, [result_space])
         )
         packed = Tracer(tape, tape.append(OP.EVALUATE, reference, *args))
