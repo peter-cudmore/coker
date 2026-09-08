@@ -130,14 +130,17 @@ class MathematicalProgram(SymbolicCallable):
             )
         call = _ProgramCall(self)
         arguments = [
-            dim.to_space(f"input_{i}") for i, dim in enumerate(self.input_shape)
+            dim.to_space(f"input_{i}")
+            for i, dim in enumerate(self.input_shape)
         ]
         results = []
         for index, output_dim in enumerate(self.result_shape):
             output = output_dim.to_space(f"output_{index}")
             space = FunctionSpace("program_output", arguments, [output])
             reference = tape.callable_reference(call, space, index)
-            results.append(Tracer(tape, tape.append(OP.EVALUATE, reference, *args)))
+            results.append(
+                Tracer(tape, tape.append(OP.EVALUATE, reference, *args))
+            )
         return tuple(results)
 
     def __call__(self, *args):

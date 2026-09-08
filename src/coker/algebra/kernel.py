@@ -190,13 +190,18 @@ class TapeInner:
     def __len__(self):
         return len(self._nodes)
 
+
 class _TapeCallableReference:
     """Reference to a callable archived by a tape."""
 
     _coker_symbolic_callable = True
 
     def __init__(
-        self, tape: "Tape", archive_index: int, function_space, result_index: int
+        self,
+        tape: "Tape",
+        archive_index: int,
+        function_space,
+        result_index: int,
     ):
         self._tape = weakref.ref(tape)
         self._archive_index = archive_index
@@ -216,6 +221,7 @@ class _TapeCallableReference:
 
     def _coker_begin_evaluation(self):
         return None
+
 
 class Tape:
     NONE = -1
@@ -251,11 +257,15 @@ class Tape:
     def archive_callable(self, callable_value):
         key = id(callable_value)
         if key not in self._inner._callable_hashmap:
-            self._inner._callable_hashmap[key] = len(self._inner._callable_archive)
+            self._inner._callable_hashmap[key] = len(
+                self._inner._callable_archive
+            )
             self._inner._callable_archive.append(callable_value)
         return self._inner._callable_hashmap[key]
 
-    def callable_reference(self, callable_value, function_space, result_index=0):
+    def callable_reference(
+        self, callable_value, function_space, result_index=0
+    ):
         archive_index = self.archive_callable(callable_value)
         return _TapeCallableReference(
             self, archive_index, function_space, result_index
@@ -337,7 +347,6 @@ class Tape:
                 dims.append(arg.dim)
         return op.compute_shape(*dims)
 
-
     def append(self, op: OP, *args) -> int:
         args = [strip_symbols_from_array(a) for a in args]
 
@@ -358,9 +367,11 @@ class Tape:
             raise DanglingTracerError(tracers=invalid_tracers)
 
         args = [
-            self.insert_value(a)
-            if not isinstance(a, (Tracer, _TapeCallableReference))
-            else a.copy() if isinstance(a, Tracer) else a
+            (
+                self.insert_value(a)
+                if not isinstance(a, (Tracer, _TapeCallableReference))
+                else a.copy() if isinstance(a, Tracer) else a
+            )
             for a in args
         ]
 
@@ -846,6 +857,7 @@ class SymbolicCallable(ABC):
     @abstractmethod
     def lower(self):
         raise NotImplementedError
+
 
 class Function(SymbolicCallable):
     """A compiled Coker function.
