@@ -34,6 +34,30 @@ _INITIAL_SITE = object()
 _TERMINAL_SITE = object()
 
 
+def _validation_t_final(t_final: float | BoundedVariable) -> None:
+    if isinstance(t_final, bool):
+        raise TypeError("t_final must be a positive float or BoundedVariable")
+    if isinstance(t_final, (int, float, np.number)):
+        if float(t_final) <= 0:
+            raise ValueError("t_final must be positive")
+    elif isinstance(t_final, BoundedVariable):
+        if t_final.lower_bound <= 0:
+            raise ValueError(
+                "t_final BoundedVariable lower_bound must be positive"
+            )
+        if t_final.upper_bound < t_final.lower_bound:
+            raise ValueError(
+                "t_final BoundedVariable upper_bound must not be below "
+                "lower_bound"
+            )
+        if not t_final.lower_bound <= t_final.guess <= t_final.upper_bound:
+            raise ValueError(
+                "t_final BoundedVariable guess must be within bounds"
+            )
+    else:
+        raise TypeError("t_final must be a positive float or BoundedVariable")
+
+
 class VariationalProblemBuilder:
     """Build a variational problem from one, context-owned symbolic trace."""
 
@@ -48,33 +72,7 @@ class VariationalProblemBuilder:
         transcription_options: Optional[TranscriptionOptions] = None,
         system_parameter_map: Optional[np.ndarray] = None,
     ):
-        if isinstance(t_final, bool):
-            raise TypeError(
-                "t_final must be a positive float or BoundedVariable"
-            )
-        if isinstance(t_final, (int, float, np.number)):
-            if float(t_final) <= 0:
-                raise ValueError("t_final must be positive")
-        elif isinstance(t_final, BoundedVariable):
-            if t_final.lower_bound <= 0:
-                raise ValueError(
-                    "t_final BoundedVariable lower_bound must be positive"
-                )
-            if t_final.upper_bound < t_final.lower_bound:
-                raise ValueError(
-                    "t_final BoundedVariable upper_bound must not be below "
-                    "lower_bound"
-                )
-            if not (
-                t_final.lower_bound <= t_final.guess <= t_final.upper_bound
-            ):
-                raise ValueError(
-                    "t_final BoundedVariable guess must be within bounds"
-                )
-        else:
-            raise TypeError(
-                "t_final must be a positive float or BoundedVariable"
-            )
+        _validation_t_final(t_final)
         self.system = system
         self.t_final_declaration = t_final
         self.backend = backend
