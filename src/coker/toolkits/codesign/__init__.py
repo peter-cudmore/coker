@@ -72,7 +72,7 @@ class MathematicalProgram(SymbolicCallable):
                     f"Argument {index} has shape {arg.dim}, expected {expected}"
                 )
 
-    def call_numeric(self, *args):
+    def _call_numeric(self, *args):
         """Solve with concrete arguments and return objective followed by outputs."""
         self._validate_arguments(args)
 
@@ -103,13 +103,13 @@ class MathematicalProgram(SymbolicCallable):
             ),
         )
 
-    def call_symbolic(self, *args):
+    def _call_symbolic(self, *args):
         """Emit objective and output evaluations on the active symbolic tape."""
         self._validate_arguments(args)
         tape = TraceContext.get_local_tape()
         if tape is None:
             raise RuntimeError(
-                "call_symbolic() requires an active Coker tracing context"
+                "symbolic program calls require an active Coker tracing context"
             )
         if self.backend is not None and tape.backend != self.backend:
             raise ValueError(
@@ -134,8 +134,8 @@ class MathematicalProgram(SymbolicCallable):
     def __call__(self, *args):
         """Call symbolically during tracing and numerically otherwise."""
         if TraceContext.get_local_tape() is not None:
-            return self.call_symbolic(*args)
-        return self.call_numeric(*args)
+            return self._call_symbolic(*args)
+        return self._call_numeric(*args)
 
     def lower(self):
         """Lower this program using its configured solver backend."""
@@ -149,7 +149,7 @@ class MathematicalProgram(SymbolicCallable):
                 dim.to_space(f"input_{i}")
                 for i, dim in enumerate(self.input_shape)
             ],
-            implementation=cast(Callable, self.call_symbolic),
+            implementation=cast(Callable, self._call_symbolic),
             backend=backend_name,
         )
 

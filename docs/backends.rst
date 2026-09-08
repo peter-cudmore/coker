@@ -63,17 +63,16 @@ and low-level native graph behaviour is tested under ``coker``.
 Optimisation program composition
 --------------------------------
 
-``MathematicalProgram`` has explicit numeric and symbolic call APIs. A
-concrete call (or ``call_numeric``) returns the solved objective followed by
-its declared outputs:
+``MathematicalProgram`` uses the same call syntax in concrete and traced code.
+A concrete call returns the solved objective followed by its declared outputs:
 
 .. code-block:: python
 
-   objective, solution = program.call_numeric(parameters)
+   objective, solution = program(parameters)
 
-During a ``function`` trace, ``program(parameters)`` dispatches to
-``call_symbolic`` and records one ``OP.EVALUATE`` node for each result. This
-allows a normal Coker function to use a solved objective or output:
+During a ``function`` trace, that same call records one ``OP.EVALUATE`` node
+for each result. This allows a normal Coker function to use a solved objective
+or output:
 
 .. code-block:: python
 
