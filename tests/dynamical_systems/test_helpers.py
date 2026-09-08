@@ -3,6 +3,8 @@ from coker.dynamics.transcription.collocation import (
     generate_discritisation_operators,
     legendre_coefficient,
     lgr_points,
+)
+from coker.dynamics.transcription.intervals import (
     split_at_non_differentiable_points,
 )
 from coker.dynamics.transcription.collocation import InterpolatingPoly
