@@ -57,9 +57,8 @@ def get_projection(dimension: Dimension, slc: slice):
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
         return Dimension(None)
-    function_space = getattr(arg, "_coker_function_space", None)
-    if isinstance(function_space, FunctionSpace):
-        return function_space
+    if isinstance(arg, CallableReference):
+        return arg.function_space
     try:
         d = Dimension(arg.shape)
         return d
@@ -191,21 +190,19 @@ class TapeInner:
         return len(self._nodes)
 
 
-class _TapeCallableReference:
-    """Reference to a callable archived by a tape."""
-
-    _coker_symbolic_callable = True
+class CallableReference:
+    """A tape-owned callable with a statically known function signature."""
 
     def __init__(
         self,
         tape: "Tape",
         archive_index: int,
-        function_space,
+        function_space: FunctionSpace,
         result_index: int,
     ):
         self._tape = weakref.ref(tape)
         self._archive_index = archive_index
-        self._coker_function_space = function_space
+        self.function_space = function_space
         self._result_index = result_index
 
     @property
@@ -267,7 +264,7 @@ class Tape:
         self, callable_value, function_space, result_index=0
     ):
         archive_index = self.archive_callable(callable_value)
-        return _TapeCallableReference(
+        return CallableReference(
             self, archive_index, function_space, result_index
         )
 
@@ -340,8 +337,8 @@ class Tape:
         for arg in args:
             if arg is None:
                 dims.append(None)
-            elif isinstance(arg, _TapeCallableReference):
-                dims.append(arg._coker_function_space)
+            elif isinstance(arg, CallableReference):
+                dims.append(arg.function_space)
             else:
                 assert isinstance(arg, Tracer)
                 dims.append(arg.dim)
@@ -369,7 +366,7 @@ class Tape:
         args = [
             (
                 self.insert_value(a)
-                if not isinstance(a, (Tracer, _TapeCallableReference))
+                if not isinstance(a, (Tracer, CallableReference))
                 else a.copy() if isinstance(a, Tracer) else a
             )
             for a in args
