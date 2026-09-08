@@ -141,9 +141,9 @@ class VariationalProblemBuilder:
     def _make_symbols(self) -> None:
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
 
-        # Canonical private trajectory descriptions.  These are deliberately
-        # kept separate from the raw tape inputs below: the latter are still
-        # consumed by the existing transcription and lowering paths.
+        # Canonical private trajectory descriptions.  Function-valued symbols
+        # are evaluated by the public accessors; downstream lowering still
+        # accepts concrete values as constant trajectory arguments.
         self._state_trajectory = FunctionSpace(
             "x",
             arguments=[Scalar("t")],
@@ -159,7 +159,7 @@ class VariationalProblemBuilder:
         terminal = self._trace.input(Scalar("t_final"))
 
         initial = self._trace.input(Scalar("t_0"))
-        x = self._trace.input(VectorSpace("x", x_dim.flat()))
+        state = self._trace.input(self._state_trajectory)
         u = (
             self._trace.input(self.system.inputs)
             if not isinstance(self.system.inputs, Noop)
@@ -181,7 +181,7 @@ class VariationalProblemBuilder:
             t,
             terminal,
             initial,
-            x,
+            state,
             u,
             p,
         )
@@ -276,7 +276,11 @@ class VariationalProblemBuilder:
 
     def state(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
-        return self._with_time(self._state, self._t if time is None else time)
+        time = self._t if time is None else time
+        value = self._state(
+            time if isinstance(time, Tracer) else self._t_initial
+        )
+        return self._with_time(value, time)
 
     def input(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
