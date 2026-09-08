@@ -37,8 +37,12 @@ def test_mathematical_program_composes_symbolically_and_compiles():
     assert compiled(3) == [9.0, 4.0]
 
 
-def test_symbolic_program_results_preserve_values():
+def test_symbolic_program_results_share_one_invocation():
+    calls = 0
+
     def implementation(x):
+        nonlocal calls
+        calls += 1
         return x**2, x + 1, x + 2
 
     program = MathematicalProgram(
@@ -51,6 +55,7 @@ def test_symbolic_program_results_preserve_values():
     )
 
     assert composed(3) == 18
+    assert calls == 1
 
 
 def test_optimisation_zero_input_problem(variational_backend):
