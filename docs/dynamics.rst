@@ -26,12 +26,10 @@ parameter space, the system becomes directly usable inside a
 Functional problem building
 ---------------------------
 
-New code should use :class:`coker.dynamics.VariationalProblemBuilder`.  The
-builder is functional: declare controls and parameters at construction time,
-then pass a :class:`coker.toolkits.codesign.Minimise` objective and
-``subject_to`` comparisons to ``build``.  The imperative ``minimise`` and
-``add_*`` methods remain available for compatibility but emit
-``DeprecationWarning``.
+New code should use :class:`coker.dynamics.VariationalProblemBuilder`. Declare
+controls and parameters at construction time, then pass a
+:class:`coker.toolkits.codesign.Minimise` objective and ``subject_to``
+comparisons to ``build``.
 
 For example, a fixed-horizon path-planning problem can constrain the input and
 terminal state without constructing a loss callback:

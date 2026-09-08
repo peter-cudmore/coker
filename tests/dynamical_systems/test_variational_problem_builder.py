@@ -1,13 +1,18 @@
 import numpy as np
 import pytest
 
-from coker import FunctionSpace, Scalar, VectorSpace, function
+from coker import FunctionSpace, Scalar, VectorSpace
+from coker.algebra.kernel import Noop
 from coker.dynamics import (
     BoundedVariable,
+    DynamicsSpec,
     PiecewiseConstantVariable,
     VariationalProblemBuilder,
 )
-from coker.dynamics.dynamical_system import create_control_system
+from coker.dynamics.dynamical_system import (
+    create_control_system,
+    create_dynamics_from_spec,
+)
 from coker.toolkits.codesign import Minimise
 
 
@@ -24,6 +29,36 @@ def make_parameterised_integrator():
         xdot=lambda _t, x, _u, _p: 0 * x,
         backend="numpy",
     )
+
+
+def make_algebraic_integrator():
+    control = FunctionSpace(
+        "u",
+        arguments=[Scalar("t")],
+        output=[Scalar("u(t)")],
+    )
+    spec = DynamicsSpec(
+        inputs=control,
+        parameters=VectorSpace("p", 1),
+        algebraic=VectorSpace("z", 1),
+        initial_conditions=lambda _z, _u, _p: (
+            np.array([0.0]),
+            np.array([0.0]),
+        ),
+        dynamics=lambda _t, x, z, _u, _p: z - x,
+        constraints=lambda _t, x, z, _u, _p: z - x,
+        outputs=lambda _t, x, z, _u, _p, _q: x + z,
+        quadratures=Noop(),
+    )
+    return create_dynamics_from_spec(spec, backend="numpy")
+
+
+def test_builder_supports_algebraic_systems_without_private_input():
+    system = make_algebraic_integrator()
+    with VariationalProblemBuilder(system, t_final=1.0) as builder:
+        problem = builder.build(Minimise(builder.output(builder.t)[0] ** 2))
+
+    assert problem.system is system
 
 
 def test_functional_builder_builds_problem():
@@ -88,27 +123,6 @@ def test_endpoint_inputs_are_valid_symbolic_accessors():
         initial = builder.input(0)
         terminal = builder.input(builder.t_final)
         assert initial.tape is terminal.tape
-
-
-def test_private_trajectory_spaces_preserve_function_evaluation_dimensions():
-    system = make_parameterised_integrator()
-    with VariationalProblemBuilder(system, t_final=1.0) as builder:
-        state_space = builder._state_trajectory
-        input_space = builder._input_trajectory
-
-        assert isinstance(state_space, FunctionSpace)
-        assert state_space.arguments == [Scalar("t")]
-        assert state_space.output == [VectorSpace("x", 1)]
-        assert input_space is system.inputs
-
-        state = function(
-            state_space.arguments,
-            lambda t: np.array([t + 1]),
-            backend="numpy",
-        )
-        value = state(2.0)
-        assert np.asarray(value).shape == (1,)
-        assert np.asarray(value) == pytest.approx([3.0])
 
 
 def test_state_accessor_is_composable():

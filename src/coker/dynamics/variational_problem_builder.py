@@ -80,7 +80,6 @@ class VariationalProblemBuilder:
         self.system_parameter_map = system_parameter_map
         self.control = list(control or [])
         self._parameter_declarations = list(parameters or [])
-        self._lowered_constraints: list[ConstraintSpec] = []
         self._quadratures: list[QuadratureSpec] = []
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
@@ -89,10 +88,10 @@ class VariationalProblemBuilder:
 
     def _make_symbols(self) -> None:
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
-        self._state_trajectory = FunctionSpace(
+        state_trajectory = FunctionSpace(
             "_state", [Scalar("t")], [VectorSpace("x", x_dim.flat())]
         )
-        self._input_trajectory = (
+        input_trajectory = (
             self.system.inputs
             if isinstance(self.system.inputs, FunctionSpace)
             else None
@@ -103,16 +102,16 @@ class VariationalProblemBuilder:
             if hasattr(output_dim, "flat")
             else output_dim[0] if isinstance(output_dim, tuple) else output_dim
         )
-        self._output_trajectory = FunctionSpace(
+        output_trajectory = FunctionSpace(
             "_output", [Scalar("t")], [VectorSpace("y", output_size)]
         )
         t = self._trace.input(Scalar("t"))
         terminal = self._trace.input(Scalar("t_final"))
         initial = self._trace.input(Scalar("t_0"))
-        state = self._trace.input(self._state_trajectory)
+        state = self._trace.input(state_trajectory)
         u = (
-            self._trace.input(self._input_trajectory)
-            if self._input_trajectory is not None
+            self._trace.input(input_trajectory)
+            if input_trajectory is not None
             else Noop()
         )
         p = (
@@ -120,18 +119,13 @@ class VariationalProblemBuilder:
             if self.system.parameters is not None
             else Noop()
         )
-        output = self._trace.input(self._output_trajectory)
+        output = self._trace.input(output_trajectory)
         self._t, self._t_final, self._t_initial = t, terminal, initial
         self._state, self._input, self._parameters, self._output = (
             state,
             u,
             p,
             output,
-        )
-        self._algebraic = (
-            self._trace.input(VectorSpace("z", z_dim.flat()))
-            if z_dim is not None and not z_dim.is_scalar() and z_dim.flat()
-            else Noop()
         )
 
     def _require_open(self) -> None:
@@ -176,12 +170,9 @@ class VariationalProblemBuilder:
             time if isinstance(time, Tracer) else self._t_initial
         )
 
-    def parameters_symbol(self) -> Tracer:
+    def parameters(self) -> Tracer:
         self._require_open()
         return self._parameters
-
-    def parameters(self) -> Tracer:
-        return self.parameters_symbol()
 
     def _time_binding(self, time: object) -> object:
         if isinstance(time, (int, float, np.number)):
@@ -276,7 +267,6 @@ class VariationalProblemBuilder:
                 initial.append(record)
             else:
                 terminal.append(record)
-        self._lowered_constraints = [record for record, _ in lowered]
         if isinstance(loss, Tracer):
             self._validate_trace(loss, "cost")
 
@@ -316,6 +306,7 @@ class VariationalProblemBuilder:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._context is not None:
+
             self._context.__exit__(exc_type, exc_val, exc_tb)
             self._context = None
         self._closed = True
