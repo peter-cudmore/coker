@@ -9,10 +9,7 @@ from coker.algebra.kernel import (
     Tracer,
 )
 
-
-def _is_symbolic_callable(value) -> bool:
-    """Return whether ``value`` is a symbolic callable graph value."""
-    return isinstance(value, (SymbolicCallable, CallableReference))
+_SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | CallableReference
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +44,7 @@ class CompiledPlan:
             if ws_idx >= 0:
                 ws[ws_idx] = (
                     arg
-                    if _is_symbolic_callable(arg)
+                    if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES)
                     else backend.to_backend_array(arg)
                 )
 
@@ -100,12 +97,12 @@ def _build_plan(graph, backend):
                 resolved.append(workspace[a.index])
             elif isinstance(a, Tracer):
                 resolved.append(a)  # cross-tape: pass through as-is
-            elif _is_symbolic_callable(a):
+            elif isinstance(a, _SYMBOLIC_CALLABLE_TYPES):
                 resolved.append(a)
             else:
                 resolved.append(backend.to_backend_array(a))
         value = resolved[0] if op == OP.VALUE else backend.call(op, *resolved)
-        if not isinstance(value, Tracer) and not _is_symbolic_callable(value):
+        if not isinstance(value, (Tracer, _SYMBOLIC_CALLABLE_TYPES)):
             value = backend.reshape(value, graph.dim[i])
         workspace[i] = value
     # Pass 3 — build execution steps for dynamic non-input nodes only.
@@ -118,7 +115,7 @@ def _build_plan(graph, backend):
         for a in args:
             if isinstance(a, Tracer) and a.tape is graph:
                 arg_indices.append(a.index)
-            elif isinstance(a, Tracer) or _is_symbolic_callable(a):
+            elif isinstance(a, (Tracer, _SYMBOLIC_CALLABLE_TYPES)):
                 arg_indices.append(alloc_inline(a))
             else:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
@@ -173,7 +170,7 @@ def _cast_outputs(outputs, graph, workspace, backend):
 def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     workspace[-1] = None
     for index, arg in zip(graph.input_indicies, args):
-        if _is_symbolic_callable(arg):
+        if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES):
             workspace[index] = arg
         else:
             workspace[index] = backend.to_backend_array(arg)
@@ -187,7 +184,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
                     return workspace[node.index]
                 else:
                     return node
-            elif _is_symbolic_callable(node):
+            elif isinstance(node, _SYMBOLIC_CALLABLE_TYPES):
                 return node
 
             return backend.to_backend_array(node)
@@ -211,8 +208,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
 
         workspace[w] = (
             backend.reshape(value, graph.dim[w])
-            if not isinstance(value, Tracer)
-            and not _is_symbolic_callable(value)
+            if not isinstance(value, (Tracer, _SYMBOLIC_CALLABLE_TYPES))
             else value
         )
 
