@@ -1,3 +1,4 @@
+import dataclasses
 import weakref
 from collections import defaultdict
 
@@ -190,26 +191,37 @@ class TapeInner:
         return len(self._nodes)
 
 
-class CallableReference:
-    """A tape-owned callable with a statically known function signature."""
+@dataclasses.dataclass
+class _CallableArchiveEntry:
+    """Callable and complete packed result signature stored by a tape."""
 
-    def __init__(
-        self,
-        tape: "Tape",
-        archive_index: int,
-        function_space: FunctionSpace,
-        result_index: int,
-    ):
-        self._tape = weakref.ref(tape)
-        self._archive_index = archive_index
-        self.function_space = function_space
-        self._result_index = result_index
+    callable_value: Callable
+    function_space: FunctionSpace
 
     def __call__(self, *args):
-        callable_value = self._tape().nodes._callable_archive[
-            self._archive_index
-        ]
-        return callable_value(*args)[self._result_index]
+        results = self.callable_value(*args)
+        return np.concatenate(
+            [np.asarray(result).reshape(-1) for result in results]
+        )
+
+
+class CallableReference:
+    """A reference to a callable entry owned by a tape."""
+
+    def __init__(self, tape: "Tape", archive_index: int):
+        self._tape = weakref.ref(tape)
+        self._archive_index = archive_index
+
+    @property
+    def _entry(self) -> _CallableArchiveEntry:
+        return self._tape().nodes._callable_archive[self._archive_index]
+
+    @property
+    def function_space(self) -> FunctionSpace:
+        return self._entry.function_space
+
+    def __call__(self, *args):
+        return self._entry(*args)
 
 
 class Tape:
@@ -243,22 +255,20 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def _archive_callable(self, callable_value):
+    def _archive_callable(self, callable_value, function_space):
         key = id(callable_value)
         if key not in self._inner._callable_hashmap:
             self._inner._callable_hashmap[key] = len(
                 self._inner._callable_archive
             )
-            self._inner._callable_archive.append(callable_value)
+            self._inner._callable_archive.append(
+                _CallableArchiveEntry(callable_value, function_space)
+            )
         return self._inner._callable_hashmap[key]
 
-    def _callable_reference(
-        self, callable_value, function_space, result_index=0
-    ):
-        archive_index = self._archive_callable(callable_value)
-        return CallableReference(
-            self, archive_index, function_space, result_index
-        )
+    def _callable_reference(self, callable_value, function_space):
+        archive_index = self._archive_callable(callable_value, function_space)
+        return CallableReference(self, archive_index)
 
     def find_dependents(self, tracer: "Tracer") -> Set[int]:
         if tracer is None or tracer is Noop():

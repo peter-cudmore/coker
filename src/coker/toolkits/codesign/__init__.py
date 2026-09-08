@@ -118,19 +118,28 @@ class MathematicalProgram(SymbolicCallable):
                 f"MathematicalProgram uses backend {self.backend!r}, "
                 f"but the enclosing graph uses {tape.backend!r}"
             )
-        call = self
         arguments = [
             dim.to_space(f"input_{i}")
             for i, dim in enumerate(self.input_shape)
         ]
+        result_dimensions = self.result_shape
+        result_space = VectorSpace(
+            "program_result", sum(dim.flat() for dim in result_dimensions)
+        )
+        reference = tape._callable_reference(
+            self, FunctionSpace("program", arguments, [result_space])
+        )
+        packed = Tracer(tape, tape.append(OP.EVALUATE, reference, *args))
+        offset = 0
         results = []
-        for index, output_dim in enumerate(self.result_shape):
-            output = output_dim.to_space(f"output_{index}")
-            space = FunctionSpace("program_output", arguments, [output])
-            reference = tape._callable_reference(call, space, index)
-            results.append(
-                Tracer(tape, tape.append(OP.EVALUATE, reference, *args))
-            )
+        for dim in result_dimensions:
+            if dim.is_scalar():
+                results.append(packed[offset])
+            else:
+                results.append(
+                    np.reshape(packed[offset : offset + dim.flat()], dim.dim)
+                )
+            offset += dim.flat()
         return tuple(results)
 
     def __call__(self, *args):
