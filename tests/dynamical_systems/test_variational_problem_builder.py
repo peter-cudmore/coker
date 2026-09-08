@@ -8,7 +8,6 @@ from coker.dynamics import (
     BoundedVariable,
     PiecewiseConstantVariable,
     VariationalProblemBuilder,
-    TemporalBinding,
 )
 from coker.dynamics.dynamical_system import create_control_system
 from coker.toolkits.codesign import Minimise
@@ -96,7 +95,7 @@ def _build_with_constraints(constraints):
     return problem
 
 
-def test_temporal_bindings_lower_to_path_initial_and_terminal():
+def test_constraints_are_placed_by_public_temporal_scope():
     problem = _build_with_constraints(
         lambda b: [
             b.state(b.t)[0] <= 1,
@@ -109,14 +108,14 @@ def test_temporal_bindings_lower_to_path_initial_and_terminal():
     assert len(problem.path_constraints) == 1
     assert len(problem.initial_constraints) == 1
     assert len(problem.terminal_constraints) == 2
-    assert problem.path_constraints[0].temporal_binding is TemporalBinding.PATH
-    assert (
-        problem.initial_constraints[0].temporal_binding
-        is TemporalBinding.INITIAL
+    assert all(
+        constraint.residual is not None
+        for constraint in (
+            problem.path_constraints
+            + problem.initial_constraints
+            + problem.terminal_constraints
+        )
     )
-    assert {c.temporal_binding for c in problem.terminal_constraints} == {
-        TemporalBinding.TERMINAL
-    }
 
 
 def test_endpoint_expression_in_path_constraint_is_broadcast():
@@ -124,7 +123,6 @@ def test_endpoint_expression_in_path_constraint_is_broadcast():
         lambda b: [b.state(b.t)[0] <= b.state(b.t_final)[0]]
     )
     assert len(problem.path_constraints) == 1
-    assert problem.path_constraints[0].temporal_binding is TemporalBinding.PATH
 
 
 def test_endpoint_inputs_are_valid_symbolic_accessors():
@@ -177,6 +175,21 @@ def test_integrate_rejects_vector_integrands_before_lowering():
             builder.integrate(builder.state(builder.t))
 
 
+def test_integral_constraint_is_enforced_at_terminal_scope():
+    system = make_parameterised_integrator()
+    with VariationalProblemBuilder(system, t_final=1.0) as builder:
+        integral = builder.integrate(builder.output(builder.t)[0] ** 2)
+        problem = builder.build(
+            Minimise(integral),
+            subject_to=[integral >= 0],
+        )
+
+    assert len(problem.quadratures) == 1
+    assert len(problem.path_constraints) == 0
+    assert len(problem.initial_constraints) == 0
+    assert len(problem.terminal_constraints) == 1
+
+
 def test_fixed_horizon_is_not_a_decision():
     system = make_parameterised_integrator()
     with VariationalProblemBuilder(system, t_final=2.0) as builder:
@@ -227,11 +240,6 @@ def test_free_horizon_retains_control_and_temporal_constraint_scopes():
     assert problem.decision_declarations == [horizon, control]
     assert len(problem.terminal_constraints) == 1
     assert len(problem.path_constraints) == 1
-    assert (
-        problem.terminal_constraints[0].temporal_binding
-        is TemporalBinding.TERMINAL
-    )
-    assert problem.path_constraints[0].temporal_binding is TemporalBinding.PATH
 
 
 @pytest.mark.parametrize("invalid", [0, -1, "T", None, True])
@@ -304,15 +312,7 @@ def test_sysopt_codesign_free_horizon_keeps_decisions_and_scopes():
     assert problem.horizon_decision is horizon
     assert problem.horizon_decision.lower_bound == 0.1
     assert problem.horizon_decision.upper_bound == 4.0
-    assert problem.horizon_decision.guess == 1.0
-    assert problem.decision_declarations == [horizon, control]
     assert len(problem.terminal_constraints) == 1
     assert len(problem.path_constraints) == 2
-    assert all(
-        constraint.temporal_binding is TemporalBinding.TERMINAL
-        for constraint in problem.terminal_constraints
-    )
-    assert all(
-        constraint.temporal_binding is TemporalBinding.PATH
-        for constraint in problem.path_constraints
-    )
+    assert problem.decision_declarations == [horizon, control]
+    assert problem.horizon_decision.guess == 1.0
