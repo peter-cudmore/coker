@@ -1,9 +1,19 @@
-from typing import NamedTuple, Callable
+from typing import Any, Callable, NamedTuple
 import numpy as np
 
 import coker
 from coker.backends.backend import Backend
 from coker.algebra.kernel import Tracer, OP
+
+
+def _is_symbolic_callable(value) -> bool:
+    """Return whether ``value`` must remain a callable graph value."""
+    return (
+        isinstance(value, coker.Function)
+        or getattr(value, "_coker_function_space", None) is not None
+        or getattr(value, "_coker_symbolic_callable", False)
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -34,13 +44,11 @@ class CompiledPlan:
 
     def execute(self, inputs, backend):
         ws = self._workspace
-        ws[-1] = None
-
         for ws_idx, arg in zip(self._input_indices, inputs):
             if ws_idx >= 0:
                 ws[ws_idx] = (
                     arg
-                    if isinstance(arg, coker.Function)
+                    if _is_symbolic_callable(arg)
                     else backend.to_backend_array(arg)
                 )
 
@@ -74,7 +82,7 @@ def _build_plan(graph, backend):
     # Pass 2 — pre-evaluate constant nodes into the workspace.
     # Negative slots below -(len+10) are reserved for any inline constants
     # (cross-tape Tracers or bare values) that appear as node arguments.
-    workspace = {-1: None}
+    workspace: dict[int, Any] = {-1: None}
     next_slot = [-(len(graph.nodes) + 10)]
 
     def alloc_inline(value):
@@ -93,13 +101,14 @@ def _build_plan(graph, backend):
                 resolved.append(workspace[a.index])
             elif isinstance(a, Tracer):
                 resolved.append(a)  # cross-tape: pass through as-is
+            elif _is_symbolic_callable(a):
+                resolved.append(a)
             else:
                 resolved.append(backend.to_backend_array(a))
         value = resolved[0] if op == OP.VALUE else backend.call(op, *resolved)
-        if not isinstance(value, Tracer):
+        if not isinstance(value, Tracer) and not _is_symbolic_callable(value):
             value = backend.reshape(value, graph.dim[i])
         workspace[i] = value
-
     # Pass 3 — build execution steps for dynamic non-input nodes only.
     steps = []
     for i, node in enumerate(graph.nodes):
@@ -110,7 +119,7 @@ def _build_plan(graph, backend):
         for a in args:
             if isinstance(a, Tracer) and a.tape is graph:
                 arg_indices.append(a.index)
-            elif isinstance(a, Tracer):
+            elif isinstance(a, Tracer) or _is_symbolic_callable(a):
                 arg_indices.append(alloc_inline(a))
             else:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
@@ -165,7 +174,7 @@ def _cast_outputs(outputs, graph, workspace, backend):
 def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     workspace[-1] = None
     for index, arg in zip(graph.input_indicies, args):
-        if isinstance(arg, coker.Function):
+        if _is_symbolic_callable(arg):
             workspace[index] = arg
         else:
             workspace[index] = backend.to_backend_array(arg)
@@ -179,7 +188,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
                     return workspace[node.index]
                 else:
                     return node
-            elif isinstance(node, coker.Function):
+            elif _is_symbolic_callable(node):
                 return node
 
             return backend.to_backend_array(node)
@@ -204,6 +213,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
         workspace[w] = (
             backend.reshape(value, graph.dim[w])
             if not isinstance(value, Tracer)
+            and not _is_symbolic_callable(value)
             else value
         )
 

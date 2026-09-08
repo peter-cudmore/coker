@@ -1,11 +1,19 @@
 import dataclasses
 from collections.abc import Mapping, Sequence
-from typing import Optional, List, Tuple, Callable, Any
+from typing import Any, Callable, List, Optional, Tuple, cast
 
 import numpy as np
 
-from coker.algebra.dimensions import Dimension
-from coker.algebra.kernel import Tape, Tracer, VectorSpace, Scalar
+from coker.algebra.dimensions import Dimension, FunctionSpace
+from coker.algebra.kernel import (
+    OP,
+    Tape,
+    TraceContext,
+    Tracer,
+    VectorSpace,
+    Scalar,
+    function,
+)
 from .optimisation import (
     BoundedConstraint,
     SolveFailure,
@@ -26,18 +34,35 @@ class Minimise:
         self.expression = expression
 
 
+class _ProgramCall:
+    """Archived symbolic call shared by all results of one program call."""
+
+    _coker_symbolic_callable = True
+
+    def __init__(self, program: "MathematicalProgram"):
+        self._program = program
+
+    def __call__(self, *args):
+        return self._program.call_numeric(*args)
+
+
 class MathematicalProgram:
-    """A numerical optimisation module mapping parameters to outputs."""
+    """An optimisation module that maps parameters to an objective and outputs.
+
+    Concrete calls execute the configured optimisation backend. Calls made
+    while tracing emit ``OP.EVALUATE`` nodes, allowing the program to compose
+    with ordinary Coker functions.
+    """
 
     def __init__(
         self,
         input_shape: Tuple[Dimension, ...],
         output_shape: Tuple[Dimension, ...],
-        impl: Callable,
+        implementation: Callable,
     ):
         self.input_shape = input_shape
         self.output_shape = output_shape
-        self.impl = impl
+        self._impl = implementation
         self.solve_info = None
 
     @property
@@ -45,18 +70,20 @@ class MathematicalProgram:
         """Return the objective-first shapes produced by this program."""
         return (Dimension(None), *self.output_shape)
 
-    def __call__(self, *args):
-        """Solve the program with concrete runtime arguments."""
+    def _validate_arguments(self, args) -> None:
         if len(args) != len(self.input_shape):
             raise ValueError(
-                f"Expected {len(self.input_shape)} runtime arguments, "
-                f"got {len(args)}"
+                f"Expected {len(self.input_shape)} arguments, got {len(args)}"
             )
 
+    def call_numeric(self, *args):
+        """Solve with concrete arguments and return objective followed by outputs."""
+        self._validate_arguments(args)
+
         try:
-            result = self.impl(*args)
+            result = self._impl(*args)
         finally:
-            self.solve_info = getattr(self.impl, "last_solve_info", None)
+            self.solve_info = getattr(self._impl, "last_solve_info", None)
         if not isinstance(result, (list, tuple)):
             result = [result]
         if len(result) != len(self.result_shape):
@@ -80,9 +107,46 @@ class MathematicalProgram:
             ),
         )
 
+    def call_symbolic(self, *args):
+        """Emit objective and output evaluations on the active symbolic tape."""
+        self._validate_arguments(args)
+        tape = TraceContext.get_local_tape()
+        if tape is None:
+            raise RuntimeError(
+                "call_symbolic() requires an active Coker tracing context"
+            )
+        call = _ProgramCall(self)
+        arguments = [
+            dim.to_space(f"input_{i}") for i, dim in enumerate(self.input_shape)
+        ]
+        results = []
+        for index, output_dim in enumerate(self.result_shape):
+            output = output_dim.to_space(f"output_{index}")
+            space = FunctionSpace("program_output", arguments, [output])
+            reference = tape.callable_reference(call, space, index)
+            results.append(Tracer(tape, tape.append(OP.EVALUATE, reference, *args)))
+        return tuple(results)
+
+    def __call__(self, *args):
+        """Call symbolically during tracing and numerically otherwise."""
+        if TraceContext.get_local_tape() is not None:
+            return self.call_symbolic(*args)
+        return self.call_numeric(*args)
+
+    def lower(self, backend: str = "numpy"):
+        """Lower this program's symbolic call graph with ``backend``."""
+        return function(
+            arguments=[
+                dim.to_space(f"input_{i}")
+                for i, dim in enumerate(self.input_shape)
+            ],
+            implementation=cast(Callable, self.call_symbolic),
+            backend=backend,
+        )
+
     def export_payload(self) -> dict[str, object]:
         """Return the deterministic artifact payload when supported."""
-        exporter = getattr(self.impl, "export_payload", None)
+        exporter = getattr(self._impl, "export_payload", None)
         if exporter is None:
             raise NotImplementedError(
                 "this mathematical program backend has no "
