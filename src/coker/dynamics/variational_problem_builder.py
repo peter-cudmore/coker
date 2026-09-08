@@ -7,7 +7,6 @@ from typing import Optional, Sequence
 import numpy as np
 
 from coker.algebra.kernel import (
-    Function,
     FunctionSpace,
     InequalityExpression,
     Noop,
@@ -149,16 +148,18 @@ class VariationalProblemBuilder:
             "_state", [Scalar("t")], [VectorSpace("x", x_dim.flat())]
         )
         self._input_trajectory = (
-            FunctionSpace(
-                "_input",
-                list(self.system.inputs.arguments),
-                list(self.system.inputs.output),
-            )
+            self.system.inputs
             if isinstance(self.system.inputs, FunctionSpace)
             else None
         )
+        output_dim = self.system.y.output_shape()[0]
+        output_size = (
+            output_dim.flat()
+            if hasattr(output_dim, "flat")
+            else output_dim[0] if isinstance(output_dim, tuple) else output_dim
+        )
         self._output_trajectory = FunctionSpace(
-            "_output", [Scalar("t")], list(self.system.y.output_shape())
+            "_output", [Scalar("t")], [VectorSpace("y", output_size)]
         )
         t = self._trace.input(Scalar("t"))
         terminal = self._trace.input(Scalar("t_final"))
@@ -175,11 +176,19 @@ class VariationalProblemBuilder:
             else Noop()
         )
         output = self._trace.input(self._output_trajectory)
-        self._receiver_roles = {state.index: _StateSignal, output.index: _OutputSignal}
+        self._receiver_roles = {
+            state.index: _StateSignal,
+            output.index: _OutputSignal,
+        }
         if isinstance(u, Tracer):
             self._receiver_roles[u.index] = _InputSignal
         self._t, self._t_final, self._t_initial = t, terminal, initial
-        self._state, self._input, self._parameters, self._output = state, u, p, output
+        self._state, self._input, self._parameters, self._output = (
+            state,
+            u,
+            p,
+            output,
+        )
         self._algebraic = (
             self._trace.input(VectorSpace("z", z_dim.flat()))
             if z_dim is not None and not z_dim.is_scalar() and z_dim.flat()
@@ -293,7 +302,9 @@ class VariationalProblemBuilder:
         time = self._t if time is None else time
         self._time_binding(time)
         return self._with_time(
-            self._output(time if isinstance(time, Tracer) else self._t_initial),
+            self._output(
+                time if isinstance(time, Tracer) else self._t_initial
+            ),
             time,
         )
 
