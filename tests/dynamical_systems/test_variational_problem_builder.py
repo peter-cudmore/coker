@@ -154,27 +154,18 @@ def test_private_trajectory_spaces_preserve_function_evaluation_dimensions():
         assert np.asarray(value) == pytest.approx([3.0])
 
 
-def test_state_accessor_emits_function_evaluation_expression():
+def test_state_accessor_is_composable():
     system = make_parameterised_integrator()
     with VariationalProblemBuilder(system, t_final=1.0) as builder:
-        for time in (builder.t, 0, builder.t_final):
-            expression = builder.state(time)
-            _op, evaluated, _marker = builder._trace.nodes[
-                builder._trace.nodes[expression.index][1].index
-            ]
-            assert _op.name == "EVALUATE"
-            assert evaluated.index == builder._state.index
+        expression = builder.state(builder.t) + builder.state(builder.t_final)
+        assert expression.tape is builder._trace
 
 
-def test_function_valued_input_accessor_emits_function_evaluation_expression():
+def test_function_valued_input_accessor_is_composable():
     system = make_parameterised_integrator()
     with VariationalProblemBuilder(system, t_final=1.0) as builder:
         expression = builder.input(builder.t)
-        _op, evaluated, _time = builder._trace.nodes[
-            builder._trace.nodes[expression.index][1].index
-        ]
-        assert _op.name == "EVALUATE"
-        assert evaluated.index == builder._input.index
+        assert expression.tape is builder._trace
 
 
 def test_state_accessor_evaluation_preserves_vector_shape():

@@ -21,8 +21,8 @@ from coker.dynamics.trajectory_normalization import (
     _InputSignal,
     _OutputSignal,
     _StateSignal,
-    InitialSite,
     PathSite,
+    InitialSite,
     TerminalSite,
     normalize_trajectory_expression,
 )
@@ -36,7 +36,6 @@ from coker.dynamics.types import (
     ParameterVariable,
     QuadratureSpec,
     TranscriptionOptions,
-    TemporalBinding,
     VariationalProblem,
 )
 from coker.toolkits.codesign import Minimise
@@ -122,7 +121,7 @@ class VariationalProblemBuilder:
         self._quadrature_initial: list[float] = []
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
-        self._timed_values: dict[int, TemporalBinding] = {}
+        self._timed_values: dict[int, str] = {}
         self._closed = False
         self._make_symbols()
 
@@ -272,15 +271,8 @@ class VariationalProblemBuilder:
         self.terminal_constraints.append(constraint)
 
     def _with_time(self, value: Tracer, time: object) -> Tracer:
-        binding = self._time_binding(time)
-        marker = {
-            TemporalBinding.PATH: self._t,
-            TemporalBinding.TERMINAL: self._t_final,
-            TemporalBinding.INITIAL: self._t_initial,
-        }[binding]
-        tagged = value + 0 * marker
-        self._timed_values[tagged.index] = binding
-        return tagged
+        self._time_binding(time)
+        return value
 
     def state(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
@@ -319,10 +311,10 @@ class VariationalProblemBuilder:
     def parameters(self) -> Tracer:
         return self.parameters_symbol()
 
-    def _time_binding(self, time: object) -> TemporalBinding:
+    def _time_binding(self, time: object) -> str:
         if isinstance(time, (int, float, np.number)):
             if float(time) == 0:
-                return TemporalBinding.INITIAL
+                return InitialSite
             raise ValueError(
                 "unsupported concrete time; allowed bindings are "
                 "0, t, and t_final"
@@ -332,11 +324,13 @@ class VariationalProblemBuilder:
                 "time marker belongs to a foreign or unrecognised trace"
             )
         if time.index == self._t.index:
-            return TemporalBinding.PATH
+            return PathSite
         if time.index == self._t_final.index:
-            return TemporalBinding.TERMINAL
+            return TerminalSite
+        if time.index == self._t_initial.index:
+            return InitialSite
         raise ValueError(
-            "unsupported time binding; allowed bindings are 0, t, and t_final"
+            "unsupported time marker; allowed bindings are 0, t, and t_final"
         )
 
     def _validate_time(self, time: object) -> None:
@@ -397,7 +391,7 @@ class VariationalProblemBuilder:
                 raise ValueError("Minimise cost must be scalar")
 
         constraints = list(subject_to or [])
-        lowered: list[ConstraintSpec] = []
+        lowered: list[tuple[ConstraintSpec, str]] = []
         for constraint in constraints:
             if not isinstance(constraint, Tracer):
                 raise TypeError("constraints must be symbolic comparisons")
@@ -409,26 +403,19 @@ class VariationalProblemBuilder:
                 self._trace, constraint.index
             ).as_halfplane_bound()
             binding = self._classify_time(residual)
-            lowered.append(
-                ConstraintSpec(
-                    residual=residual,
-                    lower_bound=lower,
-                    upper_bound=upper,
-                    temporal_binding=binding,
-                )
-            )
+            lowered.append((ConstraintSpec(residual, lower, upper), binding))
 
         path = list(self.path_constraints)
         terminal = list(self.terminal_constraints)
         initial = list(self.initial_constraints)
-        for record in lowered:
-            if record.temporal_binding is TemporalBinding.PATH:
+        for record, binding in lowered:
+            if binding is PathSite:
                 path.append(record)
-            elif record.temporal_binding is TemporalBinding.INITIAL:
+            elif binding is InitialSite:
                 initial.append(record)
             else:
                 terminal.append(record)
-        self._lowered_constraints = lowered
+        self._lowered_constraints = [record for record, _ in lowered]
         trajectory_requirements = []
         if isinstance(loss, Tracer):
             trajectory_requirements.append(
@@ -477,18 +464,14 @@ class VariationalProblemBuilder:
             backend=self.backend,
         )
 
-    def _classify_time(self, expression: Tracer) -> TemporalBinding:
+    def _classify_time(self, expression: Tracer) -> str:
         if expression.tape is not self._trace:
             raise ValueError("constraint contains a foreign trace")
-
-        # Scope is inferred from ordinary trajectory-evaluation arguments.
-        # TemporalBinding tags remain attached for backend lowering, but are
-        # deliberately not consulted here.
         if self._trace.depends_on(expression, self._t):
-            return TemporalBinding.PATH
+            return PathSite
         if self._trace.depends_on(expression, self._t_initial):
-            return TemporalBinding.INITIAL
-        return TemporalBinding.TERMINAL
+            return InitialSite
+        return TerminalSite
 
     def _validate_trace(self, expression: Tracer, label: str) -> None:
         if expression.tape is not self._trace:
