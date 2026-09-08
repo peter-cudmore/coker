@@ -153,16 +153,6 @@ class MathematicalProgram(SymbolicCallable):
             backend=backend_name,
         )
 
-    def export_payload(self) -> dict[str, object]:
-        """Return the deterministic artifact payload when supported."""
-        exporter = getattr(self._impl, "export_payload", None)
-        if exporter is None:
-            raise NotImplementedError(
-                "this mathematical program backend has no "
-                "Coker artifact payload"
-            )
-        return exporter()
-
 
 class ProblemBuilder:
     def __init__(self, arguments: Optional[List[VectorSpace | Scalar]] = None):
