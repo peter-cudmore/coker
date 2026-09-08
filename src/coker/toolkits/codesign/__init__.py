@@ -135,7 +135,7 @@ class MathematicalProgram(SymbolicCallable):
         for index, output_dim in enumerate(self.result_shape):
             output = output_dim.to_space(f"output_{index}")
             space = FunctionSpace("program_output", arguments, [output])
-            reference = tape.callable_reference(call, space, index)
+            reference = tape._callable_reference(call, space, index)
             results.append(
                 Tracer(tape, tape.append(OP.EVALUATE, reference, *args))
             )
