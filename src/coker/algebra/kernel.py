@@ -209,15 +209,8 @@ class CallableReference:
     def _owner(self):
         return self._tape().nodes._callable_archive[self._archive_index]
 
-    @property
-    def _coker_evaluation_owner(self):
-        return self._owner
-
     def __call__(self, *args):
         return self._owner(*args)[self._result_index]
-
-    def _coker_begin_evaluation(self):
-        return None
 
 
 class Tape:
