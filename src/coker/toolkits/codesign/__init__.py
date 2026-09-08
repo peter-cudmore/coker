@@ -35,16 +35,6 @@ class Minimise:
         self.expression = expression
 
 
-class _ProgramCall:
-    """Archived symbolic call shared by all results of one program call."""
-
-    def __init__(self, program: "MathematicalProgram"):
-        self._program = program
-
-    def __call__(self, *args):
-        return self._program.call_numeric(*args)
-
-
 class MathematicalProgram(SymbolicCallable):
     """An optimisation module that maps parameters to an objective and outputs.
 
@@ -126,7 +116,7 @@ class MathematicalProgram(SymbolicCallable):
                 f"MathematicalProgram uses backend {self.backend!r}, "
                 f"but the enclosing graph uses {tape.backend!r}"
             )
-        call = _ProgramCall(self)
+        call = self
         arguments = [
             dim.to_space(f"input_{i}")
             for i, dim in enumerate(self.input_shape)
