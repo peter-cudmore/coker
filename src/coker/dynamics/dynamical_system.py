@@ -2,6 +2,7 @@ import dataclasses
 from typing import Callable, List, Optional
 import numpy as np
 from coker import VectorSpace, FunctionSpace, function, Scalar
+from coker.algebra.dimensions import Dimension
 from coker.algebra.kernel import Noop
 
 from .types import DynamicsSpec, DynamicalSystem
@@ -37,7 +38,7 @@ def create_dynamics_from_spec(
     state_space = VectorSpace("x", state.dim.flat())
 
     if algebraic is not None:
-        assert algebraic.dim == spec.algebraic.dim, (
+        assert algebraic.dim == Dimension(spec.algebraic.dimension), (
             "Initial algebraic conditions must have the same dimension "
             "as the algebraic variables"
         )

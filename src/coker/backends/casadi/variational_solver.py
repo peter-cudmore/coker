@@ -43,28 +43,9 @@ class DecisionLayout:
         return slice(0, self.horizon_size)
 
     @property
-    def path_slice(self):
-        start = self.horizon_size
-        return slice(start, start + self.path_size)
-
-    @property
-    def control_slice(self):
-        start = self.horizon_size + self.path_size
-        return slice(start, start + self.control_size)
-
-    @property
     def parameter_slice(self):
         start = self.horizon_size + self.path_size + self.control_size
         return slice(start, start + self.parameter_size)
-
-    @property
-    def size(self):
-        return (
-            self.horizon_size
-            + self.path_size
-            + self.control_size
-            + self.parameter_size
-        )
 
     def vector(self, horizon, path, control, parameters):
         blocks = [path, control, parameters]
@@ -774,7 +755,6 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
         size = sum(p.size() for p in self.polys)
         np_array = np.array(array)
         assert np_array.shape == (size, 1)
-        np_array.reshape((size,))
 
         slices = []
         offset = 0
