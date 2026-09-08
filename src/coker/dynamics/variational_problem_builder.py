@@ -17,15 +17,6 @@ from coker.algebra.kernel import (
     Tracer,
     VectorSpace,
 )
-from coker.dynamics.trajectory_normalization import (
-    _InputSignal,
-    _OutputSignal,
-    _StateSignal,
-    PathSite,
-    InitialSite,
-    TerminalSite,
-    normalize_trajectory_expression,
-)
 from coker.dynamics.types import (
     BoundedVariable,
     ConstraintSpec,
@@ -40,15 +31,9 @@ from coker.dynamics.types import (
 from coker.toolkits.codesign import Minimise
 
 
-@dataclass(frozen=True)
-class _Quadrature:
-    """Symbolic dynamic quadrature channel registered by the builder."""
-
-    integrand: Tracer
-    state: Tracer
-    initial_state: float
-    channel: int
-    trace_id: int
+_PATH_SITE = object()
+_INITIAL_SITE = object()
+_TERMINAL_SITE = object()
 
 
 @dataclass
@@ -115,12 +100,9 @@ class VariationalProblemBuilder:
         self.control = list(control or [])
         self._parameter_declarations = list(parameters or [])
         self._lowered_constraints: list[ConstraintSpec] = []
-        self._quadratures: list[_Quadrature] = []
-        self._quadrature_derivative: list[Tracer] = []
-        self._quadrature_initial: list[float] = []
+        self._quadratures: list[QuadratureSpec] = []
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
-        self._timed_values: dict[int, str] = {}
         self._closed = False
         self._make_symbols()
 
@@ -178,12 +160,6 @@ class VariationalProblemBuilder:
             else Noop()
         )
         output = self._trace.input(self._output_trajectory)
-        self._receiver_roles = {
-            state.index: _StateSignal,
-            output.index: _OutputSignal,
-        }
-        if isinstance(u, Tracer):
-            self._receiver_roles[u.index] = _InputSignal
         self._t, self._t_final, self._t_initial = t, terminal, initial
         self._state, self._input, self._parameters, self._output = (
             state,
@@ -269,38 +245,30 @@ class VariationalProblemBuilder:
         )
         self.terminal_constraints.append(constraint)
 
-    def _with_time(self, value: Tracer, time: object) -> Tracer:
-        self._time_binding(time)
-        return value
-
     def state(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
         time = self._t if time is None else time
-        value = self._state(
+        self._validate_time(time)
+        return self._state(
             time if isinstance(time, Tracer) else self._t_initial
         )
-        return self._with_time(value, time)
 
     def input(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
-        marker_time = self._t if time is None else time
+        time = self._t if time is None else time
+        self._validate_time(time)
         if isinstance(self._input, Tracer):
-            value = self._input(
+            return self._input(
                 time if isinstance(time, Tracer) else self._t_initial
             )
-        else:
-            value = self._input
-        return self._with_time(value, marker_time)
+        return self._input
 
     def output(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
         time = self._t if time is None else time
-        self._time_binding(time)
-        return self._with_time(
-            self._output(
-                time if isinstance(time, Tracer) else self._t_initial
-            ),
-            time,
+        self._validate_time(time)
+        return self._output(
+            time if isinstance(time, Tracer) else self._t_initial
         )
 
     def parameters_symbol(self) -> Tracer:
@@ -310,10 +278,10 @@ class VariationalProblemBuilder:
     def parameters(self) -> Tracer:
         return self.parameters_symbol()
 
-    def _time_binding(self, time: object) -> str:
+    def _time_binding(self, time: object) -> object:
         if isinstance(time, (int, float, np.number)):
             if float(time) == 0:
-                return InitialSite
+                return _INITIAL_SITE
             raise ValueError(
                 "unsupported concrete time; allowed bindings are "
                 "0, t, and t_final"
@@ -323,11 +291,11 @@ class VariationalProblemBuilder:
                 "time marker belongs to a foreign or unrecognised trace"
             )
         if time.index == self._t.index:
-            return PathSite
+            return _PATH_SITE
         if time.index == self._t_final.index:
-            return TerminalSite
+            return _TERMINAL_SITE
         if time.index == self._t_initial.index:
-            return InitialSite
+            return _INITIAL_SITE
         raise ValueError(
             "unsupported time marker; allowed bindings are 0, t, and t_final"
         )
@@ -359,8 +327,6 @@ class VariationalProblemBuilder:
                 channel=channel,
             )
         )
-        self._quadrature_derivative.append(expression)
-        self._quadrature_initial.append(0.0)
         return state
 
     def build(
@@ -390,7 +356,7 @@ class VariationalProblemBuilder:
                 raise ValueError("Minimise cost must be scalar")
 
         constraints = list(subject_to or [])
-        lowered: list[tuple[ConstraintSpec, str]] = []
+        lowered: list[tuple[ConstraintSpec, object]] = []
         for constraint in constraints:
             if not isinstance(constraint, Tracer):
                 raise TypeError("constraints must be symbolic comparisons")
@@ -408,33 +374,13 @@ class VariationalProblemBuilder:
         terminal = list(self.terminal_constraints)
         initial = list(self.initial_constraints)
         for record, binding in lowered:
-            if binding is PathSite:
+            if binding is _PATH_SITE:
                 path.append(record)
-            elif binding is InitialSite:
+            elif binding is _INITIAL_SITE:
                 initial.append(record)
             else:
                 terminal.append(record)
         self._lowered_constraints = [record for record, _ in lowered]
-        trajectory_requirements = []
-        if isinstance(loss, Tracer):
-            trajectory_requirements.append(
-                normalize_trajectory_expression(loss, TerminalSite())
-            )
-        for records, site in (
-            (path, PathSite()),
-            (initial, InitialSite()),
-            (terminal, TerminalSite()),
-        ):
-            for record in records:
-                expression = (
-                    record.residual
-                    if isinstance(record, ConstraintSpec)
-                    else record.value
-                )
-                if isinstance(expression, Tracer):
-                    trajectory_requirements.append(
-                        normalize_trajectory_expression(expression, site)
-                    )
         if isinstance(loss, Tracer):
             self._validate_trace(loss, "cost")
 
@@ -446,7 +392,6 @@ class VariationalProblemBuilder:
             control=self.control or None,
             parameters=self._parameter_declarations or None,
             quadratures=list(self._quadratures),
-            trajectory_requirements=trajectory_requirements,
             system_parameter_map=self.system_parameter_map,
             terminal_constraints=terminal,
             initial_constraints=initial,
@@ -455,14 +400,14 @@ class VariationalProblemBuilder:
             backend=self.backend,
         )
 
-    def _classify_time(self, expression: Tracer) -> str:
+    def _classify_time(self, expression: Tracer) -> object:
         if expression.tape is not self._trace:
             raise ValueError("constraint contains a foreign trace")
         if self._trace.depends_on(expression, self._t):
-            return PathSite
+            return _PATH_SITE
         if self._trace.depends_on(expression, self._t_initial):
-            return InitialSite
-        return TerminalSite
+            return _INITIAL_SITE
+        return _TERMINAL_SITE
 
     def _validate_trace(self, expression: Tracer, label: str) -> None:
         if expression.tape is not self._trace:

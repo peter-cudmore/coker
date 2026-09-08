@@ -496,12 +496,10 @@ def create_variational_solver(
         return y_val
 
     if control_factory is None:
-        (cost,) = casadi.evaluate(
-            problem.objective.expression, [solution_proxy, p]
-        )
+        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
     else:
         (cost,) = casadi.evaluate(
-            problem.objective.expression,
+            problem.loss,
             [solution_proxy, control_factory, p],
         )
 
