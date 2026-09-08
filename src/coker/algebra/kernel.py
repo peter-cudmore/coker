@@ -845,7 +845,6 @@ class SymbolicCallable(ABC):
     not participate because their solver interface is different.
     """
 
-    _coker_symbolic_callable = True
 
     @abstractmethod
     def __call__(self, *args):
