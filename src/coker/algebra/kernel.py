@@ -255,19 +255,15 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def _archive_callable(self, callable_value, function_space):
+    def _create_callable_reference(self, callable_value, function_space):
         key = id(callable_value)
-        if key not in self._inner._callable_hashmap:
-            self._inner._callable_hashmap[key] = len(
-                self._inner._callable_archive
-            )
+        archive_index = self._inner._callable_hashmap.get(key)
+        if archive_index is None:
+            archive_index = len(self._inner._callable_archive)
+            self._inner._callable_hashmap[key] = archive_index
             self._inner._callable_archive.append(
                 _CallableArchiveEntry(callable_value, function_space)
             )
-        return self._inner._callable_hashmap[key]
-
-    def _callable_reference(self, callable_value, function_space):
-        archive_index = self._archive_callable(callable_value, function_space)
         return CallableReference(self, archive_index)
 
     def find_dependents(self, tracer: "Tracer") -> Set[int]:
