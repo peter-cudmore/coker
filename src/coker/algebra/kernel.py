@@ -251,7 +251,7 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def archive_callable(self, callable_value):
+    def _archive_callable(self, callable_value):
         key = id(callable_value)
         if key not in self._inner._callable_hashmap:
             self._inner._callable_hashmap[key] = len(
@@ -260,10 +260,10 @@ class Tape:
             self._inner._callable_archive.append(callable_value)
         return self._inner._callable_hashmap[key]
 
-    def callable_reference(
+    def _callable_reference(
         self, callable_value, function_space, result_index=0
     ):
-        archive_index = self.archive_callable(callable_value)
+        archive_index = self._archive_callable(callable_value)
         return CallableReference(
             self, archive_index, function_space, result_index
         )
