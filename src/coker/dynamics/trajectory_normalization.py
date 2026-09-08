@@ -32,6 +32,15 @@ class TrajectoryRequirement:
     site: PathSite | InitialSite | TerminalSite
 
 
+def lower_trajectory_requirement(requirement, workspace):
+    """Lower a typed requirement through nested Coker evaluations."""
+    from coker.backends.casadi.casadi import substitute
+
+    if not isinstance(requirement, TrajectoryRequirement):
+        raise TypeError("expected a TrajectoryRequirement")
+    return substitute([requirement.expression], workspace)[0]
+
+
 def normalize_trajectory_expression(expression: Tracer, site: Any):
     if not isinstance(expression, Tracer):
         raise TypeError("trajectory expression must be a tracer")

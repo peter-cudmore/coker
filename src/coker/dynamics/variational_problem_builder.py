@@ -21,6 +21,10 @@ from coker.dynamics.trajectory_normalization import (
     _InputSignal,
     _OutputSignal,
     _StateSignal,
+    InitialSite,
+    PathSite,
+    TerminalSite,
+    normalize_trajectory_expression,
 )
 from coker.dynamics.types import (
     BoundedVariable,
@@ -425,7 +429,26 @@ class VariationalProblemBuilder:
             else:
                 terminal.append(record)
         self._lowered_constraints = lowered
-
+        trajectory_requirements = []
+        if isinstance(loss, Tracer):
+            trajectory_requirements.append(
+                normalize_trajectory_expression(loss, TerminalSite())
+            )
+        for records, site in (
+            (path, PathSite()),
+            (initial, InitialSite()),
+            (terminal, TerminalSite()),
+        ):
+            for record in records:
+                expression = (
+                    record.residual
+                    if isinstance(record, ConstraintSpec)
+                    else record.value
+                )
+                if isinstance(expression, Tracer):
+                    trajectory_requirements.append(
+                        normalize_trajectory_expression(expression, site)
+                    )
         if isinstance(loss, Tracer):
             self._validate_trace(loss, "cost")
 
@@ -437,6 +460,7 @@ class VariationalProblemBuilder:
             control=self.control or None,
             parameters=self._parameter_declarations or None,
             quadratures=list(self._quadratures),
+            trajectory_requirements=trajectory_requirements,
             system_parameter_map=self.system_parameter_map,
             final_time_map=(
                 FinalTimeMapping(
