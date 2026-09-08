@@ -63,17 +63,31 @@ and low-level native graph behaviour is tested under ``coker``.
 Optimisation program composition
 --------------------------------
 
-``MathematicalProgram`` is a numerical module.  A concrete call returns the
-solved objective followed by its declared outputs:
+``MathematicalProgram`` has explicit numeric and symbolic call APIs. A
+concrete call (or ``call_numeric``) returns the solved objective followed by
+its declared outputs:
 
 .. code-block:: python
 
-   objective, solution = program(parameters)
+   objective, solution = program.call_numeric(parameters)
 
-Programs may be called from a traced ``function``.  Coker records the call
-statically and executes its prebuilt QP solver when the enclosing function is
-evaluated.  Solver calls remain numerical boundaries: derivatives through an
-argmin or argmax are not defined.
+During a ``function`` trace, ``program(parameters)`` dispatches to
+``call_symbolic`` and records one ``OP.EVALUATE`` node for each result. This
+allows a normal Coker function to use a solved objective or output:
+
+.. code-block:: python
+
+   closed_loop = function(
+       [VectorSpace("parameters", 2)],
+       lambda parameters: program(parameters)[1],
+       backend="numpy",
+   )
+
+``program.compile(backend="numpy")`` creates an equivalent
+``Function`` directly. Select the backend that should lower the enclosing
+symbolic graph; the optimisation program itself remains an opaque numerical
+operation and runs its configured solver when evaluated. Derivatives through
+an argmin or argmax are not defined.
 
 ``numpy``, ``casadi``, and ``coker`` support host-side program composition.
 The JAX backend does not construct optimisation programs.

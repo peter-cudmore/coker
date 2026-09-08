@@ -2,17 +2,55 @@ import numpy as np
 import pytest
 
 from coker.toolkits.codesign import (
-    ProblemBuilder,
+    MathematicalProgram,
     Minimise,
+    ProblemBuilder,
+    SolveFailure,
     norm as codesign_norm,
 )
-from coker import Dimension, VectorSpace
-from coker.toolkits.codesign import SolveFailure
+from coker import Dimension, Scalar, VectorSpace, function
 
 
 def quadratic(x, p, z):
     # solution should be |x| = 0, |p| = 0 z = 0
     return x.T @ x + p.T @ p + z**2
+
+
+def test_mathematical_program_composes_symbolically_and_compiles():
+    program = MathematicalProgram(
+        input_shape=(Dimension(None),),
+        output_shape=(Dimension(None),),
+        implementation=lambda x: (x**2, x + 1),
+    )
+
+    composed = function(
+        arguments=[Scalar("x")],
+        implementation=lambda x: program(x)[1] * 2,
+        backend="numpy",
+    )
+
+    assert not hasattr(program, "impl")
+    assert composed(3) == 8
+
+    compiled = program.lower(backend="numpy")
+    assert compiled.backend == "numpy"
+    assert compiled(3) == [9.0, 4.0]
+
+
+def test_symbolic_program_results_preserve_values():
+    def implementation(x):
+        return x**2, x + 1, x + 2
+
+    program = MathematicalProgram(
+        input_shape=(Dimension(None),),
+        output_shape=(Dimension(None), Dimension(None)),
+        implementation=implementation,
+    )
+    composed = function(
+        [Scalar("x")], lambda x: sum(program(x)), backend="numpy"
+    )
+
+    assert composed(3) == 18
 
 
 def test_optimisation_zero_input_problem(variational_backend):

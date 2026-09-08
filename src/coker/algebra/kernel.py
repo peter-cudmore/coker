@@ -56,8 +56,10 @@ def get_projection(dimension: Dimension, slc: slice):
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
         return Dimension(None)
+    function_space = getattr(arg, "_coker_function_space", None)
+    if isinstance(function_space, FunctionSpace):
+        return function_space
     try:
-
         d = Dimension(arg.shape)
         return d
     except (AttributeError, ValueError):
@@ -99,6 +101,8 @@ class TapeInner:
         self._nodes = []
         self._constants = []
         self._constant_hashmap = {}
+        self._callable_archive = []
+        self._callable_hashmap = {}
         self.tape_ref = weakref.ref(tape_ref)
         assert self.INNER_REF not in OP.__members__.values()
         assert self.CONSTANT_REF not in OP.__members__.values()
@@ -185,6 +189,32 @@ class TapeInner:
     def __len__(self):
         return len(self._nodes)
 
+class _TapeCallableReference:
+    """Reference to a callable archived by a tape."""
+
+    _coker_symbolic_callable = True
+
+    def __init__(
+        self, tape: "Tape", archive_index: int, function_space, result_index: int
+    ):
+        self._tape = weakref.ref(tape)
+        self._archive_index = archive_index
+        self._coker_function_space = function_space
+        self._result_index = result_index
+
+    @property
+    def _owner(self):
+        return self._tape().nodes._callable_archive[self._archive_index]
+
+    @property
+    def _coker_evaluation_owner(self):
+        return self._owner
+
+    def __call__(self, *args):
+        return self._owner(*args)[self._result_index]
+
+    def _coker_begin_evaluation(self):
+        return None
 
 class Tape:
     NONE = -1
@@ -213,6 +243,22 @@ class Tape:
     @property
     def nodes(self):
         return self._inner
+
+    def __len__(self):
+        return len(self.nodes)
+
+    def archive_callable(self, callable_value):
+        key = id(callable_value)
+        if key not in self._inner._callable_hashmap:
+            self._inner._callable_hashmap[key] = len(self._inner._callable_archive)
+            self._inner._callable_archive.append(callable_value)
+        return self._inner._callable_hashmap[key]
+
+    def callable_reference(self, callable_value, function_space, result_index=0):
+        archive_index = self.archive_callable(callable_value)
+        return _TapeCallableReference(
+            self, archive_index, function_space, result_index
+        )
 
     def find_dependents(self, tracer: "Tracer") -> Set[int]:
         if tracer is None or tracer is Noop():
@@ -278,24 +324,18 @@ class Tape:
             else:
                 yield Tracer(self, index)
 
-    def __len__(self):
-        return len(self.nodes)
-
-    def __hash__(self):
-        return id(self)
-
     def _compute_shape(self, op: OP, *args) -> Dimension:
         dims = []
         for arg in args:
             if arg is None:
                 dims.append(None)
-                continue
-
-            assert isinstance(arg, Tracer)
-
-            dims.append(arg.dim)
-
+            elif isinstance(arg, _TapeCallableReference):
+                dims.append(arg._coker_function_space)
+            else:
+                assert isinstance(arg, Tracer)
+                dims.append(arg.dim)
         return op.compute_shape(*dims)
+
 
     def append(self, op: OP, *args) -> int:
         args = [strip_symbols_from_array(a) for a in args]
@@ -317,7 +357,9 @@ class Tape:
             raise DanglingTracerError(tracers=invalid_tracers)
 
         args = [
-            self.insert_value(a) if not isinstance(a, Tracer) else a.copy()
+            self.insert_value(a)
+            if not isinstance(a, (Tracer, _TapeCallableReference))
+            else a.copy() if isinstance(a, Tracer) else a
             for a in args
         ]
 
