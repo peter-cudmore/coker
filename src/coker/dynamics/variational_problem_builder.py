@@ -1,14 +1,11 @@
 """Context-managed construction of :class:`VariationalProblem` values."""
 
-from dataclasses import dataclass
-import warnings
 from typing import Optional, Sequence
 
 import numpy as np
 
 from coker.algebra.kernel import (
     FunctionSpace,
-    InequalityExpression,
     Noop,
     OP,
     Scalar,
@@ -22,7 +19,6 @@ from coker.dynamics.types import (
     ConstraintSpec,
     ControlVariable,
     DynamicalSystem,
-    LossFunction,
     ParameterVariable,
     QuadratureSpec,
     TranscriptionOptions,
@@ -34,19 +30,6 @@ from coker.toolkits.codesign import Minimise
 _PATH_SITE = object()
 _INITIAL_SITE = object()
 _TERMINAL_SITE = object()
-
-
-@dataclass
-class _LegacyProblemState:
-    loss: Optional[LossFunction] = None
-    path_constraints: list[InequalityExpression] = None
-    terminal_constraints: list[InequalityExpression] = None
-    initial_constraints: list[InequalityExpression] = None
-
-    def __post_init__(self):
-        self.path_constraints = list(self.path_constraints or [])
-        self.terminal_constraints = list(self.terminal_constraints or [])
-        self.initial_constraints = list(self.initial_constraints or [])
 
 
 class VariationalProblemBuilder:
@@ -91,12 +74,10 @@ class VariationalProblemBuilder:
                 "t_final must be a positive float or BoundedVariable"
             )
         self.system = system
-        self._base_system = system
         self.t_final_declaration = t_final
         self.backend = backend
         self.transcription_options = transcription_options
         self.system_parameter_map = system_parameter_map
-        self._legacy = _LegacyProblemState()
         self.control = list(control or [])
         self._parameter_declarations = list(parameters or [])
         self._lowered_constraints: list[ConstraintSpec] = []
@@ -105,26 +86,6 @@ class VariationalProblemBuilder:
         self._context: Optional[TraceContext] = None
         self._closed = False
         self._make_symbols()
-
-    @property
-    def loss(self):
-        return self._legacy.loss
-
-    @loss.setter
-    def loss(self, value):
-        self._legacy.loss = value
-
-    @property
-    def path_constraints(self):
-        return self._legacy.path_constraints
-
-    @property
-    def terminal_constraints(self):
-        return self._legacy.terminal_constraints
-
-    @property
-    def initial_constraints(self):
-        return self._legacy.initial_constraints
 
     def _make_symbols(self) -> None:
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
@@ -188,62 +149,6 @@ class VariationalProblemBuilder:
     def t_final(self) -> Tracer:
         self._require_open()
         return self._t_final
-
-    def minimise(self, loss: LossFunction) -> None:
-        """Set the loss for the legacy imperative API.
-
-        .. deprecated::
-           Use :meth:`build` with a :class:`~coker.toolkits.codesign.Minimise`
-           objective instead.
-        """
-        warnings.warn(
-            "VariationalProblemBuilder.minimise() is deprecated; use build()",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.loss = loss
-
-    def add_input(self, control: ControlVariable) -> None:
-        """Add a control using the deprecated imperative API."""
-        warnings.warn(
-            "VariationalProblemBuilder.add_input() is deprecated; "
-            "pass control= to the constructor",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.control.append(control)
-
-    def add_parameter(self, parameter: ParameterVariable) -> None:
-        """Add a parameter using the deprecated imperative API."""
-        warnings.warn(
-            "VariationalProblemBuilder.add_parameter() is deprecated; "
-            "pass parameters= to the constructor",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._parameter_declarations.append(parameter)
-
-    def add_path_constraint(self, constraint: InequalityExpression) -> None:
-        """Add a path constraint using the deprecated imperative API."""
-        warnings.warn(
-            "VariationalProblemBuilder.add_path_constraint() is deprecated; "
-            "pass subject_to= to build()",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.path_constraints.append(constraint)
-
-    def add_terminal_constraint(
-        self, constraint: InequalityExpression
-    ) -> None:
-        """Add a terminal constraint using the deprecated imperative API."""
-        warnings.warn(
-            "VariationalProblemBuilder.add_terminal_constraint() is "
-            "deprecated; pass subject_to= to build()",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.terminal_constraints.append(constraint)
 
     def state(self, time: Optional[object] = None) -> Tracer:
         self._require_open()
@@ -331,30 +236,21 @@ class VariationalProblemBuilder:
 
     def build(
         self,
-        objective: Optional[Minimise] = None,
+        objective: Minimise,
         *,
         subject_to: Optional[Sequence[object]] = None,
     ) -> VariationalProblem:
         """Build a problem from a ``Minimise`` objective and constraints."""
-        if objective is None:
-            if self.loss is None:
-                raise ValueError(
-                    "A variational problem requires a loss functional or "
-                    "Minimise objective"
-                )
-            loss = self.loss
-        else:
-            if not isinstance(objective, Minimise):
-                raise TypeError("build requires a Minimise objective")
-            loss = objective.expression
-            if not isinstance(loss, Tracer):
-                raise TypeError(
-                    "Minimise cost must be a scalar symbolic expression"
-                )
-            self._validate_trace(loss, "cost")
-            if not loss.dim.is_scalar():
-                raise ValueError("Minimise cost must be scalar")
-
+        if not isinstance(objective, Minimise):
+            raise TypeError("build requires a Minimise objective")
+        loss = objective.expression
+        if not isinstance(loss, Tracer):
+            raise TypeError(
+                "Minimise cost must be a scalar symbolic expression"
+            )
+        self._validate_trace(loss, "cost")
+        if not loss.dim.is_scalar():
+            raise ValueError("Minimise cost must be scalar")
         constraints = list(subject_to or [])
         lowered: list[tuple[ConstraintSpec, object]] = []
         for constraint in constraints:
@@ -370,9 +266,9 @@ class VariationalProblemBuilder:
             binding = self._classify_time(residual)
             lowered.append((ConstraintSpec(residual, lower, upper), binding))
 
-        path = list(self.path_constraints)
-        terminal = list(self.terminal_constraints)
-        initial = list(self.initial_constraints)
+        path = []
+        terminal = []
+        initial = []
         for record, binding in lowered:
             if binding is _PATH_SITE:
                 path.append(record)
