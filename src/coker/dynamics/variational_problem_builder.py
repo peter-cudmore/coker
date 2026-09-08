@@ -31,7 +31,6 @@ from coker.dynamics.types import (
     ConstraintSpec,
     ControlVariable,
     DynamicalSystem,
-    FinalTimeMapping,
     LossFunction,
     ParameterVariable,
     QuadratureSpec,
@@ -449,14 +448,6 @@ class VariationalProblemBuilder:
             quadratures=list(self._quadratures),
             trajectory_requirements=trajectory_requirements,
             system_parameter_map=self.system_parameter_map,
-            final_time_map=(
-                FinalTimeMapping(
-                    declaration=self.t_final_declaration,
-                    decision_index=0,
-                )
-                if isinstance(self.t_final_declaration, BoundedVariable)
-                else FinalTimeMapping(value=float(self.t_final_declaration))
-            ),
             terminal_constraints=terminal,
             initial_constraints=initial,
             transcription_options=self.transcription_options
