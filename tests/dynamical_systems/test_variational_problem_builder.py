@@ -1,5 +1,3 @@
-import warnings
-
 import numpy as np
 import pytest
 
@@ -28,61 +26,20 @@ def make_parameterised_integrator():
     )
 
 
-def test_variational_problem_builder_collects_problem_terms():
+def test_functional_builder_builds_problem():
     system = make_parameterised_integrator()
-    constraint = (
-        function(
-            system.y.input_spaces(),
-            lambda _t, _x, _z, _u, p, _q: p[0],
-            backend="numpy",
-        )
-        >= 0
-    )
-    control = PiecewiseConstantVariable("u", sample_rate=4)
-    parameter = BoundedVariable("initial_state", -1, 1, guess=0.25)
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", DeprecationWarning)
-        with VariationalProblemBuilder(system, t_final=2.0) as builder:
-            builder.minimise(
-                lambda solution, input_law, p: solution(2.0, input_law, p) ** 2
-            )
-            builder.add_input(control)
-            builder.add_parameter(parameter)
-            builder.add_path_constraint(constraint)
-            builder.add_terminal_constraint(constraint)
-            problem = builder.build()
-
-    assert [warning.category for warning in caught] == [DeprecationWarning] * 5
-
-    assert problem.system is system
-    assert problem.t_final == 2.0
-    assert problem.control == [control]
-    assert problem.parameters == [parameter]
-    assert problem.path_constraints[0].residual is constraint.value
-    assert problem.path_constraints[0].lower_bound == constraint.lower
-    assert problem.path_constraints[0].upper_bound == constraint.upper
-    assert problem.terminal_constraints[0].residual is constraint.value
-
-
-def test_functional_builder_does_not_emit_deprecation_warnings():
-    system = make_parameterised_integrator()
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        with VariationalProblemBuilder(system, t_final=1.0) as builder:
-            problem = builder.build(
-                Minimise(builder.output(builder.t)[0] ** 2)
-            )
+    with VariationalProblemBuilder(system, t_final=1.0) as builder:
+        problem = builder.build(Minimise(builder.output(builder.t)[0] ** 2))
     assert problem.system is system
 
 
-def test_variational_problem_builder_requires_a_loss():
+def test_variational_problem_builder_requires_a_minimise_objective():
     builder = VariationalProblemBuilder(
         make_parameterised_integrator(), t_final=1.0
     )
 
-    with pytest.raises(ValueError, match="requires a loss functional"):
-        builder.build()
+    with pytest.raises(TypeError, match="build requires a Minimise objective"):
+        builder.build(None)
 
 
 def _build_with_constraints(constraints):
