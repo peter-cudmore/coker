@@ -133,6 +133,27 @@ def test_endpoint_inputs_are_valid_symbolic_accessors():
         assert initial.tape is terminal.tape
 
 
+def test_private_trajectory_spaces_preserve_function_evaluation_dimensions():
+    system = make_parameterised_integrator()
+    with VariationalProblemBuilder(system, t_final=1.0) as builder:
+        state_space = builder._state_trajectory
+        input_space = builder._input_trajectory
+
+        assert isinstance(state_space, FunctionSpace)
+        assert state_space.arguments == [Scalar("t")]
+        assert state_space.output == [VectorSpace("x", 1)]
+        assert input_space is system.inputs
+
+        state = function(
+            state_space.arguments,
+            lambda t: np.array([t + 1]),
+            backend="numpy",
+        )
+        value = state(2.0)
+        assert np.asarray(value).shape == (1,)
+        assert np.asarray(value) == pytest.approx([3.0])
+
+
 def test_output_supports_path_constraints_and_terminal_objectives():
     system = make_parameterised_integrator()
     with VariationalProblemBuilder(system, t_final=1.0) as builder:
