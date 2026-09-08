@@ -38,8 +38,6 @@ class Minimise:
 class _ProgramCall:
     """Archived symbolic call shared by all results of one program call."""
 
-    _coker_symbolic_callable = True
-
     def __init__(self, program: "MathematicalProgram"):
         self._program = program
 
