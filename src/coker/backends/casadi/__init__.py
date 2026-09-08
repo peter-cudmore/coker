@@ -3,6 +3,7 @@ from typing import Tuple, Type, Union
 import casadi as ca
 import numpy as np
 
+
 from coker import Dimension, Function
 from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Tracer
@@ -27,6 +28,7 @@ scalar_types = (float, int)
 
 
 class CasadiBackend(Backend):
+
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         if isinstance(array, ca.MX):
             try:
