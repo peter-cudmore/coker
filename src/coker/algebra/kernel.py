@@ -232,6 +232,43 @@ class Tape:
                         result.add(index + i)
         return result
 
+    def depends_on(self, expression: "Tracer", dependency: "Tracer") -> bool:
+        """Return whether ``expression`` is structurally derived from
+        ``dependency``.
+
+        The query follows tracer edges in this tape rather than relying on
+        input names, operation names, or metadata maintained by callers.
+        """
+        if (
+            not isinstance(expression, Tracer)
+            or not isinstance(dependency, Tracer)
+            or expression.tape is not self
+            or dependency.tape is not self
+        ):
+            return False
+
+        target = dependency.index
+        pending = [expression.index]
+        visited = set()
+        while pending:
+            index = pending.pop()
+            if index == target:
+                return True
+            if index in visited or index < 0 or index >= len(self.nodes):
+                continue
+            visited.add(index)
+            node = self.nodes[index]
+            if isinstance(node, Tracer):
+                continue
+            if node[0] == OP.VALUE:
+                continue
+            pending.extend(
+                argument.index
+                for argument in node[1:]
+                if isinstance(argument, Tracer) and argument.tape is self
+            )
+        return False
+
     def inputs(self):
         for index in self.input_indicies:
             if index == Tape.NONE:
