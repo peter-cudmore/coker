@@ -132,8 +132,8 @@ class MathematicalProgram(SymbolicCallable):
         return tuple(results)
 
     def __call__(self, *args):
-        """Call symbolically during tracing and numerically otherwise."""
-        if TraceContext.get_local_tape() is not None:
+        """Call symbolically for tracer arguments and numerically otherwise."""
+        if any(isinstance(arg, Tracer) for arg in args):
             return self._call_symbolic(*args)
         return self._call_numeric(*args)
 
