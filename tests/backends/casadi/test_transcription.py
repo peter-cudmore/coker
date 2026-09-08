@@ -117,4 +117,4 @@ def test_poly_collection_vector():
     result = poly_as_func(ca.DM(0.51), line)
 
     assert result.shape == (3, 1)
-    assert np.isclose(result, fixed_result).all()
+    np.testing.assert_allclose(result.full().ravel(), fixed_result)
