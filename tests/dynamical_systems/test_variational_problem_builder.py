@@ -9,7 +9,7 @@ from coker.dynamics import (
     PiecewiseConstantVariable,
     VariationalProblemBuilder,
 )
-from coker.dynamics.dynamical_system import (
+from coker.dynamics.system import (
     create_control_system,
     create_dynamics_from_spec,
 )

@@ -6,7 +6,7 @@ import casadi as ca
 import numpy as np
 
 from coker.backends.backend import VariationalSolver, get_backend_by_name
-from coker.backends.casadi.casadi import lower as lower_casadi
+from coker.backends.casadi.lower import lower as lower_casadi
 from coker.dynamics import (
     BoundedVariable,
     ConstantControlVariable,

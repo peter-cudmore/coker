@@ -1,14 +1,16 @@
-from coker.dynamics.transcription_helpers import (
-    legendre_coefficient,
-    lgr_points,
+from coker.dynamics.transcription.collocation import (
     expand_coefficients,
     generate_discritisation_operators,
+    legendre_coefficient,
+    lgr_points,
     split_at_non_differentiable_points,
+)
+from coker.dynamics.transcription.collocation import InterpolatingPoly
+from coker.dynamics.controls import (
     PiecewiseConstantVariable,
     SpikeVariable,
-    TranscriptionOptions,
-    InterpolatingPoly,
 )
+from coker.dynamics.variational.problem import TranscriptionOptions
 from coker.dynamics import ConstantControlVariable, InterpolatingPolyCollection
 import numpy as np
 from functools import reduce

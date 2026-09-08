@@ -1,4 +1,4 @@
-from coker.backends.casadi.casadi import substitute, to_casadi, lower
+from coker.backends.casadi.lower import substitute, to_casadi, lower
 from typing import List
 
 import casadi as ca

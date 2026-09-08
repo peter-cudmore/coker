@@ -3,7 +3,7 @@ import pytest
 
 try:
 
-    from coker.backends.casadi.variational_solver import (
+    from coker.backends.casadi.variational.solver import (
         InterpolatingPolyCollection,
         SymbolicPolyCollection,
         SymbolicPoly,

@@ -1,10 +1,7 @@
 import numpy as np
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.dynamics import create_autonomous_ode, direct_sum
-from coker.dynamics.dynamical_system import (
-    create_control_system,
-    CompositionOperator,
-)
+from coker.dynamics.system import CompositionOperator, create_control_system
 from ..util import is_close
 
 

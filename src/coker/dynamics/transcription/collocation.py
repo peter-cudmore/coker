@@ -5,12 +5,12 @@ from typing import List, Tuple, Callable, Optional, Iterator
 import numpy as np
 
 
-from coker.dynamics.types import (
-    TranscriptionOptions,
+from coker.dynamics.controls import (
     ControlVariable,
     PiecewiseConstantVariable,
     SpikeVariable,
 )
+from coker.dynamics.variational.problem import TranscriptionOptions
 
 
 def legendre_coefficient(n, k):
