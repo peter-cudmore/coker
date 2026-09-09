@@ -1,3 +1,5 @@
+import math
+
 from dataclasses import replace
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional, Tuple
@@ -24,9 +26,6 @@ from coker.dynamics import (
 from coker.toolkits.codesign.optimisation import (
     SolveFailure,
     solve_info_from_casadi_stats,
-)
-from coker.backends.casadi.variational.objective_scaling import (
-    derive_objective_scale,
 )
 from coker.backends.casadi.variational.variable_scaling import (
     _derive_variable_scaling,
@@ -57,6 +56,19 @@ def _is_acceptable_small_search_direction(
     violation = ca.fmax(lower_bounds - residual, residual - upper_bounds)
     max_violation = float(ca.mmax(ca.fmax(violation, 0)))
     return max_violation <= max(tolerance, min_tolerance)
+
+
+def _derive_objective_scale(nominal_cost: object, tolerance: object) -> float:
+    """Return a finite scale that never amplifies a sub-unit objective."""
+    try:
+        nominal = float(nominal_cost)
+        tol = float(tolerance)
+    except (TypeError, ValueError, OverflowError):
+        return 1.0
+
+    if not (math.isfinite(nominal) and math.isfinite(tol)):
+        return 1.0
+    return max(1.0, abs(nominal), tol)
 
 
 class CasadiVariationalSolver(VariationalSolver):
@@ -495,7 +507,7 @@ def create_variational_solver(
         cost, raw_decision_variables, physical_variables
     )
     normalized_g = ca.substitute(g, raw_decision_variables, physical_variables)
-    objective_scale = derive_objective_scale(
+    objective_scale = _derive_objective_scale(
         float(
             ca.Function("nominal_cost", [raw_decision_variables], [cost])(
                 decision_variables_0
