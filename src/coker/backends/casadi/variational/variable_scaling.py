@@ -100,7 +100,7 @@ def _bounds_vector(value: Any, size: int, name: str) -> Any:
 
 
 def _safe_distance(first: float, second: float) -> float:
-    """Return a finite distance, saturating if the exact difference overflows."""
+    """Return a finite distance, saturating an overflowing difference."""
     distance = abs(first * 0.5 - second * 0.5) * 2.0
     return min(distance, float(np.finfo(float).max))
 
