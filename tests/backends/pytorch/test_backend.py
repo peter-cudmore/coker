@@ -5,6 +5,7 @@ import torch
 import coker
 from coker import Scalar, VectorSpace
 from coker.algebra import Dimension, OP
+from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.backends.pytorch import PytorchModule
 from coker.toolkits.codesign import Minimise, ProblemBuilder
@@ -164,6 +165,25 @@ def test_variational_solver_creation_is_unsupported():
         ).create_variational_solver(object())
 
 
-def test_integral_evaluation_is_unsupported(pytorch_backend):
-    with pytest.raises(NotImplementedError, match="integrals"):
-        pytorch_backend.evaluate_integrals([], [], 1.0, [])
+def test_quadrature_dynamics_preserve_autograd(pytorch_backend):
+    pytest.importorskip("torchdiffeq")
+    x0 = torch.tensor([2.0], requires_grad=True)
+    q0 = torch.tensor([0.0], requires_grad=True)
+
+    x_final, z_final, q_final = pytorch_backend.evaluate_integrals(
+        [
+            lambda _t, x, _z, _u, _p: x * 0,
+            Noop(),
+            lambda _t, x, _z, _u, _p: x,
+        ],
+        [x0, None, q0],
+        0.5,
+        [None, None],
+    )
+
+    assert z_final is None
+    assert torch.allclose(x_final, x0)
+    assert torch.allclose(q_final, torch.tensor([1.0]))
+    q_final.sum().backward()
+    assert torch.allclose(x0.grad, torch.tensor([0.5]), rtol=1e-5)
+    assert torch.allclose(q0.grad, torch.ones_like(q0), rtol=1e-5)

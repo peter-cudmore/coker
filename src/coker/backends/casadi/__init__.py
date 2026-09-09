@@ -230,8 +230,8 @@ class CasadiBackend(Backend):
     ):
         dxdt, g, dqdt = functions
 
-        is_dae = dqdt is not Noop()
-        has_quadrature = g is not Noop()
+        is_dae = g is not Noop()
+        has_quadrature = dqdt is not Noop()
         x0, z0, q0 = (self.to_backend_array(a) for a in initial_conditions)
         if isinstance(end_point, (int, float)):
             if end_point == 0:
@@ -249,17 +249,16 @@ class CasadiBackend(Backend):
 
         dx_sym = dxdt(t, x, z, u, p)
 
-        if is_dae:
+        if has_quadrature:
             q = ca.MX.sym("q", q0.shape)
-            q0 = ca.DM.zeros(q.shape)
             dq_sym = dqdt(t, x, z, u, p)
             txq = ca.vertcat(t, x, q)
-            txq0 = ca.vertcat(ca.MX(0), x0, q0)
+            txq0 = ca.vertcat(ca.DM(0), x0, q0)
             xq_to_x_q = ca.Function("txq_to_x_q", [txq], [x, q])
             dtxq = ca.vertcat(ca.MX(1), dx_sym, dq_sym)
         else:
             txq = ca.vertcat(t, x)
-            txq0 = ca.vertcat(ca.MX(0), x0)
+            txq0 = ca.vertcat(ca.DM(0), x0)
             xq_to_x_q = ca.Function("txq_to_x_q", [txq], [x])
             dtxq = ca.vertcat(ca.MX(1), dx_sym)
 
@@ -271,11 +270,12 @@ class CasadiBackend(Backend):
             "ode": dtxq,
         }
         if is_dae:
-            dae["z"] = g(t, x, z, u, p)
+            dae["z"] = z
+            dae["alg"] = g(t, x, z, u, p)
             initial_conditions["z0"] = z0
 
         solver = ca.integrator("solver", "idas", dae, 0, t_eval, {})
-        xq_final = solver(x0=txq0, z0=z0)
+        xq_final = solver(**initial_conditions)
 
         if has_quadrature:
             x_final, q_final = xq_to_x_q(xq_final["xf"])
