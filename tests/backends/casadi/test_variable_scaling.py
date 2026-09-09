@@ -17,7 +17,9 @@ def test_two_sided_interval_uses_midpoint_and_half_span():
 
 
 def test_one_sided_and_unbounded_coordinates_use_guess_distance():
-    scaling = _derive_variable_scaling([-3.0, -np.inf, -np.inf], [5.0, -4.0, 0.25], [np.inf, np.inf, np.inf])
+    scaling = _derive_variable_scaling(
+        [-3.0, -np.inf, -np.inf], [5.0, -4.0, 0.25], [np.inf, np.inf, np.inf]
+    )
     np.testing.assert_allclose(scaling.offset, [-3.0, -4.0, 0.25])
     np.testing.assert_allclose(scaling.scale, [8.0, 4.0, 1.0])
 
@@ -44,7 +46,12 @@ def test_bound_conversion_preserves_infinities_and_supports_casadi():
 
 @pytest.mark.parametrize(
     "lower, guess, upper",
-    [([2.0], [1.0], [0.0]), ([np.nan], [0.0], [1.0]), ([-np.inf], [np.inf], [np.inf]), ([-np.inf], [0.0], [np.nan])],
+    [
+        ([2.0], [1.0], [0.0]),
+        ([np.nan], [0.0], [1.0]),
+        ([-np.inf], [np.inf], [np.inf]),
+        ([-np.inf], [0.0], [np.nan]),
+    ],
 )
 def test_rejects_invalid_inputs(lower, guess, upper):
     with pytest.raises(ValueError):

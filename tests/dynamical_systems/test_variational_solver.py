@@ -69,6 +69,7 @@ def test_accepts_feasible_small_search_direction():
         tolerance=1e-12,
     )
 
+
 def test_scalar_linear_system(variational_backend):
     def x0(p):
         x0_val = p[1:2]
