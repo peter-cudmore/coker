@@ -8,8 +8,8 @@ The current package metadata marks Coker as **alpha** software (`Development Sta
 
 Coker combines a few layers that usually live in separate tools:
 
-- **Symbolic function tracing** via `coker.function`, `Scalar`, `VectorSpace`, and `FunctionSpace`.
-- **Backend lowering** to `numpy`, `casadi`, `sympy`, and the native `coker` backend.
+- **Backend lowering** to `numpy`, `casadi`, `jax`, `pytorch`, `sympy`, and the
+  native `coker` backend.
 - **Differentiable execution models** that support evaluation, composition, and conditional expressions.
 - **Dynamics and variational problem tooling** for ODE systems, transcription helpers, and solver-backed optimisation workflows.
 - **Domain toolkits** for spatial algebra, rigid-body kinematics, system modelling, and codesign-style mathematical programs.
@@ -42,10 +42,12 @@ print(g(np.array([1.0, 2.0])))  # [ 1. -2.]
 
 ### 2. Swap execution backends without rewriting the model
 
-The same traced function can be lowered to different backends depending on the job:
+The same traced function can be lowered to different execution backends depending on the job:
 
 - `numpy` for direct numerical execution
 - `casadi` for optimisation-oriented symbolic workflows
+- `jax` for alternate array execution
+- `pytorch` for tensor-valued execution and autograd
 - `sympy` for symbolic inspection and printing
 - `coker` for Coker's native compact execution graph
 
@@ -64,6 +66,7 @@ Optional extras declared by the package:
 ```bash
 pip install "coker[casadi]"
 pip install "coker[jax]"
+pip install "coker[pytorch]"
 ```
 
 Base installation:
@@ -140,7 +143,7 @@ The repository uses `uv` in CI for environment management.
 Install a development environment:
 
 ```bash
-uv sync --group dev --extra casadi --extra jax
+uv sync --group dev --extra casadi --extra jax --extra pytorch
 ```
 
 Run the test suite:

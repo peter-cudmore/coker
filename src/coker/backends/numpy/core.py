@@ -1,4 +1,4 @@
-from typing import List, Any
+from typing import List
 from enum import Enum
 
 import numpy as np
@@ -136,18 +136,6 @@ def reshape(arg, dim):
 class NumpyBackend(Backend):
     def __init__(self, *args, **kwargs):
         super(NumpyBackend, self).__init__(*args, **kwargs)
-
-    def native_types(self) -> List[Any]:
-        return [
-            np.ndarray,
-            np.int32,
-            np.int64,
-            np.float64,
-            np.float32,
-            float,
-            complex,
-            int,
-        ]
 
     def to_numpy_array(self, array) -> ArrayLike:
         return array

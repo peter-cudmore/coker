@@ -209,9 +209,6 @@ class SympyBackend(Backend):
 
         return array
 
-    def native_types(self):
-        return [sp.Array, sp.Symbol, sp.Float, sp.Integer, sp.Rational]
-
     def reshape(self, array, shape):
         result = reshape(array, shape)
         try:

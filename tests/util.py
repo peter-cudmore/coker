@@ -1,5 +1,10 @@
 import numpy as np
 import pytest
+
+try:
+    import torch
+except ImportError:
+    torch = None
 from coker.toolkits.spatial import Isometry3, Rotation3, Screw
 
 
@@ -17,6 +22,18 @@ def is_close(a, b, tolerance=1e-8):
         return is_close(a.rotation, b.rotation, tolerance) and is_close(
             a.translation, b.translation, tolerance
         )
+
+    if torch is not None and (
+        isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor)
+    ):
+        if isinstance(a, torch.Tensor):
+            a = a.detach().cpu().numpy()
+        if isinstance(b, torch.Tensor):
+            b = b.detach().cpu().numpy()
+    if isinstance(a, np.ndarray) and a.ndim == 0:
+        a = a.item()
+    if isinstance(b, np.ndarray) and b.ndim == 0:
+        b = b.item()
 
     if not isinstance(a, np.ndarray) and not isinstance(b, np.ndarray):
         return abs(a - b) < tolerance

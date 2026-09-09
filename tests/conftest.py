@@ -20,6 +20,13 @@ try:
 except ImportError:
     warnings.warn("casadi is not installed")
 
+try:
+    importlib.import_module("torch")
+
+    backends.append("pytorch")
+except ImportError:
+    warnings.warn("torch is not installed")
+
 
 def pytest_generate_tests(metafunc):
     if "backend" in metafunc.fixturenames:

@@ -35,6 +35,9 @@ casadi = [
 jax = [
     "jax>=0.10,<0.11; python_version >= '3.11'",
 ]
+pytorch = [
+    "torch>=2.0,<3",
+]
 
 
 [dependency-groups]

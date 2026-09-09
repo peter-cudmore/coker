@@ -1,4 +1,4 @@
-from typing import Type, Tuple, List
+from typing import List
 
 import numpy as np
 import jax.numpy as jnp
@@ -100,18 +100,6 @@ def basis(i, n):
 class JaxBackend(Backend):
     def __init__(self, *args, **kwargs):
         super(JaxBackend, self).__init__(*args, **kwargs)
-
-    def native_types(self) -> Tuple[Type]:
-        return (
-            np.ndarray,
-            np.int32,
-            np.int64,
-            np.float64,
-            np.float32,
-            float,
-            complex,
-            int,
-        )
 
     def to_numpy_array(self, array) -> ArrayLike:
         if array is None:

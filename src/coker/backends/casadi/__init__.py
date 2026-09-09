@@ -1,4 +1,4 @@
-from typing import Tuple, Type, Union
+from typing import Union
 
 import casadi as ca
 import numpy as np
@@ -96,9 +96,6 @@ class CasadiBackend(Backend):
             return ca.reshape(arg, shape)
 
         raise NotImplementedError(f"{op} is not implemented")
-
-    def native_types(self) -> Tuple[Type]:
-        pass
 
     def reshape(self, array: ArrayLike, dim: Dimension) -> ArrayLike:
         if dim.is_scalar():

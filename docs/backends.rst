@@ -8,8 +8,8 @@ backend name is selected with the ``backend=...`` argument to
 :class:`coker.toolkits.codesign.ProblemBuilder`.
 
 The current backend registry accepts the names ``"numpy"``, ``"coker"``,
-``"jax"``, ``"casadi"``, and ``"sympy"``. If no backend is selected,
-``get_current_backend()`` defaults to ``"coker"``.
+``"jax"``, ``"casadi"``, ``"pytorch"``, and ``"sympy"``. If no backend is
+selected, ``get_current_backend()`` defaults to ``"coker"``.
 
 Backend capability matrix
 -------------------------
@@ -44,6 +44,14 @@ Backend capability matrix
      - Install with ``pip install "coker[jax]"``.
      - Backend code exists in ``src/coker/backends/jax/``. The current test
        suite does not include a dedicated ``tests/backends/jax/`` directory.
+   * - ``pytorch``
+     - Tensor-valued numerical execution with PyTorch autograd for
+       differentiable model evaluation.
+     - Install with ``pip install "coker[pytorch]"``.
+     - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
+       backend tests. ODE/integral evaluation, variational solvers,
+       mathematical-program construction, and mathematical-program solving
+       are not supported.
 
 Choosing a backend
 ------------------
@@ -52,13 +60,38 @@ A good default is:
 
 - use ``numpy`` while bringing up a model or debugging array shapes;
 - use ``casadi`` for solve-heavy optimisation and parameter-fitting problems;
+- use ``pytorch`` when you need tensor-valued execution or PyTorch autograd;
 - use ``sympy`` when you need symbolic forms or printable expressions;
 - use ``coker`` when you want the native compact execution graph documented in
   :doc:`backend_architecture`.
 
-The repository's own tests follow the same pattern: numerical execution is
-validated under ``numpy``, variational solves are exercised through ``casadi``,
-and low-level native graph behaviour is tested under ``coker``.
+The repository's own tests validate numerical execution under ``numpy``,
+``jax``, and ``pytorch`` (including PyTorch tensor/autograd behavior),
+variational solves through ``casadi``, and low-level native graph behaviour
+under ``coker``. PyTorch deliberately does not support ODE/integral
+evaluation, variational solvers, mathematical-program construction, or
+mathematical-program solving.
+
+
+PyTorch module lowering
+-----------------------
+
+Use :meth:`~coker.backends.pytorch.PytorchBackend.as_module` to expose a
+PyTorch-backed Coker function as an eager :class:`torch.nn.Module`:
+
+.. code-block:: python
+
+   from coker.backends import get_backend_by_name
+
+   backend = get_backend_by_name("pytorch")
+   module = backend.as_module(model_function)
+   output = module(input_tensor)
+
+The module accepts one positional tensor per Coker function argument. A
+single-output function returns a tensor; a multi-output function returns a
+tuple. Its constants remain Coker closure state, so it has no trainable
+parameters or registered buffers. It supports eager autograd but is not
+currently a TorchScript or ``torch.compile`` target.
 
 Optimisation program composition
 --------------------------------
@@ -90,7 +123,7 @@ solver/backend combination is rejected while building or lowering, before
 evaluation. Derivatives through an argmin or argmax are not defined.
 
 ``numpy``, ``casadi``, and ``coker`` support host-side program composition.
-The JAX backend does not construct optimisation programs.
+The JAX and PyTorch backends do not construct optimisation programs.
 
 Embedded mapped QP calls
 ------------------------
