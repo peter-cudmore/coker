@@ -25,6 +25,12 @@ from coker.toolkits.codesign.optimisation import (
     SolveFailure,
     solve_info_from_casadi_stats,
 )
+from coker.backends.casadi.variational.objective_scaling import (
+    derive_objective_scaling,
+)
+from coker.backends.casadi.variational.variable_scaling import (
+    _derive_variable_scaling,
+)
 
 
 def noop(*_args):
@@ -52,7 +58,6 @@ def _is_acceptable_small_search_direction(
     max_violation = float(ca.mmax(ca.fmax(violation, 0)))
     return max_violation <= max(tolerance, min_tolerance)
 
-
 class CasadiVariationalSolver(VariationalSolver):
     def __init__(
         self,
@@ -66,6 +71,7 @@ class CasadiVariationalSolver(VariationalSolver):
         ],
         initialiser: Optional[ca.Function] = None,
         warm_start: bool = False,
+        unscale_objective: Callable[[float], float] = float,
     ):
         self.problem = problem
         self._parameters = parameters
@@ -74,6 +80,7 @@ class CasadiVariationalSolver(VariationalSolver):
         self._assemble_solution = assemble_solution
         self._initialiser = initialiser
         self._warm_start = warm_start
+        self._unscale_objective = unscale_objective
         self._last_primal: Optional[ca.DM] = None
         self._last_lam_x: Optional[ca.DM] = None
         self._last_lam_g: Optional[ca.DM] = None
@@ -143,7 +150,7 @@ class CasadiVariationalSolver(VariationalSolver):
             self._last_lam_g = result["lam_g"]
         return self._assemble_solution(
             result["x"],
-            float(result["f"]),
+            self._unscale_objective(float(result["f"])),
             solve_info,
         )
 
@@ -463,10 +470,68 @@ def create_variational_solver(
             }
         )
 
+    state_guess = ca.vertcat(
+        x0_guess,
+        z0_guess if z0_guess is not None else ca.DM.zeros(z_size, 1),
+        ca.DM.zeros(q_size, 1),
+    )
+    n_reps = int(path_symbols.shape[0] / state_guess.shape[0])
+    path_guess = ca.repmat(state_guess, n_reps)
+    raw_decision_variables = decision_variables
+    decision_variables_0 = layout.guess(path_guess, u_guess, p_guess_base)
+    raw_lower = ca.DM(lower_bound_base)
+    raw_upper = ca.DM(upper_bound_base)
+    variable_scaling = _derive_variable_scaling(
+        np.asarray(raw_lower).reshape(-1),
+        np.asarray(decision_variables_0).reshape(-1),
+        np.asarray(raw_upper).reshape(-1),
+    )
+    normalized_variables = ca.MX.sym(
+        "normalized_decision", decision_variables.shape[0]
+    )
+    physical_variables = variable_scaling.decode(normalized_variables)
+    normalized_cost = ca.substitute(
+        cost, raw_decision_variables, physical_variables
+    )
+    normalized_g = ca.substitute(
+        g, raw_decision_variables, physical_variables
+    )
+    objective_scaling = derive_objective_scaling(
+        float(ca.Function("nominal_cost", [raw_decision_variables], [cost])(
+            decision_variables_0
+        )),
+        tolerance,
+    )
+    normalized_cost = objective_scaling.scale_cost(normalized_cost)
+    decision_variables = normalized_variables
+    decision_variables_0 = ca.DM(variable_scaling.encode(decision_variables_0))
+    lower_bound_base, upper_bound_base = variable_scaling.encode_bounds(
+        raw_lower, raw_upper
+    )
     f_out = ca.Function(
         "Output",
         [decision_variables],
-        [path_symbols, u_symbols, p, p_symbols],
+        [
+            ca.substitute(
+                path_symbols, raw_decision_variables, physical_variables
+            ),
+            ca.substitute(
+                u_symbols, raw_decision_variables, physical_variables
+            ),
+            ca.substitute(p, raw_decision_variables, physical_variables),
+            ca.substitute(
+                p_symbols, raw_decision_variables, physical_variables
+            ),
+            (
+                ca.substitute(
+                    horizon_symbol,
+                    raw_decision_variables,
+                    physical_variables,
+                )
+                if free_horizon
+                else ca.DM(problem.t_final)
+            ),
+        ],
         {},
     )
     assemble_solution = CasadiSolutionAssembler(
@@ -489,26 +554,23 @@ def create_variational_solver(
             "variational_iteration_callback",
             problem.transcription_options.interation_callback,
             nx=decision_variables.shape[0],
-            ng=g.shape[0],
+            ng=normalized_g.shape[0],
             assemble_solution=assemble_solution,
+            unscale_objective=objective_scaling.unscale_cost,
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
-
-    state_guess = ca.vertcat(
-        x0_guess,
-        z0_guess if z0_guess is not None else ca.DM.zeros(z_size, 1),
-        ca.DM.zeros(q_size, 1),
-    )
-    n_reps = int(path_symbols.shape[0] / state_guess.shape[0])
-    path_guess = ca.repmat(state_guess, n_reps)
-    decision_variables_0 = layout.guess(path_guess, u_guess, p_guess_base)
-
     init_solver = None
     if problem.transcription_options.initialise_near_guess:
         init_spec = {
-            "f": cost,
+            "f": normalized_cost,
             "x": decision_variables,
-            "g": ca.vertcat(g, p_symbols, u_symbols),
+            "g": ca.vertcat(
+                normalized_g,
+                ca.substitute(
+                    p_symbols, raw_decision_variables, physical_variables
+                ),
+                ca.substitute(u_symbols, raw_decision_variables, physical_variables),
+            ),
         }
         init_solver = ca.nlpsol(
             "initialiser",
@@ -517,7 +579,7 @@ def create_variational_solver(
             dict(solver_options),
         )
 
-    nlp_spec = {"f": cost, "x": decision_variables, "g": g}
+    nlp_spec = {"f": normalized_cost, "x": decision_variables, "g": normalized_g}
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, nlp_solver_options)
 
     parameter_offset = layout.parameter_slice.start
@@ -541,17 +603,21 @@ def create_variational_solver(
 
         for name, value in fixed_parameters.items():
             index = parameter_indices[name]
+            decision_index = parameter_offset + index
+            offset = variable_scaling.offset[decision_index]
+            scale = variable_scaling.scale[decision_index]
             if isinstance(value, BoundedVariable):
                 p_guess[index] = value.guess
-                lbx[parameter_offset + index] = value.lower_bound
-                ubx[parameter_offset + index] = value.upper_bound
-                x0[parameter_offset + index] = value.guess
+                lbx[decision_index] = (value.lower_bound - offset) / scale
+                ubx[decision_index] = (value.upper_bound - offset) / scale
+                x0[decision_index] = (value.guess - offset) / scale
             else:
                 scalar = float(value)
                 p_guess[index] = scalar
-                lbx[parameter_offset + index] = scalar
-                ubx[parameter_offset + index] = scalar
-                x0[parameter_offset + index] = scalar
+                normalized = (scalar - offset) / scale
+                lbx[decision_index] = normalized
+                ubx[decision_index] = normalized
+                x0[decision_index] = normalized
         init_lbg = ca.vertcat(lbg, p_guess, ca.DM.zeros(u_symbols.shape))
         init_ubg = ca.vertcat(ubg, p_guess, ca.DM.zeros(u_symbols.shape))
         return {
@@ -576,6 +642,7 @@ def create_variational_solver(
         assemble_solution=assemble_solution,
         initialiser=init_solver,
         warm_start=warm_start,
+        unscale_objective=objective_scaling.unscale_cost,
     )
     solver._callback_wrapper = callback_wrapper
     return solver
@@ -616,6 +683,7 @@ class CasadiSolutionAssembler:
             control_coefficients,
             parameters,
             free_parameters,
+            horizon,
         ) = self.output_function(decision_variables)
         path = self.poly_collection.to_fixed(np.array(path_coefficients))
         parameter_vector = np.array(parameters, dtype=float).reshape((-1, 1))
@@ -635,11 +703,7 @@ class CasadiSolutionAssembler:
             path=path,
             control_solutions=control_solutions,
             output=self.problem.system.y,
-            t_final=(
-                float(decision_variables[self.decision_layout.horizon_slice])
-                if self.decision_layout.horizon_size
-                else self.problem.t_final
-            ),
+            t_final=float(horizon),
             solve_info=solve_info,
             path_constraint_exprs=self.problem.path_constraints,
             terminal_constraint_exprs=self.problem.terminal_constraints,
@@ -807,19 +871,10 @@ class ControlFactory:
         self.sizes = [v.degrees_of_freedom(0, t_final) for v in variables]
         offsets = [0, *accumulate(self.sizes[:-1])]
         self.offsets = offsets
-
-    def guess(self, _):
-        return ca.DM.zeros(len(self.variables), 1)
-
-    def symbols(self) -> ca.MX:
-        return (
-            ca.vertcat(*self._symbols) if self._symbols else ca.MX.zeros(0, 1)
-        )
-
     def __call__(self, t):
-        assert (
-            0 <= t <= self.t_final
-        ), f"Control variable is not defined at t = {t}"
+        assert 0 <= t <= self.t_final, (
+            f"Control variable is not defined at t = {t}"
+        )
         out = []
         for s, var in zip(self._symbols, self.variables):
             if isinstance(var, ConstantControlVariable):
@@ -861,6 +916,7 @@ class CallbackWrapper(ca.Callback):
         assemble_solution: Callable[
             [ca.DM, float, object], VariationalSolution
         ],
+        unscale_objective: Callable[[float], float] = float,
         opts=None,
     ):
         ca.Callback.__init__(self)
@@ -868,6 +924,7 @@ class CallbackWrapper(ca.Callback):
         self.nx = nx
         self.ng = ng
         self.assemble_solution = assemble_solution
+        self.unscale_objective = unscale_objective
         self.construct(name, {} if opts is None else opts)
         self._iterate_count = 0
 
@@ -901,7 +958,7 @@ class CallbackWrapper(ca.Callback):
         darg = {name: value for name, value in zip(ca.nlpsol_out(), arg)}
         solution = self.assemble_solution(
             darg["x"],
-            float(darg["f"]),
+            self.unscale_objective(float(darg["f"])),
             None,
         )
         should_continue = bool(self.callback(self._iterate_count, solution))
