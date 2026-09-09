@@ -14,6 +14,9 @@ from coker.toolkits.codesign import SolveFailure
 from coker.backends.casadi.variational.solver import (
     _is_acceptable_small_search_direction,
 )
+from coker.backends.casadi.variational.solver import ControlFactory
+from coker.dynamics.controls import ConstantControlVariable
+
 
 from coker.dynamics.system import (
     create_autonomous_ode,
@@ -68,6 +71,13 @@ def test_accepts_feasible_small_search_direction():
         ca.DM([1.0]),
         tolerance=1e-12,
     )
+
+
+def test_control_factory_builds_symbols_and_zero_guess():
+    factory = ControlFactory([ConstantControlVariable("u")], 1.0)
+
+    assert factory.symbols().shape == (1, 1)
+    np.testing.assert_allclose(factory.guess(0), [[0.0]])
 
 
 def test_scalar_linear_system(variational_backend):

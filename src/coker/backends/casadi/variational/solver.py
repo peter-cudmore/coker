@@ -26,7 +26,7 @@ from coker.toolkits.codesign.optimisation import (
     solve_info_from_casadi_stats,
 )
 from coker.backends.casadi.variational.objective_scaling import (
-    derive_objective_scaling,
+    derive_objective_scale,
 )
 from coker.backends.casadi.variational.variable_scaling import (
     _derive_variable_scaling,
@@ -495,7 +495,7 @@ def create_variational_solver(
         cost, raw_decision_variables, physical_variables
     )
     normalized_g = ca.substitute(g, raw_decision_variables, physical_variables)
-    objective_scaling = derive_objective_scaling(
+    objective_scale = derive_objective_scale(
         float(
             ca.Function("nominal_cost", [raw_decision_variables], [cost])(
                 decision_variables_0
@@ -503,7 +503,11 @@ def create_variational_solver(
         ),
         tolerance,
     )
-    normalized_cost = objective_scaling.scale_cost(normalized_cost)
+    normalized_cost /= objective_scale
+
+    def unscale_objective(value: float) -> float:
+        return value * objective_scale
+
     decision_variables = normalized_variables
     decision_variables_0 = ca.DM(variable_scaling.encode(decision_variables_0))
     lower_bound_base, upper_bound_base = variable_scaling.encode_bounds(
@@ -537,7 +541,6 @@ def create_variational_solver(
     )
     assemble_solution = CasadiSolutionAssembler(
         problem=problem,
-        decision_layout=layout,
         output_function=f_out,
         poly_collection=poly_collection,
         projectors=projectors,
@@ -557,7 +560,7 @@ def create_variational_solver(
             nx=decision_variables.shape[0],
             ng=normalized_g.shape[0],
             assemble_solution=assemble_solution,
-            unscale_objective=objective_scaling.unscale_cost,
+            unscale_objective=unscale_objective,
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
     init_solver = None
@@ -638,7 +641,6 @@ def create_variational_solver(
             "init_ubx": path_ubx,
             "init_lbg": init_lbg,
             "init_ubg": init_ubg,
-            "p_guess": p_guess,
         }
 
     solver = CasadiVariationalSolver(
@@ -649,7 +651,7 @@ def create_variational_solver(
         assemble_solution=assemble_solution,
         initialiser=init_solver,
         warm_start=warm_start,
-        unscale_objective=objective_scaling.unscale_cost,
+        unscale_objective=unscale_objective,
     )
     solver._callback_wrapper = callback_wrapper
     return solver
@@ -660,7 +662,6 @@ class CasadiSolutionAssembler:
         self,
         *,
         problem: VariationalProblem,
-        decision_layout: DecisionLayout,
         output_function: ca.Function,
         poly_collection: "SymbolicPolyCollection",
         projectors: Tuple[
@@ -671,7 +672,6 @@ class CasadiSolutionAssembler:
         decode_controls: Optional[Callable[[ca.DM], list]],
     ):
         self.problem = problem
-        self.decision_layout = decision_layout
         self.output_function = output_function
         self.poly_collection = poly_collection
         self.projectors = projectors
@@ -878,6 +878,14 @@ class ControlFactory:
         self.sizes = [v.degrees_of_freedom(0, t_final) for v in variables]
         offsets = [0, *accumulate(self.sizes[:-1])]
         self.offsets = offsets
+
+    def guess(self, _):
+        return ca.DM.zeros(len(self.variables), 1)
+
+    def symbols(self) -> ca.MX:
+        return (
+            ca.vertcat(*self._symbols) if self._symbols else ca.MX.zeros(0, 1)
+        )
 
     def __call__(self, t):
         assert (
