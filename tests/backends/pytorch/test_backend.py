@@ -6,6 +6,7 @@ import coker
 from coker import Scalar, VectorSpace
 from coker.algebra import Dimension, OP
 from coker.backends import get_backend_by_name
+from coker.backends.pytorch import PytorchModule
 from coker.toolkits.codesign import Minimise, ProblemBuilder
 
 
@@ -68,6 +69,7 @@ def test_as_module_returns_eager_pytorch_module(pytorch_backend):
     x = torch.tensor([3.0, 2.0], requires_grad=True)
 
     assert isinstance(module, torch.nn.Module)
+    assert isinstance(module, PytorchModule)
     assert list(module.parameters()) == []
     result = module(x)
 
