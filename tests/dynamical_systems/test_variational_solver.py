@@ -1,4 +1,6 @@
 from types import SimpleNamespace
+import math
+
 
 import casadi as ca
 
@@ -12,9 +14,10 @@ from coker.dynamics import (
 )
 from coker.toolkits.codesign import SolveFailure
 from coker.backends.casadi.variational.solver import (
+    ControlFactory,
+    _derive_objective_scale,
     _is_acceptable_small_search_direction,
 )
-from coker.backends.casadi.variational.solver import ControlFactory
 from coker.dynamics.controls import ConstantControlVariable
 
 
@@ -78,6 +81,34 @@ def test_control_factory_builds_symbols_and_zero_guess():
 
     assert factory.symbols().shape == (1, 1)
     np.testing.assert_allclose(factory.guess(0), [[0.0]])
+
+
+@pytest.mark.parametrize(
+    ("nominal", "tolerance", "expected"),
+    [
+        (12.0, 1e-3, 12.0),
+        (-12.0, 1e-3, 12.0),
+        (0.0, 1e-3, 1.0),
+        (0.0, 0.0, 1.0),
+        (float("nan"), 1e-3, 1.0),
+        (float("inf"), 1e-3, 1.0),
+        (1.0, float("nan"), 1.0),
+        (1.0, float("inf"), 1.0),
+    ],
+)
+def test_derive_objective_scale(nominal, tolerance, expected):
+    assert _derive_objective_scale(nominal, tolerance) == expected
+
+
+def test_objective_scale_preserves_negative_objective_direction():
+    scale = _derive_objective_scale(-25.0, 1e-3)
+
+    assert -50.0 / scale == pytest.approx(-2.0)
+    assert (-50.0 / scale) * scale == pytest.approx(-50.0)
+
+
+def test_objective_scale_handles_invalid_values():
+    assert _derive_objective_scale(math.nan, 1e-3) == 1.0
 
 
 def test_scalar_linear_system(variational_backend):
