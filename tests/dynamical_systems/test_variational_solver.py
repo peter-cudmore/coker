@@ -8,6 +8,7 @@ import pytest
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.dynamics import (
     BoundedVariable,
+    TranscriptionOptions,
     VariationalProblem,
     VariationalSolution,
 )
@@ -165,7 +166,18 @@ def test_vector_linear_system(variational_backend):
     assert sol_line.shape == (10, 2)
 
 
-def test_fitting_constant():
+@pytest.mark.parametrize("enable_scaling", [True, False])
+def test_fitting_constant(enable_scaling, monkeypatch):
+    if not enable_scaling:
+        for helper in (
+            "_derive_variable_scaling",
+            "_derive_objective_scale",
+        ):
+            monkeypatch.setattr(
+                f"coker.backends.casadi.variational.solver.{helper}",
+                lambda *_args: pytest.fail("scaling was enabled"),
+            )
+
     def x0(p):
         return p[0]
 
@@ -201,6 +213,11 @@ def test_fitting_constant():
             BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2)
         ],
         t_final=1,
+        transcription_options=(
+            TranscriptionOptions()
+            if enable_scaling
+            else TranscriptionOptions(enable_scaling=False)
+        ),
         backend="casadi",
     )
 

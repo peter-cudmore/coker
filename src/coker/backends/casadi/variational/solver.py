@@ -494,37 +494,47 @@ def create_variational_solver(
     decision_variables_0 = layout.guess(path_guess, u_guess, p_guess_base)
     raw_lower = ca.DM(lower_bound_base)
     raw_upper = ca.DM(upper_bound_base)
-    variable_scaling = _derive_variable_scaling(
-        np.asarray(raw_lower).reshape(-1),
-        np.asarray(decision_variables_0).reshape(-1),
-        np.asarray(raw_upper).reshape(-1),
-    )
-    normalized_variables = ca.MX.sym(
-        "normalized_decision", decision_variables.shape[0]
-    )
-    physical_variables = variable_scaling.decode(normalized_variables)
-    normalized_cost = ca.substitute(
-        cost, raw_decision_variables, physical_variables
-    )
-    normalized_g = ca.substitute(g, raw_decision_variables, physical_variables)
-    objective_scale = _derive_objective_scale(
-        float(
-            ca.Function("nominal_cost", [raw_decision_variables], [cost])(
-                decision_variables_0
-            )
-        ),
-        tolerance,
-    )
-    normalized_cost /= objective_scale
+    physical_variables = raw_decision_variables
+    normalized_cost = cost
+    normalized_g = g
+    objective_scale = 1.0
+
+    if problem.transcription_options.enable_scaling:
+        variable_scaling = _derive_variable_scaling(
+            np.asarray(raw_lower).reshape(-1),
+            np.asarray(decision_variables_0).reshape(-1),
+            np.asarray(raw_upper).reshape(-1),
+        )
+        normalized_variables = ca.MX.sym(
+            "normalized_decision", decision_variables.shape[0]
+        )
+        physical_variables = variable_scaling.decode(normalized_variables)
+        normalized_cost = ca.substitute(
+            cost, raw_decision_variables, physical_variables
+        )
+        normalized_g = ca.substitute(
+            g, raw_decision_variables, physical_variables
+        )
+        objective_scale = _derive_objective_scale(
+            float(
+                ca.Function("nominal_cost", [raw_decision_variables], [cost])(
+                    decision_variables_0
+                )
+            ),
+            tolerance,
+        )
+        normalized_cost /= objective_scale
+        decision_variables = normalized_variables
+        decision_variables_0 = ca.DM(
+            variable_scaling.encode(decision_variables_0)
+        )
+        lower_bound_base, upper_bound_base = variable_scaling.encode_bounds(
+            raw_lower, raw_upper
+        )
 
     def unscale_objective(value: float) -> float:
         return value * objective_scale
 
-    decision_variables = normalized_variables
-    decision_variables_0 = ca.DM(variable_scaling.encode(decision_variables_0))
-    lower_bound_base, upper_bound_base = variable_scaling.encode_bounds(
-        raw_lower, raw_upper
-    )
     f_out = ca.Function(
         "Output",
         [decision_variables],

@@ -53,6 +53,7 @@ class TranscriptionOptions:
     verbose: bool = False
     optimiser_options: dict = field(default_factory=dict)
     initialise_near_guess: bool = True
+    enable_scaling: bool = True
     interation_callback: Optional[VariationalIterationCallback] = None
 
 
