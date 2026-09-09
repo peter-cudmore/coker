@@ -1,6 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable
-from typing import Any, Dict, List, Tuple, Type
+from typing import Any, Dict, List, Tuple
 
 from coker.algebra.kernel import Function, Tracer
 
@@ -10,10 +10,6 @@ ArrayLike = Any
 
 
 class Backend(metaclass=ABCMeta):
-
-    @abstractmethod
-    def native_types(self) -> Tuple[Type]:
-        pass
 
     @abstractmethod
     def to_numpy_array(self, array) -> ArrayLike:
@@ -175,6 +171,10 @@ def instantiate_backend(name: str):
         import coker.backends.jax
 
         backend = coker.backends.jax.JaxBackend()
+    elif name == "pytorch":
+        import coker.backends.pytorch
+
+        backend = coker.backends.pytorch.PytorchBackend()
     elif name == "casadi":
         import coker.backends.casadi
 
