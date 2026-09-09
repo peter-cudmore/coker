@@ -18,8 +18,6 @@ import casadi as ca
 import numpy as np
 
 
-
-
 def _as_vector(value: Any, name: str) -> np.ndarray:
     """Convert a numeric vector to a one-dimensional float array."""
     try:
@@ -31,8 +29,6 @@ def _as_vector(value: Any, name: str) -> np.ndarray:
     if array.ndim > 1 and 1 not in array.shape:
         raise ValueError(f"{name} must be one-dimensional")
     return np.ascontiguousarray(array.reshape(-1), dtype=float)
-
-
 
 
 @dataclass(frozen=True)
@@ -79,15 +75,15 @@ class _VariableScaling:
 
     def encode_bounds(self, lower: Any, upper: Any) -> tuple[Any, Any]:
         """Map physical bounds, retaining either sign of infinity."""
-        return self.encode(_bounds_vector(lower, self.offset.size, "lower")), self.encode(
-            _bounds_vector(upper, self.offset.size, "upper")
-        )
+        return self.encode(
+            _bounds_vector(lower, self.offset.size, "lower")
+        ), self.encode(_bounds_vector(upper, self.offset.size, "upper"))
 
     def decode_bounds(self, lower: Any, upper: Any) -> tuple[Any, Any]:
         """Map normalized bounds back to physical coordinates."""
-        return self.decode(_bounds_vector(lower, self.offset.size, "lower")), self.decode(
-            _bounds_vector(upper, self.offset.size, "upper")
-        )
+        return self.decode(
+            _bounds_vector(lower, self.offset.size, "lower")
+        ), self.decode(_bounds_vector(upper, self.offset.size, "upper"))
 
 
 def _bounds_vector(value: Any, size: int, name: str) -> Any:
@@ -109,7 +105,9 @@ def _safe_distance(first: float, second: float) -> float:
     return min(distance, float(np.finfo(float).max))
 
 
-def _derive_variable_scaling(lower: Any, guess: Any, upper: Any) -> _VariableScaling:
+def _derive_variable_scaling(
+    lower: Any, guess: Any, upper: Any
+) -> _VariableScaling:
     """Derive a stable positive affine transform from bounds and a guess.
 
     Finite intervals use their midpoint and half-span. One-sided intervals
@@ -142,9 +140,13 @@ def _derive_variable_scaling(lower: Any, guess: Any, upper: Any) -> _VariableSca
             else:
                 offset[i], scale[i] = midpoint, half_span
         elif finite_lower:
-            offset[i], scale[i] = lower_i, max(1.0, _safe_distance(guess_i, lower_i))
+            offset[i], scale[i] = lower_i, max(
+                1.0, _safe_distance(guess_i, lower_i)
+            )
         elif finite_upper:
-            offset[i], scale[i] = upper_i, max(1.0, _safe_distance(guess_i, upper_i))
+            offset[i], scale[i] = upper_i, max(
+                1.0, _safe_distance(guess_i, upper_i)
+            )
         else:
             offset[i], scale[i] = guess_i, max(1.0, abs(guess_i))
 

@@ -40,7 +40,9 @@ def test_scaling_accepts_numpy_scalar_and_vector_costs():
     scaling = derive_objective_scaling(np.float64(4.0), np.float64(0.5))
     physical = np.array([-8.0, 2.0])
 
-    np.testing.assert_allclose(scaling.unscale_cost(scaling.scale_cost(physical)), physical)
+    np.testing.assert_allclose(
+        scaling.unscale_cost(scaling.scale_cost(physical)), physical
+    )
 
 
 def test_identity_fallback_round_trips_cost():

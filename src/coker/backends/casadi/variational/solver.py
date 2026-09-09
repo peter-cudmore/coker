@@ -58,6 +58,7 @@ def _is_acceptable_small_search_direction(
     max_violation = float(ca.mmax(ca.fmax(violation, 0)))
     return max_violation <= max(tolerance, min_tolerance)
 
+
 class CasadiVariationalSolver(VariationalSolver):
     def __init__(
         self,
@@ -493,13 +494,13 @@ def create_variational_solver(
     normalized_cost = ca.substitute(
         cost, raw_decision_variables, physical_variables
     )
-    normalized_g = ca.substitute(
-        g, raw_decision_variables, physical_variables
-    )
+    normalized_g = ca.substitute(g, raw_decision_variables, physical_variables)
     objective_scaling = derive_objective_scaling(
-        float(ca.Function("nominal_cost", [raw_decision_variables], [cost])(
-            decision_variables_0
-        )),
+        float(
+            ca.Function("nominal_cost", [raw_decision_variables], [cost])(
+                decision_variables_0
+            )
+        ),
         tolerance,
     )
     normalized_cost = objective_scaling.scale_cost(normalized_cost)
@@ -569,7 +570,9 @@ def create_variational_solver(
                 ca.substitute(
                     p_symbols, raw_decision_variables, physical_variables
                 ),
-                ca.substitute(u_symbols, raw_decision_variables, physical_variables),
+                ca.substitute(
+                    u_symbols, raw_decision_variables, physical_variables
+                ),
             ),
         }
         init_solver = ca.nlpsol(
@@ -579,7 +582,11 @@ def create_variational_solver(
             dict(solver_options),
         )
 
-    nlp_spec = {"f": normalized_cost, "x": decision_variables, "g": normalized_g}
+    nlp_spec = {
+        "f": normalized_cost,
+        "x": decision_variables,
+        "g": normalized_g,
+    }
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, nlp_solver_options)
 
     parameter_offset = layout.parameter_slice.start
@@ -871,10 +878,11 @@ class ControlFactory:
         self.sizes = [v.degrees_of_freedom(0, t_final) for v in variables]
         offsets = [0, *accumulate(self.sizes[:-1])]
         self.offsets = offsets
+
     def __call__(self, t):
-        assert 0 <= t <= self.t_final, (
-            f"Control variable is not defined at t = {t}"
-        )
+        assert (
+            0 <= t <= self.t_final
+        ), f"Control variable is not defined at t = {t}"
         out = []
         for s, var in zip(self._symbols, self.variables):
             if isinstance(var, ConstantControlVariable):
