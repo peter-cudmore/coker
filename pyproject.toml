@@ -37,9 +37,6 @@ jax = [
 ]
 pytorch = [
     "torch>=2.0,<3",
-]
-pytorch-ode = [
-    "torch>=2.0,<3",
     "torchdiffeq>=0.2.5,<1",
 ]
 

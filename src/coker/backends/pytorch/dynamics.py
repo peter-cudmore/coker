@@ -60,7 +60,7 @@ def evaluate_integrals(
         from torchdiffeq import odeint
     except ImportError as ex:
         raise RuntimeError(
-            "PyTorch ODE support requires `pip install coker[pytorch-ode]`"
+            "PyTorch ODE support requires `pip install coker[pytorch]`"
         ) from ex
 
     x0 = backend.to_backend_array(x0)
