@@ -67,7 +67,6 @@ Optional extras declared by the package:
 pip install "coker[casadi]"
 pip install "coker[jax]"
 pip install "coker[pytorch]"
-pip install "coker[pytorch-ode]"
 ```
 
 Base installation:
@@ -144,7 +143,7 @@ The repository uses `uv` in CI for environment management.
 Install a development environment:
 
 ```bash
-uv sync --group dev --extra casadi --extra jax --extra pytorch-ode
+uv sync --group dev --extra casadi --extra jax --extra pytorch
 ```
 
 Run the test suite:

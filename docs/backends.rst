@@ -47,8 +47,7 @@ Backend capability matrix
    * - ``pytorch``
      - Tensor-valued numerical execution with PyTorch autograd plus ODE
        initial-value integration and quadratures.
-     - Install with ``pip install "coker[pytorch-ode]"`` for ODE support, or
-       ``pip install "coker[pytorch]"`` for tensor evaluation only.
+     - Install with ``pip install "coker[pytorch]"``.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
        backend tests. Algebraic DAEs, variational solvers, mathematical-program
        construction, and mathematical-program solving are not supported.
