@@ -45,13 +45,13 @@ Backend capability matrix
      - Backend code exists in ``src/coker/backends/jax/``. The current test
        suite does not include a dedicated ``tests/backends/jax/`` directory.
    * - ``pytorch``
-     - Tensor-valued numerical execution with PyTorch autograd for
-       differentiable model evaluation.
-     - Install with ``pip install "coker[pytorch]"``.
+     - Tensor-valued numerical execution with PyTorch autograd plus ODE
+       initial-value integration and quadratures.
+     - Install with ``pip install "coker[pytorch-ode]"`` for ODE support, or
+       ``pip install "coker[pytorch]"`` for tensor evaluation only.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
-       backend tests. ODE/integral evaluation, variational solvers,
-       mathematical-program construction, and mathematical-program solving
-       are not supported.
+       backend tests. Algebraic DAEs, variational solvers, mathematical-program
+       construction, and mathematical-program solving are not supported.
 
 Choosing a backend
 ------------------
@@ -66,10 +66,10 @@ A good default is:
   :doc:`backend_architecture`.
 
 The repository's own tests validate numerical execution under ``numpy``,
-``jax``, and ``pytorch`` (including PyTorch tensor/autograd behavior),
-variational solves through ``casadi``, and low-level native graph behaviour
-under ``coker``. PyTorch deliberately does not support ODE/integral
-evaluation, variational solvers, mathematical-program construction, or
+``jax``, and ``pytorch`` (including PyTorch tensor/autograd, ODE, and
+quadrature behavior), variational solves through ``casadi``, and low-level
+native graph behaviour under ``coker``. PyTorch deliberately does not support
+algebraic DAEs, variational solvers, mathematical-program construction, or
 mathematical-program solving.
 
 

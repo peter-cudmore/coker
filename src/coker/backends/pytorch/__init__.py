@@ -7,6 +7,7 @@ from coker.algebra import Dimension
 from coker.algebra.kernel import Tracer
 from coker.backends.backend import ArrayLike, Backend
 
+from .dynamics import PytorchSolverParameters, evaluate_integrals
 from .lower import PytorchModule, cast_torch_outputs
 from .ops import (
     call_parameterised_op,
@@ -90,6 +91,23 @@ class PytorchBackend(Backend):
 
         return scalar_post
 
+    def evaluate_integrals(
+        self,
+        functions,
+        initial_conditions,
+        end_point: float,
+        inputs,
+        solver_parameters=None,
+    ):
+        return evaluate_integrals(
+            self,
+            functions,
+            initial_conditions,
+            end_point,
+            inputs,
+            solver_parameters,
+        )
+
     def lower(self, function):
         from coker.backends.evaluator import _build_plan, _cast_outputs
 
@@ -132,4 +150,4 @@ class PytorchBackend(Backend):
         )
 
 
-__all__ = ["PytorchBackend", "PytorchModule"]
+__all__ = ["PytorchBackend", "PytorchModule", "PytorchSolverParameters"]

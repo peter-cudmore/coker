@@ -47,7 +47,7 @@ The same traced function can be lowered to different execution backends dependin
 - `numpy` for direct numerical execution
 - `casadi` for optimisation-oriented symbolic workflows
 - `jax` for alternate array execution
-- `pytorch` for tensor-valued execution and autograd
+- `pytorch` for tensor-valued execution, autograd, and optional ODE/quadrature integration
 - `sympy` for symbolic inspection and printing
 - `coker` for Coker's native compact execution graph
 
@@ -67,6 +67,7 @@ Optional extras declared by the package:
 pip install "coker[casadi]"
 pip install "coker[jax]"
 pip install "coker[pytorch]"
+pip install "coker[pytorch-ode]"
 ```
 
 Base installation:
@@ -143,7 +144,7 @@ The repository uses `uv` in CI for environment management.
 Install a development environment:
 
 ```bash
-uv sync --group dev --extra casadi --extra jax --extra pytorch
+uv sync --group dev --extra casadi --extra jax --extra pytorch-ode
 ```
 
 Run the test suite:
