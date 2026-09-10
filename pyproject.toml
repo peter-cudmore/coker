@@ -28,6 +28,13 @@ dependencies = [
     "typing-extensions",
 ]
 
+[project.entry-points."coker.backends"]
+numpy = "coker.backends.numpy:NumpyBackend"
+jax = "coker.backends.jax:JaxBackend"
+pytorch = "coker.backends.pytorch:PytorchBackend"
+casadi = "coker.backends.casadi:CasadiBackend"
+sympy = "coker.backends.sympy:SympyBackend"
+
 [project.optional-dependencies]
 casadi = [
     "casadi>=3.7.0,<4",

@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable
+from importlib.metadata import entry_points
 from typing import Any, Dict, List, Tuple
 
 from coker.algebra.kernel import Function, Tracer
@@ -150,35 +151,30 @@ def register_backend(name: str, factory: Callable[[], Backend]) -> None:
 __registered_backends: dict[str, Callable[[], Backend]] = {}
 
 
-__known_backends = {}
+def _entry_points_for_backend(name: str):
+    return tuple(
+        entry_point
+        for entry_point in entry_points(group="coker.backends")
+        if entry_point.name == name
+    )
+
+
+def _discover_backend(name: str) -> None:
+    plugins = _entry_points_for_backend(name)
+    if not plugins:
+        raise ValueError(f"Unknown backend: {name}")
+    if len(plugins) > 1:
+        raise ValueError(f"Backend {name!r} has multiple plugin registrations")
+
+    register_backend(name, plugins[0].load())
 
 
 def instantiate_backend(name: str):
     factory = __registered_backends.get(name)
-    if factory is not None:
-        backend = factory()
-    elif name == "numpy":
-        import coker.backends.numpy.core
-
-        backend = coker.backends.numpy.core.NumpyBackend()
-    elif name == "jax":
-        import coker.backends.jax
-
-        backend = coker.backends.jax.JaxBackend()
-    elif name == "pytorch":
-        import coker.backends.pytorch
-
-        backend = coker.backends.pytorch.PytorchBackend()
-    elif name == "casadi":
-        import coker.backends.casadi
-
-        backend = coker.backends.casadi.CasadiBackend()
-    elif name == "sympy":
-        import coker.backends.sympy
-
-        backend = coker.backends.sympy.SympyBackend()
-    else:
-        raise ValueError(f"Unknown backend: {name}")
+    if factory is None:
+        _discover_backend(name)
+        factory = __registered_backends[name]
+    backend = factory()
 
     # Backend identity is part of the callable/lowering contract.
     backend.name = name

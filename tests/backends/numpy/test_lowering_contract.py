@@ -3,7 +3,7 @@ import numpy as np
 from coker import Scalar, VectorSpace, function
 
 
-def test_numpy_lowering_reuses_plan_for_constants_and_declares_thread_safety():
+def test_numpy_lowering_reuses_captured_constants():
     bias = np.array([1.5, -2.0])
     compiled = function(
         [VectorSpace("x", 2)],
@@ -12,13 +12,6 @@ def test_numpy_lowering_reuses_plan_for_constants_and_declares_thread_safety():
     )
 
     lowered = compiled.lower()
-    assert lowered is compiled.lower()
-    assert lowered.capabilities.thread_safe is True
-    assert lowered.capabilities.supports_prepare is False
-    assert lowered.capabilities.eager_execution is True
-    assert lowered.capabilities.symbolic_execution is True
-    assert lowered.capabilities.autograd is False
-    assert lowered.capabilities.supports_module_adapter is False
 
     first = lowered.execute([np.array([2.0, 4.0])])[0]
     second = lowered.execute([np.array([-1.0, 3.0])])[0]

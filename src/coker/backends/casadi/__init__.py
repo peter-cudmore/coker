@@ -8,7 +8,7 @@ from coker import Dimension, Function, Scalar, VectorSpace
 from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
-from coker.backends.backend import ArrayLike, Backend
+from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.casadi.lower import (
     call_parameterised_op,
     impls,
@@ -337,3 +337,6 @@ class CasadiBackend(Backend):
             z_final = None
 
         return x_final, z_final, q_final
+
+
+register_backend("casadi", CasadiBackend)
