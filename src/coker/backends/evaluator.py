@@ -8,6 +8,7 @@ from coker.algebra.kernel import (
     SymbolicCallable,
     Tracer,
 )
+from coker.algebra.dimensions import ResultBundleDimension
 
 _SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | CallableReference
 _SYMBOLIC_TYPES = Tracer | _SYMBOLIC_CALLABLE_TYPES
@@ -103,7 +104,9 @@ def _build_plan(graph, backend):
             else:
                 resolved.append(backend.to_backend_array(a))
         value = resolved[0] if op == OP.VALUE else backend.call(op, *resolved)
-        if not isinstance(value, _SYMBOLIC_TYPES):
+        if not isinstance(value, _SYMBOLIC_TYPES) and not isinstance(
+            graph.dim[i], ResultBundleDimension
+        ):
             value = backend.reshape(value, graph.dim[i])
         workspace[i] = value
     # Pass 3 — build execution steps for dynamic non-input nodes only.
@@ -121,13 +124,18 @@ def _build_plan(graph, backend):
             else:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
         dim = graph.dim[i]
+        post_fn = (
+            (lambda value: value)
+            if isinstance(dim, ResultBundleDimension)
+            else backend.resolve_post_fn(dim)
+        )
         steps.append(
             _PlanStep(
                 backend.resolve_fn(op),
                 arg_indices,
                 i,
                 dim,
-                backend.resolve_post_fn(dim),
+                post_fn,
             )
         )
 
@@ -208,9 +216,10 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
                 raise ex from ex
 
         workspace[w] = (
-            backend.reshape(value, graph.dim[w])
-            if not isinstance(value, _SYMBOLIC_TYPES)
-            else value
+            value
+            if isinstance(value, _SYMBOLIC_TYPES)
+            or isinstance(graph.dim[w], ResultBundleDimension)
+            else backend.reshape(value, graph.dim[w])
         )
 
     return _cast_outputs(outputs, graph, workspace, backend)

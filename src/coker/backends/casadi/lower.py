@@ -5,7 +5,7 @@ import coker
 from coker.algebra.kernel import CallableReference, Tape, Tracer
 from coker.algebra.ops import OP, Noop
 from coker.algebra.dimensions import FunctionSpace
-from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
+from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP, SelectOP
 from typing import List
 
 impls = {
@@ -103,6 +103,7 @@ parameterised_impls = {
     ConcatenateOP: lambda op, *args: concat(*args, axis=op.axis),
     NormOP: lambda op, x: norm(x, ord=op.ord),
     ReshapeOP: lambda op, x: reshape(x, *op.newshape),
+    SelectOP: lambda op, value: op.select(value),
 }
 
 

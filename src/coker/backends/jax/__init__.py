@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer
-from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
+from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP, SelectOP
 
 from coker.backends.backend import ArrayLike, Backend, register_backend
 
@@ -75,6 +75,7 @@ parameterised_impls = {
     ConcatenateOP: lambda op, *x: jnp.concatenate(x, axis=op.axis),
     ReshapeOP: lambda op, x: jnp.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: jnp.linalg.norm(x, ord=op.ord),
+    SelectOP: lambda op, value: op.select(value),
 }
 
 
