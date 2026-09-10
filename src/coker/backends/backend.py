@@ -162,7 +162,7 @@ def _entry_points_for_backend(name: str):
 def _discover_backend(name: str) -> None:
     plugins = _entry_points_for_backend(name)
     if not plugins:
-        raise ValueError(f"Unknown backend: {name}")
+        raise NotImplementedError(f"Unknown backend {name!r}")
     if len(plugins) > 1:
         raise ValueError(f"Backend {name!r} has multiple plugin registrations")
 
@@ -185,24 +185,13 @@ def instantiate_backend(name: str):
 def get_backend_by_name(name: str, set_current=True) -> Backend:
     global __current_backend
 
-    try:
-        b = __backends[name]
-        if set_current:
-            __current_backend = b
-        return b
-    except KeyError:
-        pass
+    backend = __backends.get(name)
+    if backend is None:
+        backend = instantiate_backend(name)
 
-    try:
-        b = instantiate_backend(name)
-        if set_current:
-            __current_backend = b
-        return b
-    except KeyError:
-        pass
-        pass
-
-    raise NotImplementedError(f"Unknown backend {name}")
+    if set_current:
+        __current_backend = backend
+    return backend
 
 
 __backends = {}

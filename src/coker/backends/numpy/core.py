@@ -116,28 +116,6 @@ def call_parameterised_op(op, *args):
     return result
 
 
-def reshape(arg, dim):
-    if dim.is_scalar():
-        if isinstance(arg, scalar_types):
-            return arg
-        try:
-            (inner,) = arg
-        except ValueError as ex:
-            raise TypeError(f"Expecting a scalar, got {arg}") from ex
-        except TypeError as ex:
-            raise TypeError(f"Expecting a scalar, got {arg}") from ex
-        return reshape(inner, dim)
-    if isinstance(arg, np.ndarray):
-        return np.reshape(arg, dim.dim)
-    if scp.sparse.issparse(arg):
-        return np.reshape(arg.toarray(), dim.dim)
-    if isinstance(arg, (float, int)):
-        return np.array([arg]).reshape(dim.dim)
-    if arg is None:
-        return arg
-    raise NotImplementedError(f"Dont know how to reshape {arg}")
-
-
 class NumpyBackend(Backend):
     def __init__(self, *args, **kwargs):
         super(NumpyBackend, self).__init__(*args, **kwargs)
@@ -149,10 +127,23 @@ class NumpyBackend(Backend):
         return array
 
     def reshape(self, arg, dim: Dimension):
-        return reshape(arg, dim)
-        raise NotImplementedError(
-            f"Don't know how to resize {arg.__class__.__name__}"
-        )
+        if dim.is_scalar():
+            if isinstance(arg, scalar_types):
+                return arg
+            try:
+                (inner,) = arg
+            except (ValueError, TypeError) as ex:
+                raise TypeError(f"Expecting a scalar, got {arg}") from ex
+            return self.reshape(inner, dim)
+        if isinstance(arg, np.ndarray):
+            return np.reshape(arg, dim.dim)
+        if scp.sparse.issparse(arg):
+            return np.reshape(arg.toarray(), dim.dim)
+        if isinstance(arg, (float, int)):
+            return np.array([arg]).reshape(dim.dim)
+        if arg is None:
+            return arg
+        raise NotImplementedError(f"Dont know how to reshape {arg}")
 
     def lower(self, function, options=None):
         from coker.backends.evaluator import _build_plan
@@ -182,7 +173,7 @@ class NumpyBackend(Backend):
             def scalar_post(v):
                 if isinstance(v, Tracer):
                     return v
-                return reshape(v, _dim)
+                return self.reshape(v, _dim)
 
             return scalar_post
         return lambda v: v
