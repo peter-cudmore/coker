@@ -4,7 +4,7 @@ import casadi as ca
 import numpy as np
 
 
-from coker import Dimension, Function
+from coker import Dimension, Function, Scalar, VectorSpace
 from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
@@ -27,14 +27,70 @@ __all__ = ["CasadiBackend"]
 scalar_types = (float, int)
 
 
+def _space_from_casadi_shape(name: str, rows: int, columns: int):
+    if (rows, columns) == (1, 1):
+        return Scalar(name)
+    return VectorSpace(name, rows if columns == 1 else (rows, columns))
+
+
+def _signature_from_casadi_function(ca_function: ca.Function):
+    from coker.backends.lowered import (
+        FunctionInputSpec,
+        FunctionOutputSpec,
+        FunctionSignature,
+    )
+
+    inputs = tuple(
+        FunctionInputSpec(
+            ca_function.name_in(index),
+            _space_from_casadi_shape(
+                ca_function.name_in(index),
+                ca_function.size1_in(index),
+                ca_function.size2_in(index),
+            ),
+        )
+        for index in range(ca_function.n_in())
+    )
+    outputs = tuple(
+        FunctionOutputSpec(
+            ca_function.name_out(index),
+            Dimension(
+                None
+                if (ca_function.size1_out(index), ca_function.size2_out(index))
+                == (1, 1)
+                else (
+                    (ca_function.size1_out(index),)
+                    if ca_function.size2_out(index) == 1
+                    else (
+                        ca_function.size1_out(index),
+                        ca_function.size2_out(index),
+                    )
+                )
+            ),
+        )
+        for index in range(ca_function.n_out())
+    )
+    return FunctionSignature(inputs=inputs, outputs=outputs)
+
+
 class CasadiBackend(Backend):
 
-    def import_function(self, ca_function, signature):
-        """Import a native CasADi function as an OP.EVALUATE callable."""
+    def import_function(self, ca_function, signature=None):
+        """Import a native CasADi function as an ``OP.EVALUATE`` callable.
+
+        CasADi functions carry ordered names and matrix dimensions, so callers
+        may omit ``signature``. Pass one only to impose a deliberate Coker
+        declaration instead of the native function's interface.
+        """
         if not isinstance(ca_function, ca.Function):
             raise TypeError(
                 "CasadiBackend.import_function expects a casadi.Function"
             )
+        signature = (
+            _signature_from_casadi_function(ca_function)
+            if signature is None
+            else signature
+        )
         return Function.from_native(
             ca_function, signature, backend=getattr(self, "name", "casadi")
         )

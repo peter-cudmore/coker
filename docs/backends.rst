@@ -111,13 +111,13 @@ currently a TorchScript or ``torch.compile`` target.
 Importing native backend functions
 ---------------------------------
 
-Native functions can be imported into a traceable Coker function when the
-backend and the complete :class:`~coker.backends.lowered.FunctionSignature`
-are explicit:
+Native import interfaces are backend-specific. CasADi derives the ordered
+names and matrix dimensions from its native function, while a PyTorch module
+needs an explicit :class:`~coker.backends.lowered.FunctionSignature`:
 
 .. code-block:: python
 
-   casadi_function = casadi_backend.import_function(native_function, signature)
+   casadi_function = casadi_backend.import_function(native_function)
    torch_function = pytorch_backend.import_module(module, signature)
 
 Each imported invocation is recorded as an ``OP.EVALUATE`` node while Coker
