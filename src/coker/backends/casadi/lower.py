@@ -2,7 +2,7 @@ import casadi as ca
 import numpy as np
 
 import coker
-from coker.algebra.kernel import Tape, Tracer
+from coker.algebra.kernel import CallableReference, Tape, Tracer
 from coker.algebra.ops import OP, Noop
 from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
@@ -42,6 +42,12 @@ def casadi_eval(op, *args):
     # Plain Python callables (e.g. solution_proxy) can be called directly.
     if not hasattr(op, "tape"):
         return op(*args)
+    if op.backend != "casadi":
+        raise RuntimeError(
+            "Cannot lower CasADi OP.EVALUATE node for "
+            f"backend {op.backend!r}; node callable {op!r} belongs to "
+            f"backend {op.backend!r}"
+        )
     # coker.Function: evaluate symbolically via substitute, keeping CasADi
     # types (MX/DM) throughout rather than converting to Python scalars.
     workspace = {
@@ -188,6 +194,8 @@ def extract_symbols(arg: ca.MX):
 
 def substitute(output: List[Tracer], workspace):
     def get_node(node: Tracer):
+        if isinstance(node, CallableReference):
+            return node
         if node is None or node.index == Tape.NONE:
             return None
         if node is Noop():

@@ -47,18 +47,7 @@ class CasadiLoweredFunction(LoweredFunction):
         values = self._ca_function(*dm_inputs)
         if not isinstance(values, (list, tuple)):
             values = [values]
-        result = []
-        for value, output in zip(values, self._function.output):
-            try:
-                numpy_value = self._backend.to_numpy_array(value)
-                if output.dim.is_scalar():
-                    result.append(
-                        float(np.asarray(numpy_value).reshape(-1)[0])
-                    )
-                else:
-                    result.append(
-                        np.asarray(numpy_value).reshape(output.shape)
-                    )
-            except ValueError:
-                result.append(value)
-        return tuple(result)
+        # Native execution is intentionally not converted through the
+        # backend's public NumPy boundary.  CasADi callers need to retain
+        # symbolic/numeric native values (and their sparse representation).
+        return tuple(values)

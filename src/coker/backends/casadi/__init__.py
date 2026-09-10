@@ -29,6 +29,16 @@ scalar_types = (float, int)
 
 class CasadiBackend(Backend):
 
+    def import_function(self, ca_function, signature):
+        """Import a native CasADi function as an OP.EVALUATE callable."""
+        if not isinstance(ca_function, ca.Function):
+            raise TypeError(
+                "CasadiBackend.import_function expects a casadi.Function"
+            )
+        return Function.from_native(
+            ca_function, signature, backend=getattr(self, "name", "casadi")
+        )
+
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         if isinstance(array, ca.MX):
             try:
@@ -134,6 +144,24 @@ class CasadiBackend(Backend):
         return CasadiLoweredFunction(
             self, function, ca.Function("f", ca_inputs, ca_outputs)
         )
+
+    def restore_public_outputs(self, function: Function, outputs):
+        """Convert CasADi lowered values at the public Coker boundary."""
+        restored = []
+        for value, output in zip(outputs, function.output):
+            if value is None:
+                restored.append(None)
+                continue
+            try:
+                numpy_value = self.to_numpy_array(value)
+            except ValueError:
+                restored.append(value)
+                continue
+            if output.dim.is_scalar():
+                restored.append(float(np.asarray(numpy_value).reshape(-1)[0]))
+            else:
+                restored.append(np.asarray(numpy_value).reshape(output.shape))
+        return tuple(restored)
 
     def evaluate(self, function: Function, inputs: ArrayLike):
         workspace = {}

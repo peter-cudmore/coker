@@ -104,6 +104,14 @@ class Backend(metaclass=ABCMeta):
 
         return EvaluatedLoweredFunction(self, function, function.signature)
 
+    def restore_public_outputs(self, function: Function, outputs):
+        """Restore lowered results for the established ``Function`` API.
+
+        Lowered handles retain backend-native values. Backends that historically
+        expose a different public value representation override this boundary.
+        """
+        return tuple(outputs)
+
 
 class VariationalSolver:
     """Interface definition for variational solvers."""
