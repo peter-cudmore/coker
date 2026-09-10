@@ -174,7 +174,7 @@ class FunctionSpace:
 
     name: str
     arguments: List[Scalar | VectorSpace]
-    output: List[Scalar | VectorSpace | FunctionSpace | None]
+    output: List[Scalar | VectorSpace | FunctionSpace]
     signature: Optional[Tuple[int]] = None
     """Optional list of integers specifying the degree of
     differentiability for each argument.
@@ -201,16 +201,12 @@ class FunctionSpace:
             return (None,)
         return [
             (
-                None
-                if out is None
+                out
+                if isinstance(out, FunctionSpace)
                 else (
-                    out
-                    if isinstance(out, FunctionSpace)
-                    else (
-                        Dimension(None)
-                        if isinstance(out, Scalar)
-                        else Dimension(out.dimension)
-                    )
+                    Dimension(None)
+                    if isinstance(out, Scalar)
+                    else Dimension(out.dimension)
                 )
             )
             for out in self.output
@@ -218,11 +214,7 @@ class FunctionSpace:
 
     def is_scalar(self):
         output_dimensions = self.output_dimensions()
-        return (
-            len(output_dimensions) == 1
-            and output_dimensions[0] is not None
-            and output_dimensions[0].is_scalar()
-        )
+        return len(output_dimensions) == 1 and output_dimensions[0].is_scalar()
 
 
 @dataclasses.dataclass

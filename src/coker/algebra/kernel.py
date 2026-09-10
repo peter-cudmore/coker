@@ -355,15 +355,14 @@ class Tape:
             else:
                 assert isinstance(arg, Tracer)
                 dims.append(arg.dim)
-        if op == OP.EVALUATE and isinstance(args[0], NativeCallableReference):
-            callable_ref = args[0]
-            op.compute_shape(*dims)
-            return ResultBundleDimension(
-                tuple(callable_ref.function_space.output_dimensions())
-            )
         return op.compute_shape(*dims)
 
-    def append(self, op: OP, *args) -> int:
+    def append(
+        self,
+        op: OP | Operator,
+        *args,
+        result_dimension: ResultBundleDimension | None = None,
+    ) -> int:
         args = [strip_symbols_from_array(a) for a in args]
 
         if self._substitutions:
@@ -395,7 +394,12 @@ class Tape:
         if node_hash in self._node_hashmap:
             return self._node_hashmap[node_hash]
 
-        out_dim = self._compute_shape(op, *args)
+        computed_dimension = self._compute_shape(op, *args)
+        out_dim = (
+            result_dimension
+            if result_dimension is not None
+            else computed_dimension
+        )
         index = len(self.dim)
         self.nodes.push_op(op, *args)
         self.dim.append(out_dim)
@@ -1014,7 +1018,21 @@ class Function(SymbolicCallable):
     def _append_native_outputs(
         tape, native, backend, input_spaces, output_specs, args
     ):
+        def result_output_dimension(shape):
+            if shape is None or isinstance(shape, (Dimension, FunctionSpace)):
+                return shape
+            if isinstance(shape, Scalar):
+                return Dimension(None)
+            if isinstance(shape, VectorSpace):
+                return Dimension(shape.dimension)
+            raise TypeError(f"Unsupported native output shape {shape!r}")
 
+        result_dimension = ResultBundleDimension(
+            tuple(
+                result_output_dimension(output_spec.shape)
+                for output_spec in output_specs
+            )
+        )
         output_spaces = [
             (
                 output_spec.shape.to_space(output_spec.name)
@@ -1022,6 +1040,7 @@ class Function(SymbolicCallable):
                 else output_spec.shape
             )
             for output_spec in output_specs
+            if output_spec.shape is not None
         ]
         function_space = FunctionSpace(
             f"{backend}_native",
@@ -1033,7 +1052,15 @@ class Function(SymbolicCallable):
             function_space,
             native=True,
         )
-        bundle = Tracer(tape, tape.append(OP.EVALUATE, native_ref, *args))
+        bundle = Tracer(
+            tape,
+            tape.append(
+                OP.EVALUATE,
+                native_ref,
+                *args,
+                result_dimension=result_dimension,
+            ),
+        )
         return [
             (
                 None
