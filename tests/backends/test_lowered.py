@@ -47,3 +47,24 @@ def test_lowered_function_has_packed_and_positional_abis(backend_name):
         np.asarray(public_result[1]).reshape(-1),
         np.asarray(packed[1]).reshape(-1),
     )
+
+
+
+@pytest.mark.parametrize("backend_name", ["numpy", "casadi", "pytorch"])
+def test_lowered_zero_width_output_preserves_declared_shape(backend_name):
+    if backend_name == "casadi":
+        pytest.importorskip("casadi")
+    if backend_name == "pytorch":
+        pytest.importorskip("torch")
+
+    compiled = function(
+        [VectorSpace("x", 0)],
+        lambda x: x,
+        backend=backend_name,
+    )
+    lowered = compiled.lower()
+
+    (output,) = lowered.execute([np.empty(0)])
+
+    assert lowered.signature.outputs[0].shape.dim == (0,)
+    assert np.asarray(output).size == 0
