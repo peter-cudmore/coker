@@ -9,9 +9,16 @@ from coker.algebra.kernel import (
     Tracer,
 )
 from coker.algebra.dimensions import ResultBundleDimension
+from coker.algebra.ops import normalize_evaluate_result
 
 _SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | CallableReference
 _SYMBOLIC_TYPES = Tracer | _SYMBOLIC_CALLABLE_TYPES
+
+
+def _normalize_evaluate_result(op, args, value, dimension):
+    if op == OP.EVALUATE and isinstance(args[0], CallableReference):
+        return normalize_evaluate_result(value, dimension)
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +111,7 @@ def _build_plan(graph, backend):
             else:
                 resolved.append(backend.to_backend_array(a))
         value = resolved[0] if op == OP.VALUE else backend.call(op, *resolved)
+        value = _normalize_evaluate_result(op, resolved, value, graph.dim[i])
         if not isinstance(value, _SYMBOLIC_TYPES) and not isinstance(
             graph.dim[i], ResultBundleDimension
         ):
@@ -124,6 +132,15 @@ def _build_plan(graph, backend):
             else:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
         dim = graph.dim[i]
+        fn = backend.resolve_fn(op)
+        if op == OP.EVALUATE:
+
+            def fn(*values, _fn=fn, _dim=dim):
+                value = _fn(*values)
+                return _normalize_evaluate_result(
+                    OP.EVALUATE, values, value, _dim
+                )
+
         post_fn = (
             (lambda value: value)
             if isinstance(dim, ResultBundleDimension)
@@ -131,7 +148,7 @@ def _build_plan(graph, backend):
         )
         steps.append(
             _PlanStep(
-                backend.resolve_fn(op),
+                fn,
                 arg_indices,
                 i,
                 dim,
@@ -215,6 +232,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
                 ex.add_note(f"Node: {op}({args})")
                 raise ex from ex
 
+        value = _normalize_evaluate_result(op, args, value, graph.dim[w])
         workspace[w] = (
             value
             if isinstance(value, _SYMBOLIC_TYPES)

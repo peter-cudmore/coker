@@ -117,6 +117,13 @@ class SelectOP(Operator):
         return isinstance(other, SelectOP) and self.index == other.index
 
 
+def normalize_evaluate_result(value, dimension):
+    """Apply the tape-declared result policy for ``OP.EVALUATE``."""
+    if isinstance(dimension, ResultBundleDimension):
+        return value
+    return np.concatenate([np.asarray(result).reshape(-1) for result in value])
+
+
 class ConcatenateOP(Operator):
     __slots__ = ("axis",)
 

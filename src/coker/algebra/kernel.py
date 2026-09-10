@@ -202,7 +202,7 @@ class _CallableArchiveEntry:
 
 
 class CallableReference:
-    """A reference to a packed callable entry owned by a tape."""
+    """A reference to a callable entry owned by a tape."""
 
     def __init__(self, tape: "Tape", archive_index: int):
         self._tape = weakref.ref(tape)
@@ -215,16 +215,6 @@ class CallableReference:
     @property
     def function_space(self) -> FunctionSpace:
         return self._entry.function_space
-
-    def __call__(self, *args):
-        results = self._entry.callable_value(*args)
-        return np.concatenate(
-            [np.asarray(result).reshape(-1) for result in results]
-        )
-
-
-class NativeCallableReference(CallableReference):
-    """A reference to one native callable invocation returning all results."""
 
     def __call__(self, *args):
         return self._entry.callable_value(*args)
@@ -265,9 +255,8 @@ class Tape:
         self,
         callable_value,
         function_space,
-        native=False,
     ):
-        key = (id(callable_value), native)
+        key = id(callable_value)
         archive_index = self._inner._callable_hashmap.get(key)
         if archive_index is None:
             archive_index = len(self._inner._callable_archive)
@@ -278,8 +267,7 @@ class Tape:
                     function_space,
                 )
             )
-        reference = NativeCallableReference if native else CallableReference
-        return reference(self, archive_index)
+        return CallableReference(self, archive_index)
 
     def find_dependents(self, tracer: "Tracer") -> Set[int]:
         if tracer is None or tracer is Noop():
@@ -1050,7 +1038,6 @@ class Function(SymbolicCallable):
         native_ref = tape._create_callable_reference(
             native,
             function_space,
-            native=True,
         )
         bundle = Tracer(
             tape,

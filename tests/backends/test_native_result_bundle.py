@@ -2,6 +2,7 @@ import pytest
 
 from coker import Function, Scalar
 from coker.algebra import OP
+from coker.algebra.kernel import CallableReference
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -63,6 +64,7 @@ def test_native_function_space_excludes_absent_outputs():
     )
 
     assert native_ref.function_space.output == [Scalar("present")]
+    assert type(native_ref) is CallableReference
 
 
 @pytest.mark.parametrize(

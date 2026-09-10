@@ -5,7 +5,13 @@ import coker
 from coker.algebra.kernel import CallableReference, Tape, Tracer
 from coker.algebra.ops import OP, Noop
 from coker.algebra.dimensions import FunctionSpace
-from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP, SelectOP
+from coker.algebra.ops import (
+    ConcatenateOP,
+    NormOP,
+    ReshapeOP,
+    SelectOP,
+    normalize_evaluate_result,
+)
 from typing import List
 
 impls = {
@@ -217,6 +223,8 @@ def substitute(output: List[Tracer], workspace):
                     raise e
             else:
                 v = call_parameterised_op(op, *args)
+            if op == OP.EVALUATE and isinstance(args[0], CallableReference):
+                v = normalize_evaluate_result(v, node.dim)
         try:
             if not node.dim.is_scalar():
                 shape = (
