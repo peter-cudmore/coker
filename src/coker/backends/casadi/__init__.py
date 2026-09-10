@@ -113,18 +113,13 @@ class CasadiBackend(Backend):
         raise NotImplementedError
 
     def _lower_with_evaluate(self, function):
-        """Fallback wrapper for cases unsupported by ``ca.Function``."""
-        backend = self
+        from coker.backends.casadi.lowered import CasadiLoweredFunction
 
-        def compiled(inputs):
-            return backend.evaluate(function, inputs)
+        return CasadiLoweredFunction(self, function)
 
-        return compiled
+    def lower(self, function: Function, options=None):
+        from coker.backends.casadi.lowered import CasadiLoweredFunction
 
-    def lower(self, function: Function):
-        # Fall back to evaluate-based wrapper for cases that ca.Function cannot
-        # handle: FunctionSpace inputs (partially evaluated functions) or None
-        # outputs (e.g. from zero-row matmul).
         if any(
             isinstance(shape, FunctionSpace)
             for shape in function.input_shape()
@@ -134,43 +129,11 @@ class CasadiBackend(Backend):
         ca_inputs, ca_outputs = _lower_to_casadi(
             function.tape, function.output
         )
-
-        if any(o is None for o in ca_outputs):
+        if any(output is None for output in ca_outputs):
             return self._lower_with_evaluate(function)
-        ca_fn = ca.Function("f", ca_inputs, ca_outputs)
-        backend = self
-        fn_outputs = function.output
-
-        def compiled(inputs):
-            dm_inputs = [
-                backend.to_backend_array(
-                    np.asarray(a) if isinstance(a, list) else a
-                )
-                for a in inputs
-                if a is not None
-            ]
-            dm_outs = ca_fn(*dm_inputs)
-            if not isinstance(dm_outs, (list, tuple)):
-                dm_outs = [dm_outs]
-
-            result = []
-            for y_i, output_tracer in zip(dm_outs, fn_outputs):
-                try:
-                    y_result = backend.to_numpy_array(y_i)
-                    if output_tracer.dim.is_scalar():
-                        if y_result.shape == (1, 1):
-                            result.append(float(y_result[0, 0]))
-                        elif y_result.shape == (1,):
-                            result.append(float(y_result[0]))
-                        else:
-                            raise ValueError("Expected a scalar", y_result)
-                    else:
-                        result.append(y_result.reshape(output_tracer.shape))
-                except ValueError:
-                    result.append(y_i)
-            return result
-
-        return compiled
+        return CasadiLoweredFunction(
+            self, function, ca.Function("f", ca_inputs, ca_outputs)
+        )
 
     def evaluate(self, function: Function, inputs: ArrayLike):
         workspace = {}

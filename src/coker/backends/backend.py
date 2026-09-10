@@ -95,28 +95,14 @@ class Backend(metaclass=ABCMeta):
             "Evaluating integrals is not implemented for this backend"
         )
 
-    def lower(self, function: Function):
-        """Compile function to a callable for repeated numerical evaluation.
+    def lower(self, function: Function, options=None):
+        """Return a common evaluate-based lowering handle.
 
-        Called once on the first concrete (non-Tracer) invocation of
-        Function.__call__. Returns a callable f(inputs) -> outputs where
-        inputs and outputs are lists matching the function's signature.
-
-        The default wraps evaluate_inner; backends override this to return an
-        optimised compiled callable (e.g. a plan-based closure for numpy, a
-        ca.Function for casadi).
+        Backends with a reusable compiled representation override this method.
         """
-        backend = self
-        tape = function.tape
-        outputs = function.output
+        from coker.backends.lowered import EvaluatedLoweredFunction
 
-        def compiled(inputs):
-            from coker.backends.evaluator import evaluate_inner
-
-            workspace = {}
-            return evaluate_inner(tape, inputs, outputs, backend, workspace)
-
-        return compiled
+        return EvaluatedLoweredFunction(self, function, function.signature)
 
 
 class VariationalSolver:

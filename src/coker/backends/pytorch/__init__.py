@@ -8,7 +8,7 @@ from coker.algebra.kernel import Tracer
 from coker.backends.backend import ArrayLike, Backend
 
 from .dynamics import PytorchSolverParameters, evaluate_integrals
-from .lower import PytorchModule, cast_torch_outputs
+from .lower import PytorchLoweredFunction, PytorchModule
 from .ops import (
     call_parameterised_op,
     impls,
@@ -108,35 +108,16 @@ class PytorchBackend(Backend):
             solver_parameters,
         )
 
-    def lower(self, function):
-        from coker.backends.evaluator import _build_plan, _cast_outputs
+    def lower(self, function, options=None):
+        from coker.backends.evaluator import _build_plan
 
-        plan = _build_plan(function.tape, self)
-        backend = self
-
-        def compiled(inputs):
-            workspace = plan.execute(inputs, backend)
-            if any(isinstance(arg, torch.Tensor) for arg in inputs):
-                return cast_torch_outputs(function, workspace)
-            return _cast_outputs(
-                function.output, function.tape, workspace, backend
-            )
-
-        return compiled
+        return PytorchLoweredFunction(
+            self, function, _build_plan(function.tape, self)
+        )
 
     def as_module(self, function):
-        """Lower a function to an eager ``torch.nn.Module``.
-
-        The module accepts one positional tensor for each Coker input. It
-        returns a tensor for a single-output function and a tuple otherwise.
-        Coker constants remain ordinary closure state, so this module exposes
-        no trainable parameters or registered buffers.
-        """
-        return PytorchModule(
-            self.lower(function),
-            len(function.tape.input_indicies),
-            function.is_single,
-        )
+        """Lower a function to an eager ``torch.nn.Module``."""
+        return self.lower(function).as_module()
 
     def build_optimisation_problem(self, *args, **kwargs):
         raise NotImplementedError(
