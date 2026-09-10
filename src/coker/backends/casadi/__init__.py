@@ -59,6 +59,8 @@ class CasadiBackend(Backend):
 
         if array is None:
             return ca.DM()
+        if isinstance(array, np.ndarray) and array.size == 0:
+            return ca.DM.zeros(0, 1)
         if scipy.sparse.issparse(array):
             return ca.DM(scipy.sparse.csc_matrix(array))
         if isinstance(array, scalar_types):
