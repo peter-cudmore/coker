@@ -1,6 +1,7 @@
 import pytest
 
 from coker import Function, Scalar
+from coker.algebra import OP
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -42,6 +43,26 @@ def test_native_result_bundle_preserves_absent_outputs():
     imported = Function.from_native(native, signature, backend="numpy")
 
     assert imported(3.0) == (4.0, None)
+
+
+def test_native_function_space_excludes_absent_outputs():
+    signature = FunctionSignature(
+        inputs=(FunctionInputSpec("x", Scalar("x")),),
+        outputs=(
+            FunctionOutputSpec("present", Scalar("present")),
+            FunctionOutputSpec("absent", None),
+        ),
+    )
+    imported = Function.from_native(
+        lambda x: (x, None), signature, backend="numpy"
+    )
+    (_, native_ref, *_) = next(
+        node
+        for node in imported.tape.nodes
+        if isinstance(node, tuple) and node[0] == OP.EVALUATE
+    )
+
+    assert native_ref.function_space.output == [Scalar("present")]
 
 
 @pytest.mark.parametrize(
