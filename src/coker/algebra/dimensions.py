@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 from functools import reduce
 from operator import mul
@@ -136,6 +138,19 @@ class Dimension:
         if self.dim is None:
             return (1,)
         return self.dim
+
+
+@dataclasses.dataclass(frozen=True)
+class ResultBundleDimension:
+    """Ordered dimensions returned by one multi-output native call."""
+
+    outputs: tuple[Dimension | FunctionSpace | None, ...]
+
+    def select(self, index: int) -> Dimension | FunctionSpace:
+        output = self.outputs[index]
+        if output is None:
+            raise ValueError(f"Cannot select absent result {index}")
+        return output
 
 
 @dataclasses.dataclass

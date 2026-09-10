@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from coker.algebra import OP
-from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP
+from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP, SelectOP
 
 
 scalar_types = (float, complex, int, bool, np.number)
@@ -98,6 +98,7 @@ parameterised_impls = {
     ConcatenateOP: lambda op, *x: torch.cat(x, dim=op.axis),
     ReshapeOP: lambda op, x: torch.reshape(x, shape=op.newshape),
     NormOP: _norm,
+    SelectOP: lambda op, value: op.select(value),
 }
 
 

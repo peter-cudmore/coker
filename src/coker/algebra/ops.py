@@ -2,7 +2,11 @@ import enum
 import numpy as np
 from typing import Dict, Callable
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
-from coker.algebra.dimensions import Dimension, FunctionSpace
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    ResultBundleDimension,
+)
 from typing_extensions import final
 
 
@@ -79,6 +83,38 @@ class Operator:
 
     def is_nonlinear(self):
         return not self.is_linear() and not self.is_bilinear()
+
+
+class SelectOP(Operator):
+    """Select one declared result from a native-call result bundle."""
+
+    __slots__ = ("index",)
+
+    def __init__(self, index: int):
+        self.index = index
+
+    def compute_shape(
+        self, bundle: ResultBundleDimension
+    ) -> Dimension | FunctionSpace:
+        if not isinstance(bundle, ResultBundleDimension):
+            raise InvalidShape("SELECT expects a native-call result bundle")
+        return bundle.select(self.index)
+
+    def select(self, bundle):
+        if isinstance(bundle, (list, tuple)):
+            return bundle[self.index]
+        if self.index != 0:
+            raise ValueError(
+                f"Native callable returned one result for requested index "
+                f"{self.index}"
+            )
+        return bundle
+
+    def __hash__(self):
+        return hash((SelectOP, self.index))
+
+    def __eq__(self, other):
+        return isinstance(other, SelectOP) and self.index == other.index
 
 
 class ConcatenateOP(Operator):

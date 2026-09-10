@@ -7,7 +7,7 @@ import scipy as scp
 
 from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer, Noop
-from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
+from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP, SelectOP
 
 from coker.backends.backend import (
     ArrayLike,
@@ -105,6 +105,7 @@ parameterised_impls = {
     ConcatenateOP: lambda op, *x: np.concatenate(x, axis=op.axis),
     ReshapeOP: lambda op, x: np.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
+    SelectOP: lambda op, value: op.select(value),
 }
 
 
