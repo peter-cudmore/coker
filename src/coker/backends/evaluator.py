@@ -213,28 +213,7 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
             else value
         )
 
-    def cast_output(o):
-        if o is None:
-            return None
-        if o.tape != graph:
-            return o
-        output = workspace[o.index]
-        if isinstance(output, Tracer):
-            return output
-        if not o.dim.is_scalar():
-            try:
-                output = backend.to_numpy_array(output)
-                if isinstance(output, np.ndarray):
-                    return np.reshape(output, shape=o.shape)
-            except ValueError:
-                pass
-            backend.reshape(output, o.dim)
-            return output
-        return backend.to_numpy_array(workspace[o.index])
-
-    outputs = [cast_output(o) for o in outputs]
-
-    return outputs
+    return _cast_outputs(outputs, graph, workspace, backend)
 
 
 def evaluate(function, args, backend=None):
