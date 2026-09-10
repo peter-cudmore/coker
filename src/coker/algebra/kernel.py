@@ -199,19 +199,10 @@ class _CallableArchiveEntry:
 
     callable_value: Callable
     function_space: FunctionSpace
-    result_dimension: ResultBundleDimension | None = None
-
-    def __call__(self, *args):
-        results = self.callable_value(*args)
-        if self.result_dimension is not None:
-            return results
-        return np.concatenate(
-            [np.asarray(result).reshape(-1) for result in results]
-        )
 
 
 class CallableReference:
-    """A reference to a callable entry owned by a tape."""
+    """A reference to a packed callable entry owned by a tape."""
 
     def __init__(self, tape: "Tape", archive_index: int):
         self._tape = weakref.ref(tape)
@@ -226,11 +217,17 @@ class CallableReference:
         return self._entry.function_space
 
     def __call__(self, *args):
-        return self._entry(*args)
+        results = self._entry.callable_value(*args)
+        return np.concatenate(
+            [np.asarray(result).reshape(-1) for result in results]
+        )
 
-    @property
-    def result_dimension(self) -> ResultBundleDimension | None:
-        return self._entry.result_dimension
+
+class NativeCallableReference(CallableReference):
+    """A reference to one native callable invocation returning all results."""
+
+    def __call__(self, *args):
+        return self._entry.callable_value(*args)
 
 
 class Tape:
@@ -268,9 +265,9 @@ class Tape:
         self,
         callable_value,
         function_space,
-        result_dimension=None,
+        native=False,
     ):
-        key = id(callable_value)
+        key = (id(callable_value), native)
         archive_index = self._inner._callable_hashmap.get(key)
         if archive_index is None:
             archive_index = len(self._inner._callable_archive)
@@ -279,10 +276,10 @@ class Tape:
                 _CallableArchiveEntry(
                     callable_value,
                     function_space,
-                    result_dimension,
                 )
             )
-        return CallableReference(self, archive_index)
+        reference = NativeCallableReference if native else CallableReference
+        return reference(self, archive_index)
 
     def find_dependents(self, tracer: "Tracer") -> Set[int]:
         if tracer is None or tracer is Noop():
@@ -358,14 +355,12 @@ class Tape:
             else:
                 assert isinstance(arg, Tracer)
                 dims.append(arg.dim)
-        if (
-            op == OP.EVALUATE
-            and isinstance(args[0], CallableReference)
-            and args[0].result_dimension is not None
-        ):
+        if op == OP.EVALUATE and isinstance(args[0], NativeCallableReference):
             callable_ref = args[0]
             op.compute_shape(*dims)
-            return callable_ref.result_dimension
+            return ResultBundleDimension(
+                tuple(callable_ref.function_space.output_dimensions())
+            )
         return op.compute_shape(*dims)
 
     def append(self, op: OP, *args) -> int:
@@ -1019,20 +1014,7 @@ class Function(SymbolicCallable):
     def _append_native_outputs(
         tape, native, backend, input_spaces, output_specs, args
     ):
-        def result_output_dimension(shape):
-            if shape is None or isinstance(shape, (Dimension, FunctionSpace)):
-                return shape
-            if isinstance(shape, Scalar):
-                return Dimension(None)
-            if isinstance(shape, VectorSpace):
-                return Dimension(shape.dimension)
-            raise TypeError(f"Unsupported native output shape {shape!r}")
 
-        output_dimensions = tuple(
-            result_output_dimension(output_spec.shape)
-            for output_spec in output_specs
-        )
-        result_dimension = ResultBundleDimension(output_dimensions)
         output_spaces = [
             (
                 output_spec.shape.to_space(output_spec.name)
@@ -1040,7 +1022,6 @@ class Function(SymbolicCallable):
                 else output_spec.shape
             )
             for output_spec in output_specs
-            if output_spec.shape is not None
         ]
         function_space = FunctionSpace(
             f"{backend}_native",
@@ -1050,7 +1031,7 @@ class Function(SymbolicCallable):
         native_ref = tape._create_callable_reference(
             native,
             function_space,
-            result_dimension,
+            native=True,
         )
         bundle = Tracer(tape, tape.append(OP.EVALUATE, native_ref, *args))
         return [
