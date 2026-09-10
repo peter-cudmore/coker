@@ -44,6 +44,35 @@ def test_imported_casadi_function_uses_backend_name_and_native_signature():
 
 
 
+def test_imported_casadi_function_derives_its_signature():
+    scalar = ca.MX.sym("scalar")
+    vector = ca.MX.sym("vector", 2, 1)
+    native = ca.Function(
+        "native",
+        [scalar, vector],
+        [scalar + 1, vector * 2],
+        ["time", "state"],
+        ["offset_time", "scaled_state"],
+    )
+
+    imported = CasadiBackend().import_function(native)
+
+    assert [spec.name for spec in imported.signature.inputs] == [
+        "time",
+        "state",
+    ]
+    assert [spec.space.dimension if hasattr(spec.space, "dimension") else None
+            for spec in imported.signature.inputs] == [None, 2]
+    assert [spec.name for spec in imported.signature.outputs] == [
+        "offset_time",
+        "scaled_state",
+    ]
+    assert [spec.shape.dim for spec in imported.signature.outputs] == [
+        None,
+        (2,),
+    ]
+
+
 def test_imported_casadi_function_rejects_cross_backend_lowering():
     x = ca.MX.sym("x")
     imported = CasadiBackend().import_function(
