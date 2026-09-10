@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-ca = pytest.importorskip("casadi")
-
 from coker import FunctionSpace, Scalar, VectorSpace, function
+
+ca = pytest.importorskip("casadi")
 
 
 def test_casadi_lowering_uses_native_fast_path_and_preserves_native_values():
