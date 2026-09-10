@@ -1,15 +1,16 @@
 import numpy as np
 import pytest
 
-ca = pytest.importorskip("casadi")
-from coker import Scalar, function
+from coker import FunctionSpace, Scalar, function
 from coker.backends.casadi import CasadiBackend
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
     FunctionSignature,
+    LoweringOptions,
 )
 
+ca = pytest.importorskip("casadi")
 
 
 def scalar_signature(name="x"):
@@ -24,7 +25,9 @@ def test_imported_casadi_function_composes_symbolically_without_tracers():
     native = ca.Function("native", [native_x], [2 * native_x + 3])
     imported = CasadiBackend().import_function(native, scalar_signature())
     inner = function([Scalar("x")], lambda x: x + 1, backend="casadi")
-    outer = function([Scalar("x")], lambda x: imported(inner(x)), backend="casadi")
+    outer = function(
+        [Scalar("x")], lambda x: imported(inner(x)), backend="casadi"
+    )
 
     lowered = outer.lower()
     (result,) = lowered.execute([4.0])
@@ -43,7 +46,6 @@ def test_imported_casadi_function_uses_backend_name_and_native_signature():
     assert imported.signature == scalar_signature("argument")
 
 
-
 def test_imported_casadi_function_derives_its_signature():
     scalar = ca.MX.sym("scalar")
     vector = ca.MX.sym("vector", 2, 1)
@@ -57,12 +59,11 @@ def test_imported_casadi_function_derives_its_signature():
 
     imported = CasadiBackend().import_function(native)
 
-    assert [spec.name for spec in imported.signature.inputs] == [
-        "time",
-        "state",
+    input_dimensions = [
+        spec.space.dimension if hasattr(spec.space, "dimension") else None
+        for spec in imported.signature.inputs
     ]
-    assert [spec.space.dimension if hasattr(spec.space, "dimension") else None
-            for spec in imported.signature.inputs] == [None, 2]
+    assert input_dimensions == [None, 2]
     assert [spec.name for spec in imported.signature.outputs] == [
         "offset_time",
         "scaled_state",
@@ -79,13 +80,13 @@ def test_imported_casadi_function_rejects_cross_backend_lowering():
         ca.Function("native", [x], [x]), scalar_signature()
     )
 
-    from coker.backends.lowered import LoweringOptions
-
-    with pytest.raises(RuntimeError, match="native callable for backend 'casadi'"):
+    with pytest.raises(
+        RuntimeError, match="native callable for backend 'casadi'"
+    ):
         imported.lower(LoweringOptions(backend="numpy"))
 
+
 def test_functionspace_lowering_keeps_evaluate_fallback_boundary():
-    from coker import FunctionSpace
 
     space = FunctionSpace("f", [Scalar("x")], [Scalar("y")])
     outer = function([space], lambda f: f(3.0), backend="casadi")

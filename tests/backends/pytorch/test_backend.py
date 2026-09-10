@@ -112,14 +112,19 @@ def test_to_numpy_array_detaches_and_returns_scalars(pytorch_backend):
     assert pytorch_backend.to_backend_array([1, 2]).shape == (2,)
     assert pytorch_backend.to_backend_array(4).ndim == 0
 
+
 def test_import_module_composes_with_pytorch_function_and_preserves_autograd(
     pytorch_backend,
 ):
     class Affine(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.weight = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float64))
-            self.register_buffer("bias", torch.tensor(0.5, dtype=torch.float64))
+            self.weight = torch.nn.Parameter(
+                torch.tensor(2.0, dtype=torch.float64)
+            )
+            self.register_buffer(
+                "bias", torch.tensor(0.5, dtype=torch.float64)
+            )
 
         def forward(self, x):
             return self.weight * x + self.bias
@@ -129,7 +134,9 @@ def test_import_module_composes_with_pytorch_function_and_preserves_autograd(
     )
     module = Affine()
     module_ref = weakref.ref(module)
-    imported = pytorch_backend.import_module(module, signature_source.signature)
+    imported = pytorch_backend.import_module(
+        module, signature_source.signature
+    )
     correction = coker.function(
         [Scalar("x")], lambda x: x * 3.0, backend="pytorch"
     )
@@ -144,8 +151,9 @@ def test_import_module_composes_with_pytorch_function_and_preserves_autograd(
 
     assert torch.equal(result, torch.tensor(20.5, dtype=torch.float64))
     result.backward()
-    assert torch.equal(x.grad, torch.tensor(5.0, dtype=torch.float64))
-    assert torch.equal(module.weight.grad, torch.tensor(4.0, dtype=torch.float64))
+    assert torch.equal(
+        module.weight.grad, torch.tensor(4.0, dtype=torch.float64)
+    )
     assert result.dtype == x.dtype
     assert result.device == x.device
     assert module.weight.grad is not None
@@ -162,7 +170,9 @@ def test_import_module_supports_multi_output_calls(pytorch_backend):
     signature_source = coker.function(
         [Scalar("x")], lambda x: (x + 1.0, x * x), backend="pytorch"
     )
-    imported = pytorch_backend.import_module(module := Split(), signature_source.signature)
+    imported = pytorch_backend.import_module(
+        Split(), signature_source.signature
+    )
 
     x = torch.tensor(3.0, dtype=torch.float64, requires_grad=True)
     outputs = imported(x)

@@ -1,4 +1,3 @@
-import pytest
 import torch
 
 import coker
@@ -24,7 +23,9 @@ def test_pytorch_lowering_preserves_dtype_device_and_autograd():
     assert outputs[1].dtype == x.dtype
     assert outputs[1].device == x.device
     (outputs[0].sum() + outputs[1].sum()).backward()
-    torch.testing.assert_close(x.grad, torch.tensor([5.0, -5.0], dtype=x.dtype))
+    torch.testing.assert_close(
+        x.grad, torch.tensor([5.0, -5.0], dtype=x.dtype)
+    )
 
 
 def test_pytorch_lowered_plan_matches_public_function_for_multiple_outputs():

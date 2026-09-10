@@ -990,9 +990,10 @@ class Function(SymbolicCallable):
     def from_native(cls, native, signature, *, backend: str, name=None):
         """Import a backend-native callable as a traceable Coker function.
 
-        Each declared non-``None`` result is represented by an ``OP.EVALUATE``
-        node. Native code is invoked only by a compatible concrete backend;
-        tracing an imported function appends equivalent nodes to the outer tape.
+        Each declared non-``None`` result is represented by an
+        ``OP.EVALUATE`` node. Native code is invoked only by a compatible
+        concrete backend; tracing an imported function appends equivalent nodes
+        to the outer tape.
         """
         from coker.backends.lowered import FunctionSignature
 
