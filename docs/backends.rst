@@ -78,9 +78,8 @@ Lowering handles
 Call :meth:`~coker.Function.lower` to obtain a backend-specific executable
 handle. Every handle exposes an ordered ``signature`` and a common packed
 ``execute(inputs)`` ABI returning a tuple. Positional handle calls unwrap one
-output and return a tuple for multiple outputs. ``Function(...)`` preserves its
-existing public result shape: a single output is unwrapped and multiple outputs
-remain a list.
+output and return a tuple for multiple outputs. ``Function(...)`` also unwraps
+a single output and returns a tuple for multiple outputs.
 
 The NumPy and PyTorch handles retain reusable execution plans. CasADi exposes
 its native function through ``ca_function`` when the graph can be represented
@@ -108,6 +107,28 @@ single-output function returns a tensor; a multi-output function returns a
 tuple. Its constants remain Coker closure state, so it has no trainable
 parameters or registered buffers. It supports eager autograd but is not
 currently a TorchScript or ``torch.compile`` target.
+
+Importing native backend functions
+---------------------------------
+
+Native functions can be imported into a traceable Coker function when the
+backend and the complete :class:`~coker.backends.lowered.FunctionSignature`
+are explicit:
+
+.. code-block:: python
+
+   casadi_function = casadi_backend.import_function(native_function, signature)
+   torch_function = pytorch_backend.import_module(module, signature)
+
+Each imported invocation is recorded as an ``OP.EVALUATE`` node while Coker
+traces.  It is lowered only by its owning backend: CasADi imports remain
+symbolic CasADi calls, and PyTorch imports retain the module, its parameters,
+buffers, device, dtype, and autograd graph.  Cross-backend lowering raises an
+error rather than passing Coker tracers into a native callable.
+
+Successful CasADi lowered calls return native CasADi values. PyTorch module
+import transfers logical ownership to the Coker wrapper, which retains a strong
+reference to the module; Python aliases cannot be invalidated automatically.
 
 Optimisation program composition
 --------------------------------

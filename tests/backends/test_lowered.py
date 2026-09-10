@@ -32,12 +32,18 @@ def test_lowered_function_has_packed_and_positional_abis(backend_name):
     positional = lowered(value)
     assert isinstance(packed, tuple)
     assert isinstance(positional, tuple)
-    np.testing.assert_allclose(packed[0], [3.0, 4.0])
-    np.testing.assert_allclose(packed[1], [4.0, 6.0])
+    np.testing.assert_allclose(np.asarray(packed[0]).reshape(-1), [3.0, 4.0])
+    np.testing.assert_allclose(np.asarray(packed[1]).reshape(-1), [4.0, 6.0])
     np.testing.assert_allclose(positional[0], packed[0])
     np.testing.assert_allclose(positional[1], packed[1])
 
     public_result = compiled(value)
-    assert isinstance(public_result, list)
-    np.testing.assert_allclose(public_result[0], packed[0])
-    np.testing.assert_allclose(public_result[1], packed[1])
+    assert isinstance(public_result, tuple)
+    np.testing.assert_allclose(
+        np.asarray(public_result[0]).reshape(-1),
+        np.asarray(packed[0]).reshape(-1),
+    )
+    np.testing.assert_allclose(
+        np.asarray(public_result[1]).reshape(-1),
+        np.asarray(packed[1]).reshape(-1),
+    )

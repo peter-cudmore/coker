@@ -34,7 +34,7 @@ def test_mathematical_program_composes_symbolically_and_compiles():
 
     compiled = program.lower()
     assert compiled.backend == "numpy"
-    assert compiled(3) == [9.0, 4.0]
+    assert compiled(3) == (9.0, 4.0)
 
 
 def test_symbolic_program_results_share_one_invocation():

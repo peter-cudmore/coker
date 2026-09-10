@@ -193,13 +193,24 @@ class TapeInner:
 
 @dataclasses.dataclass
 class _CallableArchiveEntry:
-    """Callable and complete packed result signature stored by a tape."""
+    """Callable, signature, and optional result selector stored by a tape."""
 
     callable_value: Callable
     function_space: FunctionSpace
+    output_index: int | None = None
+    backend: str | None = None
 
     def __call__(self, *args):
         results = self.callable_value(*args)
+        if self.output_index is not None:
+            if not isinstance(results, (list, tuple)):
+                if self.output_index != 0:
+                    raise ValueError(
+                        "Native callable returned one result for a "
+                        f"requested output index {self.output_index}"
+                    )
+                return results
+            return results[self.output_index]
         return np.concatenate(
             [np.asarray(result).reshape(-1) for result in results]
         )
@@ -222,6 +233,11 @@ class CallableReference:
 
     def __call__(self, *args):
         return self._entry(*args)
+
+    @property
+    def backend(self) -> str | None:
+        """Backend that owns this native callable, when it has one."""
+        return self._entry.backend
 
 
 class Tape:
@@ -255,14 +271,26 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def _create_callable_reference(self, callable_value, function_space):
-        key = id(callable_value)
+    def _create_callable_reference(
+        self,
+        callable_value,
+        function_space,
+        *,
+        output_index: int | None = None,
+        backend: str | None = None,
+    ):
+        key = (id(callable_value), output_index, backend)
         archive_index = self._inner._callable_hashmap.get(key)
         if archive_index is None:
             archive_index = len(self._inner._callable_archive)
             self._inner._callable_hashmap[key] = archive_index
             self._inner._callable_archive.append(
-                _CallableArchiveEntry(callable_value, function_space)
+                _CallableArchiveEntry(
+                    callable_value,
+                    function_space,
+                    output_index=output_index,
+                    backend=backend,
+                )
             )
         return CallableReference(self, archive_index)
 
@@ -939,6 +967,8 @@ class Function(SymbolicCallable):
     @property
     def signature(self):
         """Return the ordered input and output declaration for lowering."""
+        if hasattr(self, "_native_signature"):
+            return self._native_signature
         from coker.backends.lowered import (
             FunctionInputSpec,
             FunctionOutputSpec,
@@ -955,6 +985,83 @@ class Function(SymbolicCallable):
                 for index, shape in enumerate(self.output_shape())
             ),
         )
+
+    @classmethod
+    def from_native(cls, native, signature, *, backend: str, name=None):
+        """Import a backend-native callable as a traceable Coker function.
+
+        Each declared non-``None`` result is represented by an ``OP.EVALUATE``
+        node. Native code is invoked only by a compatible concrete backend;
+        tracing an imported function appends equivalent nodes to the outer tape.
+        """
+        from coker.backends.lowered import FunctionSignature
+
+        if not isinstance(signature, FunctionSignature):
+            raise TypeError("signature must be a FunctionSignature")
+
+        input_spaces = [spec.space for spec in signature.inputs]
+        with TraceContext(backend=backend) as tape:
+            args = [tape.input(space) for space in input_spaces]
+            outputs = cls._append_native_outputs(
+                tape, native, backend, input_spaces, signature.outputs, args
+            )
+
+        result = cls(
+            tape,
+            outputs[0] if len(outputs) == 1 else outputs,
+            backend=backend,
+            name=name,
+        )
+        result._native_callable = native
+        result._native_signature = signature
+        return result
+
+    @staticmethod
+    def _append_native_outputs(
+        tape, native, backend, input_spaces, output_specs, args
+    ):
+        outputs = []
+        for output_index, output_spec in enumerate(output_specs):
+            output_dim = output_spec.shape
+            if output_dim is None:
+                outputs.append(None)
+                continue
+            output_space = (
+                output_dim.to_space(output_spec.name)
+                if isinstance(output_dim, Dimension)
+                else output_dim
+            )
+            function_space = FunctionSpace(
+                f"{backend}_native",
+                arguments=list(input_spaces),
+                output=[output_space],
+            )
+            native_ref = tape._create_callable_reference(
+                native,
+                function_space,
+                output_index=output_index,
+                backend=backend,
+            )
+            outputs.append(
+                Tracer(tape, tape.append(OP.EVALUATE, native_ref, *args))
+            )
+        return outputs
+
+    def _call_native_in_trace(self, args, outer_tape):
+        if outer_tape.backend != self.backend:
+            raise RuntimeError(
+                "Cannot compose native callable for backend "
+                f"{self.backend!r} into {outer_tape.backend!r} trace"
+            )
+        outputs = self._append_native_outputs(
+            outer_tape,
+            self._native_callable,
+            self.backend,
+            [spec.space for spec in self._native_signature.inputs],
+            self._native_signature.outputs,
+            args,
+        )
+        return outputs[0] if self.is_single else tuple(outputs)
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:
@@ -1051,17 +1158,27 @@ class Function(SymbolicCallable):
         from coker.backends import get_backend_by_name
 
         if any(isinstance(a, Tracer) for a in args):
+            if hasattr(self, "_native_callable"):
+                outer_tape = TraceContext.get_local_tape()
+                if outer_tape is None:
+                    outer_tape = next(
+                        a.tape for a in args if isinstance(a, Tracer)
+                    )
+                return self._call_native_in_trace(args, outer_tape)
             # Tracing context: interpret through numpy so ops are recorded on
             # the outer tape rather than evaluated numerically.
             backend = get_backend_by_name("numpy", set_current=False)
             output = backend.evaluate(self, args)
         else:
             # Concrete evaluation: lower once per backend/options combination.
-            output = self.lower().execute(args)
+            lowered = self.lower()
+            output = get_backend_by_name(
+                lowered.backend_name, set_current=False
+            ).restore_public_outputs(self, lowered.execute(args))
 
         if self.is_single:
             return output[0]
-        return list(output)
+        return tuple(output)
 
     def lower(self, options=None):
         """Return a cached backend-specific executable lowering handle."""
@@ -1072,6 +1189,11 @@ class Function(SymbolicCallable):
         if not isinstance(options, LoweringOptions):
             raise TypeError("options must be a LoweringOptions instance")
         backend = get_backend_by_name(options.backend or self.backend)
+        if hasattr(self, "_native_callable") and backend.name != self.backend:
+            raise RuntimeError(
+                "Cannot lower native callable for backend "
+                f"{self.backend!r} with backend {backend.name!r}"
+            )
         cache_key = (id(backend), options)
         try:
             return self._lowered_cache[cache_key]
