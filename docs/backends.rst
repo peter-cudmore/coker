@@ -72,6 +72,23 @@ algebraic DAEs, variational solvers, mathematical-program construction, or
 mathematical-program solving.
 
 
+Lowering handles
+----------------
+
+Call :meth:`~coker.Function.lower` to obtain a backend-specific executable
+handle. Every handle exposes an ordered ``signature`` and a common packed
+``execute(inputs)`` ABI returning a tuple. Positional handle calls unwrap one
+output and return a tuple for multiple outputs. ``Function(...)`` preserves its
+existing public result shape: a single output is unwrapped and multiple outputs
+remain a list.
+
+The NumPy and PyTorch handles retain reusable execution plans. CasADi exposes
+its native function through ``ca_function`` when the graph can be represented
+as a :class:`casadi.Function`; otherwise its handle uses the same evaluate
+fallback. The Python package does not currently include the Coker-RS artifact
+runtime adapter.
+
+
 PyTorch module lowering
 -----------------------
 

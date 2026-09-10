@@ -4,23 +4,64 @@ import torch
 
 from coker.algebra.kernel import Tracer
 
+from coker.backends.evaluator import _cast_outputs
+from coker.backends.lowered import LoweredFunction, LoweringCapabilities
+
+
+class PytorchLoweredFunction(LoweredFunction):
+    """Execute a reusable PyTorch plan while preserving tensor autograd."""
+
+    def __init__(self, backend, function, plan):
+        self._backend = backend
+        self._function = function
+        self._plan = plan
+
+    @property
+    def backend_name(self):
+        return self._backend.name
+
+    @property
+    def signature(self):
+        return self._function.signature
+
+    @property
+    def capabilities(self):
+        return LoweringCapabilities(
+            True, True, True, False, False, False, True, True
+        )
+
+    def execute(self, inputs):
+        workspace = self._plan.execute(inputs, self._backend)
+        if any(isinstance(arg, torch.Tensor) for arg in inputs):
+            return tuple(cast_torch_outputs(self._function, workspace))
+        return tuple(
+            _cast_outputs(
+                self._function.output,
+                self._function.tape,
+                workspace,
+                self._backend,
+            )
+        )
+
+    def as_module(self):
+        """Expose this handle through an eager ``torch.nn.Module``."""
+        return PytorchModule(self)
+
 
 class PytorchModule(torch.nn.Module):
     """Expose a lowered Coker function through PyTorch's module interface."""
 
-    def __init__(self, compiled, input_count, is_single):
+    def __init__(self, lowered):
         super().__init__()
-        self._compiled = compiled
-        self._input_count = input_count
-        self._is_single = is_single
+        self._lowered = lowered
+        self._input_count = len(lowered.signature.inputs)
 
     def forward(self, *inputs):
         if len(inputs) != self._input_count:
             raise TypeError(
                 f"Expected {self._input_count} inputs, got {len(inputs)}"
             )
-        outputs = self._compiled(inputs)
-        return outputs[0] if self._is_single else tuple(outputs)
+        return self._lowered(*inputs)
 
 
 def cast_torch_outputs(function, workspace):

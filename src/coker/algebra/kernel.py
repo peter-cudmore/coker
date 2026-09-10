@@ -874,7 +874,7 @@ class Function(SymbolicCallable):
         self.name = name
         self.tape = tape
         self.backend = backend
-        self._compiled = None
+        self._lowered_cache = {}
         if isinstance(outputs, Tracer) or outputs is None:
             self.output = [outputs]
             self.is_single = True
@@ -935,6 +935,26 @@ class Function(SymbolicCallable):
         """Return each output shape as a
         :class:`~coker.algebra.dimensions.Dimension` tuple."""
         return tuple(o.dim if o is not None else None for o in self.output)
+
+    @property
+    def signature(self):
+        """Return the ordered input and output declaration for lowering."""
+        from coker.backends.lowered import (
+            FunctionInputSpec,
+            FunctionOutputSpec,
+            FunctionSignature,
+        )
+
+        return FunctionSignature(
+            inputs=tuple(
+                FunctionInputSpec(name, space)
+                for name, space in zip(self.arguments, self.input_spaces())
+            ),
+            outputs=tuple(
+                FunctionOutputSpec(f"output_{index}", shape)
+                for index, shape in enumerate(self.output_shape())
+            ),
+        )
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:
@@ -1036,21 +1056,29 @@ class Function(SymbolicCallable):
             backend = get_backend_by_name("numpy", set_current=False)
             output = backend.evaluate(self, args)
         else:
-            # Concrete evaluation: compile on first call, reuse thereafter.
-            if self._compiled is None:
-                backend = get_backend_by_name(self.backend)
-                self._compiled = backend.lower(self)
-            output = self._compiled(args)
+            # Concrete evaluation: lower once per backend/options combination.
+            output = self.lower().execute(args)
 
         if self.is_single:
             return output[0]
-        return output
+        return list(output)
 
-    def lower(self):
+    def lower(self, options=None):
+        """Return a cached backend-specific executable lowering handle."""
         from coker.backends import get_backend_by_name
+        from coker.backends.lowered import LoweringOptions
 
-        backend = get_backend_by_name(self.backend)
-        return backend.lower(self)
+        options = LoweringOptions() if options is None else options
+        if not isinstance(options, LoweringOptions):
+            raise TypeError("options must be a LoweringOptions instance")
+        backend = get_backend_by_name(options.backend or self.backend)
+        cache_key = (id(backend), options)
+        try:
+            return self._lowered_cache[cache_key]
+        except KeyError:
+            lowered = backend.lower(self, options)
+            self._lowered_cache[cache_key] = lowered
+            return lowered
 
     def __le__(self, other: np.ndarray):
         # self < other

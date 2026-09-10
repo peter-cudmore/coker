@@ -149,19 +149,13 @@ class NumpyBackend(Backend):
             f"Don't know how to resize {arg.__class__.__name__}"
         )
 
-    def lower(self, function):
-        from coker.backends.evaluator import _build_plan, _cast_outputs
+    def lower(self, function, options=None):
+        from coker.backends.evaluator import _build_plan
+        from coker.backends.numpy.lowered import NumpyLoweredFunction
 
-        plan = _build_plan(function.tape, self)
-        tape = function.tape
-        outputs = function.output
-        backend = self
-
-        def compiled(inputs):
-            workspace = plan.execute(inputs, backend)
-            return _cast_outputs(outputs, tape, workspace, backend)
-
-        return compiled
+        return NumpyLoweredFunction(
+            self, function, _build_plan(function.tape, self)
+        )
 
     def resolve_fn(self, op):
         if op in impls:
