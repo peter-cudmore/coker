@@ -7,7 +7,7 @@ from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
-from coker.backends.backend import Backend, ArrayLike
+from coker.backends.backend import ArrayLike, Backend, register_backend
 
 
 def to_array(value, shape):
@@ -158,3 +158,6 @@ class JaxBackend(Backend):
         **kwargs,
     ):
         raise NotImplementedError
+
+
+register_backend("jax", JaxBackend)

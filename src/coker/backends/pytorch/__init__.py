@@ -5,7 +5,7 @@ import torch
 
 from coker.algebra import Dimension
 from coker.algebra.kernel import Function, Tracer
-from coker.backends.backend import ArrayLike, Backend
+from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import FunctionSignature
 
 from .dynamics import PytorchSolverParameters, evaluate_integrals
@@ -125,6 +125,7 @@ class PytorchBackend(Backend):
             "optimisation problem construction is not implemented for the "
             "pytorch backend"
         )
+
     def import_module(
         self, module: torch.nn.Module, signature: FunctionSignature
     ) -> Function:
@@ -148,3 +149,4 @@ class PytorchBackend(Backend):
 
 
 __all__ = ["PytorchBackend", "PytorchModule", "PytorchSolverParameters"]
+register_backend("pytorch", PytorchBackend)

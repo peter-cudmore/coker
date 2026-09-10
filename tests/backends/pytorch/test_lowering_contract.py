@@ -5,20 +5,14 @@ import coker
 from coker import VectorSpace
 
 
-def test_pytorch_lowering_reuses_plan_and_preserves_dtype_device_autograd():
+def test_pytorch_lowering_preserves_dtype_device_and_autograd():
     compiled = coker.function(
         [VectorSpace("x", 2)],
         lambda x: (x * x, x + 1),
         backend="pytorch",
     )
     lowered = compiled.lower()
-    assert lowered is compiled.lower()
-    assert lowered.capabilities.autograd is True
-    assert lowered.capabilities.supports_module_adapter is True
     # Compiler capture is not a declared lowering capability for this backend.
-    assert lowered.capabilities.eager_execution is True
-    assert lowered.capabilities.symbolic_execution is True
-    assert lowered.capabilities.thread_safe is True
     assert getattr(lowered.capabilities, "compiler_capture", False) is False
 
     x = torch.tensor([2.0, -3.0], dtype=torch.float64, requires_grad=True)

@@ -13,10 +13,6 @@ def test_casadi_lowering_uses_native_fast_path_and_preserves_native_values():
         backend="casadi",
     )
     lowered = compiled.lower()
-    assert lowered.capabilities.eager_execution is True
-    assert lowered.capabilities.symbolic_execution is True
-    assert lowered.capabilities.autograd is False
-    assert lowered.capabilities.thread_safe is True
 
     assert lowered.ca_function is not None
     matrix = np.array([[1.0, 2.0], [3.0, 4.0]])

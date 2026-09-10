@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
 
@@ -5,19 +7,37 @@ from coker import VectorSpace, function
 from coker.backends.lowered import LoweredFunction, LoweringOptions
 
 
-BACKENDS = ["numpy", "casadi", "pytorch"]
+@dataclass(frozen=True)
+class BackendCase:
+    name: str
+    autograd: bool
+    module_adapter: bool
+    optional_module: str | None = None
 
 
-def _require_backend(backend_name):
-    if backend_name == "casadi":
-        pytest.importorskip("casadi")
-    elif backend_name == "pytorch":
-        pytest.importorskip("torch")
+BACKENDS = (
+    BackendCase("numpy", autograd=False, module_adapter=False),
+    BackendCase(
+        "casadi",
+        autograd=False,
+        module_adapter=False,
+        optional_module="casadi",
+    ),
+    BackendCase(
+        "pytorch", autograd=True, module_adapter=True, optional_module="torch"
+    ),
+)
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
-def test_lowered_contract_signature_abis_and_public_equivalence(backend_name):
-    _require_backend(backend_name)
+def _require_backend(case):
+    if case.optional_module is not None:
+        pytest.importorskip(case.optional_module)
+
+
+@pytest.mark.parametrize("case", BACKENDS)
+def test_lowered_contract_signature_abis_and_public_equivalence(case):
+    _require_backend(case)
+    backend_name = case.name
     compiled = function(
         [VectorSpace("x", 2)],
         lambda x: (x + 1, x * 2),
@@ -56,9 +76,10 @@ def test_lowered_contract_signature_abis_and_public_equivalence(backend_name):
         )
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
-def test_lowered_none_output_policy(backend_name):
-    _require_backend(backend_name)
+@pytest.mark.parametrize("case", BACKENDS)
+def test_lowered_none_output_policy(case):
+    _require_backend(case)
+    backend_name = case.name
     compiled = function(
         [VectorSpace("x", 2)],
         lambda x: (x + 1, None),
@@ -87,9 +108,10 @@ def test_lowered_none_output_policy(backend_name):
     assert lowered.signature.outputs[1].shape is None
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
-def test_lowered_cache_options_prepare_and_capabilities(backend_name):
-    _require_backend(backend_name)
+@pytest.mark.parametrize("case", BACKENDS)
+def test_lowered_cache_options_prepare_and_capabilities(case):
+    _require_backend(case)
+    backend_name = case.name
     compiled = function(
         [VectorSpace("x", 2)],
         lambda x: x + 1,
@@ -121,17 +143,18 @@ def test_lowered_cache_options_prepare_and_capabilities(backend_name):
     capabilities = first.capabilities
     assert capabilities.eager_execution is True
     assert capabilities.symbolic_execution is True
-    assert capabilities.autograd is (backend_name == "pytorch")
+    assert capabilities.autograd is case.autograd
     assert capabilities.serializable_artifact is False
     assert capabilities.caller_owned_workspace is False
     assert capabilities.supports_prepare is False
-    assert capabilities.supports_module_adapter is (backend_name == "pytorch")
+    assert capabilities.supports_module_adapter is case.module_adapter
     assert capabilities.thread_safe is True
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
-def test_lowered_zero_width_output_preserves_declared_shape(backend_name):
-    _require_backend(backend_name)
+@pytest.mark.parametrize("case", BACKENDS)
+def test_lowered_zero_width_output_preserves_declared_shape(case):
+    _require_backend(case)
+    backend_name = case.name
     compiled = function(
         [VectorSpace("x", 0)],
         lambda x: x,

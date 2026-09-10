@@ -1,7 +1,7 @@
 import sympy as sp
 import numpy as np
 from coker import Function
-from coker.backends.backend import Backend, ArrayLike
+from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.algebra.ops import OP, ConcatenateOP, ReshapeOP, NormOP
 from coker.algebra.dimensions import Dimension
 from coker.backends.sympy.shape import reshape
@@ -323,3 +323,6 @@ class SympyBackend(Backend):
     def evaluate_integrals(*args):
 
         raise NotImplementedError("not supported on sympy backend")
+
+
+register_backend("sympy", SympyBackend)

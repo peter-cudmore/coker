@@ -9,7 +9,12 @@ from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer, Noop
 from coker.algebra.ops import ConcatenateOP, ReshapeOP, NormOP
 
-from coker.backends.backend import Backend, ArrayLike, SolverParameters
+from coker.backends.backend import (
+    ArrayLike,
+    Backend,
+    SolverParameters,
+    register_backend,
+)
 from coker.backends.numpy.optimisation import build_optimisation_problem
 
 
@@ -274,6 +279,9 @@ class NumpyBackend(Backend):
         return build_optimisation_problem(
             self, cost, constraints, arguments, outputs, initial_conditions
         )
+
+
+register_backend("numpy", NumpyBackend)
 
 
 #
