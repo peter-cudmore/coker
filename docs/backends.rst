@@ -84,8 +84,8 @@ a single output and returns a tuple for multiple outputs.
 The NumPy and PyTorch handles retain reusable execution plans. CasADi exposes
 its native function through ``ca_function`` when the graph can be represented
 as a :class:`casadi.Function`; otherwise its handle uses the same evaluate
-fallback. The Python package does not currently include the Coker-RS artifact
-runtime adapter.
+fallback. The separately packaged Coker-RS backend exposes typed artifact
+export and caller-workspace binding through ``CokerArtifactFunction``.
 
 
 PyTorch module lowering
