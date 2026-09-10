@@ -198,7 +198,6 @@ class _CallableArchiveEntry:
     callable_value: Callable
     function_space: FunctionSpace
     output_index: int | None = None
-    backend: str | None = None
 
     def __call__(self, *args):
         results = self.callable_value(*args)
@@ -233,11 +232,6 @@ class CallableReference:
 
     def __call__(self, *args):
         return self._entry(*args)
-
-    @property
-    def backend(self) -> str | None:
-        """Backend that owns this native callable, when it has one."""
-        return self._entry.backend
 
 
 class Tape:
@@ -277,9 +271,8 @@ class Tape:
         function_space,
         *,
         output_index: int | None = None,
-        backend: str | None = None,
     ):
-        key = (id(callable_value), output_index, backend)
+        key = (id(callable_value), output_index)
         archive_index = self._inner._callable_hashmap.get(key)
         if archive_index is None:
             archive_index = len(self._inner._callable_archive)
@@ -289,7 +282,6 @@ class Tape:
                     callable_value,
                     function_space,
                     output_index=output_index,
-                    backend=backend,
                 )
             )
         return CallableReference(self, archive_index)
@@ -1041,7 +1033,6 @@ class Function(SymbolicCallable):
                 native,
                 function_space,
                 output_index=output_index,
-                backend=backend,
             )
             outputs.append(
                 Tracer(tape, tape.append(OP.EVALUATE, native_ref, *args))
