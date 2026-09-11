@@ -38,6 +38,8 @@ scalar_types = (
     int,
 )
 
+SPARSE_STORAGE_MIN_SPARSITY = 0.70
+
 
 def get_basis(dimension: Dimension, i: int):
     return np.array([1 if j == i else 0 for j in range(dimension.dim[0])])
@@ -135,19 +137,12 @@ class TapeInner:
 
     @staticmethod
     def try_sparsify(value: Any) -> Any:
-        if not isinstance(value, np.ndarray):
+        """Store two-dimensional constants sparsely at 70% sparsity or above."""
+        if not isinstance(value, np.ndarray) or value.ndim != 2:
             return value
 
-        n_entries: int = value.flatten().shape[0]
-
-        if len(value.shape) == 1 or n_entries <= 16:
-            return value
-
-        nnz: int = np.count_nonzero(value)
-        density = nnz / n_entries
-        threshold = 0.25
-
-        if density > threshold:
+        sparsity = 1 - (np.count_nonzero(value) / value.size)
+        if sparsity < SPARSE_STORAGE_MIN_SPARSITY:
             return value
         try:
             return sp.sparse.csc_array(value)
