@@ -2,8 +2,9 @@
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
-from coker.backends.evaluator import _cast_outputs
 
+from coker.backends.evaluator import _cast_outputs
+from coker.backends.lowered import LoweredFunction, LoweringCapabilities
 
 if TYPE_CHECKING:
     from coker.algebra.kernel import Function
@@ -11,13 +12,8 @@ if TYPE_CHECKING:
     from coker.backends.evaluator import CompiledPlan
     from coker.backends.lowered import FunctionSignature
 
-from coker.backends.lowered import (
-    LoweringCapabilities,
-    call_lowered,
-)
 
-
-class NumpyLoweredFunction:
+class NumpyLoweredFunction(LoweredFunction):
     """Execute one immutable NumPy plan with a fresh per-call workspace."""
 
     def __init__(
@@ -54,12 +50,3 @@ class NumpyLoweredFunction:
                 self._backend,
             )
         )
-
-    def __call__(self, *inputs: Any) -> Any:
-        return call_lowered(self, *inputs)
-
-    def prepare(self) -> None:
-        return None
-
-    def close(self) -> None:
-        return None

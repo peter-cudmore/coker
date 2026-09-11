@@ -106,18 +106,13 @@ class Backend(metaclass=ABCMeta):
             "Evaluating integrals is not implemented for this backend"
         )
 
+    @abstractmethod
     def lower(
         self,
         function: Function,
         options: "LoweringOptions | None" = None,
     ) -> "LoweredFunction":
-        """Return a common evaluate-based lowering handle.
-
-        Backends with a reusable compiled representation override this method.
-        """
-        from coker.backends.lowered import EvaluatedLoweredFunction
-
-        return EvaluatedLoweredFunction(self, function, function.signature)
+        """Return this backend's concrete lowered execution handle."""
 
     def restore_public_outputs(
         self, function: Function, outputs: Sequence[Any | None]

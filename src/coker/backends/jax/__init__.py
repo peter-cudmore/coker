@@ -1,4 +1,5 @@
-from typing import List
+from collections.abc import Sequence
+from typing import Any, List
 
 import numpy as np
 import jax.numpy as jnp
@@ -14,6 +15,8 @@ from coker.algebra.ops import (
 )
 
 from coker.backends.backend import ArrayLike, Backend, register_backend
+
+from coker.backends.lowered import LoweredFunction, LoweringCapabilities
 
 
 def to_array(value, shape):
@@ -106,6 +109,34 @@ def basis(i, n):
     return p
 
 
+class JaxLoweredFunction(LoweredFunction):
+    """JAX evaluator-backed lowered execution handle."""
+
+    def __init__(self, backend: "JaxBackend", function) -> None:
+        self._backend = backend
+        self._function = function
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend.name
+
+    @property
+    def signature(self):
+        return self._function.signature
+
+    @property
+    def capabilities(self) -> LoweringCapabilities:
+        return LoweringCapabilities(
+            eager_execution=True,
+            symbolic_execution=True,
+            autograd=True,
+            thread_safe=True,
+        )
+
+    def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
+        return tuple(self._backend.evaluate(self._function, inputs))
+
+
 class JaxBackend(Backend):
     def __init__(self, *args, **kwargs):
         super(JaxBackend, self).__init__(*args, **kwargs)
@@ -157,6 +188,9 @@ class JaxBackend(Backend):
         if isinstance(op, tuple(parameterised_impls.keys())):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
+
+    def lower(self, function, options=None) -> JaxLoweredFunction:
+        return JaxLoweredFunction(self, function)
 
     def build_optimisation_problem(
         self,
