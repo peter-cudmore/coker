@@ -19,14 +19,6 @@ from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import LoweredFunction, LoweringCapabilities
 
 
-def to_array(value, shape):
-
-    if isinstance(value, np.ndarray) and value.shape == shape:
-        return jnp.array(value)
-
-    raise NotImplementedError
-
-
 scalar_types = (
     jnp.float32,
     jnp.float64,
@@ -130,7 +122,6 @@ class JaxLoweredFunction(LoweredFunction):
             eager_execution=True,
             symbolic_execution=True,
             autograd=True,
-            thread_safe=True,
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:

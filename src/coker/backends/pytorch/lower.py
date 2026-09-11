@@ -39,7 +39,9 @@ class PytorchLoweredFunction(LoweredFunction):
     @property
     def capabilities(self) -> LoweringCapabilities:
         return LoweringCapabilities(
-            True, True, True, False, False, False, True, True
+            eager_execution=True,
+            symbolic_execution=True,
+            autograd=True,
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
