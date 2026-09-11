@@ -4,7 +4,11 @@ import numpy as np
 import pytest
 
 from coker import VectorSpace, function
-from coker.backends.lowered import LoweredFunction, LoweringOptions
+from coker.backends.lowered import (
+    LoweredFunction,
+    LoweringCapabilities,
+    LoweringOptions,
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,19 @@ BACKENDS = (
 def _require_backend(case):
     if case.optional_module is not None:
         pytest.importorskip(case.optional_module)
+
+
+def test_lowering_capabilities_default_to_unsupported():
+    assert LoweringCapabilities() == LoweringCapabilities(
+        eager_execution=False,
+        symbolic_execution=False,
+        autograd=False,
+        serializable_artifact=False,
+        caller_owned_workspace=False,
+        supports_prepare=False,
+        supports_module_adapter=False,
+        thread_safe=False,
+    )
 
 
 @pytest.mark.parametrize("case", BACKENDS)

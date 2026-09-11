@@ -3,6 +3,8 @@
 from typing import TYPE_CHECKING, Any, Sequence
 
 import torch
+from coker.backends.evaluator import _cast_outputs
+
 
 if TYPE_CHECKING:
     from coker.algebra.kernel import Function
@@ -12,11 +14,13 @@ if TYPE_CHECKING:
 
 from coker.algebra.kernel import Tracer
 
-from coker.backends.evaluator import _cast_outputs
-from coker.backends.lowered import LoweredFunction, LoweringCapabilities
+from coker.backends.lowered import (
+    LoweringCapabilities,
+    call_lowered,
+)
 
 
-class PytorchLoweredFunction(LoweredFunction):
+class PytorchLoweredFunction:
     """Execute a reusable PyTorch plan while preserving tensor autograd."""
 
     def __init__(
@@ -55,6 +59,15 @@ class PytorchLoweredFunction(LoweredFunction):
                 self._backend,
             )
         )
+
+    def __call__(self, *inputs: Any) -> Any:
+        return call_lowered(self, *inputs)
+
+    def prepare(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 
     def as_module(self) -> "PytorchModule":
         """Expose this handle through an eager ``torch.nn.Module``."""

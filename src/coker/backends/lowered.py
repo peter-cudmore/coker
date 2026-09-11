@@ -1,8 +1,14 @@
 """Common executable handles produced by backend lowering."""
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Protocol,
+    Sequence,
+    TypeAlias,
+    runtime_checkable,
+)
 
 from coker.algebra.dimensions import (
     Dimension,
@@ -57,42 +63,37 @@ class LoweringOptions:
 class LoweringCapabilities:
     """Declared execution and lifecycle properties of a lowered handle."""
 
-    eager_execution: bool
-    symbolic_execution: bool
-    autograd: bool
-    serializable_artifact: bool
-    caller_owned_workspace: bool
-    supports_prepare: bool
-    supports_module_adapter: bool
-    thread_safe: bool
+    eager_execution: bool = False
+    symbolic_execution: bool = False
+    autograd: bool = False
+    serializable_artifact: bool = False
+    caller_owned_workspace: bool = False
+    supports_prepare: bool = False
+    supports_module_adapter: bool = False
+    thread_safe: bool = False
 
 
-class LoweredFunction(ABC):
+@runtime_checkable
+class LoweredFunction(Protocol):
     """Backend-specific executable with a common packed execution ABI."""
 
     @property
-    @abstractmethod
     def backend_name(self) -> str:
         """Registered name of the backend that created this handle."""
 
     @property
-    @abstractmethod
     def signature(self) -> FunctionSignature:
         """Ordered input and output declaration accepted by :meth:`execute`."""
 
     @property
-    @abstractmethod
     def capabilities(self) -> LoweringCapabilities:
         """Execution, lifecycle, and sharing guarantees for this handle."""
 
-    @abstractmethod
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
         """Execute ordered inputs and return ordered outputs as a tuple."""
 
     def __call__(self, *inputs: Any) -> Any:
         """Execute positional inputs, unwrapping a single declared output."""
-        outputs = self.execute(inputs)
-        return outputs[0] if len(outputs) == 1 else outputs
 
     def prepare(self) -> None:
         """Perform optional deferred setup; eager handles need no work."""
@@ -101,7 +102,13 @@ class LoweredFunction(ABC):
         """Release optional host resources without touching caller values."""
 
 
-class EvaluatedLoweredFunction(LoweredFunction):
+def call_lowered(lowered: LoweredFunction, *inputs: Any) -> Any:
+    """Execute positional inputs, unwrapping one declared output."""
+    outputs = lowered.execute(inputs)
+    return outputs[0] if len(outputs) == 1 else outputs
+
+
+class EvaluatedLoweredFunction:
     """Generic handle without a reusable compiled representation."""
 
     def __init__(
@@ -141,3 +148,12 @@ class EvaluatedLoweredFunction(LoweredFunction):
                 workspace,
             )
         )
+
+    def __call__(self, *inputs: Any) -> Any:
+        return call_lowered(self, *inputs)
+
+    def prepare(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
