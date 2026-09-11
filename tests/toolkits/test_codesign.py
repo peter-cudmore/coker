@@ -127,6 +127,40 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
     assert problem.solve_info.success
 
 
+def test_casadi_optimisation_passes_options_at_solver_construction(
+    monkeypatch,
+):
+    import coker.backends.casadi.optimiser as casadi_optimiser
+
+    nlpsol = casadi_optimiser.ca.nlpsol
+    calls = []
+
+    def capture_nlpsol(*args, **kwargs):
+        calls.append((args, kwargs))
+        return nlpsol(*args, **kwargs)
+
+    monkeypatch.setattr(casadi_optimiser.ca, "nlpsol", capture_nlpsol)
+    optimiser_options = {
+        "ipopt.max_iter": 50,
+        "ipopt.max_cpu_time": 30.0,
+    }
+
+    with ProblemBuilder() as builder:
+        x = builder.new_variable(name="x", initial_value=0.0)
+        builder.objective = Minimise((x - 1.0) ** 2)
+        builder.outputs = [x]
+        problem = builder.build("casadi", optimiser_options=optimiser_options)
+
+    objective, x_value = problem()
+
+    assert objective == pytest.approx(0.0, abs=1e-6)
+    assert x_value == pytest.approx(1.0, abs=1e-6)
+    assert len(calls) == 1
+    solver_options = calls[0][0][3]
+    assert solver_options == optimiser_options
+    assert solver_options is not optimiser_options
+
+
 def test_optimisation_supports_parameter_dependent_constraint_bounds(
     variational_backend,
 ):

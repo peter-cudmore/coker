@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from coker.backends.casadi.lower import substitute, to_casadi, lower
 from typing import List
 
@@ -12,7 +14,12 @@ from coker.toolkits.codesign.optimisation import (
 
 
 def build_optimisation_problem(
-    cost, constraints, parameters: List[Tracer], outputs, initial_conditions
+    cost,
+    constraints,
+    parameters: List[Tracer],
+    outputs,
+    initial_conditions,
+    optimiser_options: Mapping | None = None,
 ):
 
     # p = P(parameters)
@@ -100,7 +107,9 @@ def build_optimisation_problem(
 
     spec = {"x": x, "p": p, "f": cost_fn, "g": g}
 
-    solver_inner = ca.nlpsol("solver", "ipopt", spec)
+    solver_inner = ca.nlpsol(
+        "solver", "ipopt", spec, dict(optimiser_options or {})
+    )
 
     return CasadiSolver(
         solver_inner, p, None, (lower_bound, upper_bound), output_map, x0
