@@ -158,13 +158,21 @@ def _build_plan(graph: Tape, backend: Backend) -> CompiledPlan:
             else:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
         dim = graph.dim[i]
-        fn = backend.resolve_fn(op)
+        operation_fn = backend.resolve_fn(op)
         if op == OP.EVALUATE:
 
-            def fn(*values, _fn=fn, _op=op, _dim=dim):
-                value = _fn(*values)
+            def evaluate_fn(
+                *values,
+                _operation_fn=operation_fn,
+                _op=op,
+                _dim=dim,
+            ):
+                value = _operation_fn(*values)
                 return _normalize_evaluate_result(_op, values, value, _dim)
 
+            step_fn = evaluate_fn
+        else:
+            step_fn = operation_fn
         post_fn = (
             (lambda value: value)
             if isinstance(dim, ResultBundleDimension)
@@ -172,7 +180,7 @@ def _build_plan(graph: Tape, backend: Backend) -> CompiledPlan:
         )
         steps.append(
             _PlanStep(
-                fn,
+                step_fn,
                 arg_indices,
                 i,
                 dim,

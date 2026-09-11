@@ -12,10 +12,13 @@ if TYPE_CHECKING:
 
 import numpy as np
 
-from coker.backends.lowered import LoweredFunction, LoweringCapabilities
+from coker.backends.lowered import (
+    LoweringCapabilities,
+    call_lowered,
+)
 
 
-class CasadiLoweredFunction(LoweredFunction):
+class CasadiLoweredFunction:
     """Execute a native ``ca.Function`` or the required evaluate fallback."""
 
     def __init__(
@@ -64,3 +67,12 @@ class CasadiLoweredFunction(LoweredFunction):
         # backend's public NumPy boundary.  CasADi callers need to retain
         # symbolic/numeric native values (and their sparse representation).
         return tuple(values)
+
+    def __call__(self, *inputs: Any) -> Any:
+        return call_lowered(self, *inputs)
+
+    def prepare(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None

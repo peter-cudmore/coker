@@ -81,6 +81,44 @@ def _signature_from_casadi_function(
     return FunctionSignature(inputs=inputs, outputs=outputs)
 
 
+def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
+    """Convert a numeric CasADi value to a NumPy array."""
+    if isinstance(array, ca.MX):
+        try:
+            return array.to_DM().toarray()
+        except RuntimeError:
+            pass
+    elif isinstance(array, ca.DM):
+        return array.toarray()
+    try:
+        return ca.evalf(array).toarray()
+    except RuntimeError:
+        pass
+
+    raise ValueError(f"Cannot convert {array} to a numpy array")
+
+
+def restore_public_outputs(
+    function: Function, outputs: Sequence[Any | None]
+) -> tuple[Any | None, ...]:
+    """Convert CasADi lowered values at the public Coker boundary."""
+    restored: list[Any | None] = []
+    for value, output in zip(outputs, function.output):
+        if value is None or output is None:
+            restored.append(None)
+            continue
+        try:
+            numpy_value = to_numpy_array(value)
+        except ValueError:
+            restored.append(value)
+            continue
+        if output.dim.is_scalar():
+            restored.append(float(np.asarray(numpy_value).reshape(-1)[0]))
+        else:
+            restored.append(np.asarray(numpy_value).reshape(output.shape))
+    return tuple(restored)
+
+
 class CasadiBackend(Backend):
 
     def import_function(
@@ -88,7 +126,7 @@ class CasadiBackend(Backend):
         ca_function: ca.Function,
         signature: FunctionSignature | None = None,
     ) -> Function:
-        """Import a native CasADi function as an ``OP.EVALUATE`` callable.
+        """Import a native CasADi function as a :class:`coker.Function`.
 
         CasADi functions carry ordered names and matrix dimensions, so callers
         may omit ``signature``. Pass one only to impose a deliberate Coker
@@ -108,19 +146,7 @@ class CasadiBackend(Backend):
         )
 
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
-        if isinstance(array, ca.MX):
-            try:
-                return array.to_DM().toarray()
-            except RuntimeError:
-                pass
-        elif isinstance(array, ca.DM):
-            return array.toarray()
-        try:
-            return ca.evalf(array).toarray()
-        except RuntimeError:
-            pass
-
-        raise ValueError(f"Cannot convert {array} to a numpy array")
+        return to_numpy_array(array)
 
     def to_backend_array(self, array):
         import scipy.sparse
@@ -192,9 +218,6 @@ class CasadiBackend(Backend):
             return ca.reshape(array, *shape)
         raise NotImplementedError
 
-    def _lower_with_evaluate(self, function):
-        return CasadiLoweredFunction(self, function)
-
     def lower(
         self,
         function: Function,
@@ -205,7 +228,7 @@ class CasadiBackend(Backend):
             isinstance(shape, FunctionSpace)
             for shape in function.input_shape()
         ) or any(output is None for output in function.output):
-            return self._lower_with_evaluate(function)
+            return CasadiLoweredFunction(self, function)
 
         ca_inputs, ca_outputs = _lower_to_casadi(
             function.tape, function.output
@@ -217,22 +240,7 @@ class CasadiBackend(Backend):
     def restore_public_outputs(
         self, function: Function, outputs: Sequence[Any | None]
     ) -> tuple[Any | None, ...]:
-        """Convert CasADi lowered values at the public Coker boundary."""
-        restored: list[Any | None] = []
-        for value, output in zip(outputs, function.output):
-            if value is None or output is None:
-                restored.append(None)
-                continue
-            try:
-                numpy_value = self.to_numpy_array(value)
-            except ValueError:
-                restored.append(value)
-                continue
-            if output.dim.is_scalar():
-                restored.append(float(np.asarray(numpy_value).reshape(-1)[0]))
-            else:
-                restored.append(np.asarray(numpy_value).reshape(output.shape))
-        return tuple(restored)
+        return restore_public_outputs(function, outputs)
 
     def evaluate(
         self, function: Function, inputs: Sequence[Any]

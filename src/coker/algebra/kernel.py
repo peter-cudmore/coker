@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         LoweringOptions,
         OutputShape,
     )
+
 import threading
 
 scalar_types = (
@@ -968,6 +969,7 @@ class Function(SymbolicCallable):
             self.is_single = False
         self._native_callable: Callable[..., Any] | None = None
         if signature is None:
+
             from coker.backends.lowered import (
                 FunctionInputSpec,
                 FunctionOutputSpec,
@@ -1054,6 +1056,7 @@ class Function(SymbolicCallable):
         concrete backend; tracing an imported function appends equivalent nodes
         to the outer tape.
         """
+
         from coker.backends.lowered import FunctionSignature
 
         if not isinstance(signature, FunctionSignature):
@@ -1267,9 +1270,11 @@ class Function(SymbolicCallable):
         else:
             # Concrete evaluation: lower once per backend/options combination.
             lowered = self.lower()
-            output = get_backend_by_name(
+            outputs = lowered.execute(args)
+            backend = get_backend_by_name(
                 lowered.backend_name, set_current=False
-            ).restore_public_outputs(self, lowered.execute(args))
+            )
+            output = backend.restore_public_outputs(self, outputs)
 
         if self.is_single:
             return output[0]
@@ -1279,8 +1284,8 @@ class Function(SymbolicCallable):
         self, options: "LoweringOptions | None" = None
     ) -> "LoweredFunction":
         """Return a cached backend-specific executable lowering handle."""
-        from coker.backends import get_backend_by_name
         from coker.backends.lowered import LoweringOptions
+        from coker.backends import get_backend_by_name
 
         options = LoweringOptions() if options is None else options
         if not isinstance(options, LoweringOptions):
