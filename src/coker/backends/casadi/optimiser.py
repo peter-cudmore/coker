@@ -4,7 +4,7 @@ from typing import List
 import casadi as ca
 import numpy as np
 
-from coker.algebra.kernel import Tracer
+from coker.algebra.graph import Tracer
 from coker.toolkits.codesign.optimisation import (
     SolveFailure,
     solve_info_from_casadi_stats,

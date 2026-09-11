@@ -5,12 +5,8 @@ import casadi as ca
 import numpy as np
 
 import coker
-from coker.algebra.kernel import (
-    BoundCallable,
-    CallableReference,
-    Tape,
-    Tracer,
-)
+from coker.algebra.function import BoundCallable
+from coker.algebra.graph import CallableReference, Tape, Tracer
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,

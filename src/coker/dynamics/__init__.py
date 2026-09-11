@@ -19,11 +19,9 @@ from coker.dynamics.controls import (
     ValueType,
 )
 from coker.dynamics.system import create_autonomous_ode, direct_sum
-from coker.dynamics.model import (
-    DynamicsSpec,
-    DynamicalSystem,
-    SolverParameters,
-)
+from coker.interfaces import SolverParameters
+
+from coker.dynamics.model import DynamicsSpec, DynamicalSystem
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     evaluate_legendre_polynomial,

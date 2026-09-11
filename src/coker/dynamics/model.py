@@ -1,9 +1,7 @@
-import abc
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple
 
 import numpy as np
-
 from coker.algebra.kernel import (
     Dimension,
     Function,
@@ -12,12 +10,6 @@ from coker.algebra.kernel import (
     Scalar,
     VectorSpace,
 )
-
-
-class SolverParameters(metaclass=abc.ABCMeta):
-    """Interface for backend-specific ODE solver configuration."""
-
-    pass
 
 
 @dataclass

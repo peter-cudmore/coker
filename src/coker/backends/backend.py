@@ -1,18 +1,18 @@
+from __future__ import annotations
+
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable, Sequence
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
-    from coker.backends.lowered import (
-        LoweredFunction,
-        LoweringOptions,
-    )
+    from coker.algebra.function import Function
+    from coker.backends.lowered import LoweredFunction, LoweringOptions
+    from coker.dynamics.model import VariationalProblem
 
-from coker.algebra.kernel import Function, Tracer
+from coker.algebra.graph import Tracer
 from coker.algebra.dimensions import Dimension
-
-from coker.dynamics import VariationalProblem, SolverParameters
+from coker.interfaces import SolverParameters
 
 ArrayLike = Any
 

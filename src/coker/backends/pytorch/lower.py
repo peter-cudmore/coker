@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 import torch
 
-from coker.algebra.kernel import Tracer
+from coker.algebra.graph import Tracer
 from coker.backends.evaluator import _cast_outputs
 from coker.backends.lowered import LoweredFunction, LoweringCapabilities
 

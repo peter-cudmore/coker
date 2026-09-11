@@ -6,7 +6,9 @@ import scipy.sparse.csc
 import scipy as scp
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Function, Tracer, Noop
+from coker.algebra.function import Function
+from coker.algebra.graph import Tracer
+from coker.algebra.ops import Noop
 from coker.algebra.ops import (
     ConcatenateOP,
     NormOP,
