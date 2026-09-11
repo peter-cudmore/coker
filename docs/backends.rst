@@ -35,10 +35,10 @@ Backend capability matrix
      - Included in the base install.
      - Covered by ``tests/backends/sympy/test_sympy_printing.py``.
    * - ``coker``
-     - Coker's compact workspace-oriented execution graph.
-     - Included in the base install.
-     - Covered by ``tests/backends/coker/`` and described in
-       :doc:`backend_architecture`.
+     - Compact workspace-oriented execution graph.
+     - Requires the separately packaged ``coker_backend`` plugin.
+     - Described in :doc:`backend_architecture`; it is not part of the base
+       Coker installation.
    * - ``jax``
      - Alternate array backend when you want JAX-native values.
      - Install with ``pip install "coker[jax]"``.
@@ -109,7 +109,7 @@ parameters or registered buffers. It supports eager autograd but is not
 currently a TorchScript or ``torch.compile`` target.
 
 Importing native backend functions
----------------------------------
+----------------------------------
 
 Native import interfaces are backend-specific. CasADi derives the ordered
 names and matrix dimensions from its native function, while a PyTorch module

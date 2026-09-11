@@ -3,7 +3,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from coker.algebra.kernel import InequalityExpression
+from coker.algebra.function import InequalityExpression
 from coker.dynamics.controls import ControlSolution
 from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
 from coker.toolkits.codesign.optimisation import SolveInfo

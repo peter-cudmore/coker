@@ -7,7 +7,7 @@ import numpy as np
 import scipy.sparse
 
 from coker.algebra.dimensions import VectorSpace
-from coker.algebra.kernel import Tracer
+from coker.algebra.graph import Tracer
 from coker.algebra.tensor import SymbolicVector
 
 

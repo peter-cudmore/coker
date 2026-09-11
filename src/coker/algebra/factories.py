@@ -1,12 +1,12 @@
 import numpy as np
-from coker.algebra.kernel import TraceContext
+from coker.algebra.graph import TraceContext
 
 
 def zeros(shape: tuple):
     """Create a zero-filled array node on the active tape.
 
     Must be called inside a tracing context, within an
-    ``implementation`` passed to :func:`~coker.algebra.kernel.function`.
+    ``implementation`` passed to :func:`~coker.algebra.function.function`.
     The returned array behaves like a numpy array and supports index
     assignment of symbolic values.
 

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from coker import FunctionSpace, Scalar, VectorSpace
-from coker.algebra.kernel import Noop
+from coker.algebra.ops import Noop
 from coker.dynamics import (
     BoundedVariable,
     DynamicsSpec,

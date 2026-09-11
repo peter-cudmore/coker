@@ -95,7 +95,11 @@ directly.
        builder.outputs = [x]
        problem = builder.build("casadi")
 
-   (x_val,) = problem(np.array([3.0, -1.0]))
+   objective, x_val = problem(np.array([3.0, -1.0]))
+
+Use ``bounded(residual, lower, upper)`` when bounds are part of the model.
+Bounds may depend on runtime parameters; CasADi evaluates them as residual
+constraints at solve time.
 
 Where to continue
 -----------------

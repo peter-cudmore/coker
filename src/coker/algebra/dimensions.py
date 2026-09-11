@@ -50,7 +50,7 @@ class Dimension:
 
     Wraps a tuple of ints (for array-valued nodes) or ``None`` (for scalars).
     Used internally to track shapes through the tape and by
-    :func:`~coker.algebra.kernel.get_projection` when constructing slice
+    :func:`~coker.algebra.graph.get_projection` when constructing slice
     projections.
 
     Args:

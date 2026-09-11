@@ -5,7 +5,7 @@ class SymbolicVector:
     """A mutable array that can hold a mix of constants and symbolic tracers.
 
     Use this inside an ``implementation`` passed to
-    :func:`~coker.algebra.kernel.function` when you need to build an
+    :func:`~coker.algebra.function.function` when you need to build an
     output vector by assigning to individual elements, some of which may
     be symbolic expressions and some constants.
 

@@ -48,7 +48,7 @@ class Function(SymbolicCallable):
     Attributes:
         tape: The recorded computation graph.
         backend: Name of the backend used for concrete evaluation.
-        output: List of output :class:`~coker.algebra.kernel.Tracer` nodes.
+        output: List of output :class:`~coker.algebra.graph.Tracer` nodes.
     """
 
     INLINE_SIZE = 10
@@ -291,7 +291,7 @@ class Function(SymbolicCallable):
 
         Unlike ``__call__``, which compiles to the configured backend,
         this always routes through the numpy interpreter so the result
-        is a :class:`~coker.algebra.kernel.Tracer` recorded on the
+        is a :class:`~coker.algebra.graph.Tracer` recorded on the
         enclosing tape. Use this when composing functions inside an
         ``implementation`` passed to :func:`function`.
         """
@@ -484,7 +484,7 @@ def function(
             :class:`VectorSpace`, or :class:`FunctionSpace`.
         implementation: A Python callable that defines the computation.  It
             will be called once during tracing with symbolic
-            :class:`~coker.algebra.kernel.Tracer` arguments.
+            :class:`~coker.algebra.graph.Tracer` arguments.
         backend: Name of the backend used for concrete evaluation.
             Built-in options are ``"numpy"`` (default for tracing),
             ``"casadi"``, ``"sympy"``, and ``"coker"``.

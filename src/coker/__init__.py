@@ -1,9 +1,5 @@
-from coker.algebra.kernel import (
-    Function,
-    SymbolicCallable,
-    function,
-    if_then_else,
-)
+from coker.algebra.function import Function, SymbolicCallable, function
+from coker.algebra.graph import if_then_else
 from coker.algebra.dimensions import (
     Dimension,
     VectorSpace,

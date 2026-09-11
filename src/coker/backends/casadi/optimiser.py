@@ -58,9 +58,6 @@ def build_optimisation_problem(
     (cost_fn,) = substitute([cost], workspace)
     output_map = ca.Function("y", *lower(tape, outputs, workspace))
 
-    #    constraint_function = np.zeros((n_constraints,))
-    #    lower_bound = ca.DM(n_constraints, 1)
-    #    upper_bound = ca.DM(n_constraints, 1)
     cs = []
     lbs = []
     ubs = []
@@ -68,18 +65,34 @@ def build_optimisation_problem(
     for constraint in constraints:
         c, lb, ub = constraint.as_halfplane_bound()
         (c_i,) = substitute([c], workspace)
-        if isinstance(lb, Tracer):
-            (lb_i,) = substitute([lb], workspace)
-        else:
-            lb_i = to_casadi(lb) * ca.DM.ones(*c_i.shape)
-        if isinstance(ub, Tracer):
-            (ub_i,) = substitute([ub], workspace)
-        else:
-            ub_i = to_casadi(ub) * ca.DM.ones(*c_i.shape)
+        lower_is_symbolic = isinstance(lb, Tracer)
+        upper_is_symbolic = isinstance(ub, Tracer)
 
-        lbs.append(lb_i)
-        ubs.append(ub_i)
-        cs.append(c_i)
+        if not lower_is_symbolic and not upper_is_symbolic:
+            cs.append(c_i)
+            lbs.append(to_casadi(lb) * ca.DM.ones(*c_i.shape))
+            ubs.append(to_casadi(ub) * ca.DM.ones(*c_i.shape))
+            continue
+
+        if lower_is_symbolic:
+            (lb_i,) = substitute([lb], workspace)
+            cs.append(c_i - lb_i)
+            lbs.append(ca.DM.zeros(*c_i.shape))
+            ubs.append(ca.DM.ones(*c_i.shape) * ca.inf)
+        else:
+            cs.append(c_i)
+            lbs.append(to_casadi(lb) * ca.DM.ones(*c_i.shape))
+            ubs.append(ca.DM.ones(*c_i.shape) * ca.inf)
+
+        if upper_is_symbolic:
+            (ub_i,) = substitute([ub], workspace)
+            cs.append(c_i - ub_i)
+            lbs.append(-ca.DM.ones(*c_i.shape) * ca.inf)
+            ubs.append(ca.DM.zeros(*c_i.shape))
+        else:
+            cs.append(c_i)
+            lbs.append(-ca.DM.ones(*c_i.shape) * ca.inf)
+            ubs.append(to_casadi(ub) * ca.DM.ones(*c_i.shape))
 
     upper_bound = ca.vertcat(*ubs)
     lower_bound = ca.vertcat(*lbs)

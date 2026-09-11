@@ -8,8 +8,9 @@ The current package metadata marks Coker as **alpha** software (`Development Sta
 
 Coker combines a few layers that usually live in separate tools:
 
-- **Backend lowering** to `numpy`, `casadi`, `jax`, `pytorch`, `sympy`, and the
-  native `coker` backend.
+- **Backend lowering** to `numpy`, `casadi`, `jax`, `pytorch`, and `sympy`;
+  the separately packaged native `coker` backend can be registered for compact
+  workspace-oriented execution.
 - **Differentiable execution models** that support evaluation, composition, and conditional expressions.
 - **Dynamics and variational problem tooling** for ODE systems, transcription helpers, and solver-backed optimisation workflows.
 - **Domain toolkits** for spatial algebra, rigid-body kinematics, system modelling, and codesign-style mathematical programs.
@@ -39,7 +40,6 @@ g = function(
 )
 print(g(np.array([1.0, 2.0])))  # [ 1. -2.]
 ```
-
 ### 2. Swap execution backends without rewriting the model
 
 The same traced function can be lowered to different execution backends depending on the job:
@@ -49,7 +49,7 @@ The same traced function can be lowered to different execution backends dependin
 - `jax` for alternate array execution
 - `pytorch` for tensor-valued execution, autograd, and optional ODE/quadrature integration
 - `sympy` for symbolic inspection and printing
-- `coker` for Coker's native compact execution graph
+- `coker` when the separately packaged `coker_backend` plugin is installed
 
 ```python
 from coker import function, Scalar
@@ -86,14 +86,12 @@ pip install coker
 - conditional expressions via `if_then_else`
 - backend-specific lowering paths
 
-### Native Coker backend
+### Optional native Coker backend
 
-The `coker` backend lowers traced functions into a compact workspace-oriented graph. The internal architecture in `docs/backend_architecture.rst` describes:
+The native `coker` backend is supplied by the separate `coker_backend` package.
+It lowers traced functions into a compact workspace-oriented graph; see
+`docs/backend_architecture.rst` for its artifact and runtime boundary.
 
-- contiguous workspace allocation for function values
-- sparse bilinear layers for affine/quadratic-compatible ops
-- generic vector layers for non-bilinear work
-- value and tangent propagation over the same execution graph
 
 ### Dynamics and optimisation
 

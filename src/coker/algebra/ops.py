@@ -158,7 +158,7 @@ def normalize_evaluate_result(
 
 def invoke_callable(callable_value: Any, *arguments: Any) -> Any:
     """Invoke a callable, expanding explicit bound arguments first."""
-    from coker.algebra.kernel import BoundCallable
+    from coker.algebra.function import BoundCallable
 
     if isinstance(callable_value, BoundCallable):
         target, expanded_arguments = callable_value.expand_call(*arguments)

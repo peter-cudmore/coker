@@ -9,7 +9,7 @@ from coker import (
 )
 from coker.algebra import get_projection
 from coker.algebra import zeros
-from coker.algebra.kernel import Tape, TraceContext
+from coker.algebra.graph import Tape, TraceContext
 from ..util import is_close
 
 
