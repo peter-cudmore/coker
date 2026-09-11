@@ -12,7 +12,7 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.function import Function
+from coker.algebra.function import Function, create_function_from_native
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
 from coker.backends.backend import ArrayLike, Backend, register_backend
@@ -51,7 +51,7 @@ def _space_from_casadi_shape(
 
 def _signature_from_casadi_function(
     ca_function: ca.Function,
-) -> "FunctionSignature":
+) -> FunctionSignature:
 
     inputs = tuple(
         FunctionInputSpec(
@@ -147,7 +147,9 @@ class CasadiBackend(Backend):
             if signature is None
             else signature
         )
-        return super().import_function(ca_function, signature)
+        return create_function_from_native(
+            ca_function, signature, backend=self.name
+        )
 
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         return to_numpy_array(array)

@@ -1,18 +1,18 @@
 """Lowered PyTorch execution adapters for Coker functions."""
 
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import Any, Sequence
 
 import torch
 
+from coker.algebra.function import Function
 from coker.algebra.graph import Tracer
-from coker.backends.evaluator import _cast_outputs
-from coker.backends.lowered import LoweredFunction, LoweringCapabilities
-
-if TYPE_CHECKING:
-    from coker.algebra.kernel import Function
-    from coker.backends.backend import Backend
-    from coker.backends.evaluator import CompiledPlan
-    from coker.backends.lowered import FunctionSignature
+from coker.backends.backend import Backend
+from coker.backends.evaluator import CompiledPlan, _cast_outputs
+from coker.backends.lowered import (
+    FunctionSignature,
+    LoweredFunction,
+    LoweringCapabilities,
+)
 
 
 class PytorchLoweredFunction(LoweredFunction):
@@ -20,9 +20,9 @@ class PytorchLoweredFunction(LoweredFunction):
 
     def __init__(
         self,
-        backend: "Backend",
-        function: "Function",
-        plan: "CompiledPlan",
+        backend: Backend,
+        function: Function,
+        plan: CompiledPlan,
     ) -> None:
         self._backend = backend
         self._function = function
@@ -33,7 +33,7 @@ class PytorchLoweredFunction(LoweredFunction):
         return self._backend.name
 
     @property
-    def signature(self) -> "FunctionSignature":
+    def signature(self) -> FunctionSignature:
         return self._function.signature
 
     @property
@@ -79,7 +79,7 @@ class PytorchModule(torch.nn.Module):
 
 
 def cast_torch_outputs(
-    function: "Function", workspace: dict[int, Any]
+    function: Function, workspace: dict[int, Any]
 ) -> list[Any | None]:
     """Restore declared output shapes without detaching native tensors."""
     result: list[Any | None] = []

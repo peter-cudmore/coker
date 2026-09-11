@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List
+from typing import List
 from enum import Enum
 
 import numpy as np
@@ -6,7 +6,7 @@ import scipy.sparse.csc
 import scipy as scp
 
 from coker.algebra import Dimension, OP
-from coker.algebra.function import Function
+from coker.algebra.function import Function, create_function_from_native
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
 from coker.algebra.ops import (
@@ -23,10 +23,9 @@ from coker.backends.backend import (
     SolverParameters,
     register_backend,
 )
-from coker.backends.lowered import LoweringOptions
+from coker.backends.lowered import FunctionSignature, LoweringOptions
 
-if TYPE_CHECKING:
-    from coker.backends.numpy.lowered import NumpyLoweredFunction
+from coker.backends.numpy.lowered import NumpyLoweredFunction
 from coker.backends.numpy.optimisation import build_optimisation_problem
 
 
@@ -151,12 +150,23 @@ class NumpyBackend(Backend):
 
     def lower(
         self, function: Function, options: LoweringOptions | None = None
-    ) -> "NumpyLoweredFunction":
+    ) -> NumpyLoweredFunction:
         from coker.backends.evaluator import _build_plan
-        from coker.backends.numpy.lowered import NumpyLoweredFunction
 
         return NumpyLoweredFunction(
             self, function, _build_plan(function.tape, self)
+        )
+
+    def import_function(
+        self,
+        implementation,
+        signature: FunctionSignature,
+        *,
+        name: str | None = None,
+    ) -> Function:
+        """Import a NumPy-compatible callable as a Coker function."""
+        return create_function_from_native(
+            implementation, signature, backend=self.name, name=name
         )
 
     def resolve_fn(self, op):

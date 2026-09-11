@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 import sympy as sp
 import numpy as np
-from coker.algebra.function import Function
+from coker.algebra.function import Function, create_function_from_native
 from coker.backends.backend import ArrayLike, Backend, register_backend
-from coker.backends.lowered import LoweredFunction, LoweringCapabilities
+from coker.backends.lowered import (
+    FunctionSignature,
+    LoweredFunction,
+    LoweringCapabilities,
+)
 
 from coker.algebra.ops import (
     OP,
@@ -162,7 +168,7 @@ parameterised_impls = {
 class SympyLoweredFunction(LoweredFunction):
     """SymPy evaluator-backed lowered execution handle."""
 
-    def __init__(self, backend: "SympyBackend", function: Function) -> None:
+    def __init__(self, backend: SympyBackend, function: Function) -> None:
         self._backend = backend
         self._function = function
 
@@ -282,6 +288,18 @@ class SympyBackend(Backend):
 
     def lower(self, function, options=None) -> SympyLoweredFunction:
         return SympyLoweredFunction(self, function)
+
+    def import_function(
+        self,
+        implementation,
+        signature: FunctionSignature,
+        *,
+        name: str | None = None,
+    ) -> Function:
+        """Import a SymPy-compatible callable as a Coker function."""
+        return create_function_from_native(
+            implementation, signature, backend=self.name, name=name
+        )
 
     def evaluate(self, function: Function, inputs: ArrayLike):
 

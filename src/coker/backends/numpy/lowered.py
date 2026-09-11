@@ -1,16 +1,16 @@
 """NumPy reusable-plan lowering handle."""
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from coker.backends.evaluator import _cast_outputs
-from coker.backends.lowered import LoweredFunction, LoweringCapabilities
-
-if TYPE_CHECKING:
-    from coker.algebra.kernel import Function
-    from coker.backends.backend import Backend
-    from coker.backends.evaluator import CompiledPlan
-    from coker.backends.lowered import FunctionSignature
+from coker.algebra.function import Function
+from coker.backends.backend import Backend
+from coker.backends.evaluator import CompiledPlan, _cast_outputs
+from coker.backends.lowered import (
+    FunctionSignature,
+    LoweredFunction,
+    LoweringCapabilities,
+)
 
 
 class NumpyLoweredFunction(LoweredFunction):
@@ -18,9 +18,9 @@ class NumpyLoweredFunction(LoweredFunction):
 
     def __init__(
         self,
-        backend: "Backend",
-        function: "Function",
-        plan: "CompiledPlan",
+        backend: Backend,
+        function: Function,
+        plan: CompiledPlan,
     ) -> None:
         self._backend = backend
         self._function = function
@@ -31,7 +31,7 @@ class NumpyLoweredFunction(LoweredFunction):
         return self._backend.name
 
     @property
-    def signature(self) -> "FunctionSignature":
+    def signature(self) -> FunctionSignature:
         return self._function.signature
 
     @property

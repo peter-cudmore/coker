@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 from typing import Any, List
 
 import numpy as np
 import jax.numpy as jnp
 
+from coker.algebra.function import Function, create_function_from_native
 from coker.algebra import Dimension, OP
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import (
@@ -16,7 +19,11 @@ from coker.algebra.ops import (
 
 from coker.backends.backend import ArrayLike, Backend, register_backend
 
-from coker.backends.lowered import LoweredFunction, LoweringCapabilities
+from coker.backends.lowered import (
+    FunctionSignature,
+    LoweredFunction,
+    LoweringCapabilities,
+)
 
 
 scalar_types = (
@@ -102,9 +109,8 @@ def basis(i, n):
 
 
 class JaxLoweredFunction(LoweredFunction):
-    """JAX evaluator-backed lowered execution handle."""
+    def __init__(self, backend: JaxBackend, function) -> None:
 
-    def __init__(self, backend: "JaxBackend", function) -> None:
         self._backend = backend
         self._function = function
 
@@ -182,6 +188,18 @@ class JaxBackend(Backend):
 
     def lower(self, function, options=None) -> JaxLoweredFunction:
         return JaxLoweredFunction(self, function)
+
+    def import_function(
+        self,
+        implementation,
+        signature: FunctionSignature,
+        *,
+        name: str | None = None,
+    ) -> Function:
+        """Import a JAX-compatible callable as a Coker function."""
+        return create_function_from_native(
+            implementation, signature, backend=self.name, name=name
+        )
 
     def build_optimisation_problem(
         self,
