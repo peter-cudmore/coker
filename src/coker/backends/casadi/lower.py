@@ -48,8 +48,8 @@ impls = {
 
 
 def casadi_eval(op, *args):
-    # Plain Python callables (e.g. solution_proxy) can be called directly.
-    if not hasattr(op, "tape"):
+    # Native references and solver proxies are invoked directly.
+    if not isinstance(op, coker.Function):
         return op(*args)
     if op.backend != "casadi":
         raise RuntimeError(
