@@ -1,8 +1,9 @@
 import pytest
 
 from coker import Function, Scalar
+from coker.algebra.ops import OP
 from coker.algebra.kernel import CallableReference
-from coker.algebra.ops import EvaluateOP
+from coker.algebra.dimensions import FunctionValueDimension
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -57,19 +58,25 @@ def test_native_function_space_excludes_absent_outputs():
     imported = Function.from_native(
         lambda x: (x, None), signature, backend="numpy"
     )
-    evaluate_index, (evaluate_op, native_ref, *_) = next(
+    function_value_index, (_, native_ref) = next(
         (index, node)
         for index, node in enumerate(imported.tape.nodes)
-        if isinstance(node, tuple) and isinstance(node[0], EvaluateOP)
+        if isinstance(node, tuple) and node[0] == OP.FUNCTION_VALUE
+    )
+    evaluate_index, evaluate_node = next(
+        (index, node)
+        for index, node in enumerate(imported.tape.nodes)
+        if isinstance(node, tuple) and node[0] == OP.EVALUATE
     )
 
     assert native_ref.function_space.output == [Scalar("present")]
     assert type(native_ref) is CallableReference
+    assert evaluate_node[1].index == function_value_index
+    assert isinstance(
+        imported.tape.dim[function_value_index], FunctionValueDimension
+    )
     assert (
-        evaluate_op.compute_shape(
-            native_ref.function_space,
-            *native_ref.function_space.input_dimensions(),
-        )
+        imported.tape.dim[function_value_index].result_dimension
         == imported.tape.dim[evaluate_index]
     )
 

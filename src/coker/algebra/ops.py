@@ -6,6 +6,7 @@ from coker.algebra.exceptions import InvalidShape, InvalidArgument
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
+    FunctionValueDimension,
     ResultBundleDimension,
 )
 from typing_extensions import final
@@ -38,7 +39,9 @@ class OP(enum.Enum):
     ARCTAN2 = 23
     LESS_THAN = 24
     LESS_EQUAL = 25
-    LOG = 27
+    FUNCTION_VALUE = 26
+    EVALUATE = 27
+    LOG = 28
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -85,24 +88,6 @@ class Operator:
         return not self.is_linear() and not self.is_bilinear()
 
 
-class EvaluateOP(Operator):
-    """Invoke a callable and declare the dimension of its result."""
-
-    __slots__ = ("result_dimension",)
-
-    def __init__(
-        self,
-        result_dimension: Dimension | FunctionSpace | ResultBundleDimension,
-    ) -> None:
-        self.result_dimension = result_dimension
-
-    def compute_shape(
-        self, function_sig: FunctionSpace, *args: Dimension
-    ) -> Dimension | FunctionSpace | ResultBundleDimension:
-        validate_evaluate_inputs(function_sig, args)
-        return self.result_dimension
-
-
 class SelectOP(Operator):
     """Select one declared result from a native-call result bundle."""
 
@@ -139,7 +124,7 @@ def normalize_evaluate_result(
     value: Any,
     dimension: Dimension | FunctionSpace | ResultBundleDimension,
 ) -> Any:
-    """Apply the tape-declared result policy for ``EvaluateOP``."""
+    """Apply the tape-declared result policy for ``OP.EVALUATE``."""
     if isinstance(dimension, ResultBundleDimension):
         return value
     return np.concatenate([np.asarray(result).reshape(-1) for result in value])
@@ -278,6 +263,25 @@ def validate_evaluate_inputs(
                 f"Argument {i} has dimension {arg_dim.dim}, expected "
                 f"{input_dim.dim}"
             )
+
+
+@register_shape(OP.EVALUATE)
+def evaluate_shape(
+    function_value: FunctionSpace | FunctionValueDimension,
+    *args: Dimension,
+) -> Dimension | FunctionSpace | ResultBundleDimension:
+    if isinstance(function_value, FunctionValueDimension):
+        validate_evaluate_inputs(function_value.function_space, args)
+        return function_value.result_dimension
+
+    validate_evaluate_inputs(function_value, args)
+    try:
+        (result_dimension,) = function_value.output_dimensions()
+    except ValueError as ex:
+        raise InvalidShape(
+            "EVALUATE requires a function with one declared result"
+        ) from ex
+    return result_dimension
 
 
 __componentwise_ops = [

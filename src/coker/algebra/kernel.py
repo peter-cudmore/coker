@@ -21,15 +21,15 @@ from typing import (
 
 from coker.algebra.dimensions import (
     Dimension,
-    VectorSpace,
-    Scalar,
-    FunctionSpace,
     Element,
+    FunctionSpace,
+    FunctionValueDimension,
     ResultBundleDimension,
+    Scalar,
+    VectorSpace,
 )
 from coker.algebra.ops import (
     OP,
-    EvaluateOP,
     Noop,
     Operator,
     ReshapeOP,
@@ -121,6 +121,7 @@ def _find_closure_tracers(fn) -> dict:
 class TapeInner:
     INNER_REF = -1
     CONSTANT_REF = -2
+    FUNCTION_REF = -3
 
     def __init__(self, tape_ref: "Tape"):
         self._nodes = []
@@ -131,6 +132,7 @@ class TapeInner:
         self.tape_ref = weakref.ref(tape_ref)
         assert self.INNER_REF not in OP.__members__.values()
         assert self.CONSTANT_REF not in OP.__members__.values()
+        assert self.FUNCTION_REF not in OP.__members__.values()
 
     @staticmethod
     def constant_hash(value) -> int:
@@ -191,6 +193,9 @@ class TapeInner:
                 self._constants.append(value)
 
             self._nodes.append((self.CONSTANT_REF, value_idx))
+        elif op == OP.FUNCTION_VALUE:
+            (reference,) = args
+            self._nodes.append((self.FUNCTION_REF, reference._archive_index))
         else:
             self._nodes.append((op, *args))
         return idx
@@ -209,6 +214,11 @@ class TapeInner:
         if op == self.CONSTANT_REF:
             (value_idx,) = args
             return OP.VALUE, self._constants[value_idx]
+        if op == self.FUNCTION_REF:
+            (archive_index,) = args
+            return OP.FUNCTION_VALUE, CallableReference(
+                self.tape_ref(), archive_index
+            )
         return op, *args
 
     def __len__(self):
@@ -221,6 +231,7 @@ class _CallableArchiveEntry:
 
     callable_value: Callable
     function_space: FunctionSpace
+    result_dimension: Dimension | FunctionSpace | ResultBundleDimension
 
 
 class CallableReference:
@@ -237,6 +248,12 @@ class CallableReference:
     @property
     def function_space(self) -> FunctionSpace:
         return self._entry.function_space
+
+    @property
+    def result_dimension(
+        self,
+    ) -> Dimension | FunctionSpace | ResultBundleDimension:
+        return self._entry.result_dimension
 
     def __call__(self, *args):
         return self._entry.callable_value(*args)
@@ -275,9 +292,21 @@ class Tape:
 
     def _create_callable_reference(
         self,
-        callable_value,
-        function_space,
-    ):
+        callable_value: Callable[..., Any],
+        function_space: FunctionSpace,
+        result_dimension: (
+            Dimension | FunctionSpace | ResultBundleDimension | None
+        ) = None,
+    ) -> CallableReference:
+        if result_dimension is None:
+            output_dimensions = function_space.output_dimensions()
+            if len(output_dimensions) != 1:
+                raise ValueError(
+                    "Callable references require one result or an explicit "
+                    "result dimension"
+                )
+            (result_dimension,) = output_dimensions
+
         key = id(callable_value)
         archive_index = self._inner._callable_hashmap.get(key)
         if archive_index is None:
@@ -287,6 +316,7 @@ class Tape:
                 _CallableArchiveEntry(
                     callable_value,
                     function_space,
+                    result_dimension,
                 )
             )
         return CallableReference(self, archive_index)
@@ -360,8 +390,6 @@ class Tape:
         for arg in args:
             if arg is None:
                 dims.append(None)
-            elif isinstance(arg, CallableReference):
-                dims.append(arg.function_space)
             else:
                 assert isinstance(arg, Tracer)
                 dims.append(arg.dim)
@@ -392,9 +420,13 @@ class Tape:
 
         args = [
             (
-                self.insert_value(a)
-                if not isinstance(a, (Tracer, CallableReference))
-                else a.copy() if isinstance(a, Tracer) else a
+                a.copy()
+                if isinstance(a, Tracer)
+                else (
+                    self.insert_function_value(a)
+                    if isinstance(a, CallableReference)
+                    else self.insert_value(a)
+                )
             )
             for a in args
         ]
@@ -425,6 +457,22 @@ class Tape:
         self.dim.append(dim)
         self._node_hashmap[node_hash] = idx
         return Tracer(self, idx)
+
+    def insert_function_value(self, reference: CallableReference) -> "Tracer":
+        node_hash = hash((OP.FUNCTION_VALUE, reference._archive_index))
+        if node_hash in self._node_hashmap:
+            return Tracer(self, self._node_hashmap[node_hash])
+
+        index = len(self.dim)
+        self.nodes.push_op(OP.FUNCTION_VALUE, reference)
+        self.dim.append(
+            FunctionValueDimension(
+                reference.function_space,
+                reference.result_dimension,
+            )
+        )
+        self._node_hashmap[node_hash] = index
+        return Tracer(self, index)
 
     def input(self, v: VectorSpace | Scalar):
         if v is None:
@@ -532,7 +580,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         if self.is_input():
             return False
         op, *_ = self.tape.nodes[self.index]
-        if not isinstance(op, EvaluateOP):
+        if op != OP.EVALUATE:
             return False
         return True
 
@@ -861,8 +909,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return self._emit(OP.CASE, norm == 0, self, self / norm)
 
     def __call__(self, *args):
-        (result_dimension,) = self.dim.output_dimensions()
-        return self._emit(EvaluateOP(result_dimension), self, *args)
+        return self._emit(OP.EVALUATE, self, *args)
 
 
 class SymbolicCallable(ABC):
@@ -1003,7 +1050,7 @@ class Function(SymbolicCallable):
         """Import a backend-native callable as a traceable Coker function.
 
         Each declared non-``None`` result is represented by an
-        ``EvaluateOP`` node. Native code is invoked only by a compatible
+        ``OP.EVALUATE`` node. Native code is invoked only by a compatible
         concrete backend; tracing an imported function appends equivalent nodes
         to the outer tape.
         """
@@ -1072,11 +1119,12 @@ class Function(SymbolicCallable):
         native_ref = tape._create_callable_reference(
             native,
             function_space,
+            result_dimension,
         )
         bundle = Tracer(
             tape,
             tape.append(
-                EvaluateOP(result_dimension),
+                OP.EVALUATE,
                 native_ref,
                 *args,
             ),

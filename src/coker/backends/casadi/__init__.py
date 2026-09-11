@@ -88,7 +88,7 @@ class CasadiBackend(Backend):
         ca_function: ca.Function,
         signature: FunctionSignature | None = None,
     ) -> Function:
-        """Import a native CasADi function as an ``EvaluateOP`` callable.
+        """Import a native CasADi function as an ``OP.EVALUATE`` callable.
 
         CasADi functions carry ordered names and matrix dimensions, so callers
         may omit ``signature``. Pass one only to impose a deliberate Coker

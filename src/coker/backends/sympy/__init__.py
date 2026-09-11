@@ -5,7 +5,6 @@ from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,
-    EvaluateOP,
     NormOP,
     ReshapeOP,
     SelectOP,
@@ -135,6 +134,9 @@ impls = {
     OP.CASE: lambda cond, t, f: t if cond else f,
     OP.ARCTAN2: sp.atan2,
     OP.LOG: sp.log,
+    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
+        callable_value, *args
+    ),
 }
 
 
@@ -152,9 +154,6 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: reshape(x, dim=Dimension(op.newshape)),
     NormOP: lambda op, x: sympy_norm(x, ord=op.ord),
     SelectOP: lambda op, value: op.select(value),
-    EvaluateOP: lambda op, callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
 }
 
 
