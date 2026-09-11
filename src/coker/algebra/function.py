@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 
-from coker.algebra.callable import SymbolicCallable
+from coker.interfaces import SymbolicCallable
 import numpy as np
 
 from coker.algebra.dimensions import (
