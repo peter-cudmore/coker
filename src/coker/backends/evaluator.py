@@ -11,7 +11,7 @@ from coker.algebra.dimensions import (
     FunctionSpace,
     ResultBundleDimension,
 )
-from coker.algebra.callable import SymbolicCallable
+from coker.interfaces import SymbolicCallable
 from coker.algebra.graph import CallableReference, Tape, Tracer
 from coker.algebra.ops import OP, Operator, normalize_evaluate_result
 
