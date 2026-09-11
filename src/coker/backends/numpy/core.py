@@ -195,7 +195,12 @@ class NumpyBackend(Backend):
         arguments: List[Tracer],
         outputs: List[Tracer],
         initial_conditions,
+        optimiser_options=None,
     ):
+        if optimiser_options:
+            raise ValueError(
+                "NumPy optimisation does not support solver options"
+            )
         return build_optimisation_problem(
             self, cost, constraints, arguments, outputs, initial_conditions
         )

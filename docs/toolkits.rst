@@ -101,6 +101,19 @@ Use ``bounded(residual, lower, upper)`` when bounds are part of the model.
 Bounds may depend on runtime parameters; CasADi evaluates them as residual
 constraints at solve time.
 
+For bounded CasADi/IPOPT solves, pass flat CasADi options when building the
+program:
+
+.. code-block:: python
+
+   problem = builder.build(
+       "casadi",
+       optimiser_options={
+           "ipopt.max_iter": 50,
+           "ipopt.max_cpu_time": 30.0,
+       },
+   )
+
 Where to continue
 -----------------
 

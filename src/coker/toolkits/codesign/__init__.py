@@ -225,7 +225,12 @@ class ProblemBuilder:
             )
         return dict(zip(decision_input_indicies, self.initial_conditions))
 
-    def build(self, backend: Optional[str] = None) -> MathematicalProgram:
+    def build(
+        self,
+        backend: Optional[str] = None,
+        *,
+        optimiser_options: Mapping[str, Any] | None = None,
+    ) -> MathematicalProgram:
         assert isinstance(self.objective, Minimise)
         assert self.tape is not None
         assert self.outputs
@@ -247,6 +252,7 @@ class ProblemBuilder:
             self.arguments,
             [self.objective.expression, *self.outputs],
             self._normalise_initial_conditions(),
+            optimiser_options=optimiser_options,
         )
         impl = backend_impl.make_optimisation_module(implementation)
 
