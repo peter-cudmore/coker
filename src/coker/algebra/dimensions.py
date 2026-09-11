@@ -217,6 +217,14 @@ class FunctionSpace:
         return len(output_dimensions) == 1 and output_dimensions[0].is_scalar()
 
 
+@dataclasses.dataclass(frozen=True)
+class FunctionValueDimension:
+    """Complete declaration retained by a function-table value."""
+
+    function_space: FunctionSpace
+    result_dimension: Dimension | FunctionSpace | ResultBundleDimension
+
+
 @dataclasses.dataclass
 class Element:
     parent: VectorSpace

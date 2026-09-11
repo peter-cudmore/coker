@@ -14,7 +14,7 @@ from coker.algebra.kernel import (
     Scalar,
     function,
 )
-from coker.algebra.ops import EvaluateOP
+from coker.algebra.ops import OP
 from .optimisation import (
     BoundedConstraint,
     SolveFailure,
@@ -127,12 +127,12 @@ class MathematicalProgram(SymbolicCallable):
             "program_result", sum(dim.flat() for dim in result_dimensions)
         )
         function_space = FunctionSpace("program", arguments, [result_space])
-        reference = tape._create_callable_reference(self, function_space)
-        (packed_dimension,) = function_space.output_dimensions()
-        packed = Tracer(
-            tape,
-            tape.append(EvaluateOP(packed_dimension), reference, *args),
+        reference = tape._create_callable_reference(
+            self,
+            function_space,
+            function_space.output_dimensions()[0],
         )
+        packed = Tracer(tape, tape.append(OP.EVALUATE, reference, *args))
         offset = 0
         results = []
         for dim in result_dimensions:

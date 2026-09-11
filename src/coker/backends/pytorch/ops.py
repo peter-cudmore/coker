@@ -6,7 +6,6 @@ import torch
 from coker.algebra import OP
 from coker.algebra.ops import (
     ConcatenateOP,
-    EvaluateOP,
     NormOP,
     ReshapeOP,
     SelectOP,
@@ -98,6 +97,9 @@ impls = {
     OP.LESS_THAN: torch.less,
     OP.LESS_EQUAL: torch.less_equal,
     OP.LOG: torch.log,
+    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
+        callable_value, *args
+    ),
 }
 
 parameterised_impls = {
@@ -105,9 +107,6 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: torch.reshape(x, shape=op.newshape),
     NormOP: _norm,
     SelectOP: lambda op, value: op.select(value),
-    EvaluateOP: lambda op, callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
 }
 
 

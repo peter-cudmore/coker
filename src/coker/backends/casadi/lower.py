@@ -14,7 +14,6 @@ from coker.algebra.kernel import (
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,
-    EvaluateOP,
     Noop,
     NormOP,
     ReshapeOP,
@@ -49,6 +48,9 @@ impls = {
     OP.LESS_THAN: ca.lt,
     OP.CASE: lambda c, t, f: ca.if_else(c, t, f),
     OP.LOG: ca.log,
+    OP.EVALUATE: lambda callable_value, *args: casadi_eval(
+        callable_value, *args
+    ),
 }
 
 
@@ -61,7 +63,7 @@ def casadi_eval(op, *args):
         return op(*args)
     if op.backend != "casadi":
         raise RuntimeError(
-            "Cannot lower CasADi EvaluateOP node for "
+            "Cannot lower CasADi OP.EVALUATE node for "
             f"backend {op.backend!r}; node callable {op!r} belongs to "
             f"backend {op.backend!r}"
         )
@@ -121,9 +123,6 @@ parameterised_impls = {
     NormOP: lambda op, x: norm(x, ord=op.ord),
     ReshapeOP: lambda op, x: reshape(x, *op.newshape),
     SelectOP: lambda op, value: op.select(value),
-    EvaluateOP: lambda op, callable_value, *args: casadi_eval(
-        callable_value, *args
-    ),
 }
 
 
@@ -230,18 +229,17 @@ def substitute(
             v = to_casadi(node.value())
         else:
             op, *args = node.value()
-            args = [get_node(a) for a in args]
-
-            if op in impls:
+            args = [get_node(arg) for arg in args]
+            if op == OP.FUNCTION_VALUE:
+                (v,) = args
+            elif op in impls:
                 try:
                     v = impls[op](*args)
                 except RuntimeError as e:
                     raise e
             else:
                 v = call_parameterised_op(op, *args)
-            if isinstance(op, EvaluateOP) and isinstance(
-                args[0], CallableReference
-            ):
+            if op == OP.EVALUATE and isinstance(args[0], CallableReference):
                 v = normalize_evaluate_result(v, node.dim)
         try:
             if not node.dim.is_scalar():

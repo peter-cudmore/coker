@@ -9,7 +9,6 @@ from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Function, Tracer, Noop
 from coker.algebra.ops import (
     ConcatenateOP,
-    EvaluateOP,
     NormOP,
     ReshapeOP,
     SelectOP,
@@ -109,12 +108,12 @@ impls = {
     OP.LESS_THAN: np.less,
     OP.CASE: lambda cond, t, f: t if cond else f,
     OP.LOG: np.log,
+    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
+        callable_value, *args
+    ),
 }
 
 parameterised_impls = {
-    EvaluateOP: lambda op, callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
     ConcatenateOP: lambda op, *values: np.concatenate(values, axis=op.axis),
     ReshapeOP: lambda op, x: np.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),

@@ -16,7 +16,7 @@ from coker.algebra.kernel import (
     Tape,
     Tracer,
 )
-from coker.algebra.ops import EvaluateOP, Operator, normalize_evaluate_result
+from coker.algebra.ops import Operator, normalize_evaluate_result
 from coker.backends.backend import Backend
 
 NodeDimension = Dimension | FunctionSpace | ResultBundleDimension
@@ -31,7 +31,7 @@ def _normalize_evaluate_result(
     value: Any,
     dimension: NodeDimension,
 ) -> Any:
-    if isinstance(op, EvaluateOP) and isinstance(args[0], CallableReference):
+    if op == OP.EVALUATE and isinstance(args[0], CallableReference):
         return normalize_evaluate_result(value, dimension)
     return value
 
@@ -132,7 +132,11 @@ def _build_plan(graph: Tape, backend: Backend) -> CompiledPlan:
                 resolved.append(a)
             else:
                 resolved.append(backend.to_backend_array(a))
-        value = resolved[0] if op == OP.VALUE else backend.call(op, *resolved)
+        value = (
+            resolved[0]
+            if op in {OP.VALUE, OP.FUNCTION_VALUE}
+            else backend.call(op, *resolved)
+        )
         value = _normalize_evaluate_result(op, resolved, value, graph.dim[i])
         if not isinstance(value, _SYMBOLIC_TYPES) and not isinstance(
             graph.dim[i], ResultBundleDimension
@@ -155,7 +159,7 @@ def _build_plan(graph: Tape, backend: Backend) -> CompiledPlan:
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
         dim = graph.dim[i]
         fn = backend.resolve_fn(op)
-        if isinstance(op, EvaluateOP):
+        if op == OP.EVALUATE:
 
             def fn(*values, _fn=fn, _op=op, _dim=dim):
                 value = _fn(*values)
@@ -253,7 +257,7 @@ def evaluate_inner(
         op, *nodes = graph.nodes[w]
 
         args = [cast_node(n) for n in nodes]
-        if op == OP.VALUE:
+        if op in {OP.VALUE, OP.FUNCTION_VALUE}:
             (value,) = args
         else:
             try:
