@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 import coker
@@ -26,6 +27,23 @@ def test_pytorch_lowering_preserves_dtype_device_and_autograd():
     torch.testing.assert_close(
         x.grad, torch.tensor([5.0, -5.0], dtype=x.dtype)
     )
+
+
+def test_pytorch_dot_moves_cpu_constant_to_cuda_value():
+    if not torch.cuda.is_available():
+        return
+    compiled = coker.function(
+        [VectorSpace("x", 2)],
+        lambda x: np.dot(np.array([2.0, 3.0]), x),
+        backend="pytorch",
+    )
+    x = torch.tensor([4.0, 5.0], device="cuda", requires_grad=True)
+    result = compiled(x)
+    result.backward()
+    torch.testing.assert_close(
+        result, torch.tensor(23.0, device="cuda", dtype=result.dtype)
+    )
+    torch.testing.assert_close(x.grad, torch.tensor([2.0, 3.0], device="cuda"))
 
 
 def test_pytorch_lowered_plan_matches_public_function_for_multiple_outputs():

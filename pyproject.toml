@@ -79,3 +79,11 @@ markers = [
 [tool.black]
 line-length = 79
 target-version = ["py310", "py311", "py312", "py313"]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
