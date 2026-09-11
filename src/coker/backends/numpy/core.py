@@ -13,6 +13,7 @@ from coker.algebra.ops import (
     NormOP,
     ReshapeOP,
     SelectOP,
+    invoke_callable,
 )
 
 from coker.backends.backend import (
@@ -111,11 +112,13 @@ impls = {
 }
 
 parameterised_impls = {
-    ConcatenateOP: lambda op, *x: np.concatenate(x, axis=op.axis),
+    EvaluateOP: lambda op, callable_value, *args: invoke_callable(
+        callable_value, *args
+    ),
+    ConcatenateOP: lambda op, *values: np.concatenate(values, axis=op.axis),
     ReshapeOP: lambda op, x: np.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
     SelectOP: lambda op, value: op.select(value),
-    EvaluateOP: lambda op, callable_value, *args: callable_value(*args),
 }
 
 

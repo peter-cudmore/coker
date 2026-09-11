@@ -1136,15 +1136,12 @@ class Function(SymbolicCallable):
 
     def _lift_closure(
         self, fn, space: FunctionSpace, ex: DanglingTracerError
-    ) -> "_BoundFunction":
+    ) -> "BoundCallable":
         """Re-trace ``fn`` with captured outer-tape tracers as inputs.
 
-        Creates a new inner tape with extra inputs for each captured
-        tracer, registers substitution rules so uses of the outer
-        tracers inside ``fn`` are rewritten to the corresponding inner
-        inputs during re-tracing, then wraps the result in a
-        ``_BoundFunction`` that supplies the captured values at call
-        time.
+        The resulting target accepts both its public arguments and the
+        captured values explicitly. ``BoundCallable`` then records the
+        public ``FunctionSpace`` and supplies those bound tail arguments.
         """
         captured = _find_closure_tracers(fn)
         if not captured:
@@ -1175,7 +1172,7 @@ class Function(SymbolicCallable):
             result = _normalise_result(output, inner_tape)
 
         inner_fn = Function(inner_tape, result, self.backend)
-        return _BoundFunction(inner_fn, unique_captured)
+        return BoundCallable(inner_fn, space, tuple(unique_captured))
 
     def call_inline(self, *args) -> Tuple[Tracer]:
         """Evaluate this function symbolically inside an active trace.
@@ -1295,26 +1292,40 @@ class Function(SymbolicCallable):
         return InequalityExpression(self, other, ones * np.inf, is_equal=False)
 
 
-class _BoundFunction(Function):
-    """A Function whose extra tail inputs are pre-bound to closures.
+class BoundCallable(SymbolicCallable):
+    """A public callable view over a target with explicit bound arguments."""
 
-    Created by :meth:`Function._lift_closure` when a Python callable
-    passed as a FunctionSpace argument closes over tracers from an
-    enclosing trace.
-    """
+    def __init__(
+        self,
+        target: Function,
+        public_space: FunctionSpace,
+        bound_arguments: tuple[Tracer, ...],
+    ) -> None:
+        if len(target.signature.inputs) != (
+            len(public_space.arguments) + len(bound_arguments)
+        ):
+            raise ValueError(
+                "Bound callable target signature does not match public and "
+                "bound arguments"
+            )
+        self.target = target
+        self.public_space = public_space
+        self.bound_arguments = bound_arguments
 
-    def __init__(self, inner_fn: Function, captured: List[Tracer]):
-        self.name = inner_fn.name
-        self.tape = inner_fn.tape
-        self.backend = inner_fn.backend
-        self._compiled = None
-        self.output = inner_fn.output
-        self.is_single = inner_fn.is_single
-        self._inner = inner_fn
-        self._captured = captured
+    def expand_call(self, *arguments: Any) -> tuple[Function, tuple[Any, ...]]:
+        if len(arguments) != len(self.public_space.arguments):
+            raise TypeError(
+                f"Expected {len(self.public_space.arguments)} arguments, "
+                f"got {len(arguments)}"
+            )
+        return self.target, (*arguments, *self.bound_arguments)
 
-    def __call__(self, *args):
-        return self._inner(*args, *self._captured)
+    def __call__(self, *arguments: Any) -> Any:
+        target, expanded_arguments = self.expand_call(*arguments)
+        return target(*expanded_arguments)
+
+    def lower(self, options=None) -> "LoweredFunction":
+        return self.target.lower(options)
 
 
 class InequalityExpression:

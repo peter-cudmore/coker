@@ -5,7 +5,12 @@ import casadi as ca
 import numpy as np
 
 import coker
-from coker.algebra.kernel import CallableReference, Tape, Tracer
+from coker.algebra.kernel import (
+    BoundCallable,
+    CallableReference,
+    Tape,
+    Tracer,
+)
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,
@@ -48,6 +53,9 @@ impls = {
 
 
 def casadi_eval(op, *args):
+    if isinstance(op, BoundCallable):
+        target, expanded_arguments = op.expand_call(*args)
+        return casadi_eval(target, *expanded_arguments)
     # Native references and solver proxies are invoked directly.
     if not isinstance(op, coker.Function):
         return op(*args)

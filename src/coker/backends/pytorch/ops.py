@@ -10,6 +10,7 @@ from coker.algebra.ops import (
     NormOP,
     ReshapeOP,
     SelectOP,
+    invoke_callable,
 )
 
 
@@ -104,7 +105,9 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: torch.reshape(x, shape=op.newshape),
     NormOP: _norm,
     SelectOP: lambda op, value: op.select(value),
-    EvaluateOP: lambda op, callable_value, *args: callable_value(*args),
+    EvaluateOP: lambda op, callable_value, *args: invoke_callable(
+        callable_value, *args
+    ),
 }
 
 
