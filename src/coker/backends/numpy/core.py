@@ -1,4 +1,4 @@
-from typing import List
+from typing import TYPE_CHECKING, List
 from enum import Enum
 
 import numpy as np
@@ -6,7 +6,7 @@ import scipy.sparse.csc
 import scipy as scp
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Tracer, Noop
+from coker.algebra.kernel import Function, Tracer, Noop
 from coker.algebra.ops import (
     ConcatenateOP,
     EvaluateOP,
@@ -21,6 +21,10 @@ from coker.backends.backend import (
     SolverParameters,
     register_backend,
 )
+from coker.backends.lowered import LoweringOptions
+
+if TYPE_CHECKING:
+    from coker.backends.numpy.lowered import NumpyLoweredFunction
 from coker.backends.numpy.optimisation import build_optimisation_problem
 
 
@@ -152,7 +156,9 @@ class NumpyBackend(Backend):
             return arg
         raise NotImplementedError(f"Dont know how to reshape {arg}")
 
-    def lower(self, function, options=None):
+    def lower(
+        self, function: Function, options: LoweringOptions | None = None
+    ) -> "NumpyLoweredFunction":
         from coker.backends.evaluator import _build_plan
         from coker.backends.numpy.lowered import NumpyLoweredFunction
 

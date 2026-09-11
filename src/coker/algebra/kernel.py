@@ -5,7 +5,18 @@ from collections import defaultdict
 import numpy as np
 import scipy as sp
 from abc import ABC, abstractmethod
-from typing import Callable, Union, Tuple, List, Optional, Set, Iterable, Any
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 from coker.algebra.dimensions import (
     Dimension,
@@ -27,6 +38,15 @@ from coker.algebra.tensor import SymbolicVector
 
 from coker.algebra.ops import numpy_atomics, numpy_composites
 
+
+if TYPE_CHECKING:
+    from coker.backends.lowered import (
+        FunctionOutputSpec,
+        FunctionSignature,
+        LoweredFunction,
+        LoweringOptions,
+        OutputShape,
+    )
 import threading
 
 scalar_types = (
@@ -878,21 +898,28 @@ class Function(SymbolicCallable):
     INLINE_SIZE = 10
 
     def __init__(
-        self, tape: Tape, outputs: List[Tracer], backend="coker", name=None
-    ):
+        self,
+        tape: Tape,
+        outputs: Tracer | None | Sequence[Tracer | None],
+        backend: str = "coker",
+        name: str | None = None,
+    ) -> None:
         self.name = name
         self.tape = tape
         self.backend = backend
-        self._lowered_cache = {}
+        self._lowered_cache: dict[
+            tuple[int, "LoweringOptions"], "LoweredFunction"
+        ] = {}
+        self.output: list[Tracer | None]
         if isinstance(outputs, Tracer) or outputs is None:
             self.output = [outputs]
             self.is_single = True
         else:
-            self.output = outputs
+            self.output = list(outputs)
             self.is_single = False
 
     @property
-    def arguments(self):
+    def arguments(self) -> list[str]:
         return self.tape.input_names.copy()
 
     def __repr__(self):
@@ -916,7 +943,7 @@ class Function(SymbolicCallable):
             ],
         )
 
-    def input_spaces(self):
+    def input_spaces(self) -> list[Scalar | VectorSpace | FunctionSpace]:
         """Return the argument spaces of this function as a list.
 
         Returns:
@@ -927,9 +954,8 @@ class Function(SymbolicCallable):
         """
         return list(self.tape.list_inputs())
 
-    def input_shape(self) -> Tuple[Dimension, ...]:
-        """Return each input argument shape as a
-        :class:`~coker.algebra.dimensions.Dimension` tuple."""
+    def input_shape(self) -> tuple[Dimension | FunctionSpace | None, ...]:
+        """Return each input argument shape in declaration order."""
         special_inputs = {
             Tape.NONE: None,
             Tape.MAP_TO_NONE: Noop().cast_to_function_space(None),
@@ -940,13 +966,12 @@ class Function(SymbolicCallable):
             for i in self.tape.input_indicies
         )
 
-    def output_shape(self) -> Tuple[Dimension, ...]:
-        """Return each output shape as a
-        :class:`~coker.algebra.dimensions.Dimension` tuple."""
+    def output_shape(self) -> tuple[Dimension | FunctionSpace | None, ...]:
+        """Return each output shape in declaration order."""
         return tuple(o.dim if o is not None else None for o in self.output)
 
     @property
-    def signature(self):
+    def signature(self) -> "FunctionSignature":
         """Return the ordered input and output declaration for lowering."""
         if hasattr(self, "_native_signature"):
             return self._native_signature
@@ -968,7 +993,14 @@ class Function(SymbolicCallable):
         )
 
     @classmethod
-    def from_native(cls, native, signature, *, backend: str, name=None):
+    def from_native(
+        cls,
+        native: Callable[..., Any],
+        signature: "FunctionSignature",
+        *,
+        backend: str,
+        name: str | None = None,
+    ) -> "Function":
         """Import a backend-native callable as a traceable Coker function.
 
         Each declared non-``None`` result is represented by an
@@ -1000,9 +1032,16 @@ class Function(SymbolicCallable):
 
     @staticmethod
     def _append_native_outputs(
-        tape, native, backend, input_spaces, output_specs, args
-    ):
-        def result_output_dimension(shape):
+        tape: Tape,
+        native: Callable[..., Any],
+        backend: str,
+        input_spaces: Sequence[Scalar | VectorSpace | FunctionSpace],
+        output_specs: Sequence["FunctionOutputSpec"],
+        args: Sequence[Tracer],
+    ) -> list[Tracer | None]:
+        def result_output_dimension(
+            shape: "OutputShape",
+        ) -> Dimension | FunctionSpace | None:
             if shape is None or isinstance(shape, (Dimension, FunctionSpace)):
                 return shape
             if isinstance(shape, Scalar):
@@ -1055,7 +1094,9 @@ class Function(SymbolicCallable):
             for output_index, output_spec in enumerate(output_specs)
         ]
 
-    def _call_native_in_trace(self, args, outer_tape):
+    def _call_native_in_trace(
+        self, args: Sequence[Tracer], outer_tape: Tape
+    ) -> Tracer | tuple[Tracer | None, ...]:
         if outer_tape.backend != self.backend:
             raise RuntimeError(
                 "Cannot compose native callable for backend "
@@ -1152,7 +1193,7 @@ class Function(SymbolicCallable):
             return output[0]
         return output
 
-    def __call__(self, *args):
+    def __call__(self, *args: Any) -> Any:
         assert len(args) == len(self.tape.input_indicies), (
             f"Expected {len(self.tape.input_indicies)} arguments but got "
             f"{len(args)}"
@@ -1188,7 +1229,9 @@ class Function(SymbolicCallable):
             return output[0]
         return tuple(output)
 
-    def lower(self, options=None):
+    def lower(
+        self, options: "LoweringOptions | None" = None
+    ) -> "LoweredFunction":
         """Return a cached backend-specific executable lowering handle."""
         from coker.backends import get_backend_by_name
         from coker.backends.lowered import LoweringOptions

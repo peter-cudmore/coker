@@ -1,6 +1,14 @@
 """CasADi lowering handles retaining the native function when available."""
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
+
+import casadi as ca
+
+if TYPE_CHECKING:
+    from coker.algebra.kernel import Function
+    from coker.backends.backend import Backend
+    from coker.backends.lowered import FunctionSignature
 
 import numpy as np
 
@@ -10,31 +18,36 @@ from coker.backends.lowered import LoweredFunction, LoweringCapabilities
 class CasadiLoweredFunction(LoweredFunction):
     """Execute a native ``ca.Function`` or the required evaluate fallback."""
 
-    def __init__(self, backend, function, ca_function=None):
+    def __init__(
+        self,
+        backend: "Backend",
+        function: "Function",
+        ca_function: ca.Function | None = None,
+    ) -> None:
         self._backend = backend
         self._function = function
         self._ca_function = ca_function
 
     @property
-    def backend_name(self):
+    def backend_name(self) -> str:
         return self._backend.name
 
     @property
-    def signature(self):
+    def signature(self) -> "FunctionSignature":
         return self._function.signature
 
     @property
-    def capabilities(self):
+    def capabilities(self) -> LoweringCapabilities:
         return LoweringCapabilities(
             True, True, False, False, False, False, False, True
         )
 
     @property
-    def ca_function(self):
+    def ca_function(self) -> ca.Function | None:
         """Native CasADi function, or ``None`` for an evaluate fallback."""
         return self._ca_function
 
-    def execute(self, inputs: Sequence):
+    def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
         if self._ca_function is None:
             return tuple(self._backend.evaluate(self._function, list(inputs)))
         dm_inputs = [

@@ -41,3 +41,17 @@ def test_casadi_function_space_and_none_inputs_use_evaluate_fallback():
     values = lowered.execute([inner, None])
     assert values == (6.0, None)
     assert compiled(inner, None) == (6.0, None)
+
+
+def test_casadi_none_output_uses_evaluate_fallback():
+    compiled = function(
+        [Scalar("x")],
+        lambda x: (x + 1.0, None),
+        backend="casadi",
+    )
+
+    lowered = compiled.lower()
+
+    assert lowered.ca_function is None
+    assert lowered.execute([2.0]) == (3.0, None)
+    assert compiled(2.0) == (3.0, None)

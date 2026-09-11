@@ -1,9 +1,16 @@
 from abc import ABCMeta, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from importlib.metadata import entry_points
-from typing import Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List
+
+if TYPE_CHECKING:
+    from coker.backends.lowered import (
+        LoweredFunction,
+        LoweringOptions,
+    )
 
 from coker.algebra.kernel import Function, Tracer
+from coker.algebra.dimensions import Dimension
 
 from coker.dynamics import VariationalProblem, SolverParameters
 
@@ -11,6 +18,7 @@ ArrayLike = Any
 
 
 class Backend(metaclass=ABCMeta):
+    name: str
 
     @abstractmethod
     def to_numpy_array(self, array) -> ArrayLike:
@@ -23,7 +31,7 @@ class Backend(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def reshape(self, array: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
+    def reshape(self, array: ArrayLike, shape: Dimension) -> ArrayLike:
         pass
 
     @abstractmethod
@@ -76,10 +84,12 @@ class Backend(metaclass=ABCMeta):
 
         return post
 
-    def evaluate(self, function: Function, inputs: ArrayLike):
+    def evaluate(
+        self, function: Function, inputs: Sequence[Any]
+    ) -> list[Any | None]:
         from coker.backends.evaluator import evaluate_inner
 
-        workspace = {}
+        workspace: dict[int, Any] = {}
         return evaluate_inner(
             function.tape, inputs, function.output, self, workspace
         )
@@ -96,7 +106,11 @@ class Backend(metaclass=ABCMeta):
             "Evaluating integrals is not implemented for this backend"
         )
 
-    def lower(self, function: Function, options=None):
+    def lower(
+        self,
+        function: Function,
+        options: "LoweringOptions | None" = None,
+    ) -> "LoweredFunction":
         """Return a common evaluate-based lowering handle.
 
         Backends with a reusable compiled representation override this method.
@@ -105,7 +119,9 @@ class Backend(metaclass=ABCMeta):
 
         return EvaluatedLoweredFunction(self, function, function.signature)
 
-    def restore_public_outputs(self, function: Function, outputs):
+    def restore_public_outputs(
+        self, function: Function, outputs: Sequence[Any | None]
+    ) -> tuple[Any | None, ...]:
         """Restore lowered results for the established ``Function`` API.
 
         Lowered handles retain backend-native values. Backends that
