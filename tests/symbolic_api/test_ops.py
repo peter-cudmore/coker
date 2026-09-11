@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.sparse
 
 from coker import (
     function,
@@ -34,6 +35,20 @@ def test_repeated_matrix_product_reuses_constant_and_operation_nodes():
 
     assert y.index == z.index
     assert len(tape) == 3
+
+
+def test_tape_stores_dense_and_sparse_matrix_constants_by_sparsity():
+    tape = Tape()
+    dense_value = np.zeros((10, 10))
+    dense_value.flat[:31] = 1
+    sparse_value = np.zeros((10, 10))
+    sparse_value.flat[:30] = 1
+
+    dense = tape.insert_value(dense_value)
+    sparse = tape.insert_value(sparse_value)
+
+    assert isinstance(tape.nodes[dense.index][1], np.ndarray)
+    assert scipy.sparse.issparse(tape.nodes[sparse.index][1])
 
 
 def test_symbolic_scalar(backend):
