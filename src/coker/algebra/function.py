@@ -344,11 +344,7 @@ class Function(SymbolicCallable):
         else:
             # Concrete evaluation: lower once per backend/options combination.
             lowered = self.lower()
-            outputs = lowered.execute(args)
-            backend = get_backend_by_name(
-                lowered.backend_name, set_current=False
-            )
-            output = backend.restore_public_outputs(self, outputs)
+            output = lowered.restore_public_outputs(lowered.execute(args))
 
         if self.is_single:
             return output[0]

@@ -103,27 +103,6 @@ def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
     raise ValueError(f"Cannot convert {array} to a numpy array")
 
 
-def restore_public_outputs(
-    function: Function, outputs: Sequence[Any | None]
-) -> tuple[Any | None, ...]:
-    """Convert CasADi lowered values at the public Coker boundary."""
-    restored: list[Any | None] = []
-    for value, output in zip(outputs, function.output):
-        if value is None or output is None:
-            restored.append(None)
-            continue
-        try:
-            numpy_value = to_numpy_array(value)
-        except ValueError:
-            restored.append(value)
-            continue
-        if output.dim.is_scalar():
-            restored.append(float(np.asarray(numpy_value).reshape(-1)[0]))
-        else:
-            restored.append(np.asarray(numpy_value).reshape(output.shape))
-    return tuple(restored)
-
-
 class CasadiBackend(Backend):
     name = "casadi"
 
@@ -242,11 +221,6 @@ class CasadiBackend(Backend):
         return CasadiLoweredFunction(
             self, function, ca.Function("f", ca_inputs, ca_outputs)
         )
-
-    def restore_public_outputs(
-        self, function: Function, outputs: Sequence[Any | None]
-    ) -> tuple[Any | None, ...]:
-        return restore_public_outputs(function, outputs)
 
     def evaluate(
         self, function: Function, inputs: Sequence[Any]

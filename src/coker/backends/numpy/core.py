@@ -5,17 +5,10 @@ import numpy as np
 import scipy.sparse.csc
 import scipy as scp
 
-from coker.algebra import Dimension, OP
+from coker.algebra import Dimension
 from coker.algebra.function import Function, create_function_from_native
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
-from coker.algebra.ops import (
-    ConcatenateOP,
-    NormOP,
-    ReshapeOP,
-    SelectOP,
-    invoke_callable,
-)
 
 from coker.backends.backend import (
     ArrayLike,
@@ -26,6 +19,12 @@ from coker.backends.backend import (
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from coker.backends.numpy.lowered import NumpyLoweredFunction
+from coker.backends.numpy.evaluator import (
+    NumpyEvaluator,
+    call_parameterised_op,
+    impls,
+    parameterised_impls,
+)
 from coker.backends.numpy.optimisation import build_optimisation_problem
 
 
@@ -52,74 +51,6 @@ scalar_types = (
     bool,
     np.bool_,
 )
-
-
-def div(num, den):
-    if isinstance(den, Tracer):
-        return num / den
-    with np.errstate(divide="ignore", invalid="ignore"):
-        result = np.divide(num, den)
-    try:
-        if np.isscalar(den) and den == 0:
-            if np.isscalar(num):
-                return float("nan")
-            return np.full_like(result, np.nan, dtype=float)
-        zero_mask = den == 0
-    except ValueError:
-        return result
-    if np.isscalar(zero_mask):
-        return result
-    if np.any(zero_mask):
-        result = np.asarray(result, dtype=float)
-        result[zero_mask] = np.nan
-    return result
-
-
-impls = {
-    OP.ADD: np.add,
-    OP.SUB: np.subtract,
-    OP.MUL: np.multiply,
-    OP.DIV: div,
-    OP.MATMUL: np.matmul,
-    OP.SIN: np.sin,
-    OP.COS: np.cos,
-    OP.TAN: np.tan,
-    OP.EXP: np.exp,
-    OP.PWR: np.power,
-    OP.INT_PWR: np.power,
-    OP.ARCCOS: np.arccos,
-    OP.ARCSIN: np.arcsin,
-    OP.DOT: np.dot,
-    OP.CROSS: np.cross,
-    OP.TRANSPOSE: np.transpose,
-    OP.NEG: np.negative,
-    OP.SQRT: np.sqrt,
-    OP.ABS: np.abs,
-    OP.ARCTAN2: np.arctan2,
-    OP.EQUAL: np.equal,
-    OP.LESS_EQUAL: np.less_equal,
-    OP.LESS_THAN: np.less,
-    OP.CASE: lambda cond, t, f: t if cond else f,
-    OP.LOG: np.log,
-    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
-}
-
-parameterised_impls = {
-    ConcatenateOP: lambda op, *values: np.concatenate(values, axis=op.axis),
-    ReshapeOP: lambda op, x: np.reshape(x, shape=op.newshape),
-    NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
-    SelectOP: lambda op, value: op.select(value),
-}
-
-
-def call_parameterised_op(op, *args):
-    kls = op.__class__
-
-    result = parameterised_impls[kls](op, *args)
-
-    return result
 
 
 class NumpyBackend(Backend):
@@ -151,11 +82,14 @@ class NumpyBackend(Backend):
     def lower(
         self, function: Function, options: LoweringOptions | None = None
     ) -> NumpyLoweredFunction:
-        from coker.backends.evaluator import _build_plan
-
         return NumpyLoweredFunction(
-            self, function, _build_plan(function.tape, self)
+            self,
+            function,
+            self.get_evaluator().build_plan(function.tape),
         )
+
+    def get_evaluator(self) -> NumpyEvaluator:
+        return NumpyEvaluator(self)
 
     def import_function(
         self,
@@ -168,31 +102,6 @@ class NumpyBackend(Backend):
         return create_function_from_native(
             implementation, signature, backend=self.name, name=name
         )
-
-    def resolve_fn(self, op):
-        if op in impls:
-            return impls[op]
-        if isinstance(op, tuple(parameterised_impls.keys())):
-            kls = op.__class__
-            _op = op
-            return lambda *args: parameterised_impls[kls](_op, *args)
-        raise NotImplementedError(f"{op} is not implemented")
-
-    def resolve_post_fn(self, dim):
-        # For scalar outputs, reshape extracts the Python scalar from the
-        # array. Tracers must pass through unchanged during function
-        # composition tracing. Non-scalar outputs already have the
-        # correct shape.
-        if dim.is_scalar():
-            _dim = dim
-
-            def scalar_post(v):
-                if isinstance(v, Tracer):
-                    return v
-                return self.reshape(v, _dim)
-
-            return scalar_post
-        return lambda v: v
 
     def call(self, op, *args) -> ArrayLike:
 
