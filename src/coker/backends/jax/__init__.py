@@ -11,6 +11,7 @@ from coker.algebra.ops import (
     NormOP,
     ReshapeOP,
     SelectOP,
+    invoke_callable,
 )
 
 from coker.backends.backend import ArrayLike, Backend, register_backend
@@ -81,7 +82,9 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: jnp.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: jnp.linalg.norm(x, ord=op.ord),
     SelectOP: lambda op, value: op.select(value),
-    EvaluateOP: lambda op, callable_value, *args: callable_value(*args),
+    EvaluateOP: lambda op, callable_value, *args: invoke_callable(
+        callable_value, *args
+    ),
 }
 
 

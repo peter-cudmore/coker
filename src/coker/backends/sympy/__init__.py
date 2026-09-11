@@ -9,6 +9,7 @@ from coker.algebra.ops import (
     NormOP,
     ReshapeOP,
     SelectOP,
+    invoke_callable,
 )
 from coker.algebra.dimensions import Dimension
 from coker.backends.sympy.shape import reshape
@@ -151,7 +152,9 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: reshape(x, dim=Dimension(op.newshape)),
     NormOP: lambda op, x: sympy_norm(x, ord=op.ord),
     SelectOP: lambda op, value: op.select(value),
-    EvaluateOP: lambda op, callable_value, *args: callable_value(*args),
+    EvaluateOP: lambda op, callable_value, *args: invoke_callable(
+        callable_value, *args
+    ),
 }
 
 

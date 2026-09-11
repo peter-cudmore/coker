@@ -145,6 +145,16 @@ def normalize_evaluate_result(
     return np.concatenate([np.asarray(result).reshape(-1) for result in value])
 
 
+def invoke_callable(callable_value: Any, *arguments: Any) -> Any:
+    """Invoke a callable, expanding explicit bound arguments first."""
+    from coker.algebra.kernel import BoundCallable
+
+    if isinstance(callable_value, BoundCallable):
+        target, expanded_arguments = callable_value.expand_call(*arguments)
+        return target(*expanded_arguments)
+    return callable_value(*arguments)
+
+
 class ConcatenateOP(Operator):
     __slots__ = ("axis",)
 
