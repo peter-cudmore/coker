@@ -42,14 +42,6 @@ class NumpySolverParameters(SolverParameters):
         self.solver = solver
 
 
-def to_array(value, shape):
-
-    if isinstance(value, np.ndarray) and value.shape == shape:
-        return value
-
-    raise NotImplementedError
-
-
 scalar_types = (
     np.float32,
     np.float64,
@@ -132,9 +124,6 @@ def call_parameterised_op(op, *args):
 
 
 class NumpyBackend(Backend):
-    def __init__(self, *args, **kwargs):
-        super(NumpyBackend, self).__init__(*args, **kwargs)
-
     def to_numpy_array(self, array) -> ArrayLike:
         return array
 

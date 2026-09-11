@@ -37,7 +37,8 @@ class NumpyLoweredFunction(LoweredFunction):
     @property
     def capabilities(self) -> LoweringCapabilities:
         return LoweringCapabilities(
-            True, True, False, False, False, False, False, True
+            eager_execution=True,
+            symbolic_execution=True,
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:

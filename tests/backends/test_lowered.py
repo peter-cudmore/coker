@@ -15,21 +15,17 @@ from coker.backends.lowered import (
 class BackendCase:
     name: str
     autograd: bool
-    module_adapter: bool
     optional_module: str | None = None
 
 
 BACKENDS = (
-    BackendCase("numpy", autograd=False, module_adapter=False),
+    BackendCase("numpy", autograd=False),
     BackendCase(
         "casadi",
         autograd=False,
-        module_adapter=False,
         optional_module="casadi",
     ),
-    BackendCase(
-        "pytorch", autograd=True, module_adapter=True, optional_module="torch"
-    ),
+    BackendCase("pytorch", autograd=True, optional_module="torch"),
 )
 
 
@@ -43,11 +39,6 @@ def test_lowering_capabilities_default_to_unsupported():
         eager_execution=False,
         symbolic_execution=False,
         autograd=False,
-        serializable_artifact=False,
-        caller_owned_workspace=False,
-        supports_prepare=False,
-        supports_module_adapter=False,
-        thread_safe=False,
     )
 
 
@@ -127,7 +118,7 @@ def test_lowered_none_output_policy(case):
 
 
 @pytest.mark.parametrize("case", BACKENDS)
-def test_lowered_cache_options_prepare_and_capabilities(case):
+def test_lowered_cache_options_and_capabilities(case):
     _require_backend(case)
     backend_name = case.name
     compiled = function(
@@ -153,20 +144,13 @@ def test_lowered_cache_options_prepare_and_capabilities(case):
 
     assert first is compiled.lower(default_options)
     assert first is not compiled.lower(explicit_options)
-    first.prepare()
-    first.prepare()
-    first.close()
-    first.close()
 
     capabilities = first.capabilities
-    assert capabilities.eager_execution is True
-    assert capabilities.symbolic_execution is True
-    assert capabilities.autograd is case.autograd
-    assert capabilities.serializable_artifact is False
-    assert capabilities.caller_owned_workspace is False
-    assert capabilities.supports_prepare is False
-    assert capabilities.supports_module_adapter is case.module_adapter
-    assert capabilities.thread_safe is True
+    assert capabilities == LoweringCapabilities(
+        eager_execution=True,
+        symbolic_execution=True,
+        autograd=case.autograd,
+    )
 
 
 @pytest.mark.parametrize("case", BACKENDS)

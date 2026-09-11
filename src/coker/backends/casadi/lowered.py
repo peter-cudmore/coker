@@ -39,7 +39,8 @@ class CasadiLoweredFunction(LoweredFunction):
     @property
     def capabilities(self) -> LoweringCapabilities:
         return LoweringCapabilities(
-            True, True, False, False, False, False, False, True
+            eager_execution=True,
+            symbolic_execution=True,
         )
 
     @property

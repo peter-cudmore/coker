@@ -51,16 +51,11 @@ class LoweringOptions:
 
 @dataclass(frozen=True)
 class LoweringCapabilities:
-    """Declared execution and lifecycle properties of a lowered handle."""
+    """Execution semantics exposed by a lowered handle."""
 
     eager_execution: bool = False
     symbolic_execution: bool = False
     autograd: bool = False
-    serializable_artifact: bool = False
-    caller_owned_workspace: bool = False
-    supports_prepare: bool = False
-    supports_module_adapter: bool = False
-    thread_safe: bool = False
 
 
 class LoweredFunction(ABC):
@@ -89,9 +84,3 @@ class LoweredFunction(ABC):
         """Execute positional inputs, unwrapping a single declared output."""
         outputs = self.execute(inputs)
         return outputs[0] if len(outputs) == 1 else outputs
-
-    def prepare(self) -> None:
-        """Perform optional deferred setup; eager handles need no work."""
-
-    def close(self) -> None:
-        """Release optional host resources without touching caller values."""

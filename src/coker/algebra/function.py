@@ -466,10 +466,6 @@ class InequalityExpression:
 
 def _normalise_result(result, tape: Tape):
     """Normalise an implementation's return value into Tracer(s) on tape."""
-    if isinstance(result, np.ndarray):
-        result = strip_symbols_from_array(result)
-    if isinstance(result, SymbolicVector):
-        result = result.collapse()
 
     def wrap(v):
         if isinstance(v, (list, tuple)):

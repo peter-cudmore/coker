@@ -179,7 +179,6 @@ class SympyLoweredFunction(LoweredFunction):
         return LoweringCapabilities(
             eager_execution=True,
             symbolic_execution=True,
-            thread_safe=True,
         )
 
     def execute(self, inputs) -> tuple:
