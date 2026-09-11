@@ -47,6 +47,22 @@ def test_native_result_bundle_preserves_absent_outputs():
     assert imported(3.0) == (4.0, None)
 
 
+def test_native_result_bundle_rejects_wrong_result_count():
+    signature = FunctionSignature(
+        inputs=(FunctionInputSpec("x", Scalar("x")),),
+        outputs=(
+            FunctionOutputSpec("incremented", Scalar("incremented")),
+            FunctionOutputSpec("doubled", Scalar("doubled")),
+        ),
+    )
+    imported = Function.from_native(
+        lambda x: (x + 1,), signature, backend="numpy"
+    )
+
+    with pytest.raises(ValueError, match="returned 1 results; expected 2"):
+        imported(3.0)
+
+
 def test_native_function_space_excludes_absent_outputs():
     signature = FunctionSignature(
         inputs=(FunctionInputSpec("x", Scalar("x")),),

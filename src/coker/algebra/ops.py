@@ -124,10 +124,36 @@ def normalize_evaluate_result(
     value: Any,
     dimension: Dimension | FunctionSpace | ResultBundleDimension,
 ) -> Any:
-    """Apply the tape-declared result policy for ``OP.EVALUATE``."""
+    """Validate a native result against the tape-declared result dimension."""
     if isinstance(dimension, ResultBundleDimension):
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        if len(values) != len(dimension.outputs):
+            raise ValueError(
+                f"Native callable returned {len(values)} results; expected "
+                f"{len(dimension.outputs)}"
+            )
+        for index, (result, output_dimension) in enumerate(
+            zip(values, dimension.outputs)
+        ):
+            if (result is None) != (output_dimension is None):
+                raise ValueError(
+                    f"Native callable result {index} does not match its "
+                    "declared absence"
+                )
         return value
-    return np.concatenate([np.asarray(result).reshape(-1) for result in value])
+
+    if isinstance(value, (list, tuple)):
+        value = np.concatenate(
+            [np.asarray(result).reshape(-1) for result in value]
+        )
+    if isinstance(dimension, Dimension):
+        result_array = np.asarray(value)
+        if result_array.size != dimension.flat():
+            raise ValueError(
+                "Native callable result has "
+                f"{result_array.size} elements; expected {dimension.flat()}"
+            )
+    return value
 
 
 def invoke_callable(callable_value: Any, *arguments: Any) -> Any:
