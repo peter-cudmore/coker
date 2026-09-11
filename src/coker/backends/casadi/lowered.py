@@ -1,18 +1,20 @@
 """CasADi lowering handles retaining the native function when available."""
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import casadi as ca
 
-if TYPE_CHECKING:
-    from coker.algebra.kernel import Function
-    from coker.backends.backend import Backend
-    from coker.backends.lowered import FunctionSignature
 
 import numpy as np
 
-from coker.backends.lowered import LoweredFunction, LoweringCapabilities
+from coker.algebra.function import Function
+from coker.backends.backend import Backend
+from coker.backends.lowered import (
+    FunctionSignature,
+    LoweredFunction,
+    LoweringCapabilities,
+)
 
 
 class CasadiLoweredFunction(LoweredFunction):
@@ -20,8 +22,8 @@ class CasadiLoweredFunction(LoweredFunction):
 
     def __init__(
         self,
-        backend: "Backend",
-        function: "Function",
+        backend: Backend,
+        function: Function,
         ca_function: ca.Function | None = None,
     ) -> None:
         self._backend = backend
@@ -33,7 +35,7 @@ class CasadiLoweredFunction(LoweredFunction):
         return self._backend.name
 
     @property
-    def signature(self) -> "FunctionSignature":
+    def signature(self) -> FunctionSignature:
         return self._function.signature
 
     @property

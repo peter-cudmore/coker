@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
@@ -73,13 +75,13 @@ class Function(SymbolicCallable):
         outputs: Tracer | None | Sequence[Tracer | None],
         backend: str = "numpy",
         name: str | None = None,
-        signature: "FunctionSignature | None" = None,
+        signature: FunctionSignature | None = None,
     ) -> None:
         self.name = name
         self.tape = tape
         self.backend = backend
         self._lowered_cache: dict[
-            tuple[int, "LoweringOptions"], "LoweredFunction"
+            tuple[int, LoweringOptions], LoweredFunction
         ] = {}
         self.output: list[Tracer | None]
         if isinstance(outputs, Tracer) or outputs is None:
@@ -160,11 +162,11 @@ class Function(SymbolicCallable):
         native: Callable[..., Any],
         backend: str,
         input_spaces: Sequence[Scalar | VectorSpace | FunctionSpace],
-        output_specs: Sequence["FunctionOutputSpec"],
+        output_specs: Sequence[FunctionOutputSpec],
         args: Sequence[Tracer],
     ) -> list[Tracer | None]:
         def result_output_dimension(
-            shape: "OutputShape",
+            shape: OutputShape,
         ) -> Dimension | FunctionSpace | None:
             if shape is None or isinstance(shape, (Dimension, FunctionSpace)):
                 return shape
@@ -262,7 +264,7 @@ class Function(SymbolicCallable):
 
     def _lift_closure(
         self, fn, space: FunctionSpace, ex: DanglingTracerError
-    ) -> "BoundCallable":
+    ) -> BoundCallable:
         """Re-trace ``fn`` with captured outer-tape tracers as inputs.
 
         The resulting target accepts both its public arguments and the
@@ -352,9 +354,7 @@ class Function(SymbolicCallable):
             return output[0]
         return tuple(output)
 
-    def lower(
-        self, options: "LoweringOptions | None" = None
-    ) -> "LoweredFunction":
+    def lower(self, options: LoweringOptions | None = None) -> LoweredFunction:
         """Return a cached backend-specific executable lowering handle."""
 
         options = LoweringOptions() if options is None else options
@@ -447,7 +447,7 @@ class BoundCallable(SymbolicCallable):
         target, expanded_arguments = self.expand_call(*arguments)
         return target(*expanded_arguments)
 
-    def lower(self, options=None) -> "LoweredFunction":
+    def lower(self, options=None) -> LoweredFunction:
         return self.target.lower(options)
 
 
@@ -536,7 +536,7 @@ def function(
 
 def create_function_from_native(
     native: Callable[..., Any],
-    signature: "FunctionSignature",
+    signature: FunctionSignature,
     *,
     backend: str,
     name: str | None = None,

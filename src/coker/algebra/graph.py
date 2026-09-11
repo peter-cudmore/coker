@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import weakref
 from collections import defaultdict
@@ -70,7 +72,7 @@ def get_dim_by_class(arg):
 
 
 class DanglingTracerError(Exception):
-    def __init__(self, *args, tracers: List["Tracer"]):
+    def __init__(self, *args, tracers: List[Tracer]):
         super().__init__(*args)
         self.tracers = tracers
 
@@ -99,7 +101,7 @@ class TapeInner:
     CONSTANT_REF = -2
     FUNCTION_REF = -3
 
-    def __init__(self, tape_ref: "Tape"):
+    def __init__(self, tape_ref: Tape):
         self._nodes = []
         self._constants = []
         self._constant_hashmap = {}
@@ -213,7 +215,7 @@ class _CallableArchiveEntry:
 class CallableReference:
     """A reference to a callable entry owned by a tape."""
 
-    def __init__(self, tape: "Tape", archive_index: int):
+    def __init__(self, tape: Tape, archive_index: int):
         self._tape = weakref.ref(tape)
         self._archive_index = archive_index
 
@@ -248,7 +250,7 @@ class Tape:
         self._substitutions: dict = {}
         self._node_hashmap: dict[int, int] = {}
 
-    def add_substitution(self, foreign: "Tracer", local: "Tracer"):
+    def add_substitution(self, foreign: Tracer, local: Tracer):
         """Register a rewrite rule for substituting a traced value.
 
         Any occurrence of ``foreign`` in appended args is replaced by
@@ -297,7 +299,7 @@ class Tape:
             )
         return CallableReference(self, archive_index)
 
-    def find_dependents(self, tracer: "Tracer") -> Set[int]:
+    def find_dependents(self, tracer: Tracer) -> Set[int]:
         if tracer is None or tracer is Noop():
             return set()
 
@@ -315,7 +317,7 @@ class Tape:
                         result.add(index + i)
         return result
 
-    def depends_on(self, expression: "Tracer", dependency: "Tracer") -> bool:
+    def depends_on(self, expression: Tracer, dependency: Tracer) -> bool:
         """Return whether ``expression`` is structurally derived from
         ``dependency``.
 
@@ -434,7 +436,7 @@ class Tape:
         self._node_hashmap[node_hash] = idx
         return Tracer(self, idx)
 
-    def insert_function_value(self, reference: CallableReference) -> "Tracer":
+    def insert_function_value(self, reference: CallableReference) -> Tracer:
         node_hash = hash((OP.FUNCTION_VALUE, reference._archive_index))
         if node_hash in self._node_hashmap:
             return Tracer(self, self._node_hashmap[node_hash])
@@ -521,7 +523,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def tape(self):
         return self._tape()
 
-    def _active_tape(self) -> "Tape":
+    def _active_tape(self) -> Tape:
         """Return the tape that operations on this Tracer should use.
 
         During tracing the current TraceContext tape is returned so that
@@ -533,7 +535,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         ctx = TraceContext.get_local_tape()
         return ctx if ctx is not None else self.tape
 
-    def _emit(self, op: OP, *args) -> "Tracer":
+    def _emit(self, op: OP, *args) -> Tracer:
         """Append op to the active tape and return the resulting Tracer."""
         tape = self._active_tape()
         return Tracer(tape, tape.append(op, *args))
@@ -560,7 +562,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             return False
         return True
 
-    def as_halfplane_bound(self) -> Tuple["Tracer", float, float]:
+    def as_halfplane_bound(self) -> Tuple[Tracer, float, float]:
         op, lhs, rhs = self.tape.nodes[self.index]
         bounds = {
             OP.EQUAL: (-1e-9, 1e-9),
@@ -1017,7 +1019,7 @@ _local.trace = []
 
 
 class TraceContext:
-    def __init__(self, tape: "Tape | None" = None, backend: str | None = None):
+    def __init__(self, tape: Tape | None = None, backend: str | None = None):
         self._tape = tape
         self._backend = backend
 

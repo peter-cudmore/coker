@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
     from coker.algebra.function import Function
-    from coker.backends.lowered import LoweredFunction, LoweringOptions
     from coker.dynamics.model import VariationalProblem
 
+from coker.backends.lowered import LoweredFunction, LoweringOptions
 from coker.algebra.graph import Tracer
 from coker.algebra.dimensions import Dimension
 from coker.interfaces import SolverParameters
@@ -55,7 +55,7 @@ class Backend(metaclass=ABCMeta):
 
     def create_variational_solver(
         self, problem: VariationalProblem
-    ) -> "VariationalSolver":
+    ) -> VariationalSolver:
         raise NotImplementedError
 
     def resolve_fn(self, op):
@@ -110,23 +110,9 @@ class Backend(metaclass=ABCMeta):
     def lower(
         self,
         function: Function,
-        options: "LoweringOptions | None" = None,
-    ) -> "LoweredFunction":
+        options: LoweringOptions | None = None,
+    ) -> LoweredFunction:
         """Return this backend's concrete lowered execution handle."""
-
-    def import_function(
-        self,
-        implementation: Callable[..., Any],
-        signature,
-        *,
-        name: str | None = None,
-    ) -> Function:
-        """Import this backend's callable as a traceable Coker function."""
-        from coker.algebra.kernel import create_function_from_native
-
-        return create_function_from_native(
-            implementation, signature, backend=self.name, name=name
-        )
 
     def restore_public_outputs(
         self, function: Function, outputs: Sequence[Any | None]

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from coker.algebra import Dimension
-from coker.algebra.function import Function
+from coker.algebra.function import Function, create_function_from_native
 from coker.algebra.graph import Tracer
 from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import FunctionSignature, LoweringOptions
@@ -127,6 +127,18 @@ class PytorchBackend(Backend):
         raise NotImplementedError(
             "optimisation problem construction is not implemented for the "
             "pytorch backend"
+        )
+
+    def import_function(
+        self,
+        implementation,
+        signature: FunctionSignature,
+        *,
+        name: str | None = None,
+    ) -> Function:
+        """Import a PyTorch-compatible callable as a Coker function."""
+        return create_function_from_native(
+            implementation, signature, backend=self.name, name=name
         )
 
     def import_module(
