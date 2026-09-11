@@ -1040,45 +1040,6 @@ class Function(SymbolicCallable):
         """Return each output shape in declaration order."""
         return tuple(o.dim if o is not None else None for o in self.output)
 
-    @classmethod
-    def from_native(
-        cls,
-        native: Callable[..., Any],
-        signature: "FunctionSignature",
-        *,
-        backend: str,
-        name: str | None = None,
-    ) -> "Function":
-        """Import a backend-native callable as a traceable Coker function.
-
-        Each declared non-``None`` result is represented by an
-        ``OP.EVALUATE`` node. Native code is invoked only by a compatible
-        concrete backend; tracing an imported function appends equivalent nodes
-        to the outer tape.
-        """
-
-        from coker.backends.lowered import FunctionSignature
-
-        if not isinstance(signature, FunctionSignature):
-            raise TypeError("signature must be a FunctionSignature")
-
-        input_spaces = [spec.space for spec in signature.inputs]
-        with TraceContext(backend=backend) as tape:
-            args = [tape.input(space) for space in input_spaces]
-            outputs = cls._append_native_outputs(
-                tape, native, backend, input_spaces, signature.outputs, args
-            )
-
-        result = cls(
-            tape,
-            outputs[0] if len(outputs) == 1 else outputs,
-            backend=backend,
-            name=name,
-            signature=signature,
-        )
-        result._native_callable = native
-        return result
-
     @staticmethod
     def _append_native_outputs(
         tape: Tape,
@@ -1616,3 +1577,34 @@ class TraceContext:
         if not _local.trace:
             return None
         return _local.trace[-1]
+
+
+def create_function_from_native(
+    native: Callable[..., Any],
+    signature: "FunctionSignature",
+    *,
+    backend: str,
+    name: str | None = None,
+) -> Function:
+    """Build a traceable Coker function around a backend-native callable."""
+    from coker.backends.lowered import FunctionSignature
+
+    if not isinstance(signature, FunctionSignature):
+        raise TypeError("signature must be a FunctionSignature")
+
+    input_spaces = [spec.space for spec in signature.inputs]
+    with TraceContext(backend=backend) as tape:
+        args = [tape.input(space) for space in input_spaces]
+        outputs = Function._append_native_outputs(
+            tape, native, backend, input_spaces, signature.outputs, args
+        )
+
+    result = Function(
+        tape,
+        outputs[0] if len(outputs) == 1 else outputs,
+        backend=backend,
+        name=name,
+        signature=signature,
+    )
+    result._native_callable = native
+    return result

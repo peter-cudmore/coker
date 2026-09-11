@@ -131,18 +131,14 @@ class PytorchBackend(Backend):
     def import_module(
         self, module: torch.nn.Module, signature: FunctionSignature
     ) -> Function:
-        """Import a parameterised PyTorch module as a native Coker function.
+        """Import a parameterised PyTorch module as a Coker function.
 
-        The module is retained by the native callable created by
-        :meth:`Function.from_native`; its parameters and buffers therefore
-        remain the authoritative execution state and stay connected to
-        PyTorch autograd.
+        The module remains the native callable, so its parameters and buffers
+        stay authoritative and connected to PyTorch autograd.
         """
         if not isinstance(module, torch.nn.Module):
             raise TypeError("module must be a torch.nn.Module")
-        if not isinstance(signature, FunctionSignature):
-            raise TypeError("signature must be a FunctionSignature")
-        return Function.from_native(module, signature, backend=self.name)
+        return self.import_function(module, signature)
 
     def create_variational_solver(self, problem):
         raise NotImplementedError(
