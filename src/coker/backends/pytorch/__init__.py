@@ -5,12 +5,12 @@ import torch
 
 from coker.algebra import Dimension
 from coker.algebra.function import Function, create_function_from_native
-from coker.algebra.graph import Tracer
 from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from .dynamics import PytorchSolverParameters, evaluate_integrals
 from .lower import PytorchLoweredFunction, PytorchModule
+from .evaluator import PytorchEvaluator
 from .ops import (
     call_parameterised_op,
     impls,
@@ -74,24 +74,8 @@ class PytorchBackend(Backend):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
 
-    def resolve_fn(self, op):
-        if op in impls:
-            return impls[op]
-        if isinstance(op, tuple(parameterised_impls.keys())):
-            operation = op
-            return lambda *args: call_parameterised_op(operation, *args)
-        raise NotImplementedError(f"{op} is not implemented")
-
-    def resolve_post_fn(self, dim):
-        if not dim.is_scalar():
-            return lambda value: value
-
-        def scalar_post(value):
-            if isinstance(value, Tracer):
-                return value
-            return self.reshape(value, dim)
-
-        return scalar_post
+    def get_evaluator(self) -> PytorchEvaluator:
+        return PytorchEvaluator(self)
 
     def evaluate_integrals(
         self,
@@ -113,10 +97,10 @@ class PytorchBackend(Backend):
     def lower(
         self, function: Function, options: LoweringOptions | None = None
     ) -> PytorchLoweredFunction:
-        from coker.backends.evaluator import _build_plan
-
         return PytorchLoweredFunction(
-            self, function, _build_plan(function.tape, self)
+            self,
+            function,
+            self.get_evaluator().build_plan(function.tape),
         )
 
     def as_module(self, function):

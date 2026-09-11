@@ -27,8 +27,8 @@ def test_evaluate_inner_speed():
     node-by-node on each invocation. 1000 calls to a ~100-node function
     should complete in < 100ms total.
 
-    The tape is compiled to a single lambda by _build_plan / CompiledPlan,
-    eliminating per-node Python dispatch.
+    The backend evaluator compiles the tape into plan steps with pre-resolved
+    native callables, eliminating per-node Python dispatch.
     """
     f = make_dynamics_fn()
     x0 = np.zeros(N_STATES)

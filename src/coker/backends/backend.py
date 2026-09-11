@@ -58,31 +58,11 @@ class Backend(metaclass=ABCMeta):
     ) -> VariationalSolver:
         raise NotImplementedError
 
-    def resolve_fn(self, op):
-        """Return a callable for op, resolved at plan-build time.
+    def get_evaluator(self):
+        """Return the compiler used to lower this backend's tape plans."""
+        from coker.backends.evaluator import GenericEvaluator
 
-        The default wraps backend.call; backends can override to return the
-        underlying function directly and avoid the per-call dispatch overhead.
-        """
-        _op = op
-        return lambda *args: self.call(_op, *args)
-
-    def resolve_post_fn(self, dim):
-        """Return the post-processing function applied to a step's output.
-
-        The default handles the general case (Tracer passthrough + reshape).
-        Backends can override to return an identity function where safe,
-        removing the isinstance check and reshape call from the hot loop.
-        """
-        _dim = dim
-        _reshape = self.reshape
-
-        def post(value):
-            if not isinstance(value, Tracer):
-                return _reshape(value, _dim)
-            return value
-
-        return post
+        return GenericEvaluator(self)
 
     def evaluate(
         self, function: Function, inputs: Sequence[Any]
@@ -113,17 +93,6 @@ class Backend(metaclass=ABCMeta):
         options: LoweringOptions | None = None,
     ) -> LoweredFunction:
         """Return this backend's concrete lowered execution handle."""
-
-    def restore_public_outputs(
-        self, function: Function, outputs: Sequence[Any | None]
-    ) -> tuple[Any | None, ...]:
-        """Restore lowered results for the established ``Function`` API.
-
-        Lowered handles retain backend-native values. Backends that
-        historically expose a different public value representation override
-        this boundary.
-        """
-        return tuple(outputs)
 
 
 class VariationalSolver:

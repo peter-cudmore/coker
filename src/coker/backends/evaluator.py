@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
 
@@ -46,9 +47,10 @@ class _PlanStep(NamedTuple):
 class CompiledPlan:
     """Pre-compiled execution plan for a (tape, backend) pair.
 
-    Built once via _build_plan; subsequent calls skip per-node isinstance
-    dispatch and dict lookups by working from pre-resolved callables and
-    workspace indices. Not thread-safe — workspace is mutated in place.
+    Built once by an :class:`Evaluator`; subsequent calls skip per-node
+    isinstance dispatch and dictionary lookups by working from pre-resolved
+    callables and workspace indices. Not thread-safe — workspace is mutated
+    in place.
     """
 
     def __init__(
@@ -81,108 +83,142 @@ class CompiledPlan:
         return ws
 
 
-def _build_plan(graph: Tape, backend: Backend) -> CompiledPlan:
-    """Walk the tape once and return a CompiledPlan."""
+class Evaluator(ABC):
+    """Backend-specific compiler for reusable tape execution plans."""
 
-    # Pass 1 — mark nodes that depend on inputs (dynamic) versus
-    # pure constants.
-    is_dynamic = {}
-    for i, node in enumerate(graph.nodes):
-        if isinstance(node, Tracer):
-            # Bare Tracer in nodes list means this is an input node.
-            is_dynamic[i] = True
-        else:
+    def __init__(self, backend: Backend) -> None:
+        self.backend = backend
+
+    @abstractmethod
+    def build_plan(self, graph: Tape) -> CompiledPlan:
+        """Compile ``graph`` into a reusable execution plan."""
+
+
+class GenericEvaluator(Evaluator):
+    """Compiler using the backend's general operation and reshape APIs."""
+
+    def _resolve_operation(self, op) -> Callable[..., Any]:
+        call = self.backend.call
+        return lambda *args: call(op, *args)
+
+    def _resolve_post(self, dim: NodeDimension) -> Callable[[Any], Any]:
+        reshape = self.backend.reshape
+
+        def post(value):
+            if not isinstance(value, Tracer):
+                return reshape(value, dim)
+            return value
+
+        return post
+
+    def build_plan(self, graph: Tape) -> CompiledPlan:
+        """Walk the tape once and return a compiled execution plan."""
+        backend = self.backend
+
+        # Pass 1 — mark nodes that depend on inputs (dynamic) versus
+        # pure constants.
+        is_dynamic = {}
+        for i, node in enumerate(graph.nodes):
+            if isinstance(node, Tracer):
+                # Bare Tracer in nodes list means this is an input node.
+                is_dynamic[i] = True
+            else:
+                op, *args = node
+                is_dynamic[i] = any(
+                    isinstance(a, Tracer)
+                    and a.tape is graph
+                    and is_dynamic.get(a.index, False)
+                    for a in args
+                )
+
+        # Pass 2 — pre-evaluate constant nodes into the workspace.
+        # Negative slots below -(len+10) are reserved for inline constants
+        # (cross-tape Tracers or bare values) used as node arguments.
+        workspace: dict[int, Any] = {-1: None}
+        next_slot = [-(len(graph.nodes) + 10)]
+
+        def alloc_inline(value):
+            slot = next_slot[0]
+            next_slot[0] -= 1
+            workspace[slot] = value
+            return slot
+
+        for i, node in enumerate(graph.nodes):
+            if is_dynamic.get(i, True) or isinstance(node, Tracer):
+                continue
             op, *args = node
-            is_dynamic[i] = any(
-                isinstance(a, Tracer)
-                and a.tape is graph
-                and is_dynamic.get(a.index, False)
-                for a in args
+            resolved = []
+            for arg in args:
+                if isinstance(arg, Tracer) and arg.tape is graph:
+                    resolved.append(workspace[arg.index])
+                elif isinstance(arg, Tracer):
+                    resolved.append(arg)
+                elif isinstance(arg, _SYMBOLIC_CALLABLE_TYPES):
+                    resolved.append(arg)
+                else:
+                    resolved.append(backend.to_backend_array(arg))
+            value = (
+                resolved[0]
+                if op in {OP.VALUE, OP.FUNCTION_VALUE}
+                else backend.call(op, *resolved)
             )
-
-    # Pass 2 — pre-evaluate constant nodes into the workspace.
-    # Negative slots below -(len+10) are reserved for any inline constants
-    # (cross-tape Tracers or bare values) that appear as node arguments.
-    workspace: dict[int, Any] = {-1: None}
-    next_slot = [-(len(graph.nodes) + 10)]
-
-    def alloc_inline(value):
-        s = next_slot[0]
-        next_slot[0] -= 1
-        workspace[s] = value
-        return s
-
-    for i, node in enumerate(graph.nodes):
-        if is_dynamic.get(i, True) or isinstance(node, Tracer):
-            continue
-        op, *args = node
-        resolved = []
-        for a in args:
-            if isinstance(a, Tracer) and a.tape is graph:
-                resolved.append(workspace[a.index])
-            elif isinstance(a, Tracer):
-                resolved.append(a)  # cross-tape: pass through as-is
-            elif isinstance(a, _SYMBOLIC_CALLABLE_TYPES):
-                resolved.append(a)
-            else:
-                resolved.append(backend.to_backend_array(a))
-        value = (
-            resolved[0]
-            if op in {OP.VALUE, OP.FUNCTION_VALUE}
-            else backend.call(op, *resolved)
-        )
-        value = _normalize_evaluate_result(op, resolved, value, graph.dim[i])
-        if not isinstance(value, _SYMBOLIC_TYPES) and not isinstance(
-            graph.dim[i], ResultBundleDimension
-        ):
-            value = backend.reshape(value, graph.dim[i])
-        workspace[i] = value
-    # Pass 3 — build execution steps for dynamic non-input nodes only.
-    steps = []
-    for i, node in enumerate(graph.nodes):
-        if not is_dynamic.get(i, False) or isinstance(node, Tracer):
-            continue
-        op, *args = node
-        arg_indices = []
-        for a in args:
-            if isinstance(a, Tracer) and a.tape is graph:
-                arg_indices.append(a.index)
-            elif isinstance(a, _SYMBOLIC_TYPES):
-                arg_indices.append(alloc_inline(a))
-            else:
-                arg_indices.append(alloc_inline(backend.to_backend_array(a)))
-        dim = graph.dim[i]
-        operation_fn = backend.resolve_fn(op)
-        if op == OP.EVALUATE:
-
-            def evaluate_fn(
-                *values,
-                _operation_fn=operation_fn,
-                _op=op,
-                _dim=dim,
+            value = _normalize_evaluate_result(
+                op, resolved, value, graph.dim[i]
+            )
+            if not isinstance(value, _SYMBOLIC_TYPES) and not isinstance(
+                graph.dim[i], ResultBundleDimension
             ):
-                value = _operation_fn(*values)
-                return _normalize_evaluate_result(_op, values, value, _dim)
+                value = backend.reshape(value, graph.dim[i])
+            workspace[i] = value
 
-            step_fn = evaluate_fn
-        else:
-            step_fn = operation_fn
-        post_fn = (
-            (lambda value: value)
-            if isinstance(dim, ResultBundleDimension)
-            else backend.resolve_post_fn(dim)
-        )
-        steps.append(
-            _PlanStep(
-                step_fn,
-                arg_indices,
-                i,
-                dim,
-                post_fn,
+        # Pass 3 — build execution steps for dynamic non-input nodes only.
+        steps = []
+        for i, node in enumerate(graph.nodes):
+            if not is_dynamic.get(i, False) or isinstance(node, Tracer):
+                continue
+            op, *args = node
+            arg_indices = []
+            for arg in args:
+                if isinstance(arg, Tracer) and arg.tape is graph:
+                    arg_indices.append(arg.index)
+                elif isinstance(arg, _SYMBOLIC_TYPES):
+                    arg_indices.append(alloc_inline(arg))
+                else:
+                    arg_indices.append(
+                        alloc_inline(backend.to_backend_array(arg))
+                    )
+            dim = graph.dim[i]
+            operation_fn = self._resolve_operation(op)
+            if op == OP.EVALUATE:
+
+                def evaluate_fn(
+                    *values,
+                    _operation_fn=operation_fn,
+                    _op=op,
+                    _dim=dim,
+                ):
+                    value = _operation_fn(*values)
+                    return _normalize_evaluate_result(_op, values, value, _dim)
+
+                step_fn = evaluate_fn
+            else:
+                step_fn = operation_fn
+            post_fn = (
+                (lambda value: value)
+                if isinstance(dim, ResultBundleDimension)
+                else self._resolve_post(dim)
             )
-        )
+            steps.append(
+                _PlanStep(
+                    step_fn,
+                    arg_indices,
+                    i,
+                    dim,
+                    post_fn,
+                )
+            )
 
-    return CompiledPlan(steps, workspace, graph.input_indicies)
+        return CompiledPlan(steps, workspace, graph.input_indicies)
 
 
 def _cast_outputs(

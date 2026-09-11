@@ -80,6 +80,12 @@ class LoweredFunction(ABC):
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
         """Execute ordered inputs and return ordered outputs as a tuple."""
 
+    def restore_public_outputs(
+        self, outputs: Sequence[Any | None]
+    ) -> tuple[Any | None, ...]:
+        """Adapt native execution results to the public function boundary."""
+        return tuple(outputs)
+
     def __call__(self, *inputs: Any) -> Any:
         """Execute positional inputs, unwrapping a single declared output."""
         outputs = self.execute(inputs)

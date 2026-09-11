@@ -67,3 +67,23 @@ class CasadiLoweredFunction(LoweredFunction):
         # backend's public NumPy boundary.  CasADi callers need to retain
         # symbolic/numeric native values (and their sparse representation).
         return tuple(values)
+
+    def restore_public_outputs(
+        self, outputs: Sequence[Any | None]
+    ) -> tuple[Any | None, ...]:
+        """Convert native CasADi values at the public function boundary."""
+        restored: list[Any | None] = []
+        for value, output in zip(outputs, self._function.output):
+            if value is None or output is None:
+                restored.append(None)
+                continue
+            try:
+                numpy_value = self._backend.to_numpy_array(value)
+            except ValueError:
+                restored.append(value)
+                continue
+            if output.dim.is_scalar():
+                restored.append(float(np.asarray(numpy_value).reshape(-1)[0]))
+            else:
+                restored.append(np.asarray(numpy_value).reshape(output.shape))
+        return tuple(restored)
