@@ -106,20 +106,20 @@ def test_optimisation_zero_input_problem(variational_backend):
 
 def test_optimisation_accepts_runtime_parameters(variational_backend):
 
-    with ProblemBuilder(arguments=[VectorSpace("target", 2)]) as builder:
+    with ProblemBuilder(arguments=[VectorSpace("target", 3)]) as builder:
         (target,) = builder.arguments
         x = builder.new_variable(
             name="x", shape=(2,), initial_value=np.ones(2)
         )
-        delta = x - target
+        delta = x - target[:2]
         builder.objective = Minimise(np.dot(delta, delta))
         builder.outputs = [x]
         problem = builder.build(variational_backend)
 
-    assert problem.input_shape == (Dimension((2,)),)
+    assert problem.input_shape == (Dimension((3,)),)
     assert problem.output_shape == (Dimension((2,)),)
 
-    objective, x_val = problem(np.array([3.0, -1.0]))
+    objective, x_val = problem(np.array([3.0, -1.0, 7.0]))
     assert objective == pytest.approx(0.0, abs=1e-6)
     assert x_val.shape == (2,)
     assert np.allclose(x_val, np.array([3.0, -1.0]), atol=1e-6)

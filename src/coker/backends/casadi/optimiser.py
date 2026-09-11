@@ -152,7 +152,7 @@ class CasadiSolver:
                 self.last_solve_info,
             )
 
-        result = self.output_map(soln["x"], *output_args)
+        result = self.output_map(*output_args, soln["x"])
         if self.output_map.n_out() == 1:
             result = [result]
 
