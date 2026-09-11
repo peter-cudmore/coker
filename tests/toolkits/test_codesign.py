@@ -1,14 +1,15 @@
 import numpy as np
 import pytest
 
+from coker import Dimension, Scalar, VectorSpace, function
 from coker.toolkits.codesign import (
     MathematicalProgram,
     Minimise,
     ProblemBuilder,
     SolveFailure,
+    bounded,
     norm as codesign_norm,
 )
-from coker import Dimension, Scalar, VectorSpace, function
 
 
 def quadratic(x, p, z):
@@ -124,6 +125,21 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
     assert np.allclose(x_val, np.array([3.0, -1.0]), atol=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
+
+def test_optimisation_supports_parameter_dependent_constraint_bounds(
+    variational_backend,
+):
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        (target,) = builder.arguments
+        x = builder.new_variable(name="x", initial_value=0.0)
+        builder.objective = Minimise(x**2)
+        builder.constraints = [bounded(x, target, target)]
+        builder.outputs = [x]
+        problem = builder.build(variational_backend)
+
+    for target in (3.0, -2.0):
+        _objective, x_value = problem(target)
+        assert x_value == pytest.approx(target, abs=1e-6)
 
 
 def test_optimisation_norm_helper(variational_backend):

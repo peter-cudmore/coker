@@ -4,16 +4,14 @@ from typing import Any, Callable, List, Optional, Tuple, cast
 
 import numpy as np
 
-from coker.algebra.dimensions import Dimension, FunctionSpace
-from coker.algebra.kernel import (
-    SymbolicCallable,
-    Tape,
-    TraceContext,
-    Tracer,
-    VectorSpace,
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
     Scalar,
-    function,
+    VectorSpace,
 )
+from coker.algebra.function import SymbolicCallable, function
+from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import OP
 from .optimisation import (
     BoundedConstraint,

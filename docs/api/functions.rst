@@ -6,7 +6,7 @@ Python callables into Coker functions.
 
 .. autofunction:: coker.function
 
-.. autoclass:: coker.algebra.kernel.Function
+.. autoclass:: coker.algebra.function.Function
    :members:
    :special-members: __call__
 

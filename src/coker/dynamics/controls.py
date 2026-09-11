@@ -4,7 +4,7 @@ from typing import Callable, Union
 
 import numpy as np
 
-from coker.algebra.kernel import Scalar, VectorSpace
+from coker.algebra.dimensions import Scalar, VectorSpace
 
 
 class ParameterMixin(abc.ABC):

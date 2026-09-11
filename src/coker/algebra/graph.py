@@ -952,17 +952,17 @@ def if_then_else(expression, true_branch, false_branch):
     Args:
         expression: A scalar boolean condition.  Inside a trace this must be
             the result of a comparison operator (``==``, ``<``, ``<=``) applied
-            to a :class:`~coker.algebra.kernel.Tracer`.
+            to a :class:`~coker.algebra.graph.Tracer`.
         true_branch: Value returned when ``expression`` is ``True``.
         false_branch: Value returned when ``expression`` is ``False``.  Must
             have the same shape as ``true_branch``.
 
     Returns:
         ``true_branch`` or ``false_branch``, or a symbolic
-        :class:`~coker.algebra.kernel.Tracer` representing the choice.
+        :class:`~coker.algebra.graph.Tracer` representing the choice.
 
     Raises:
-        TypeError: If ``expression`` is a :class:`~coker.algebra.kernel.Tracer`
+        TypeError: If ``expression`` is a :class:`~coker.algebra.graph.Tracer`
             that was not produced by a comparison operator, or if it is a
             multi-element array that cannot be unambiguously cast to ``bool``.
         :class:`~coker.algebra.exceptions.InvalidShape`: If ``true_branch`` and

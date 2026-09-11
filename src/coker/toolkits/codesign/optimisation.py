@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from coker.algebra.kernel import Tracer
+from coker.algebra.graph import Tracer
 
 
 @dataclass(frozen=True)

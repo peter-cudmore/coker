@@ -63,6 +63,20 @@ the ``backend`` argument:
 Available backend names in the current package are ``"numpy"``, ``"casadi"``,
 ``"sympy"``, ``"coker"``, and ``"jax"``.
 
+In Coker 0.4, :func:`coker.function` defaults to ``"numpy"``. Pass
+``backend=`` explicitly for portable examples. The native ``"coker"`` backend
+is supplied by the separate ``coker_backend`` package.
+
+Migrating to 0.4
+----------------
+
+``coker.algebra.kernel`` has been removed. Public imports from :mod:`coker`
+remain supported. Code using internal algebra types must import from their
+owning modules: ``function`` and ``Function`` from
+``coker.algebra.function``; ``Tape``, ``Tracer``, and ``TraceContext`` from
+``coker.algebra.graph``; dimensions from ``coker.algebra.dimensions``; and
+``OP``/``Noop`` from ``coker.algebra.ops``.
+
 Next steps
 ----------
 

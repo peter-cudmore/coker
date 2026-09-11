@@ -4,16 +4,9 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from coker.algebra.kernel import (
-    FunctionSpace,
-    Noop,
-    OP,
-    Scalar,
-    Tape,
-    TraceContext,
-    Tracer,
-    VectorSpace,
-)
+from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
+from coker.algebra.graph import Tape, TraceContext, Tracer
+from coker.algebra.ops import Noop, OP
 from coker.dynamics.controls import (
     BoundedVariable,
     ControlVariable,

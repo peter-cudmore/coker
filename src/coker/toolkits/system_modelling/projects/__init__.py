@@ -1,6 +1,6 @@
 from typing import Callable, Tuple, Dict
 
-from coker.algebra.kernel import Function
+from coker.algebra.function import Function
 from coker.helpers import get_all_subclasses
 from coker.toolkits.system_modelling.modelling import Block
 

@@ -2,7 +2,7 @@ from typing import Optional
 import numpy as np
 from coker.toolkits.spatial.types import Vec3, Scalar
 from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
-from coker.algebra.kernel import normalise
+from coker.algebra.graph import normalise
 
 SE3_BASIS = np.array(
     [

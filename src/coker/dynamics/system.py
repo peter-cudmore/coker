@@ -3,7 +3,7 @@ from typing import Callable, List, Optional
 import numpy as np
 from coker import VectorSpace, FunctionSpace, function, Scalar
 from coker.algebra.dimensions import Dimension
-from coker.algebra.kernel import Noop
+from coker.algebra.ops import Noop
 
 from .model import DynamicsSpec, DynamicalSystem
 from ..algebra import is_scalar

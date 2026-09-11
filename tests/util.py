@@ -49,7 +49,7 @@ def is_close(a, b, tolerance=1e-8):
 
 
 def validate_symbolic_call(name, f, arguments, test_set, backend):
-    from coker.algebra.kernel import function
+    from coker.algebra.function import function
 
     f_test = function(implementation=f, arguments=arguments, backend=backend)
 
@@ -80,7 +80,7 @@ def validate_symbolic_call(name, f, arguments, test_set, backend):
 def validate_symbolic_call_throws(
     f, arguments, value_exception_pairs, backend
 ):
-    from coker.algebra.kernel import function
+    from coker.algebra.function import function
 
     f_test = function(implementation=f, arguments=arguments, backend=backend)
 

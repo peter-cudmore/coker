@@ -2,14 +2,14 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple
 
 import numpy as np
-from coker.algebra.kernel import (
+from coker.algebra.dimensions import (
     Dimension,
-    Function,
     FunctionSpace,
-    Noop,
     Scalar,
     VectorSpace,
 )
+from coker.algebra.function import Function
+from coker.algebra.ops import Noop
 
 
 @dataclass

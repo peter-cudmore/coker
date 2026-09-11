@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 
 from coker import function, Scalar, VectorSpace, FunctionSpace
-from coker.algebra.kernel import BoundCallable, TraceContext, Tracer
+from coker.algebra.function import BoundCallable
+from coker.algebra.graph import TraceContext, Tracer
 
 casadi_available = importlib.util.find_spec("casadi") is not None
 
