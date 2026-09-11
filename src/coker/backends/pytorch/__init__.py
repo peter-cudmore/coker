@@ -5,12 +5,12 @@ import torch
 
 from coker.algebra import Dimension
 from coker.algebra.function import Function, create_function_from_native
+from coker.backends.evaluator import GenericEvaluator
 from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from .dynamics import PytorchSolverParameters, evaluate_integrals
 from .lower import PytorchLoweredFunction, PytorchModule
-from .evaluator import PytorchEvaluator
 from .ops import (
     call_parameterised_op,
     impls,
@@ -74,8 +74,13 @@ class PytorchBackend(Backend):
             return call_parameterised_op(op, *args)
         raise NotImplementedError(f"{op} is not implemented")
 
-    def get_evaluator(self) -> PytorchEvaluator:
-        return PytorchEvaluator(self)
+    def get_evaluator(self) -> GenericEvaluator:
+        return GenericEvaluator(
+            self,
+            operations=impls,
+            parameterised_operations=parameterised_impls,
+            preserve_nonscalar_shapes=True,
+        )
 
     def evaluate_integrals(
         self,

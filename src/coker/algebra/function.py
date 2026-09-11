@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
+
+from coker.algebra.callable import SymbolicCallable
 import numpy as np
 
 from coker.algebra.dimensions import (
@@ -34,23 +35,6 @@ from coker.backends.lowered import (
     LoweringOptions,
     OutputShape,
 )
-
-
-class SymbolicCallable(ABC):
-    """Common call/lowering contract for symbolic callable graph values.
-
-    Implementations accept concrete values or tracers and expose ``lower``
-    for backend-specific execution.  Variational problems intentionally do
-    not participate because their solver interface is different.
-    """
-
-    @abstractmethod
-    def __call__(self, *args):
-        raise NotImplementedError
-
-    @abstractmethod
-    def lower(self):
-        raise NotImplementedError
 
 
 class Function(SymbolicCallable):

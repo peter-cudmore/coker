@@ -1,6 +1,4 @@
-"""NumPy operation implementations and compiled-plan specialization."""
-
-from typing import Any
+"""NumPy operation implementations for generic compiled plans."""
 
 import numpy as np
 
@@ -13,7 +11,6 @@ from coker.algebra.ops import (
     SelectOP,
     invoke_callable,
 )
-from coker.backends.evaluator import GenericEvaluator
 
 
 def div(num, den):
@@ -78,27 +75,3 @@ parameterised_impls = {
 
 def call_parameterised_op(op, *args):
     return parameterised_impls[type(op)](op, *args)
-
-
-class NumpyEvaluator(GenericEvaluator):
-    """Compile plans using NumPy's native operation implementations."""
-
-    def _resolve_operation(self, op):
-        if op in impls:
-            return impls[op]
-        if isinstance(op, tuple(parameterised_impls.keys())):
-            operation_type = type(op)
-            return lambda *args: parameterised_impls[operation_type](op, *args)
-        raise NotImplementedError(f"{op} is not implemented")
-
-    def _resolve_post(self, dim):
-        if not dim.is_scalar():
-            return lambda value: value
-        reshape = self.backend.reshape
-
-        def scalar_post(value: Any):
-            if isinstance(value, Tracer):
-                return value
-            return reshape(value, dim)
-
-        return scalar_post

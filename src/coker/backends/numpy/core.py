@@ -10,6 +10,7 @@ from coker.algebra.function import Function, create_function_from_native
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
 
+from coker.backends.evaluator import GenericEvaluator
 from coker.backends.backend import (
     ArrayLike,
     Backend,
@@ -20,7 +21,6 @@ from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from coker.backends.numpy.lowered import NumpyLoweredFunction
 from coker.backends.numpy.evaluator import (
-    NumpyEvaluator,
     call_parameterised_op,
     impls,
     parameterised_impls,
@@ -88,8 +88,13 @@ class NumpyBackend(Backend):
             self.get_evaluator().build_plan(function.tape),
         )
 
-    def get_evaluator(self) -> NumpyEvaluator:
-        return NumpyEvaluator(self)
+    def get_evaluator(self) -> GenericEvaluator:
+        return GenericEvaluator(
+            self,
+            operations=impls,
+            parameterised_operations=parameterised_impls,
+            preserve_nonscalar_shapes=True,
+        )
 
     def import_function(
         self,

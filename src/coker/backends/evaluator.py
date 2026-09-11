@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
-from typing import Any, NamedTuple
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
@@ -9,10 +11,13 @@ from coker.algebra.dimensions import (
     FunctionSpace,
     ResultBundleDimension,
 )
-from coker.algebra.function import Function, SymbolicCallable
+from coker.algebra.callable import SymbolicCallable
 from coker.algebra.graph import CallableReference, Tape, Tracer
 from coker.algebra.ops import OP, Operator, normalize_evaluate_result
-from coker.backends.backend import Backend
+
+if TYPE_CHECKING:
+    from coker.algebra.function import Function
+    from coker.backends.backend import Backend
 
 NodeDimension = Dimension | FunctionSpace | ResultBundleDimension
 
@@ -58,21 +63,21 @@ class CompiledPlan:
         steps: Sequence[_PlanStep],
         workspace: dict[int, Any],
         input_indices: Sequence[int],
+        to_backend_array: Callable[[Any], Any],
     ) -> None:
         self._steps = steps
         self._workspace = workspace  # constants pre-filled; reused each call
         self._input_indices = input_indices
+        self._to_backend_array = to_backend_array
 
-    def execute(
-        self, inputs: Sequence[Any], backend: Backend
-    ) -> dict[int, Any]:
+    def execute(self, inputs: Sequence[Any]) -> dict[int, Any]:
         ws = self._workspace
         for ws_idx, arg in zip(self._input_indices, inputs):
             if ws_idx >= 0:
                 ws[ws_idx] = (
                     arg
                     if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES)
-                    else backend.to_backend_array(arg)
+                    else self._to_backend_array(arg)
                 )
 
         for step in self._steps:
@@ -95,13 +100,40 @@ class Evaluator(ABC):
 
 
 class GenericEvaluator(Evaluator):
-    """Compiler using the backend's general operation and reshape APIs."""
+    """Compiler configurable with optional native operation tables."""
+
+    def __init__(
+        self,
+        backend: Backend,
+        *,
+        operations: Mapping[object, Callable[..., Any]] | None = None,
+        parameterised_operations: (
+            Mapping[type, Callable[..., Any]] | None
+        ) = None,
+        preserve_nonscalar_shapes: bool = False,
+    ) -> None:
+        super().__init__(backend)
+        self._operations = operations
+        self._parameterised_operations = parameterised_operations
+        self._preserve_nonscalar_shapes = preserve_nonscalar_shapes
 
     def _resolve_operation(self, op) -> Callable[..., Any]:
+        if self._operations is not None and op in self._operations:
+            return self._operations[op]
+        if (
+            self._parameterised_operations is not None
+            and type(op) in self._parameterised_operations
+        ):
+            operation_type = type(op)
+            return lambda *args: self._parameterised_operations[
+                operation_type
+            ](op, *args)
         call = self.backend.call
         return lambda *args: call(op, *args)
 
     def _resolve_post(self, dim: NodeDimension) -> Callable[[Any], Any]:
+        if self._preserve_nonscalar_shapes and not dim.is_scalar():
+            return lambda value: value
         reshape = self.backend.reshape
 
         def post(value):
@@ -218,7 +250,12 @@ class GenericEvaluator(Evaluator):
                 )
             )
 
-        return CompiledPlan(steps, workspace, graph.input_indicies)
+        return CompiledPlan(
+            steps,
+            workspace,
+            graph.input_indicies,
+            backend.to_backend_array,
+        )
 
 
 def _cast_outputs(

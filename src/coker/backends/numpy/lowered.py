@@ -42,7 +42,7 @@ class NumpyLoweredFunction(LoweredFunction):
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
-        workspace = self._plan.execute(inputs, self._backend)
+        workspace = self._plan.execute(inputs)
         return tuple(
             _cast_outputs(
                 self._function.output,
