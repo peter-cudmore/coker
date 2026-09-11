@@ -25,6 +25,7 @@ from coker.algebra.ops import (
     numpy_atomics,
     numpy_composites,
 )
+
 scalar_types = (
     np.float32,
     np.float64,
