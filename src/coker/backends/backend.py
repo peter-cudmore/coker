@@ -114,6 +114,20 @@ class Backend(metaclass=ABCMeta):
     ) -> "LoweredFunction":
         """Return this backend's concrete lowered execution handle."""
 
+    def import_function(
+        self,
+        implementation: Callable[..., Any],
+        signature,
+        *,
+        name: str | None = None,
+    ) -> Function:
+        """Import this backend's callable as a traceable Coker function."""
+        from coker.algebra.kernel import create_function_from_native
+
+        return create_function_from_native(
+            implementation, signature, backend=self.name, name=name
+        )
+
     def restore_public_outputs(
         self, function: Function, outputs: Sequence[Any | None]
     ) -> tuple[Any | None, ...]:

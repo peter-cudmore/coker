@@ -120,6 +120,7 @@ def restore_public_outputs(
 
 
 class CasadiBackend(Backend):
+    name = "casadi"
 
     def import_function(
         self,
@@ -141,9 +142,7 @@ class CasadiBackend(Backend):
             if signature is None
             else signature
         )
-        return Function.from_native(
-            ca_function, signature, backend=getattr(self, "name", "casadi")
-        )
+        return super().import_function(ca_function, signature)
 
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         return to_numpy_array(array)

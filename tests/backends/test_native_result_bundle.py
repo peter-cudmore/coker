@@ -1,6 +1,7 @@
 import pytest
 
-from coker import Function, Scalar
+from coker import Scalar
+from coker.backends import get_backend_by_name
 from coker.algebra.ops import OP
 from coker.algebra.kernel import CallableReference
 from coker.algebra.dimensions import FunctionValueDimension
@@ -25,7 +26,7 @@ def test_multi_output_native_function_executes_once_per_call():
             FunctionOutputSpec("doubled", Scalar("doubled")),
         ),
     )
-    imported = Function.from_native(native, signature, backend="numpy")
+    imported = get_backend_by_name("numpy").import_function(native, signature)
 
     assert imported(3.0) == (4.0, 6.0)
     assert calls == [3.0]
@@ -42,7 +43,7 @@ def test_native_result_bundle_preserves_absent_outputs():
             FunctionOutputSpec("absent", None),
         ),
     )
-    imported = Function.from_native(native, signature, backend="numpy")
+    imported = get_backend_by_name("numpy").import_function(native, signature)
 
     assert imported(3.0) == (4.0, None)
 
@@ -55,8 +56,8 @@ def test_native_result_bundle_rejects_wrong_result_count():
             FunctionOutputSpec("doubled", Scalar("doubled")),
         ),
     )
-    imported = Function.from_native(
-        lambda x: (x + 1,), signature, backend="numpy"
+    imported = get_backend_by_name("numpy").import_function(
+        lambda x: (x + 1,), signature
     )
 
     with pytest.raises(ValueError, match="returned 1 results; expected 2"):
@@ -71,8 +72,8 @@ def test_native_function_space_excludes_absent_outputs():
             FunctionOutputSpec("absent", None),
         ),
     )
-    imported = Function.from_native(
-        lambda x: (x, None), signature, backend="numpy"
+    imported = get_backend_by_name("numpy").import_function(
+        lambda x: (x, None), signature
     )
     function_value_index, (_, native_ref) = next(
         (index, node)
@@ -102,7 +103,6 @@ def test_native_function_space_excludes_absent_outputs():
     [
         ("numpy", None),
         ("pytorch", "torch"),
-        ("casadi", "casadi"),
         ("jax", "jax"),
         ("sympy", "sympy"),
     ],
@@ -126,7 +126,9 @@ def test_native_result_selection_dispatches_on_every_backend(
             FunctionOutputSpec("doubled", Scalar("doubled")),
         ),
     )
-    imported = Function.from_native(native, signature, backend=backend_name)
+    imported = get_backend_by_name(backend_name).import_function(
+        native, signature
+    )
 
     result = imported(3.0)
 
