@@ -2,6 +2,8 @@ import sympy as sp
 import numpy as np
 from coker import Function
 from coker.backends.backend import ArrayLike, Backend, register_backend
+from coker.backends.lowered import LoweredFunction, LoweringCapabilities
+
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,
@@ -157,6 +159,44 @@ parameterised_impls = {
 }
 
 
+class SympyLoweredFunction(LoweredFunction):
+    """SymPy evaluator-backed lowered execution handle."""
+
+    def __init__(self, backend: "SympyBackend", function: Function) -> None:
+        self._backend = backend
+        self._function = function
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend.name
+
+    @property
+    def signature(self):
+        return self._function.signature
+
+    @property
+    def capabilities(self) -> LoweringCapabilities:
+        return LoweringCapabilities(
+            eager_execution=True,
+            symbolic_execution=True,
+            thread_safe=True,
+        )
+
+    def execute(self, inputs) -> tuple:
+        from coker.backends.evaluator import evaluate_inner
+
+        workspace = {}
+        return tuple(
+            evaluate_inner(
+                self._function.tape,
+                inputs,
+                self._function.output,
+                self._backend,
+                workspace,
+            )
+        )
+
+
 class SympyBackend(Backend):
 
     def to_numpy_array(self, array):
@@ -240,6 +280,9 @@ class SympyBackend(Backend):
             return result
 
         raise NotImplementedError(f"{op} is not implemented")
+
+    def lower(self, function, options=None) -> SympyLoweredFunction:
+        return SympyLoweredFunction(self, function)
 
     def evaluate(self, function: Function, inputs: ArrayLike):
 
