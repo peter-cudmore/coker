@@ -276,10 +276,21 @@ class CasadiBackend(Backend):
         return self.to_numpy_array(arg)
 
     def build_optimisation_problem(
-        self, cost, constraints, parameters, outputs, initial_conditions
+        self,
+        cost,
+        constraints,
+        parameters,
+        outputs,
+        initial_conditions,
+        optimiser_options=None,
     ):
         return build_optimisation_problem(
-            cost, constraints, parameters, outputs, initial_conditions
+            cost,
+            constraints,
+            parameters,
+            outputs,
+            initial_conditions,
+            optimiser_options,
         )
 
     def create_variational_solver(self, problem: VariationalProblem):
