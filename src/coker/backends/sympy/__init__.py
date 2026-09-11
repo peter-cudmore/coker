@@ -3,7 +3,12 @@ from __future__ import annotations
 import sympy as sp
 import numpy as np
 from coker.algebra.function import Function, create_function_from_native
-from coker.backends.backend import ArrayLike, Backend, register_backend
+from coker.backends.backend import (
+    ArrayLike,
+    Backend,
+    Evaluator,
+    register_backend,
+)
 from coker.backends.lowered import (
     FunctionSignature,
     LoweredFunction,
@@ -288,6 +293,11 @@ class SympyBackend(Backend):
 
     def lower(self, function, options=None) -> SympyLoweredFunction:
         return SympyLoweredFunction(self, function)
+
+    def get_evaluator(self) -> Evaluator:
+        raise NotImplementedError(
+            "SymPy lowering does not use compiled tape evaluators"
+        )
 
     def import_function(
         self,

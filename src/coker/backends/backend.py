@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from coker.algebra.function import Function
     from coker.dynamics.model import VariationalProblem
 
-from coker.backends.evaluator import Evaluator, GenericEvaluator
+from coker.backends.evaluator import Evaluator
 from coker.backends.lowered import LoweredFunction, LoweringOptions
 from coker.algebra.graph import Tracer
 from coker.algebra.dimensions import Dimension
@@ -59,9 +59,9 @@ class Backend(metaclass=ABCMeta):
     ) -> VariationalSolver:
         raise NotImplementedError
 
+    @abstractmethod
     def get_evaluator(self) -> Evaluator:
-        """Return the compiler used to lower this backend's tape plans."""
-        return GenericEvaluator(self)
+        """Return this backend's compiled-plan evaluator."""
 
     def evaluate(
         self, function: Function, inputs: Sequence[Any]
