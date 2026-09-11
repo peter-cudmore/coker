@@ -76,7 +76,7 @@ def _signature_from_casadi_function(ca_function: ca.Function):
 class CasadiBackend(Backend):
 
     def import_function(self, ca_function, signature=None):
-        """Import a native CasADi function as an ``OP.EVALUATE`` callable.
+        """Import a native CasADi function as an ``EvaluateOP`` callable.
 
         CasADi functions carry ordered names and matrix dimensions, so callers
         may omit ``signature``. Pass one only to impose a deliberate Coker

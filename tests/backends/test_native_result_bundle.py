@@ -1,8 +1,8 @@
 import pytest
 
 from coker import Function, Scalar
-from coker.algebra import OP
 from coker.algebra.kernel import CallableReference
+from coker.algebra.ops import EvaluateOP
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -57,14 +57,21 @@ def test_native_function_space_excludes_absent_outputs():
     imported = Function.from_native(
         lambda x: (x, None), signature, backend="numpy"
     )
-    (_, native_ref, *_) = next(
-        node
-        for node in imported.tape.nodes
-        if isinstance(node, tuple) and node[0] == OP.EVALUATE
+    evaluate_index, (evaluate_op, native_ref, *_) = next(
+        (index, node)
+        for index, node in enumerate(imported.tape.nodes)
+        if isinstance(node, tuple) and isinstance(node[0], EvaluateOP)
     )
 
     assert native_ref.function_space.output == [Scalar("present")]
     assert type(native_ref) is CallableReference
+    assert (
+        evaluate_op.compute_shape(
+            native_ref.function_space,
+            *native_ref.function_space.input_dimensions(),
+        )
+        == imported.tape.dim[evaluate_index]
+    )
 
 
 @pytest.mark.parametrize(
