@@ -6,7 +6,6 @@ import numpy as np
 
 from coker.algebra.dimensions import Dimension, FunctionSpace
 from coker.algebra.kernel import (
-    OP,
     SymbolicCallable,
     Tape,
     TraceContext,
@@ -15,6 +14,7 @@ from coker.algebra.kernel import (
     Scalar,
     function,
 )
+from coker.algebra.ops import EvaluateOP
 from .optimisation import (
     BoundedConstraint,
     SolveFailure,
@@ -126,10 +126,13 @@ class MathematicalProgram(SymbolicCallable):
         result_space = VectorSpace(
             "program_result", sum(dim.flat() for dim in result_dimensions)
         )
-        reference = tape._create_callable_reference(
-            self, FunctionSpace("program", arguments, [result_space])
+        function_space = FunctionSpace("program", arguments, [result_space])
+        reference = tape._create_callable_reference(self, function_space)
+        (packed_dimension,) = function_space.output_dimensions()
+        packed = Tracer(
+            tape,
+            tape.append(EvaluateOP(packed_dimension), reference, *args),
         )
-        packed = Tracer(tape, tape.append(OP.EVALUATE, reference, *args))
         offset = 0
         results = []
         for dim in result_dimensions:

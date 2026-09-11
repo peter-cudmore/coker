@@ -2,7 +2,14 @@ import sympy as sp
 import numpy as np
 from coker import Function
 from coker.backends.backend import ArrayLike, Backend, register_backend
-from coker.algebra.ops import OP, ConcatenateOP, NormOP, ReshapeOP, SelectOP
+from coker.algebra.ops import (
+    OP,
+    ConcatenateOP,
+    EvaluateOP,
+    NormOP,
+    ReshapeOP,
+    SelectOP,
+)
 from coker.algebra.dimensions import Dimension
 from coker.backends.sympy.shape import reshape
 
@@ -126,7 +133,6 @@ impls = {
     OP.EQUAL: lambda x, y: x == y,
     OP.CASE: lambda cond, t, f: t if cond else f,
     OP.ARCTAN2: sp.atan2,
-    OP.EVALUATE: lambda op, *args: op(*args),
     OP.LOG: sp.log,
 }
 
@@ -145,6 +151,7 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: reshape(x, dim=Dimension(op.newshape)),
     NormOP: lambda op, x: sympy_norm(x, ord=op.ord),
     SelectOP: lambda op, value: op.select(value),
+    EvaluateOP: lambda op, callable_value, *args: callable_value(*args),
 }
 
 

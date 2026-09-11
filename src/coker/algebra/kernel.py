@@ -17,6 +17,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.ops import (
     OP,
+    EvaluateOP,
     Noop,
     Operator,
     ReshapeOP,
@@ -349,7 +350,6 @@ class Tape:
         self,
         op: OP | Operator,
         *args,
-        result_dimension: ResultBundleDimension | None = None,
     ) -> int:
         args = [strip_symbols_from_array(a) for a in args]
 
@@ -382,12 +382,7 @@ class Tape:
         if node_hash in self._node_hashmap:
             return self._node_hashmap[node_hash]
 
-        computed_dimension = self._compute_shape(op, *args)
-        out_dim = (
-            result_dimension
-            if result_dimension is not None
-            else computed_dimension
-        )
+        out_dim = self._compute_shape(op, *args)
         index = len(self.dim)
         self.nodes.push_op(op, *args)
         self.dim.append(out_dim)
@@ -515,8 +510,8 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def is_functional(self):
         if self.is_input():
             return False
-        op, *args = self.tape.nodes[self.index]
-        if op not in {OP.EVALUATE}:
+        op, *_ = self.tape.nodes[self.index]
+        if not isinstance(op, EvaluateOP):
             return False
         return True
 
@@ -845,7 +840,8 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return self._emit(OP.CASE, norm == 0, self, self / norm)
 
     def __call__(self, *args):
-        return self._emit(OP.EVALUATE, self, *args)
+        (result_dimension,) = self.dim.output_dimensions()
+        return self._emit(EvaluateOP(result_dimension), self, *args)
 
 
 class SymbolicCallable(ABC):
@@ -976,7 +972,7 @@ class Function(SymbolicCallable):
         """Import a backend-native callable as a traceable Coker function.
 
         Each declared non-``None`` result is represented by an
-        ``OP.EVALUATE`` node. Native code is invoked only by a compatible
+        ``EvaluateOP`` node. Native code is invoked only by a compatible
         concrete backend; tracing an imported function appends equivalent nodes
         to the outer tape.
         """
@@ -1042,10 +1038,9 @@ class Function(SymbolicCallable):
         bundle = Tracer(
             tape,
             tape.append(
-                OP.EVALUATE,
+                EvaluateOP(result_dimension),
                 native_ref,
                 *args,
-                result_dimension=result_dimension,
             ),
         )
         return [

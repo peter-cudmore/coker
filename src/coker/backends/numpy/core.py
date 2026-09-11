@@ -7,7 +7,13 @@ import scipy as scp
 
 from coker.algebra import Dimension, OP
 from coker.algebra.kernel import Tracer, Noop
-from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP, SelectOP
+from coker.algebra.ops import (
+    ConcatenateOP,
+    EvaluateOP,
+    NormOP,
+    ReshapeOP,
+    SelectOP,
+)
 
 from coker.backends.backend import (
     ArrayLike,
@@ -97,7 +103,6 @@ impls = {
     OP.LESS_EQUAL: np.less_equal,
     OP.LESS_THAN: np.less,
     OP.CASE: lambda cond, t, f: t if cond else f,
-    OP.EVALUATE: lambda op, *args: op(*args),
     OP.LOG: np.log,
 }
 
@@ -106,6 +111,7 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: np.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
     SelectOP: lambda op, value: op.select(value),
+    EvaluateOP: lambda op, callable_value, *args: callable_value(*args),
 }
 
 

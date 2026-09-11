@@ -4,7 +4,13 @@ import numpy as np
 import torch
 
 from coker.algebra import OP
-from coker.algebra.ops import ConcatenateOP, NormOP, ReshapeOP, SelectOP
+from coker.algebra.ops import (
+    ConcatenateOP,
+    EvaluateOP,
+    NormOP,
+    ReshapeOP,
+    SelectOP,
+)
 
 
 scalar_types = (float, complex, int, bool, np.number)
@@ -90,7 +96,6 @@ impls = {
     OP.ARCTAN2: torch.arctan2,
     OP.LESS_THAN: torch.less,
     OP.LESS_EQUAL: torch.less_equal,
-    OP.EVALUATE: lambda op, *args: op(*args),
     OP.LOG: torch.log,
 }
 
@@ -99,6 +104,7 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: torch.reshape(x, shape=op.newshape),
     NormOP: _norm,
     SelectOP: lambda op, value: op.select(value),
+    EvaluateOP: lambda op, callable_value, *args: callable_value(*args),
 }
 
 

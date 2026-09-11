@@ -3,15 +3,17 @@ import numpy as np
 
 import coker
 from coker.algebra.kernel import CallableReference, Tape, Tracer
-from coker.algebra.ops import OP, Noop
-from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.ops import (
+    OP,
     ConcatenateOP,
+    EvaluateOP,
+    Noop,
     NormOP,
     ReshapeOP,
     SelectOP,
     normalize_evaluate_result,
 )
+from coker.algebra.dimensions import FunctionSpace
 from typing import List
 
 impls = {
@@ -39,7 +41,6 @@ impls = {
     OP.LESS_EQUAL: ca.le,
     OP.LESS_THAN: ca.lt,
     OP.CASE: lambda c, t, f: ca.if_else(c, t, f),
-    OP.EVALUATE: lambda op, *args: casadi_eval(op, *args),
     OP.LOG: ca.log,
 }
 
@@ -50,7 +51,7 @@ def casadi_eval(op, *args):
         return op(*args)
     if op.backend != "casadi":
         raise RuntimeError(
-            "Cannot lower CasADi OP.EVALUATE node for "
+            "Cannot lower CasADi EvaluateOP node for "
             f"backend {op.backend!r}; node callable {op!r} belongs to "
             f"backend {op.backend!r}"
         )
@@ -110,6 +111,9 @@ parameterised_impls = {
     NormOP: lambda op, x: norm(x, ord=op.ord),
     ReshapeOP: lambda op, x: reshape(x, *op.newshape),
     SelectOP: lambda op, value: op.select(value),
+    EvaluateOP: lambda op, callable_value, *args: casadi_eval(
+        callable_value, *args
+    ),
 }
 
 
@@ -223,7 +227,9 @@ def substitute(output: List[Tracer], workspace):
                     raise e
             else:
                 v = call_parameterised_op(op, *args)
-            if op == OP.EVALUATE and isinstance(args[0], CallableReference):
+            if isinstance(op, EvaluateOP) and isinstance(
+                args[0], CallableReference
+            ):
                 v = normalize_evaluate_result(v, node.dim)
         try:
             if not node.dim.is_scalar():

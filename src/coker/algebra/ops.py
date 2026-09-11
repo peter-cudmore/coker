@@ -37,7 +37,6 @@ class OP(enum.Enum):
     ARCTAN2 = 23
     LESS_THAN = 24
     LESS_EQUAL = 25
-    EVALUATE = 26
     LOG = 27
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
@@ -85,6 +84,22 @@ class Operator:
         return not self.is_linear() and not self.is_bilinear()
 
 
+class EvaluateOP(Operator):
+    """Invoke a callable and declare the dimension of its result."""
+
+    __slots__ = ("result_dimension",)
+
+    def __init__(
+        self,
+        result_dimension: Dimension | FunctionSpace | ResultBundleDimension,
+    ):
+        self.result_dimension = result_dimension
+
+    def compute_shape(self, function_sig: FunctionSpace, *args: Dimension):
+        validate_evaluate_inputs(function_sig, args)
+        return self.result_dimension
+
+
 class SelectOP(Operator):
     """Select one declared result from a native-call result bundle."""
 
@@ -118,7 +133,7 @@ class SelectOP(Operator):
 
 
 def normalize_evaluate_result(value, dimension):
-    """Apply the tape-declared result policy for ``OP.EVALUATE``."""
+    """Apply the tape-declared result policy for ``EvaluateOP``."""
     if isinstance(dimension, ResultBundleDimension):
         return value
     return np.concatenate([np.asarray(result).reshape(-1) for result in value])
@@ -230,9 +245,9 @@ def register_shape(*ops: OP):
     return inner
 
 
-@register_shape(OP.EVALUATE)
-def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
-
+def validate_evaluate_inputs(
+    function_sig: FunctionSpace, args: tuple[Dimension, ...]
+):
     if len(args) != len(function_sig.arguments):
         raise InvalidShape(
             f"Expected {len(function_sig.arguments)} arguments, got "
@@ -247,11 +262,6 @@ def evaluate_shape(function_sig: FunctionSpace, *args: Dimension):
                 f"Argument {i} has dimension {arg_dim.dim}, expected "
                 f"{input_dim.dim}"
             )
-    try:
-        (out_dim,) = function_sig.output_dimensions()
-        return out_dim
-    except ValueError:
-        return function_sig.output_dimensions()
 
 
 __componentwise_ops = [

@@ -9,14 +9,14 @@ from coker.algebra.kernel import (
     Tracer,
 )
 from coker.algebra.dimensions import ResultBundleDimension
-from coker.algebra.ops import normalize_evaluate_result
+from coker.algebra.ops import EvaluateOP, normalize_evaluate_result
 
 _SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | CallableReference
 _SYMBOLIC_TYPES = Tracer | _SYMBOLIC_CALLABLE_TYPES
 
 
 def _normalize_evaluate_result(op, args, value, dimension):
-    if op == OP.EVALUATE and isinstance(args[0], CallableReference):
+    if isinstance(op, EvaluateOP) and isinstance(args[0], CallableReference):
         return normalize_evaluate_result(value, dimension)
     return value
 
@@ -133,13 +133,11 @@ def _build_plan(graph, backend):
                 arg_indices.append(alloc_inline(backend.to_backend_array(a)))
         dim = graph.dim[i]
         fn = backend.resolve_fn(op)
-        if op == OP.EVALUATE:
+        if isinstance(op, EvaluateOP):
 
-            def fn(*values, _fn=fn, _dim=dim):
+            def fn(*values, _fn=fn, _op=op, _dim=dim):
                 value = _fn(*values)
-                return _normalize_evaluate_result(
-                    OP.EVALUATE, values, value, _dim
-                )
+                return _normalize_evaluate_result(_op, values, value, _dim)
 
         post_fn = (
             (lambda value: value)
