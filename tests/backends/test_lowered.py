@@ -49,6 +49,7 @@ def test_lowered_contract_signature_abis_and_public_equivalence(case):
     assert isinstance(lowered, LoweredFunction)
     assert lowered.backend_name == backend_name
     assert lowered.signature == compiled.signature
+    assert compiled.signature is compiled.signature
     assert [spec.name for spec in compiled.signature.inputs] == ["x"]
     assert compiled.signature.inputs[0].space.name == "x"
     assert [spec.name for spec in compiled.signature.outputs] == [

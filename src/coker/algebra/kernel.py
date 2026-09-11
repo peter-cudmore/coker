@@ -1,6 +1,7 @@
 import dataclasses
 import weakref
 from collections import defaultdict
+from types import FunctionType
 
 import numpy as np
 import scipy as sp
@@ -105,7 +106,7 @@ def _find_closure_tracers(fn) -> dict:
     are collapsed.
     """
     captured = {}
-    if not (hasattr(fn, "__code__") and fn.__closure__):
+    if not isinstance(fn, FunctionType) or fn.__closure__ is None:
         return captured
     for cell in fn.__closure__:
         try:
@@ -903,6 +904,7 @@ class Function(SymbolicCallable):
         outputs: Tracer | None | Sequence[Tracer | None],
         backend: str = "coker",
         name: str | None = None,
+        signature: "FunctionSignature | None" = None,
     ) -> None:
         self.name = name
         self.tape = tape
@@ -917,6 +919,25 @@ class Function(SymbolicCallable):
         else:
             self.output = list(outputs)
             self.is_single = False
+        self._native_callable: Callable[..., Any] | None = None
+        if signature is None:
+            from coker.backends.lowered import (
+                FunctionInputSpec,
+                FunctionOutputSpec,
+                FunctionSignature,
+            )
+
+            signature = FunctionSignature(
+                inputs=tuple(
+                    FunctionInputSpec(name, space)
+                    for name, space in zip(self.arguments, self.input_spaces())
+                ),
+                outputs=tuple(
+                    FunctionOutputSpec(f"output_{index}", shape)
+                    for index, shape in enumerate(self.output_shape())
+                ),
+            )
+        self.signature = signature
 
     @property
     def arguments(self) -> list[str]:
@@ -970,28 +991,6 @@ class Function(SymbolicCallable):
         """Return each output shape in declaration order."""
         return tuple(o.dim if o is not None else None for o in self.output)
 
-    @property
-    def signature(self) -> "FunctionSignature":
-        """Return the ordered input and output declaration for lowering."""
-        if hasattr(self, "_native_signature"):
-            return self._native_signature
-        from coker.backends.lowered import (
-            FunctionInputSpec,
-            FunctionOutputSpec,
-            FunctionSignature,
-        )
-
-        return FunctionSignature(
-            inputs=tuple(
-                FunctionInputSpec(name, space)
-                for name, space in zip(self.arguments, self.input_spaces())
-            ),
-            outputs=tuple(
-                FunctionOutputSpec(f"output_{index}", shape)
-                for index, shape in enumerate(self.output_shape())
-            ),
-        )
-
     @classmethod
     def from_native(
         cls,
@@ -1025,9 +1024,9 @@ class Function(SymbolicCallable):
             outputs[0] if len(outputs) == 1 else outputs,
             backend=backend,
             name=name,
+            signature=signature,
         )
         result._native_callable = native
-        result._native_signature = signature
         return result
 
     @staticmethod
@@ -1102,12 +1101,14 @@ class Function(SymbolicCallable):
                 "Cannot compose native callable for backend "
                 f"{self.backend!r} into {outer_tape.backend!r} trace"
             )
+        native = self._native_callable
+        assert native is not None
         outputs = self._append_native_outputs(
             outer_tape,
-            self._native_callable,
+            native,
             self.backend,
-            [spec.space for spec in self._native_signature.inputs],
-            self._native_signature.outputs,
+            [spec.space for spec in self.signature.inputs],
+            self.signature.outputs,
             args,
         )
         return outputs[0] if self.is_single else tuple(outputs)
@@ -1207,7 +1208,7 @@ class Function(SymbolicCallable):
         from coker.backends import get_backend_by_name
 
         if any(isinstance(a, Tracer) for a in args):
-            if hasattr(self, "_native_callable"):
+            if self._native_callable is not None:
                 outer_tape = TraceContext.get_local_tape()
                 if outer_tape is None:
                     outer_tape = next(
@@ -1240,7 +1241,7 @@ class Function(SymbolicCallable):
         if not isinstance(options, LoweringOptions):
             raise TypeError("options must be a LoweringOptions instance")
         backend = get_backend_by_name(options.backend or self.backend)
-        if hasattr(self, "_native_callable") and backend.name != self.backend:
+        if self._native_callable is not None and backend.name != self.backend:
             raise RuntimeError(
                 "Cannot lower native callable for backend "
                 f"{self.backend!r} with backend {backend.name!r}"
