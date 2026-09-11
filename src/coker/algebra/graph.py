@@ -922,6 +922,21 @@ def strip_symbols_from_array(array: np.ndarray, float_type=float):
     return symbol_array
 
 
+def normalise(v: np.ndarray | Tracer):
+    if isinstance(v, np.ndarray):
+        if all(v_i == 0 for v_i in v):
+            return np.zeros_like(v), 0
+
+        norm_v = np.linalg.norm(v)
+        return v / norm_v, norm_v
+
+    assert isinstance(v, Tracer), f"Expected Tracer got {type(v)}"
+    unit_v = v.normalise()
+    norm_v = v.norm()
+
+    return unit_v, norm_v
+
+
 _comparison_ops = frozenset({OP.EQUAL, OP.LESS_THAN, OP.LESS_EQUAL})
 
 

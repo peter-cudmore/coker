@@ -1,6 +1,5 @@
 """Compatibility facade for Coker's algebra graph and function APIs."""
 
-from coker.algebra.control import normalise
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
@@ -26,6 +25,7 @@ from coker.algebra.graph import (
     get_dim_by_class,
     get_projection,
     if_then_else,
+    normalise,
     strip_symbols_from_array,
 )
 from coker.algebra.ops import OP, Noop
