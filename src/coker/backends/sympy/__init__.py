@@ -1,6 +1,6 @@
 import sympy as sp
 import numpy as np
-from coker import Function
+from coker.algebra.function import Function
 from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import LoweredFunction, LoweringCapabilities
 

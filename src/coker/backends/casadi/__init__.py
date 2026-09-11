@@ -6,9 +6,14 @@ import casadi as ca
 import numpy as np
 
 
-from coker import Dimension, Function, Scalar, VectorSpace
-from coker.algebra.dimensions import FunctionSpace
-from coker.algebra.kernel import Tracer
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+)
+from coker.algebra.function import Function
+from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
 from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import (

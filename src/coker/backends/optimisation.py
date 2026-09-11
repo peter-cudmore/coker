@@ -6,7 +6,7 @@ from typing import Iterable, Sequence
 import numpy as np
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Tape, Tracer
+from coker.algebra.graph import Tape, Tracer
 
 
 @dataclass(frozen=True)

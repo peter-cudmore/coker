@@ -4,7 +4,8 @@ import numpy as np
 import torch
 
 from coker.algebra import Dimension
-from coker.algebra.kernel import Function, Tracer
+from coker.algebra.function import Function
+from coker.algebra.graph import Tracer
 from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 

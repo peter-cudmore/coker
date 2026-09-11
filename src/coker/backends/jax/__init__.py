@@ -5,7 +5,7 @@ import numpy as np
 import jax.numpy as jnp
 
 from coker.algebra import Dimension, OP
-from coker.algebra.kernel import Tracer
+from coker.algebra.graph import Tracer
 from coker.algebra.ops import (
     ConcatenateOP,
     NormOP,

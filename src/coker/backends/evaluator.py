@@ -8,15 +8,9 @@ from coker.algebra.dimensions import (
     FunctionSpace,
     ResultBundleDimension,
 )
-from coker.algebra.kernel import (
-    CallableReference,
-    Function,
-    OP,
-    SymbolicCallable,
-    Tape,
-    Tracer,
-)
-from coker.algebra.ops import Operator, normalize_evaluate_result
+from coker.algebra.function import Function, SymbolicCallable
+from coker.algebra.graph import CallableReference, Tape, Tracer
+from coker.algebra.ops import OP, Operator, normalize_evaluate_result
 from coker.backends.backend import Backend
 
 NodeDimension = Dimension | FunctionSpace | ResultBundleDimension

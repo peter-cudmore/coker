@@ -7,7 +7,7 @@ import numpy as np
 import scipy.optimize as optimize
 
 from coker.algebra import Dimension
-from coker.algebra.kernel import Tape, Tracer
+from coker.algebra.graph import Tape, Tracer
 from coker.backends.evaluator import evaluate_inner
 from coker.backends.optimisation import (
     InputBinding,
