@@ -1,6 +1,7 @@
 import enum
+from typing import Any, Callable, Dict, Sequence
+
 import numpy as np
-from typing import Dict, Callable
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
 from coker.algebra.dimensions import (
     Dimension,
@@ -71,7 +72,7 @@ class Operator:
     def pre_process(self, *args):
         return args
 
-    def compute_shape(self, *dims: Dimension) -> Dimension:
+    def compute_shape(self, *dims: Any) -> Any:
         raise NotImplementedError("Compute shape not implemented for {}", self)
 
     def is_linear(self):
@@ -92,10 +93,12 @@ class EvaluateOP(Operator):
     def __init__(
         self,
         result_dimension: Dimension | FunctionSpace | ResultBundleDimension,
-    ):
+    ) -> None:
         self.result_dimension = result_dimension
 
-    def compute_shape(self, function_sig: FunctionSpace, *args: Dimension):
+    def compute_shape(
+        self, function_sig: FunctionSpace, *args: Dimension
+    ) -> Dimension | FunctionSpace | ResultBundleDimension:
         validate_evaluate_inputs(function_sig, args)
         return self.result_dimension
 
@@ -132,7 +135,10 @@ class SelectOP(Operator):
         return isinstance(other, SelectOP) and self.index == other.index
 
 
-def normalize_evaluate_result(value, dimension):
+def normalize_evaluate_result(
+    value: Any,
+    dimension: Dimension | FunctionSpace | ResultBundleDimension,
+) -> Any:
     """Apply the tape-declared result policy for ``EvaluateOP``."""
     if isinstance(dimension, ResultBundleDimension):
         return value
@@ -246,8 +252,8 @@ def register_shape(*ops: OP):
 
 
 def validate_evaluate_inputs(
-    function_sig: FunctionSpace, args: tuple[Dimension, ...]
-):
+    function_sig: FunctionSpace, args: Sequence[Dimension]
+) -> None:
     if len(args) != len(function_sig.arguments):
         raise InvalidShape(
             f"Expected {len(function_sig.arguments)} arguments, got "

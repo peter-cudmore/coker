@@ -1,6 +1,14 @@
 """Lowered PyTorch execution adapters for Coker functions."""
 
+from typing import TYPE_CHECKING, Any, Sequence
+
 import torch
+
+if TYPE_CHECKING:
+    from coker.algebra.kernel import Function
+    from coker.backends.backend import Backend
+    from coker.backends.evaluator import CompiledPlan
+    from coker.backends.lowered import FunctionSignature
 
 from coker.algebra.kernel import Tracer
 
@@ -11,26 +19,31 @@ from coker.backends.lowered import LoweredFunction, LoweringCapabilities
 class PytorchLoweredFunction(LoweredFunction):
     """Execute a reusable PyTorch plan while preserving tensor autograd."""
 
-    def __init__(self, backend, function, plan):
+    def __init__(
+        self,
+        backend: "Backend",
+        function: "Function",
+        plan: "CompiledPlan",
+    ) -> None:
         self._backend = backend
         self._function = function
         self._plan = plan
 
     @property
-    def backend_name(self):
+    def backend_name(self) -> str:
         return self._backend.name
 
     @property
-    def signature(self):
+    def signature(self) -> "FunctionSignature":
         return self._function.signature
 
     @property
-    def capabilities(self):
+    def capabilities(self) -> LoweringCapabilities:
         return LoweringCapabilities(
             True, True, True, False, False, False, True, True
         )
 
-    def execute(self, inputs):
+    def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
         workspace = self._plan.execute(inputs, self._backend)
         if any(isinstance(arg, torch.Tensor) for arg in inputs):
             return tuple(cast_torch_outputs(self._function, workspace))
@@ -43,7 +56,7 @@ class PytorchLoweredFunction(LoweredFunction):
             )
         )
 
-    def as_module(self):
+    def as_module(self) -> "PytorchModule":
         """Expose this handle through an eager ``torch.nn.Module``."""
         return PytorchModule(self)
 
@@ -51,12 +64,12 @@ class PytorchLoweredFunction(LoweredFunction):
 class PytorchModule(torch.nn.Module):
     """Expose a lowered Coker function through PyTorch's module interface."""
 
-    def __init__(self, lowered):
+    def __init__(self, lowered: PytorchLoweredFunction) -> None:
         super().__init__()
         self._lowered = lowered
         self._input_count = len(lowered.signature.inputs)
 
-    def forward(self, *inputs):
+    def forward(self, *inputs: Any) -> Any:
         if len(inputs) != self._input_count:
             raise TypeError(
                 f"Expected {self._input_count} inputs, got {len(inputs)}"
@@ -64,9 +77,11 @@ class PytorchModule(torch.nn.Module):
         return self._lowered(*inputs)
 
 
-def cast_torch_outputs(function, workspace):
+def cast_torch_outputs(
+    function: "Function", workspace: dict[int, Any]
+) -> list[Any | None]:
     """Restore declared output shapes without detaching native tensors."""
-    result = []
+    result: list[Any | None] = []
     for output_ref in function.output:
         if output_ref is None:
             result.append(None)

@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+from typing import Any
+
 import casadi as ca
 import numpy as np
 
@@ -14,7 +17,6 @@ from coker.algebra.ops import (
     normalize_evaluate_result,
 )
 from coker.algebra.dimensions import FunctionSpace
-from typing import List
 
 impls = {
     OP.ADD: lambda x, y: x + y,
@@ -203,8 +205,10 @@ def extract_symbols(arg: ca.MX):
     }
 
 
-def substitute(output: List[Tracer], workspace):
-    def get_node(node: Tracer):
+def substitute(
+    output: Sequence[Tracer | None], workspace: dict[int, Any]
+) -> list[Any | None]:
+    def get_node(node: Any) -> Any:
         if isinstance(node, CallableReference):
             return node
         if node is None or node.index == Tape.NONE:
@@ -248,7 +252,11 @@ def substitute(output: List[Tracer], workspace):
     return [get_node(o) for o in output]
 
 
-def lower(tape: Tape, output: List[Tracer], workspace=None):
+def lower(
+    tape: Tape,
+    output: Sequence[Tracer | None],
+    workspace: dict[int, Any] | None = None,
+) -> tuple[list[ca.MX], list[Any | None]]:
     workspace = {} if not workspace else workspace
     inputs = dict()
     for i in tape.input_indicies:

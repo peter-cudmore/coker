@@ -1,4 +1,6 @@
-from typing import Union
+from __future__ import annotations
+
+from typing import Any, Sequence, Union
 
 import casadi as ca
 import numpy as np
@@ -9,6 +11,12 @@ from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.kernel import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
 from coker.backends.backend import ArrayLike, Backend, register_backend
+from coker.backends.lowered import (
+    FunctionInputSpec,
+    FunctionOutputSpec,
+    FunctionSignature,
+    LoweringOptions,
+)
 from coker.backends.casadi.lower import (
     call_parameterised_op,
     impls,
@@ -17,6 +25,7 @@ from coker.backends.casadi.lower import (
     substitute,
 )
 from coker.backends.casadi.optimiser import build_optimisation_problem
+from coker.backends.casadi.lowered import CasadiLoweredFunction
 from coker.backends.casadi.variational.solver import (
     create_variational_solver,
 )
@@ -27,18 +36,17 @@ __all__ = ["CasadiBackend"]
 scalar_types = (float, int)
 
 
-def _space_from_casadi_shape(name: str, rows: int, columns: int):
+def _space_from_casadi_shape(
+    name: str, rows: int, columns: int
+) -> Scalar | VectorSpace:
     if (rows, columns) == (1, 1):
         return Scalar(name)
     return VectorSpace(name, rows if columns == 1 else (rows, columns))
 
 
-def _signature_from_casadi_function(ca_function: ca.Function):
-    from coker.backends.lowered import (
-        FunctionInputSpec,
-        FunctionOutputSpec,
-        FunctionSignature,
-    )
+def _signature_from_casadi_function(
+    ca_function: ca.Function,
+) -> "FunctionSignature":
 
     inputs = tuple(
         FunctionInputSpec(
@@ -75,7 +83,11 @@ def _signature_from_casadi_function(ca_function: ca.Function):
 
 class CasadiBackend(Backend):
 
-    def import_function(self, ca_function, signature=None):
+    def import_function(
+        self,
+        ca_function: ca.Function,
+        signature: FunctionSignature | None = None,
+    ) -> Function:
         """Import a native CasADi function as an ``EvaluateOP`` callable.
 
         CasADi functions carry ordered names and matrix dimensions, so callers
@@ -181,33 +193,34 @@ class CasadiBackend(Backend):
         raise NotImplementedError
 
     def _lower_with_evaluate(self, function):
-        from coker.backends.casadi.lowered import CasadiLoweredFunction
-
         return CasadiLoweredFunction(self, function)
 
-    def lower(self, function: Function, options=None):
-        from coker.backends.casadi.lowered import CasadiLoweredFunction
+    def lower(
+        self,
+        function: Function,
+        options: LoweringOptions | None = None,
+    ) -> CasadiLoweredFunction:
 
         if any(
             isinstance(shape, FunctionSpace)
             for shape in function.input_shape()
-        ):
+        ) or any(output is None for output in function.output):
             return self._lower_with_evaluate(function)
 
         ca_inputs, ca_outputs = _lower_to_casadi(
             function.tape, function.output
         )
-        if any(output is None for output in ca_outputs):
-            return self._lower_with_evaluate(function)
         return CasadiLoweredFunction(
             self, function, ca.Function("f", ca_inputs, ca_outputs)
         )
 
-    def restore_public_outputs(self, function: Function, outputs):
+    def restore_public_outputs(
+        self, function: Function, outputs: Sequence[Any | None]
+    ) -> tuple[Any | None, ...]:
         """Convert CasADi lowered values at the public Coker boundary."""
-        restored = []
+        restored: list[Any | None] = []
         for value, output in zip(outputs, function.output):
-            if value is None:
+            if value is None or output is None:
                 restored.append(None)
                 continue
             try:
@@ -221,8 +234,10 @@ class CasadiBackend(Backend):
                 restored.append(np.asarray(numpy_value).reshape(output.shape))
         return tuple(restored)
 
-    def evaluate(self, function: Function, inputs: ArrayLike):
-        workspace = {}
+    def evaluate(
+        self, function: Function, inputs: Sequence[Any]
+    ) -> list[Any | None]:
+        workspace: dict[int, Any] = {}
 
         for idx, (space, arg) in enumerate(
             zip(function.input_shape(), inputs)
@@ -236,8 +251,11 @@ class CasadiBackend(Backend):
                 workspace[index] = arg
 
         y = substitute(function.output, workspace)
-        outs = []
+        outs: list[Any | None] = []
         for y_i, output_tracer in zip(y, function.output):
+            if output_tracer is None:
+                outs.append(None)
+                continue
             try:
                 y_result = self.to_numpy_array(y_i)
                 if output_tracer.dim.is_scalar():

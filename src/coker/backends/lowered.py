@@ -2,7 +2,24 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
+
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+)
+
+if TYPE_CHECKING:
+    from coker.algebra.kernel import Function
+    from coker.backends.backend import Backend
+
+
+InputSpace: TypeAlias = Scalar | VectorSpace | FunctionSpace
+OutputShape: TypeAlias = (
+    Dimension | Scalar | VectorSpace | FunctionSpace | None
+)
 
 
 @dataclass(frozen=True)
@@ -10,7 +27,7 @@ class FunctionInputSpec:
     """One canonical input, preserving its declaration name and space."""
 
     name: str
-    space: Any
+    space: InputSpace
 
 
 @dataclass(frozen=True)
@@ -18,7 +35,7 @@ class FunctionOutputSpec:
     """One canonical output, preserving its declaration order and shape."""
 
     name: str
-    shape: Any
+    shape: OutputShape
 
 
 @dataclass(frozen=True)
@@ -72,7 +89,7 @@ class LoweredFunction(ABC):
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
         """Execute ordered inputs and return ordered outputs as a tuple."""
 
-    def __call__(self, *inputs):
+    def __call__(self, *inputs: Any) -> Any:
         """Execute positional inputs, unwrapping a single declared output."""
         outputs = self.execute(inputs)
         return outputs[0] if len(outputs) == 1 else outputs
@@ -87,7 +104,12 @@ class LoweredFunction(ABC):
 class EvaluatedLoweredFunction(LoweredFunction):
     """Generic handle without a reusable compiled representation."""
 
-    def __init__(self, backend, function, signature: FunctionSignature):
+    def __init__(
+        self,
+        backend: "Backend",
+        function: "Function",
+        signature: FunctionSignature,
+    ) -> None:
         self._backend = backend
         self._function = function
         self._signature = signature
@@ -109,7 +131,7 @@ class EvaluatedLoweredFunction(LoweredFunction):
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
         from coker.backends.evaluator import evaluate_inner
 
-        workspace = {}
+        workspace: dict[int, Any] = {}
         return tuple(
             evaluate_inner(
                 self._function.tape,

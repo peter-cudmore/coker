@@ -6,7 +6,7 @@ import torch
 from coker.algebra import Dimension
 from coker.algebra.kernel import Function, Tracer
 from coker.backends.backend import ArrayLike, Backend, register_backend
-from coker.backends.lowered import FunctionSignature
+from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from .dynamics import PytorchSolverParameters, evaluate_integrals
 from .lower import PytorchLoweredFunction, PytorchModule
@@ -109,7 +109,9 @@ class PytorchBackend(Backend):
             solver_parameters,
         )
 
-    def lower(self, function, options=None):
+    def lower(
+        self, function: Function, options: LoweringOptions | None = None
+    ) -> PytorchLoweredFunction:
         from coker.backends.evaluator import _build_plan
 
         return PytorchLoweredFunction(

@@ -1,21 +1,36 @@
-from typing import Any, Callable, NamedTuple
+from collections.abc import Callable, Sequence
+from typing import Any, NamedTuple
+
 import numpy as np
 
-from coker.backends.backend import Backend
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    ResultBundleDimension,
+)
 from coker.algebra.kernel import (
     CallableReference,
+    Function,
     OP,
     SymbolicCallable,
+    Tape,
     Tracer,
 )
-from coker.algebra.dimensions import ResultBundleDimension
-from coker.algebra.ops import EvaluateOP, normalize_evaluate_result
+from coker.algebra.ops import EvaluateOP, Operator, normalize_evaluate_result
+from coker.backends.backend import Backend
+
+NodeDimension = Dimension | FunctionSpace | ResultBundleDimension
 
 _SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | CallableReference
 _SYMBOLIC_TYPES = Tracer | _SYMBOLIC_CALLABLE_TYPES
 
 
-def _normalize_evaluate_result(op, args, value, dimension):
+def _normalize_evaluate_result(
+    op: OP | Operator,
+    args: Sequence[Any],
+    value: Any,
+    dimension: NodeDimension,
+) -> Any:
     if isinstance(op, EvaluateOP) and isinstance(args[0], CallableReference):
         return normalize_evaluate_result(value, dimension)
     return value
@@ -27,11 +42,11 @@ def _normalize_evaluate_result(op, args, value, dimension):
 
 
 class _PlanStep(NamedTuple):
-    fn: Callable
-    arg_indices: list
+    fn: Callable[..., Any]
+    arg_indices: list[int]
     out_idx: int
-    dim: object
-    post_fn: Callable  # pre-resolved reshape (or identity) applied after fn
+    dim: NodeDimension
+    post_fn: Callable[[Any], Any]
 
 
 class CompiledPlan:
@@ -42,12 +57,19 @@ class CompiledPlan:
     workspace indices. Not thread-safe — workspace is mutated in place.
     """
 
-    def __init__(self, steps, workspace, input_indices):
+    def __init__(
+        self,
+        steps: Sequence[_PlanStep],
+        workspace: dict[int, Any],
+        input_indices: Sequence[int],
+    ) -> None:
         self._steps = steps
         self._workspace = workspace  # constants pre-filled; reused each call
         self._input_indices = input_indices
 
-    def execute(self, inputs, backend):
+    def execute(
+        self, inputs: Sequence[Any], backend: Backend
+    ) -> dict[int, Any]:
         ws = self._workspace
         for ws_idx, arg in zip(self._input_indices, inputs):
             if ws_idx >= 0:
@@ -65,7 +87,7 @@ class CompiledPlan:
         return ws
 
 
-def _build_plan(graph, backend):
+def _build_plan(graph: Tape, backend: Backend) -> CompiledPlan:
     """Walk the tape once and return a CompiledPlan."""
 
     # Pass 1 — mark nodes that depend on inputs (dynamic) versus
@@ -157,9 +179,14 @@ def _build_plan(graph, backend):
     return CompiledPlan(steps, workspace, graph.input_indicies)
 
 
-def _cast_outputs(outputs, graph, workspace, backend):
+def _cast_outputs(
+    outputs: Sequence[Tracer | None],
+    graph: Tape,
+    workspace: dict[int, Any],
+    backend: Backend,
+) -> list[Any | None]:
     """Extract and reshape outputs from the workspace after plan execution."""
-    result = []
+    result: list[Any | None] = []
     for o in outputs:
         if o is None:
             result.append(None)
@@ -191,7 +218,13 @@ def _cast_outputs(outputs, graph, workspace, backend):
 # ---------------------------------------------------------------------------
 
 
-def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
+def evaluate_inner(
+    graph: Tape,
+    args: Sequence[Any],
+    outputs: Sequence[Tracer | None],
+    backend: Backend,
+    workspace: dict[int, Any],
+) -> list[Any | None]:
     workspace[-1] = None
     for index, arg in zip(graph.input_indicies, args):
         if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES):
@@ -241,12 +274,17 @@ def evaluate_inner(graph, args, outputs, backend: Backend, workspace: dict):
     return _cast_outputs(outputs, graph, workspace, backend)
 
 
-def evaluate(function, args, backend=None):
+def evaluate(
+    function: Function,
+    args: Sequence[Any],
+    backend: str | None = None,
+) -> list[Any | None]:
 
     from coker.backends import get_backend_by_name, get_current_backend
 
-    if not backend:
-        backend_impl: Backend = get_current_backend()
-    else:
-        backend_impl: Backend = get_backend_by_name(backend)
+    backend_impl: Backend = (
+        get_current_backend()
+        if backend is None
+        else get_backend_by_name(backend)
+    )
     return backend_impl.evaluate(function, args)
