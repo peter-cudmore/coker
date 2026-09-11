@@ -79,7 +79,6 @@ class PytorchBackend(Backend):
             self,
             operations=impls,
             parameterised_operations=parameterised_impls,
-            preserve_nonscalar_shapes=True,
         )
 
     def evaluate_integrals(

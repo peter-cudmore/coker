@@ -15,7 +15,12 @@ from coker.algebra.dimensions import (
 from coker.algebra.function import Function, create_function_from_native
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
-from coker.backends.backend import ArrayLike, Backend, register_backend
+from coker.backends.backend import (
+    ArrayLike,
+    Backend,
+    Evaluator,
+    register_backend,
+)
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -202,6 +207,11 @@ class CasadiBackend(Backend):
         if isinstance(array, np.ndarray):
             return ca.reshape(array, *shape)
         raise NotImplementedError
+
+    def get_evaluator(self) -> Evaluator:
+        raise NotImplementedError(
+            "CasADi lowering does not use compiled tape evaluators"
+        )
 
     def lower(
         self,

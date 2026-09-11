@@ -45,7 +45,6 @@ class _PlanStep(NamedTuple):
     fn: Callable[..., Any]
     arg_indices: list[int]
     out_idx: int
-    dim: NodeDimension
     post_fn: Callable[[Any], Any]
 
 
@@ -100,39 +99,32 @@ class Evaluator(ABC):
 
 
 class GenericEvaluator(Evaluator):
-    """Compiler configurable with optional native operation tables."""
+    """Compiler resolving operations from backend-native tables."""
 
     def __init__(
         self,
         backend: Backend,
         *,
-        operations: Mapping[object, Callable[..., Any]] | None = None,
-        parameterised_operations: (
-            Mapping[type, Callable[..., Any]] | None
-        ) = None,
-        preserve_nonscalar_shapes: bool = False,
+        operations: Mapping[object, Callable[..., Any]],
+        parameterised_operations: Mapping[type, Callable[..., Any]],
     ) -> None:
         super().__init__(backend)
         self._operations = operations
         self._parameterised_operations = parameterised_operations
-        self._preserve_nonscalar_shapes = preserve_nonscalar_shapes
 
     def _resolve_operation(self, op) -> Callable[..., Any]:
-        if self._operations is not None and op in self._operations:
+        try:
             return self._operations[op]
-        if (
-            self._parameterised_operations is not None
-            and type(op) in self._parameterised_operations
-        ):
-            operation_type = type(op)
-            return lambda *args: self._parameterised_operations[
-                operation_type
-            ](op, *args)
-        call = self.backend.call
-        return lambda *args: call(op, *args)
+        except KeyError:
+            pass
+        try:
+            operation = self._parameterised_operations[type(op)]
+        except KeyError as ex:
+            raise NotImplementedError(f"{op} is not implemented") from ex
+        return lambda *args: operation(op, *args)
 
     def _resolve_post(self, dim: NodeDimension) -> Callable[[Any], Any]:
-        if self._preserve_nonscalar_shapes and not dim.is_scalar():
+        if not dim.is_scalar():
             return lambda value: value
         reshape = self.backend.reshape
 
@@ -245,7 +237,6 @@ class GenericEvaluator(Evaluator):
                     step_fn,
                     arg_indices,
                     i,
-                    dim,
                     post_fn,
                 )
             )

@@ -17,7 +17,12 @@ from coker.algebra.ops import (
     invoke_callable,
 )
 
-from coker.backends.backend import ArrayLike, Backend, register_backend
+from coker.backends.backend import (
+    ArrayLike,
+    Backend,
+    Evaluator,
+    register_backend,
+)
 
 from coker.backends.lowered import (
     FunctionSignature,
@@ -188,6 +193,11 @@ class JaxBackend(Backend):
 
     def lower(self, function, options=None) -> JaxLoweredFunction:
         return JaxLoweredFunction(self, function)
+
+    def get_evaluator(self) -> Evaluator:
+        raise NotImplementedError(
+            "JAX lowering does not use compiled tape evaluators"
+        )
 
     def import_function(
         self,

@@ -93,7 +93,6 @@ class NumpyBackend(Backend):
             self,
             operations=impls,
             parameterised_operations=parameterised_impls,
-            preserve_nonscalar_shapes=True,
         )
 
     def import_function(
