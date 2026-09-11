@@ -137,7 +137,8 @@ class TapeInner:
 
     @staticmethod
     def try_sparsify(value: Any) -> Any:
-        """Store two-dimensional constants sparsely at 70% sparsity or above."""
+        """Store two-dimensional constants sparsely at 70% sparsity or
+        above."""
         if not isinstance(value, np.ndarray) or value.ndim != 2:
             return value
 

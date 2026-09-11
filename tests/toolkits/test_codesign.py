@@ -126,6 +126,7 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
     assert problem.solve_info is not None
     assert problem.solve_info.success
 
+
 def test_optimisation_supports_parameter_dependent_constraint_bounds(
     variational_backend,
 ):
