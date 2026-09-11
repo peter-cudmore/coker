@@ -45,7 +45,7 @@ class PytorchLoweredFunction(LoweredFunction):
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
-        workspace = self._plan.execute(inputs, self._backend)
+        workspace = self._plan.execute(inputs)
         if any(isinstance(arg, torch.Tensor) for arg in inputs):
             return tuple(cast_torch_outputs(self._function, workspace))
         return tuple(
