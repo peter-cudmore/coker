@@ -71,7 +71,7 @@ class Function(SymbolicCallable):
         self,
         tape: Tape,
         outputs: Tracer | None | Sequence[Tracer | None],
-        backend: str = "coker",
+        backend: str = "numpy",
         name: str | None = None,
         signature: "FunctionSignature | None" = None,
     ) -> None:
@@ -493,7 +493,7 @@ def _normalise_result(result, tape: Tape):
 def function(
     arguments: List[Scalar | VectorSpace | FunctionSpace],
     implementation: Callable[[Element, ...], Element],
-    backend: str = "coker",
+    backend: str = "numpy",
     name: Optional[str] = None,
 ) -> Function:
     """Compile a Python callable into a Coker :class:`Function`.
