@@ -10,8 +10,14 @@ from coker import Scalar, VectorSpace
 from coker.algebra import Dimension, OP
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
-from coker.backends.pytorch import PytorchModule
-from coker.toolkits.codesign import Minimise, ProblemBuilder
+from coker.backends.pytorch import PytorchModule, PytorchNLPSolverOptions
+from coker.toolkits.codesign import (
+    Minimise,
+    ProblemBuilder,
+    SolveFailure,
+    SolverOptions,
+    bounded,
+)
 
 
 @pytest.fixture
@@ -224,13 +230,144 @@ def test_if_then_else_uses_tensor_where():
     assert torch.equal(result, torch.tensor([0.0, 0.0, 0.0]))
 
 
-def test_mathematical_program_construction_is_unsupported():
-    with ProblemBuilder() as builder:
-        x = builder.new_variable("x")
-        builder.objective = Minimise(x * x)
+def test_pytorch_nlp_solver_options_validate_cuda_float32_configuration():
+    options = SolverOptions(warm_start=True)
+    assert options.warm_start
+    with pytest.raises(ValueError, match="CUDA"):
+        PytorchNLPSolverOptions(device="cpu")
+    with pytest.raises(ValueError, match="float32"):
+        PytorchNLPSolverOptions(dtype="float64")
+    options = PytorchNLPSolverOptions(
+        inner_iterations=7, restoration_iterations=9, warm_start=True
+    )
+    assert options.inner_iterations == 7
+    assert options.restoration_iterations == 9
+    assert options.warm_start
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_pytorch_warm_start_reuses_detached_cuda_primal():
+    with ProblemBuilder(
+        solver_options=PytorchNLPSolverOptions(
+            warm_start=True, inner_iterations=10
+        )
+    ) as builder:
+        x = builder.new_variable("x", initial_value=0.2)
+        builder.objective = Minimise((x - 1.0) ** 2)
+        builder.constraints = [x * x <= 0.25]
         builder.outputs = [x]
-        with pytest.raises(NotImplementedError, match="optimisation"):
-            builder.build("pytorch")
+        program = builder.build("pytorch")
+    program()
+    implementation = program._impl
+    assert implementation._warm_start_decision is not None
+    assert implementation._warm_start_decision.device.type == "cuda"
+    assert implementation._warm_start_decision.grad_fn is None
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_solves_and_reports_status():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", initial_value=3.0)
+        builder.objective = Minimise((x - 1.0) * (x - 1.0))
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+
+    cost, result = problem()
+    assert cost == pytest.approx(0.0, abs=1e-5)
+    assert result == pytest.approx(1.0, abs=1e-3)
+    assert problem.solve_info.success
+    assert problem.solve_info.solver == "LBFGS"
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_accepts_cuda_runtime_and_rejects_cpu():
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        target = builder.arguments[0]
+        x = builder.new_variable("x", initial_value=0.0)
+        builder.objective = Minimise((x - target) * (x - target))
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+
+    _, result = problem(torch.tensor(2.0, device="cuda"))
+    assert result == pytest.approx(2.0, abs=1e-3)
+    with pytest.raises(ValueError, match="CUDA"):
+        problem(torch.tensor(2.0))
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_bound_optimum():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", initial_value=0.0)
+        builder.objective = Minimise((x - 2.0) ** 2)
+        builder.constraints = [x >= 1.0, x <= 1.5]
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+    _, result = problem()
+    assert result == pytest.approx(1.5, abs=2e-3)
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_nonlinear_inequality():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", initial_value=0.2)
+        builder.objective = Minimise((x - 1.0) ** 2)
+        builder.constraints = [x * x <= 0.25]
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+    _, result = problem()
+    assert result == pytest.approx(0.5, abs=3e-2)
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_equality_constraint():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", initial_value=0.0)
+        builder.objective = Minimise((x - 3.0) ** 2)
+        builder.constraints = [x == 1.0]
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+    _, result = problem()
+    assert result == pytest.approx(1.0, abs=2e-3)
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_parameter_dependent_bound():
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        target = builder.arguments[0]
+        x = builder.new_variable("x", initial_value=0.0)
+        builder.objective = Minimise(x * x)
+        builder.constraints = [bounded(x, target, target)]
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+    _, result = problem(torch.tensor(2.0, device="cuda"))
+    assert result == pytest.approx(2.0, abs=2e-3)
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_infeasible_constraint_reports_failure():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x", initial_value=0.0)
+        builder.objective = Minimise(x * x)
+        builder.constraints = [x >= 1.0, x <= 0.0]
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+    with pytest.raises(SolveFailure):
+        problem()
+    assert not problem.solve_info.success
 
 
 def test_variational_solver_creation_is_unsupported():
@@ -238,6 +375,22 @@ def test_variational_solver_creation_is_unsupported():
         get_backend_by_name(
             "pytorch", set_current=False
         ).create_variational_solver(object())
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_zero_decision_problem():
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        target = builder.arguments[0]
+        builder.objective = Minimise(target * target)
+        builder.outputs = [target]
+        problem = builder.build("pytorch")
+
+    cost, output = problem(torch.tensor(2.0, device="cuda"))
+    assert cost == pytest.approx(4.0)
+    assert output == pytest.approx(2.0)
+    assert problem.solve_info.success
 
 
 def test_quadrature_dynamics_preserve_autograd(pytorch_backend):

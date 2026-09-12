@@ -46,11 +46,24 @@ Backend capability matrix
        suite does not include a dedicated ``tests/backends/jax/`` directory.
    * - ``pytorch``
      - Tensor-valued numerical execution with PyTorch autograd plus ODE
-       initial-value integration and quadratures.
-     - Install with ``pip install "coker[pytorch]"``.
+       initial-value integration and quadratures.  CUDA-only nonlinear
+       mathematical-program solving is also supported through
+       :class:`~coker.toolkits.codesign.ProblemBuilder` and
+       :class:`~coker.backends.pytorch.PytorchNLPSolverOptions`.
+     - Install with ``pip install "coker[pytorch]"``. NLP and variational
+       solves require a CUDA-capable PyTorch installation. NLP uses float32
+       LBFGS with barrier/augmented-Lagrangian stages; variational fitting
+       supports fixed-horizon, bound-only ODE parameters.
+     - ``SolverOptions`` contains backend-independent NLP settings;
+       ``PytorchNLPSolverOptions`` adds CUDA LBFGS/barrier settings.
+       ``PytorchODESolverParameters`` configures ``torchdiffeq`` initial-value
+       solves only. Variational fitting currently has no separate options
+       object: its fixed integration and LBFGS settings are implementation
+       defaults.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
-       backend tests. Algebraic DAEs, variational solvers, mathematical-program
-       construction, and mathematical-program solving are not supported.
+       backend tests. Algebraic DAEs, variational controls, quadratures,
+       constraints, and optimized horizons are unsupported; CPU NLP and
+       variational solving are unsupported.
 
 Choosing a backend
 ------------------
@@ -59,17 +72,16 @@ A good default is:
 
 - use ``numpy`` while bringing up a model or debugging array shapes;
 - use ``casadi`` for solve-heavy optimisation and parameter-fitting problems;
-- use ``pytorch`` when you need tensor-valued execution or PyTorch autograd;
+- use ``pytorch`` when you need tensor-valued execution, autograd, or a
+  CUDA-only nonlinear mathematical-program solve;
 - use ``sympy`` when you need symbolic forms or printable expressions;
 - use ``coker`` when you want the native compact execution graph documented in
   :doc:`backend_architecture`.
 
-The repository's own tests validate numerical execution under ``numpy``,
-``jax``, and ``pytorch`` (including PyTorch tensor/autograd, ODE, and
-quadrature behavior), variational solves through ``casadi``, and low-level
-native graph behaviour under ``coker``. PyTorch deliberately does not support
-algebraic DAEs, variational solvers, mathematical-program construction, or
-mathematical-program solving.
+The repository's tests validate numerical execution under ``numpy``, ``jax``,
+and ``pytorch`` (including CUDA-conditional mathematical-program and
+fixed-horizon variational fitting behavior), variational solves through
+``casadi``, and low-level native graph behaviour under ``coker``.
 
 
 Lowering handles
@@ -160,7 +172,9 @@ solver/backend combination is rejected while building or lowering, before
 evaluation. Derivatives through an argmin or argmax are not defined.
 
 ``numpy``, ``casadi``, and ``coker`` support host-side program composition.
-The JAX and PyTorch backends do not construct optimisation programs.
+PyTorch supports direct CUDA mathematical-program construction/solving and
+fixed-horizon, bound-only ODE parameter fitting; JAX does not construct
+optimisation programs.
 
 Embedded mapped QP calls
 ------------------------

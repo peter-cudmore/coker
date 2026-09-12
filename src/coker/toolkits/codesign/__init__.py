@@ -23,9 +23,22 @@ from .optimisation import (
 )
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class SolverOptions:
+    """Backend-independent settings for nonlinear-program solvers.
+
+    Backend implementations define subclasses for their algorithm, precision,
+    and device settings. ODE initial-value settings use the separate
+    :class:`coker.interfaces.SolverParameters` hierarchy; variational solvers
+    expose a dedicated options type only when they require configuration beyond
+    their problem definition.
+    """
+
     warm_start: bool = False
+
+    def __post_init__(self):
+        if not isinstance(self.warm_start, bool):
+            raise TypeError("warm_start must be a bool")
 
 
 class Minimise:
@@ -167,7 +180,12 @@ class MathematicalProgram(SymbolicCallable):
 
 
 class ProblemBuilder:
-    def __init__(self, arguments: Optional[List[VectorSpace | Scalar]] = None):
+    def __init__(
+        self,
+        arguments: Optional[List[VectorSpace | Scalar]] = None,
+        *,
+        solver_options: SolverOptions | None = None,
+    ):
         self.tape: Optional[Tape] = Tape()
         self.arguments = (
             [self.tape.input(a) for a in arguments] if arguments else []
@@ -176,7 +194,7 @@ class ProblemBuilder:
         self.constraints = []
         self.outputs = []
         self.initial_conditions = {}
-        self.warm_start = False
+        self.solver_options = solver_options
 
     def new_variable(self, name, shape=None, initial_value=None):
         assert self.tape is not None
@@ -241,13 +259,21 @@ class ProblemBuilder:
                 )
         backend_impl = get_backend_by_name(backend_name)
 
-        implementation = backend_impl.build_optimisation_problem(
+        problem_args = (
             self.objective.expression,
             self.constraints,
             self.arguments,
             [self.objective.expression, *self.outputs],
             self._normalise_initial_conditions(),
         )
+        if backend_name == "pytorch":
+            implementation = backend_impl.build_optimisation_problem(
+                *problem_args, options=self.solver_options
+            )
+        else:
+            implementation = backend_impl.build_optimisation_problem(
+                *problem_args
+            )
         impl = backend_impl.make_optimisation_module(implementation)
 
         return MathematicalProgram(

@@ -41,10 +41,24 @@ def _promoted_linear(fn, *args):
     tensors = [arg for arg in args if isinstance(arg, torch.Tensor)]
     if len(tensors) > 1:
         dtype = tensors[0].dtype
+        devices = {
+            tensor.device for tensor in tensors if tensor.device.type != "cpu"
+        }
+        if len(devices) > 1:
+            devices_text = ", ".join(sorted(map(str, devices)))
+            raise ValueError(
+                "PyTorch operation received tensors on distinct devices: "
+                f"{devices_text}"
+            )
+        device = next(iter(devices), tensors[0].device)
         for tensor in tensors[1:]:
             dtype = torch.promote_types(dtype, tensor.dtype)
         args = tuple(
-            arg.to(dtype=dtype) if isinstance(arg, torch.Tensor) else arg
+            (
+                arg.to(device=device, dtype=dtype)
+                if isinstance(arg, torch.Tensor)
+                else arg
+            )
             for arg in args
         )
     return fn(*args)
