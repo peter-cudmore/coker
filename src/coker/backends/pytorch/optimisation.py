@@ -468,11 +468,13 @@ class _PytorchOptimisationProblem:
                 )
             if len({v.device for v in tensors}) != 1:
                 raise ValueError(
-                    "PyTorch optimisation runtime tensors must use one CUDA device"
+                    "PyTorch optimisation runtime tensors must use one CUDA "
+                    "device"
                 )
             if len(runtime_args) != len(self.parameter_bindings):
                 raise ValueError(
-                    f"Expected {len(self.parameter_bindings)} runtime arguments, "
+                    "Expected "
+                    f"{len(self.parameter_bindings)} runtime arguments, "
                     f"got {len(runtime_args)}"
                 )
             values = tuple(
