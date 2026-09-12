@@ -45,8 +45,10 @@ def _promoted_linear(fn, *args):
             tensor.device for tensor in tensors if tensor.device.type != "cpu"
         }
         if len(devices) > 1:
+            devices_text = ", ".join(sorted(map(str, devices)))
             raise ValueError(
-                f"PyTorch operation received tensors on distinct devices: {sorted(map(str, devices))}"
+                "PyTorch operation received tensors on distinct devices: "
+                f"{devices_text}"
             )
         device = next(iter(devices), tensors[0].device)
         for tensor in tensors[1:]:

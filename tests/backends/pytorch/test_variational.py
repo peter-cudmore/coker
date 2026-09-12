@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
 from coker import VectorSpace
 from coker.dynamics import BoundedVariable, VariationalProblem
 from coker.dynamics.system import create_autonomous_ode

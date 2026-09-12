@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from coker.backends import get_backend_by_name
-
 import numpy as np
 import torch
 
+from coker.backends import get_backend_by_name
 from coker.backends.backend import VariationalSolver
 from coker.backends.lowered import (
     FunctionInputSpec,
@@ -44,11 +43,13 @@ class PytorchVariationalSolver(VariationalSolver):
             )
         if problem.horizon_decision is not None:
             raise NotImplementedError(
-                "Optimized horizons are not supported by PyTorch variational solving"
+                "Optimized horizons are not supported by "
+                "PyTorch variational solving"
             )
         if problem.control:
             raise NotImplementedError(
-                "Control declarations are not supported by PyTorch variational solving"
+                "Control declarations are not supported by "
+                "PyTorch variational solving"
             )
         if problem.quadratures:
             raise NotImplementedError(
@@ -60,23 +61,27 @@ class PytorchVariationalSolver(VariationalSolver):
             or problem.initial_constraints
         ):
             raise NotImplementedError(
-                "Variational constraints are not supported by PyTorch variational solving"
+                "Variational constraints are not supported by "
+                "PyTorch variational solving"
             )
         _, z_dim, q_dim = problem.system.get_state_dimensions()
         if z_dim is not None:
             raise NotImplementedError(
-                "Algebraic states are not supported by PyTorch variational solving"
+                "Algebraic states are not supported by "
+                "PyTorch variational solving"
             )
         if q_dim is not None:
             raise NotImplementedError(
-                "Quadrature states are not supported by PyTorch variational solving"
+                "Quadrature states are not supported by "
+                "PyTorch variational solving"
             )
         self._parameters = []
         seen = set()
         for declaration in problem.parameters or []:
             if not isinstance(declaration, BoundedVariable):
                 raise NotImplementedError(
-                    "Only BoundedVariable parameters are supported by PyTorch variational solving"
+                    "Only BoundedVariable parameters are supported by "
+                    "PyTorch variational solving"
                 )
             if declaration.name in seen:
                 continue
@@ -143,7 +148,8 @@ class PytorchVariationalSolver(VariationalSolver):
         x0, z0 = system.x0(0.0, None, parameters)
         if z0 is not None:
             raise NotImplementedError(
-                "Algebraic states are not supported by PyTorch variational solving"
+                "Algebraic states are not supported by "
+                "PyTorch variational solving"
             )
         x0 = torch.as_tensor(
             x0, device=self._device, dtype=self._dtype
@@ -152,7 +158,8 @@ class PytorchVariationalSolver(VariationalSolver):
             from torchdiffeq import odeint
         except ImportError as ex:
             raise RuntimeError(
-                "PyTorch variational solving requires `pip install coker[pytorch]`"
+                "PyTorch variational solving requires "
+                "`pip install coker[pytorch]`"
             ) from ex
 
         def rhs(time, state):
@@ -200,20 +207,23 @@ class PytorchVariationalSolver(VariationalSolver):
         guess = float(parameter.guess)
         if not np.isfinite(guess):
             raise ValueError(
-                f"Initial guess for parameter {parameter.name!r} must be finite"
+                f"Initial guess for parameter {parameter.name!r} "
+                "must be finite"
             )
         if (np.isfinite(parameter.lower) and guess < parameter.lower) or (
             np.isfinite(parameter.upper) and guess > parameter.upper
         ):
             raise ValueError(
-                f"Initial guess for parameter {parameter.name!r} is outside its bounds"
+                f"Initial guess for parameter {parameter.name!r} is outside "
+                "its bounds"
             )
         epsilon = torch.finfo(self._dtype).eps
         lower, upper = parameter.lower, parameter.upper
         if np.isfinite(lower) and np.isfinite(upper):
             if lower >= upper:
                 raise ValueError(
-                    f"Parameter {parameter.name!r} must have lower bound below upper bound"
+                    f"Parameter {parameter.name!r} must have lower bound "
+                    "below upper bound"
                 )
             ratio = min(
                 max((guess - lower) / (upper - lower), epsilon), 1 - epsilon
