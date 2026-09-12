@@ -553,12 +553,10 @@ stationarity tolerances; failed restoration and exhausted schedules report
 
 ### Variational
 
-- [ ] Extract neutral solution assembly: move only CasADi-free validation and
-  `VariationalSolution` construction helpers behind backend-neutral boundaries.
-- [ ] Implement direct-shooting parameter fitting: fixed horizon, free
-  parameters, bound-only decisions, and `torchdiffeq` evaluation on CUDA.
-- [ ] Add bound-only variational solves: fixed-parameter validation, solve-info
-  propagation, and returned-solution evaluation.
+- [x] Implement direct-shooting parameter fitting: fixed horizon,
+  `BoundedVariable` parameters, CUDA `torchdiffeq` evaluation, and LBFGS.
+- [x] Add bound-only variational solves: fixed-parameter validation, solve-info
+  propagation, parameter guesses, and returned-solution evaluation.
 - [ ] Add controls and horizon decisions: flatten declarations, reconstruct
   controls, then support optimized horizon.
 - [ ] Add sampled variational constraints: terminal, initial, and explicit-grid
@@ -569,15 +567,17 @@ within configured tolerance and returns a valid `VariationalSolution`.
 
 ### Hardening
 
-- [x] Implement validated solver options: expose iteration limits, tolerances,
-  schedules, float32/CUDA device selection, LBFGS history, and warm starts.
+- [x] Implement validated solver options: `SolverOptions` owns
+  backend-independent NLP settings and `PytorchNLPSolverOptions` owns CUDA
+  float32 LBFGS/barrier configuration. `PytorchODESolverParameters` configures
+  ODE initial-value solves; variational fitting has no separate options object.
 - [x] Implement warm-start state reuse: validated primal/multiplier reuse
   without retaining autograd graphs or bypassing strict interior restoration.
-- [x] Update shipped capability documentation: PyTorch NLP support is CUDA-only
-  and variational solver support remains explicitly unsupported.
-- [ ] Run CUDA benchmark corpus: the opt-in harness is
-  ``scripts/benchmark_pytorch_nlp.py``; results remain unrun until a CUDA host
-  is available.
+- [x] Update shipped capability documentation: PyTorch NLP and the supported
+  fixed-horizon variational subset are CUDA-only.
+- [x] Run CUDA benchmark corpus:
+  ``scripts/benchmark_pytorch_nlp.py --run`` executes the NLP and neural-ODE
+  fitting corpus on CUDA.
 - [ ] Evaluate next solver architecture: retain the private adapter. Whether
   the barrier/augmented-Lagrangian implementation is adequate, or needs
   replacement with Coker-owned SQP/primal-dual interior-point code, remains

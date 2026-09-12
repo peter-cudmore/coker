@@ -4,7 +4,7 @@ import torch
 
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
-from coker.backends.pytorch import PytorchSolverParameters
+from coker.backends.pytorch import PytorchODESolverParameters
 
 
 def test_pytorch_ode_preserves_autograd():
@@ -17,7 +17,7 @@ def test_pytorch_ode_preserves_autograd():
         [x0, None, None],
         1.0,
         [None, None],
-        PytorchSolverParameters(rtol=1e-8, atol=1e-10),
+        PytorchODESolverParameters(rtol=1e-8, atol=1e-10),
     )
 
     assert z_final is None

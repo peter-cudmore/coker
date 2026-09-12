@@ -25,63 +25,20 @@ from .optimisation import (
 
 @dataclasses.dataclass(frozen=True)
 class SolverOptions:
-    """Validated options shared by Coker mathematical-program solvers.
+    """Backend-independent settings for nonlinear-program solvers.
 
-    The PyTorch nonlinear-program backend consumes all fields below.  Other
-    backends keep their existing defaults and ignore backend-specific fields.
+    Backend implementations define subclasses for their algorithm, precision,
+    and device settings. ODE initial-value settings use the separate
+    :class:`coker.interfaces.SolverParameters` hierarchy; variational solvers
+    expose a dedicated options type only when they require configuration beyond
+    their problem definition.
     """
 
     warm_start: bool = False
-    device: object = "cuda"
-    dtype: object = "float32"
-    inner_iterations: int = 25
-    restoration_iterations: int = 25
-    barrier_stages: int = 8
-    augmented_lagrangian_stages: int = 10
-    barrier_reduction: float = 0.2
-    penalty_growth: float = 10.0
-    tolerance_grad: float = 1e-4
-    tolerance_change: float = 1e-5
-    tolerance_constraint: float = 1e-4
-    interior_margin: float = 1e-4
-    history_size: int = 10
 
     def __post_init__(self):
-        import torch
-
-        device = torch.device(self.device)
-        if isinstance(self.dtype, str):
-            try:
-                dtype = getattr(torch, self.dtype)
-            except AttributeError as exc:
-                raise ValueError(f"unknown PyTorch dtype: {self.dtype}") from exc
-        else:
-            dtype = self.dtype
-        if device.type != "cuda":
-            raise ValueError("PyTorch optimisation requires a CUDA device")
-        if dtype is not torch.float32:
-            raise ValueError("PyTorch optimisation supports only float32")
         if not isinstance(self.warm_start, bool):
             raise TypeError("warm_start must be a bool")
-        for name in (
-            "inner_iterations", "restoration_iterations", "barrier_stages",
-            "augmented_lagrangian_stages", "history_size",
-        ):
-            value = getattr(self, name)
-            if not isinstance(value, int) or value <= 0:
-                raise ValueError(f"{name} must be a positive integer")
-        for name in (
-            "barrier_reduction", "penalty_growth", "tolerance_grad",
-            "tolerance_change", "tolerance_constraint", "interior_margin",
-        ):
-            value = getattr(self, name)
-            if not isinstance(value, (int, float)) or value <= 0:
-                raise ValueError(f"{name} must be positive")
-        if self.barrier_reduction >= 1:
-            raise ValueError("barrier_reduction must be less than 1")
-        object.__setattr__(self, "device", device)
-        object.__setattr__(self, "dtype", dtype)
-
 
 
 class Minimise:
@@ -221,6 +178,7 @@ class MathematicalProgram(SymbolicCallable):
             backend=backend_name,
         )
 
+
 class ProblemBuilder:
     def __init__(
         self,
@@ -237,8 +195,6 @@ class ProblemBuilder:
         self.outputs = []
         self.initial_conditions = {}
         self.solver_options = solver_options
-
-
 
     def new_variable(self, name, shape=None, initial_value=None):
         assert self.tape is not None
@@ -315,7 +271,9 @@ class ProblemBuilder:
                 *problem_args, options=self.solver_options
             )
         else:
-            implementation = backend_impl.build_optimisation_problem(*problem_args)
+            implementation = backend_impl.build_optimisation_problem(
+                *problem_args
+            )
         impl = backend_impl.make_optimisation_module(implementation)
 
         return MathematicalProgram(

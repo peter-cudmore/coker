@@ -10,11 +10,11 @@ from coker.backends.backend import SolverParameters
 
 
 @dataclass(frozen=True)
-class PytorchSolverParameters(SolverParameters):
-    """Configuration for a PyTorch ODE initial-value solve.
+class PytorchODESolverParameters(SolverParameters):
+    """PyTorch ODE initial-value integration settings.
 
-    ``method``, tolerances, and ``options`` are passed directly to
-    :func:`torchdiffeq.odeint`.
+    These settings are passed to :func:`torchdiffeq.odeint`. They do not
+    configure PyTorch NLP or variational solvers.
     """
 
     method: str = "dopri5"
@@ -76,8 +76,8 @@ def evaluate_integrals(
 
     parameters = (
         solver_parameters
-        if isinstance(solver_parameters, PytorchSolverParameters)
-        else PytorchSolverParameters()
+        if isinstance(solver_parameters, PytorchODESolverParameters)
+        else PytorchODESolverParameters()
     )
     times, is_scalar_endpoint, drop_initial = _build_time_grid(end_point, x0)
     if times is None:
