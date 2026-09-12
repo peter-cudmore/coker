@@ -9,9 +9,9 @@ from coker.backends.evaluator import GenericEvaluator
 from coker.backends.backend import ArrayLike, Backend, register_backend
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 
-from .dynamics import PytorchSolverParameters, evaluate_integrals
+from .dynamics import PytorchODESolverParameters, evaluate_integrals
 from .lower import PytorchLoweredFunction, PytorchModule
-from .optimisation import build_optimisation_problem
+from .optimisation import PytorchNLPSolverOptions, build_optimisation_problem
 from .ops import (
     call_parameterised_op,
     impls,
@@ -113,10 +113,22 @@ class PytorchBackend(Backend):
         return self.lower(function).as_module()
 
     def build_optimisation_problem(
-        self, cost, constraints, parameters, outputs, initial_conditions, *, options=None
+        self,
+        cost,
+        constraints,
+        parameters,
+        outputs,
+        initial_conditions,
+        *,
+        options=None,
     ):
         return build_optimisation_problem(
-            self, cost, constraints, parameters, outputs, initial_conditions,
+            self,
+            cost,
+            constraints,
+            parameters,
+            outputs,
+            initial_conditions,
             options=options,
         )
 
@@ -146,8 +158,14 @@ class PytorchBackend(Backend):
 
     def create_variational_solver(self, problem):
         from .variational import create_variational_solver
+
         return create_variational_solver(problem)
 
 
-__all__ = ["PytorchBackend", "PytorchModule", "PytorchSolverParameters"]
+__all__ = [
+    "PytorchBackend",
+    "PytorchModule",
+    "PytorchNLPSolverOptions",
+    "PytorchODESolverParameters",
+]
 register_backend("pytorch", PytorchBackend)

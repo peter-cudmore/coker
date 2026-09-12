@@ -6,17 +6,18 @@ from coker.backends import get_backend_by_name
 
 import numpy as np
 import torch
-from coker.dynamics.transcription.collocation import (
-    InterpolatingPoly,
-    generate_discritisation_operators,
-)
 
+from coker.backends.backend import VariationalSolver
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
     FunctionSignature,
 )
 from coker.dynamics.controls import BoundedVariable
+from coker.dynamics.transcription.collocation import (
+    InterpolatingPoly,
+    generate_discritisation_operators,
+)
 from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
 from coker.dynamics.variational.solution import VariationalSolution
 from coker.toolkits.codesign.optimisation import SolveFailure, SolveInfo
@@ -30,7 +31,7 @@ class _Parameter:
     guess: float
 
 
-class PytorchVariationalSolver:
+class PytorchVariationalSolver(VariationalSolver):
     """Fixed-horizon, bound-only neural-ODE parameter fitter."""
 
     def __init__(self, problem):
@@ -61,7 +62,7 @@ class PytorchVariationalSolver:
             raise NotImplementedError(
                 "Variational constraints are not supported by PyTorch variational solving"
             )
-        x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
+        _, z_dim, q_dim = problem.system.get_state_dimensions()
         if z_dim is not None:
             raise NotImplementedError(
                 "Algebraic states are not supported by PyTorch variational solving"
@@ -124,12 +125,22 @@ class PytorchVariationalSolver:
         )
         return (matrix @ values.reshape(-1, 1)).reshape(-1)
 
-    def _evaluate(self, values, *, trajectory=False):
+    def _trajectory_times(self):
+        tau, map_time, *_ = generate_discritisation_operators(
+            (0.0, float(self.problem.t_final)), 31
+        )
+        return torch.as_tensor(
+            [map_time(value) for value in tau],
+            device=self._device,
+            dtype=self._dtype,
+        )
+
+    def _integrate(self, values, times):
         system = self.problem.system
-        p_system = self._system_parameters(values)
-        if values.numel() == 0 and self.problem.system.parameters is None:
-            p_system = None
-        x0, z0 = system.x0(0.0, None, p_system)
+        parameters = self._system_parameters(values)
+        if values.numel() == 0 and system.parameters is None:
+            parameters = None
+        x0, z0 = system.x0(0.0, None, parameters)
         if z0 is not None:
             raise NotImplementedError(
                 "Algebraic states are not supported by PyTorch variational solving"
@@ -143,69 +154,98 @@ class PytorchVariationalSolver:
             raise RuntimeError(
                 "PyTorch variational solving requires `pip install coker[pytorch]`"
             ) from ex
-        if trajectory:
-            tau, map_time, *_ = generate_discritisation_operators(
-                (0.0, float(self.problem.t_final)), 31
-            )
-            times = torch.as_tensor(
-                [map_time(value) for value in tau],
-                device=self._device,
-                dtype=self._dtype,
-            )
-        else:
-            times = torch.linspace(
-                0.0,
-                float(self.problem.t_final),
-                32,
-                device=self._device,
-                dtype=self._dtype,
+
+        def rhs(time, state):
+            return system.dxdt(time, state, None, None, parameters).reshape_as(
+                state
             )
 
-        def rhs(t, x):
-            return system.dxdt(t, x, None, None, p_system).reshape_as(x)
+        return odeint(rhs, x0, times, method="dopri5", rtol=1e-6, atol=1e-8)
 
-        states = odeint(rhs, x0, times, method="dopri5", rtol=1e-6, atol=1e-8)
+    def _evaluate(self, values, *, trajectory=False):
+        system = self.problem.system
 
         def output_native(*args):
-            t = args[0]
-            p_value = (args[-1] if len(args) > 1 else values).reshape(-1)
-            ps = self._system_parameters(p_value)
-            if p_value.numel() == 0 and system.parameters is None:
-                ps = None
-            initial, initial_z = system.x0(0.0, None, ps)
-            if initial_z is not None:
-                raise NotImplementedError(
-                    "Algebraic states are not supported by PyTorch variational solving"
-                )
-            initial = torch.as_tensor(
-                initial, device=self._device, dtype=self._dtype
-            ).reshape(-1)
-
-            def rhs_local(time, state):
-                return system.dxdt(time, state, None, None, ps).reshape_as(
-                    state
-                )
-
-            tt = torch.as_tensor(t, device=self._device, dtype=self._dtype)
-            if tt.ndim:
+            time = torch.as_tensor(
+                args[0], device=self._device, dtype=self._dtype
+            )
+            parameter_values = (args[-1] if len(args) > 1 else values).reshape(
+                -1
+            )
+            parameters = self._system_parameters(parameter_values)
+            if parameter_values.numel() == 0 and system.parameters is None:
+                parameters = None
+            if time.ndim:
                 grid = (
-                    tt
-                    if tt[0] == 0
-                    else torch.cat((torch.zeros_like(tt[:1]), tt))
+                    time
+                    if time[0] == 0
+                    else torch.cat((torch.zeros_like(time[:1]), time))
                 )
-                state = odeint(rhs_local, initial, grid)[-1]
-            elif tt == 0:
-                state = initial
+                state = self._integrate(parameter_values, grid)[-1]
+            elif time == 0:
+                state = self._integrate(parameter_values, time.reshape(1))[0]
             else:
-                state = odeint(
-                    rhs_local, initial, torch.stack((torch.zeros_like(tt), tt))
+                state = self._integrate(
+                    parameter_values,
+                    torch.stack((torch.zeros_like(time), time)),
                 )[-1]
-            return system.y(tt, state, None, None, ps, None)
+            return system.y(time, state, None, None, parameters, None)
 
         if trajectory:
-            return times, states, output_native
-        solution_space = self.problem.loss.input_spaces()[0]
-        return output_native, solution_space
+            times = self._trajectory_times()
+            return times, self._integrate(values, times), output_native
+        return output_native, self.problem.loss.input_spaces()[0]
+
+    def _raw_guess(self, parameter):
+        guess = float(parameter.guess)
+        if not np.isfinite(guess):
+            raise ValueError(
+                f"Initial guess for parameter {parameter.name!r} must be finite"
+            )
+        if (np.isfinite(parameter.lower) and guess < parameter.lower) or (
+            np.isfinite(parameter.upper) and guess > parameter.upper
+        ):
+            raise ValueError(
+                f"Initial guess for parameter {parameter.name!r} is outside its bounds"
+            )
+        epsilon = torch.finfo(self._dtype).eps
+        lower, upper = parameter.lower, parameter.upper
+        if np.isfinite(lower) and np.isfinite(upper):
+            if lower >= upper:
+                raise ValueError(
+                    f"Parameter {parameter.name!r} must have lower bound below upper bound"
+                )
+            ratio = min(
+                max((guess - lower) / (upper - lower), epsilon), 1 - epsilon
+            )
+            return torch.logit(
+                torch.tensor(ratio, device=self._device, dtype=self._dtype)
+            )
+        if np.isfinite(lower):
+            delta = max(guess - lower, epsilon)
+            return torch.log(
+                torch.expm1(
+                    torch.tensor(delta, device=self._device, dtype=self._dtype)
+                )
+            )
+        if np.isfinite(upper):
+            delta = max(upper - guess, epsilon)
+            return torch.log(
+                torch.expm1(
+                    torch.tensor(delta, device=self._device, dtype=self._dtype)
+                )
+            )
+        return torch.tensor(guess, device=self._device, dtype=self._dtype)
+
+    def _parameter_value(self, raw_value, parameter):
+        lower, upper = parameter.lower, parameter.upper
+        if np.isfinite(lower) and np.isfinite(upper):
+            return lower + (upper - lower) * torch.sigmoid(raw_value)
+        if np.isfinite(lower):
+            return lower + torch.nn.functional.softplus(raw_value)
+        if np.isfinite(upper):
+            return upper - torch.nn.functional.softplus(raw_value)
+        return raw_value
 
     def solve(self, **fixed_parameters):
         self._check_fixed(fixed_parameters)
@@ -221,7 +261,9 @@ class PytorchVariationalSolver:
             )
         }
         raw = torch.nn.Parameter(
-            torch.zeros(len(free), device=self._device, dtype=self._dtype)
+            torch.stack([self._raw_guess(parameter) for parameter in free])
+            if free
+            else torch.zeros(0, device=self._device, dtype=self._dtype)
         )
 
         def values_from_raw():
@@ -231,30 +273,7 @@ class PytorchVariationalSolver:
                 if p.name in fixed:
                     out.append(fixed[p.name])
                 else:
-                    lo, hi = p.lower, p.upper
-                    if np.isfinite(lo) and np.isfinite(hi):
-                        out.append(
-                            torch.as_tensor(
-                                lo, device=self._device, dtype=self._dtype
-                            )
-                            + (hi - lo) * torch.sigmoid(raw[j])
-                        )
-                    elif np.isfinite(lo):
-                        out.append(
-                            torch.as_tensor(
-                                lo, device=self._device, dtype=self._dtype
-                            )
-                            + torch.nn.functional.softplus(raw[j])
-                        )
-                    elif np.isfinite(hi):
-                        out.append(
-                            torch.as_tensor(
-                                hi, device=self._device, dtype=self._dtype
-                            )
-                            - torch.nn.functional.softplus(raw[j])
-                        )
-                    else:
-                        out.append(raw[j])
+                    out.append(self._parameter_value(raw[j], p))
                     j += 1
             return (
                 torch.stack(out)
@@ -340,6 +359,7 @@ class PytorchVariationalSolver:
 
 def create_variational_solver(problem):
     from coker.dynamics.variational.problem import VariationalProblem
+
     if not isinstance(problem, VariationalProblem):
         raise NotImplementedError(
             "PyTorch variational solver requires a VariationalProblem"

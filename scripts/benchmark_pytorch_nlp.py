@@ -10,8 +10,8 @@ import argparse
 import time
 
 import torch
-
-from coker.toolkits.codesign import Minimise, ProblemBuilder, SolverOptions
+from coker.backends.pytorch import PytorchNLPSolverOptions
+from coker.toolkits.codesign import Minimise, ProblemBuilder
 from coker.algebra.dimensions import Scalar, VectorSpace
 from coker.dynamics import BoundedVariable, VariationalProblem
 from coker.dynamics.system import create_autonomous_ode
@@ -20,7 +20,7 @@ from coker.dynamics.system import create_autonomous_ode
 def _problem(kind: str):
     if kind == "unconstrained":
         with ProblemBuilder(
-            solver_options=SolverOptions(warm_start=True)
+            solver_options=PytorchNLPSolverOptions(warm_start=True)
         ) as builder:
             x = builder.new_variable("x", initial_value=3.0)
             builder.objective = Minimise((x - 1.0) ** 2)

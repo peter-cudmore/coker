@@ -49,11 +49,17 @@ Backend capability matrix
        initial-value integration and quadratures.  CUDA-only nonlinear
        mathematical-program solving is also supported through
        :class:`~coker.toolkits.codesign.ProblemBuilder` and
-       :class:`~coker.toolkits.codesign.SolverOptions`.
+       :class:`~coker.backends.pytorch.PytorchNLPSolverOptions`.
      - Install with ``pip install "coker[pytorch]"``. NLP and variational
        solves require a CUDA-capable PyTorch installation. NLP uses float32
        LBFGS with barrier/augmented-Lagrangian stages; variational fitting
        supports fixed-horizon, bound-only ODE parameters.
+     - ``SolverOptions`` contains backend-independent NLP settings;
+       ``PytorchNLPSolverOptions`` adds CUDA LBFGS/barrier settings.
+       ``PytorchODESolverParameters`` configures ``torchdiffeq`` initial-value
+       solves only. Variational fitting currently has no separate options
+       object: its fixed integration and LBFGS settings are implementation
+       defaults.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
        backend tests. Algebraic DAEs, variational controls, quadratures,
        constraints, and optimized horizons are unsupported; CPU NLP and
