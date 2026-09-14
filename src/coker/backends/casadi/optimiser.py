@@ -16,10 +16,16 @@ from coker.toolkits.codesign.optimisation import (
 
 @dataclass(frozen=True)
 class CasadiNLPSolverOptions(SolverOptions):
-    """Settings passed to CasADi's IPOPT ``nlpsol`` constructor.
+    """Configuration for CasADi's IPOPT ``nlpsol`` constructor.
 
-    ``optimiser_options`` accepts CasADi's flat option mapping, including
-    IPOPT-prefixed keys such as ``"ipopt.max_iter"``.
+    This backend delegates algorithm selection and numerical tuning to CasADi
+    and IPOPT. The mapping is copied when the solver is constructed, so later
+    caller mutations cannot alter an existing solver.
+
+    Args:
+        optimiser_options: Flat CasADi option mapping. Use IPOPT-prefixed keys
+            for IPOPT settings, for example ``"ipopt.max_iter"`` and
+            ``"ipopt.max_cpu_time"``.
     """
 
     optimiser_options: Mapping[str, Any] = field(default_factory=dict)
