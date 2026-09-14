@@ -1,16 +1,33 @@
 from collections.abc import Mapping
-
-from coker.backends.casadi.lower import substitute, to_casadi, lower
-from typing import List
+from dataclasses import dataclass, field
+from typing import Any, List
 
 import casadi as ca
 import numpy as np
 
 from coker.algebra.graph import Tracer
+from coker.backends.casadi.lower import lower, substitute, to_casadi
+from coker.toolkits.codesign import SolverOptions
 from coker.toolkits.codesign.optimisation import (
     SolveFailure,
     solve_info_from_casadi_stats,
 )
+
+
+@dataclass(frozen=True)
+class CasadiNLPSolverOptions(SolverOptions):
+    """Settings passed to CasADi's IPOPT ``nlpsol`` constructor.
+
+    ``optimiser_options`` accepts CasADi's flat option mapping, including
+    IPOPT-prefixed keys such as ``"ipopt.max_iter"``.
+    """
+
+    optimiser_options: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not isinstance(self.optimiser_options, Mapping):
+            raise TypeError("optimiser_options must be a mapping")
 
 
 def build_optimisation_problem(
@@ -19,8 +36,18 @@ def build_optimisation_problem(
     parameters: List[Tracer],
     outputs,
     initial_conditions,
-    optimiser_options: Mapping | None = None,
+    *,
+    options: CasadiNLPSolverOptions | None = None,
 ):
+    if options is None:
+        selected = CasadiNLPSolverOptions()
+    elif isinstance(options, CasadiNLPSolverOptions):
+        selected = options
+    else:
+        raise TypeError(
+            "CasADi NLP solving requires CasadiNLPSolverOptions; "
+            f"got {type(options).__name__}"
+        )
 
     # p = P(parameters)
     # x = P(inputs ~ parameter)
@@ -108,7 +135,7 @@ def build_optimisation_problem(
     spec = {"x": x, "p": p, "f": cost_fn, "g": g}
 
     solver_inner = ca.nlpsol(
-        "solver", "ipopt", spec, dict(optimiser_options or {})
+        "solver", "ipopt", spec, dict(selected.optimiser_options)
     )
 
     return CasadiSolver(

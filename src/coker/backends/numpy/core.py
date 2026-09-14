@@ -204,10 +204,11 @@ class NumpyBackend(Backend):
         arguments: List[Tracer],
         outputs: List[Tracer],
         initial_conditions,
-        optimiser_options=None,
+        *,
+        options=None,
     ):
-        if optimiser_options:
-            raise ValueError(
+        if options is not None:
+            raise TypeError(
                 "NumPy optimisation does not support solver options"
             )
         return build_optimisation_problem(

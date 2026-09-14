@@ -34,7 +34,10 @@ from coker.backends.casadi.lower import (
     parameterised_impls,
     substitute,
 )
-from coker.backends.casadi.optimiser import build_optimisation_problem
+from coker.backends.casadi.optimiser import (
+    CasadiNLPSolverOptions,
+    build_optimisation_problem,
+)
 from coker.backends.casadi.lowered import CasadiLoweredFunction
 from coker.backends.casadi.variational.solver import (
     create_variational_solver,
@@ -282,7 +285,8 @@ class CasadiBackend(Backend):
         parameters,
         outputs,
         initial_conditions,
-        optimiser_options=None,
+        *,
+        options=None,
     ):
         return build_optimisation_problem(
             cost,
@@ -290,7 +294,7 @@ class CasadiBackend(Backend):
             parameters,
             outputs,
             initial_conditions,
-            optimiser_options,
+            options=options,
         )
 
     def create_variational_solver(self, problem: VariationalProblem):
@@ -364,6 +368,9 @@ class CasadiBackend(Backend):
             z_final = None
 
         return x_final, z_final, q_final
+
+
+__all__ = ["CasadiBackend", "CasadiLoweredFunction", "CasadiNLPSolverOptions"]
 
 
 register_backend("casadi", CasadiBackend)

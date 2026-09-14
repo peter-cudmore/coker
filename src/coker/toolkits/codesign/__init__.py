@@ -243,12 +243,7 @@ class ProblemBuilder:
             )
         return dict(zip(decision_input_indicies, self.initial_conditions))
 
-    def build(
-        self,
-        backend: Optional[str] = None,
-        *,
-        optimiser_options: Mapping[str, Any] | None = None,
-    ) -> MathematicalProgram:
+    def build(self, backend: Optional[str] = None) -> MathematicalProgram:
         assert isinstance(self.objective, Minimise)
         assert self.tape is not None
         assert self.outputs
@@ -264,22 +259,14 @@ class ProblemBuilder:
                 )
         backend_impl = get_backend_by_name(backend_name)
 
-        problem_args = (
+        implementation = backend_impl.build_optimisation_problem(
             self.objective.expression,
             self.constraints,
             self.arguments,
             [self.objective.expression, *self.outputs],
             self._normalise_initial_conditions(),
-            optimiser_options=optimiser_options,
+            options=self.solver_options,
         )
-        if backend_name == "pytorch":
-            implementation = backend_impl.build_optimisation_problem(
-                *problem_args, options=self.solver_options
-            )
-        else:
-            implementation = backend_impl.build_optimisation_problem(
-                *problem_args
-            )
         impl = backend_impl.make_optimisation_module(implementation)
 
         return MathematicalProgram(

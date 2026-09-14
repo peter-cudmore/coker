@@ -83,8 +83,7 @@ directly.
 
 .. code-block:: python
 
-   import numpy as np
-   from coker import VectorSpace
+   from coker.backends.casadi import CasadiNLPSolverOptions
    from coker.toolkits.codesign import Minimise, ProblemBuilder
 
    with ProblemBuilder(arguments=[VectorSpace("target", 2)]) as builder:
@@ -101,18 +100,20 @@ Use ``bounded(residual, lower, upper)`` when bounds are part of the model.
 Bounds may depend on runtime parameters; CasADi evaluates them as residual
 constraints at solve time.
 
-For bounded CasADi/IPOPT solves, pass flat CasADi options when building the
-program:
+For bounded CasADi/IPOPT solves, configure CasADi's flat IPOPT options through
+the builder's ``solver_options``:
 
 .. code-block:: python
 
-   problem = builder.build(
-       "casadi",
-       optimiser_options={
-           "ipopt.max_iter": 50,
-           "ipopt.max_cpu_time": 30.0,
-       },
-   )
+   with ProblemBuilder(
+       solver_options=CasadiNLPSolverOptions(
+           optimiser_options={
+               "ipopt.max_iter": 50,
+               "ipopt.max_cpu_time": 30.0,
+           }
+       )
+   ) as builder:
+       ...
 
 Where to continue
 -----------------
