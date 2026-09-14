@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any, Dict, List
 
@@ -47,7 +47,8 @@ class Backend(metaclass=ABCMeta):
         parameters: List[Tracer],
         outputs: List[Tracer],
         initial_conditions: Dict[int, ArrayLike],
-        optimiser_options: Mapping[str, Any] | None = None,
+        *,
+        options=None,
     ):
         raise NotImplementedError
 
