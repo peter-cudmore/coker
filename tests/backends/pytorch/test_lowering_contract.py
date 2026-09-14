@@ -12,6 +12,7 @@ def test_pytorch_lowering_preserves_dtype_device_and_autograd():
         backend="pytorch",
     )
     lowered = compiled.lower()
+    assert lowered.backend_name == "pytorch"
     # Compiler capture is not a declared lowering capability for this backend.
     assert getattr(lowered.capabilities, "compiler_capture", False) is False
 

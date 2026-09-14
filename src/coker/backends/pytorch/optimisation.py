@@ -9,6 +9,7 @@ from coker.algebra.dimensions import ResultBundleDimension
 from coker.algebra.ops import OP
 from coker.algebra.graph import Tracer
 from coker.backends.evaluator import _normalize_evaluate_result
+from coker.backends.backend import get_backend_by_name
 from coker.backends.optimisation import (
     build_initial_guess,
     build_problem_bindings,
@@ -144,8 +145,6 @@ class _PytorchOptimisationProblem:
         outputs,
         initial_guess,
         options,
-        device,
-        dtype,
     ):
         self.tape = tape
         self.decision_bindings = decision_bindings
@@ -155,8 +154,9 @@ class _PytorchOptimisationProblem:
         self.outputs = outputs
         self.initial_guess = initial_guess
         self.options = options
-        self.device = device
-        self.dtype = dtype
+        backend = get_backend_by_name("pytorch", set_current=False)
+        self.device = backend.device or torch.device("cuda")
+        self.dtype = backend.dtype or torch.float32
         self._warm_start_decision = None
         self._warm_start_multipliers = None
         self.last_solve_info: SolveInfo | None = None
@@ -625,7 +625,6 @@ class _PytorchOptimisationProblem:
 
 
 def build_optimisation_problem(
-    backend,
     cost,
     constraints,
     parameters,
@@ -634,6 +633,7 @@ def build_optimisation_problem(
     *,
     options=None,
 ):
+    backend = get_backend_by_name("pytorch", set_current=False)
     if not torch.cuda.is_available():
         raise RuntimeError("PyTorch optimisation requires CUDA availability")
     device = backend.device or torch.device("cuda")
@@ -676,6 +676,4 @@ def build_optimisation_problem(
             bindings.decision_bindings, initial_conditions
         ),
         options=selected,
-        device=device,
-        dtype=dtype,
     )

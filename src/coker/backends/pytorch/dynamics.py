@@ -6,7 +6,7 @@ from typing import Mapping
 import torch
 
 from coker.algebra.ops import Noop
-from coker.backends.backend import SolverParameters
+from coker.backends.backend import SolverParameters, get_backend_by_name
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,6 @@ class PytorchODESolverParameters(SolverParameters):
 
 
 def evaluate_integrals(
-    backend,
     functions,
     initial_conditions,
     end_point,
@@ -37,6 +36,7 @@ def evaluate_integrals(
     Algebraic constraints are not supported. ``torchdiffeq`` is imported lazily
     so basic PyTorch evaluation does not require the optional ODE dependency.
     """
+    backend = get_backend_by_name("pytorch", set_current=False)
     dxdt, constraint, dqdt = functions
     x0, z0, q0 = initial_conditions
     u, p = inputs
