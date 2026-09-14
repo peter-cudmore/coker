@@ -6,8 +6,7 @@ import torch
 
 from coker.algebra.function import Function
 from coker.algebra.graph import Tracer
-from coker.backends.backend import Backend
-from coker.backends.evaluator import CompiledPlan, _cast_outputs
+from coker.backends.evaluator import CompiledPlan
 from coker.backends.lowered import (
     FunctionSignature,
     LoweredFunction,
@@ -15,22 +14,27 @@ from coker.backends.lowered import (
 )
 
 
+def _to_numpy_array(value):
+    result = value.detach().cpu().numpy()
+    return result.item() if result.shape == () else result
+
+
 class PytorchLoweredFunction(LoweredFunction):
     """Execute a reusable PyTorch plan while preserving tensor autograd."""
 
     def __init__(
         self,
-        backend: Backend,
+        backend_name: str,
         function: Function,
         plan: CompiledPlan,
     ) -> None:
-        self._backend = backend
+        self._backend_name = backend_name
         self._function = function
         self._plan = plan
 
     @property
     def backend_name(self) -> str:
-        return self._backend.name
+        return self._backend_name
 
     @property
     def signature(self) -> FunctionSignature:
@@ -46,15 +50,12 @@ class PytorchLoweredFunction(LoweredFunction):
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
         workspace = self._plan.execute(inputs)
+        outputs = cast_torch_outputs(self._function, workspace)
         if any(isinstance(arg, torch.Tensor) for arg in inputs):
-            return tuple(cast_torch_outputs(self._function, workspace))
+            return tuple(outputs)
         return tuple(
-            _cast_outputs(
-                self._function.output,
-                self._function.tape,
-                workspace,
-                self._backend,
-            )
+            None if output is None else _to_numpy_array(output)
+            for output in outputs
         )
 
     def as_module(self) -> "PytorchModule":

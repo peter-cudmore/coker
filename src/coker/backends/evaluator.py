@@ -76,6 +76,7 @@ class CompiledPlan:
                 ws[ws_idx] = (
                     arg
                     if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES)
+                    or callable(arg)
                     else self._to_backend_array(arg)
                 )
 

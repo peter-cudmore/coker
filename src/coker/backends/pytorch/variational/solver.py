@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 import numpy as np
 import torch
 
+from coker.algebra.function import (
+    Function,
+    Tracer,
+    create_function_from_native,
+)
 from coker.backends import get_backend_by_name
 from coker.backends.backend import VariationalSolver
 from coker.backends.lowered import (
@@ -12,6 +18,7 @@ from coker.backends.lowered import (
     FunctionOutputSpec,
     FunctionSignature,
 )
+from coker.backends.pytorch.dynamics import PytorchODESolverParameters
 from coker.dynamics.controls import BoundedVariable
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
@@ -19,24 +26,67 @@ from coker.dynamics.transcription.collocation import (
 )
 from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
 from coker.dynamics.variational.solution import VariationalSolution
-from coker.toolkits.codesign.optimisation import SolveFailure, SolveInfo
+from coker.toolkits.codesign import SolveFailure, SolveInfo, SolverOptions
 
 
-@dataclass
-class _Parameter:
-    name: str
-    lower: float
-    upper: float
-    guess: float
+_TRAJECTORY_GRID_NODES = 31
+_OPTIMISER_TYPES = {
+    "Adam": torch.optim.Adam,
+    "LBFGS": torch.optim.LBFGS,
+}
+
+
+@dataclass(frozen=True)
+class PytorchVariationalSolverOptions(SolverOptions):
+    """CUDA direct-shooting configuration for a PyTorch variational solve."""
+
+    ode: PytorchODESolverParameters = PytorchODESolverParameters()
+    optimiser_method: str = "LBFGS"
+    optimiser_options: Mapping[str, object] = field(
+        default_factory=lambda: {
+            "max_iter": 100,
+            "tolerance_grad": 1e-6,
+            "tolerance_change": 1e-9,
+            "line_search_fn": "strong_wolfe",
+        }
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not isinstance(self.ode, PytorchODESolverParameters):
+            raise TypeError("ode must be PytorchODESolverParameters")
+        if self.optimiser_method not in _OPTIMISER_TYPES:
+            raise ValueError(
+                f"Unsupported PyTorch optimiser {self.optimiser_method!r}"
+            )
+        if not isinstance(self.optimiser_options, Mapping):
+            raise TypeError("optimiser_options must be a mapping")
 
 
 class PytorchVariationalSolver(VariationalSolver):
     """Fixed-horizon, bound-only neural-ODE parameter fitter."""
 
-    def __init__(self, problem):
+    def __init__(
+        self, problem, options: PytorchVariationalSolverOptions | None = None
+    ):
         self.problem = problem
-        self._backend = get_backend_by_name("pytorch", set_current=False)
-        self._loss = self._backend.lower(problem.loss)
+        self._options = options or PytorchVariationalSolverOptions()
+        backend = get_backend_by_name("pytorch", set_current=False)
+        self._loss_is_trace = isinstance(problem.loss, Tracer)
+        loss = (
+            Function(problem.loss.tape, problem.loss, backend="pytorch")
+            if self._loss_is_trace
+            else problem.loss
+        )
+        self._loss = backend.lower(loss)
+        self._quadratures = tuple(
+            backend.lower(
+                Function(
+                    spec.integrand.tape, spec.integrand, backend="pytorch"
+                )
+            )
+            for spec in problem.quadratures
+        )
         if not torch.cuda.is_available():
             raise RuntimeError(
                 "PyTorch variational solving requires CUDA availability"
@@ -50,10 +100,6 @@ class PytorchVariationalSolver(VariationalSolver):
             raise NotImplementedError(
                 "Control declarations are not supported by "
                 "PyTorch variational solving"
-            )
-        if problem.quadratures:
-            raise NotImplementedError(
-                "Quadratures are not supported by PyTorch variational solving"
             )
         if (
             problem.path_constraints
@@ -72,7 +118,7 @@ class PytorchVariationalSolver(VariationalSolver):
             )
         if q_dim is not None:
             raise NotImplementedError(
-                "Quadrature states are not supported by "
+                "System quadrature states are not supported by "
                 "PyTorch variational solving"
             )
         self._parameters = []
@@ -86,17 +132,16 @@ class PytorchVariationalSolver(VariationalSolver):
             if declaration.name in seen:
                 continue
             seen.add(declaration.name)
-            self._parameters.append(
-                _Parameter(
-                    declaration.name,
-                    declaration.lower_bound,
-                    declaration.upper_bound,
-                    declaration.guess,
-                )
-            )
+            self._parameters.append(declaration)
         self._names = [p.name for p in self._parameters]
         self._device = torch.device("cuda")
         self._dtype = torch.float32
+        self._t_initial = torch.zeros(
+            (), device=self._device, dtype=self._dtype
+        )
+        self._t_final = torch.tensor(
+            float(problem.t_final), device=self._device, dtype=self._dtype
+        )
 
     @property
     def parameters(self):
@@ -113,8 +158,8 @@ class PytorchVariationalSolver(VariationalSolver):
                 value = float(fixed_parameters[p.name])
                 if (
                     not np.isfinite(value)
-                    or value < p.lower
-                    or value > p.upper
+                    or value < p.lower_bound
+                    or value > p.upper_bound
                 ):
                     raise ValueError(
                         f"Fixed parameter {p.name!r} is outside its bounds"
@@ -132,13 +177,49 @@ class PytorchVariationalSolver(VariationalSolver):
 
     def _trajectory_times(self):
         tau, map_time, *_ = generate_discritisation_operators(
-            (0.0, float(self.problem.t_final)), 31
+            (0.0, float(self.problem.t_final)), _TRAJECTORY_GRID_NODES
         )
         return torch.as_tensor(
             [map_time(value) for value in tau],
             device=self._device,
             dtype=self._dtype,
         )
+
+    def _trace_arguments(
+        self, signature, time, state, parameters, quadratures
+    ):
+        system = self.problem.system
+
+        def state_trajectory(_time):
+            return state
+
+        def output_trajectory(output_time):
+            return system.y(
+                output_time, state, None, None, parameters, None
+            ).reshape(-1)
+
+        arguments = {
+            "t": time,
+            "t_final": self._t_final,
+            "t_0": self._t_initial,
+            "_state": state_trajectory,
+            "p": parameters,
+            "_output": output_trajectory,
+        }
+        arguments.update(
+            {
+                f"q_{spec.channel}": quadratures[index]
+                for index, spec in enumerate(self.problem.quadratures)
+            }
+        )
+        try:
+            return [
+                arguments[input_spec.name] for input_spec in signature.inputs
+            ]
+        except KeyError as ex:
+            raise NotImplementedError(
+                f"Unsupported quadrature input {ex.args[0]!r}"
+            ) from ex
 
     def _integrate(self, values, times):
         system = self.problem.system
@@ -154,6 +235,11 @@ class PytorchVariationalSolver(VariationalSolver):
         x0 = torch.as_tensor(
             x0, device=self._device, dtype=self._dtype
         ).reshape(-1)
+        q0 = torch.as_tensor(
+            [spec.initial_state for spec in self.problem.quadratures],
+            device=self._device,
+            dtype=self._dtype,
+        )
         try:
             from torchdiffeq import odeint
         except ImportError as ex:
@@ -162,14 +248,44 @@ class PytorchVariationalSolver(VariationalSolver):
                 "`pip install coker[pytorch]`"
             ) from ex
 
-        def rhs(time, state):
-            return system.dxdt(time, state, None, None, parameters).reshape_as(
-                state
+        def rhs(time, integrated):
+            state = integrated[: x0.numel()]
+            quadratures = integrated[x0.numel() :]
+            dx = system.dxdt(time, state, None, None, parameters).reshape(-1)
+            if not self._quadratures:
+                return dx
+            dq = torch.stack(
+                [
+                    quadrature.execute(
+                        self._trace_arguments(
+                            quadrature.signature,
+                            time,
+                            state,
+                            parameters,
+                            quadratures,
+                        )
+                    )[0].reshape(())
+                    for quadrature in self._quadratures
+                ]
             )
+            return torch.cat((dx, dq))
 
-        return odeint(rhs, x0, times, method="dopri5", rtol=1e-6, atol=1e-8)
+        initial_state = torch.cat((x0, q0)) if self._quadratures else x0
+        integrated = odeint(
+            rhs,
+            initial_state,
+            times,
+            method=self._options.ode.method,
+            rtol=self._options.ode.rtol,
+            atol=self._options.ode.atol,
+            options=self._options.ode.options,
+        )
+        return (
+            integrated[..., : x0.numel()],
+            integrated[..., x0.numel() :] if self._quadratures else None,
+        )
 
-    def _evaluate(self, values, *, trajectory=False):
+    def _evaluate(self, values):
         system = self.problem.system
 
         def output_native(*args):
@@ -185,23 +301,51 @@ class PytorchVariationalSolver(VariationalSolver):
             if time.ndim:
                 grid = (
                     time
-                    if time[0] == 0
+                    if bool(time[0] == 0)
                     else torch.cat((torch.zeros_like(time[:1]), time))
                 )
-                state = self._integrate(parameter_values, grid)[-1]
-            elif time == 0:
-                state = self._integrate(parameter_values, time.reshape(1))[0]
+                state, quadratures = self._integrate(parameter_values, grid)
+                state = state[-1]
+                quadratures = (
+                    quadratures[-1] if quadratures is not None else None
+                )
+            elif bool(time == 0):
+                state, quadratures = self._integrate(
+                    parameter_values, time.reshape(1)
+                )
+                state = state[0]
+                quadratures = (
+                    quadratures[0] if quadratures is not None else None
+                )
             else:
-                state = self._integrate(
+                state, quadratures = self._integrate(
                     parameter_values,
                     torch.stack((torch.zeros_like(time), time)),
-                )[-1]
-            return system.y(time, state, None, None, parameters, None)
+                )
+                state = state[-1]
+                quadratures = (
+                    quadratures[-1] if quadratures is not None else None
+                )
+            return system.y(time, state, None, None, parameters, quadratures)
 
-        if trajectory:
-            times = self._trajectory_times()
-            return times, self._integrate(values, times), output_native
         return output_native, self.problem.loss.input_spaces()[0]
+
+    def _evaluate_trace_loss(self, values):
+        states, quadratures = self._integrate(
+            values, torch.stack((self._t_initial, self._t_final))
+        )
+        parameters = self._system_parameters(values)
+        if values.numel() == 0 and self.problem.system.parameters is None:
+            parameters = None
+        return self._loss.execute(
+            self._trace_arguments(
+                self._loss.signature,
+                self._t_final,
+                states[-1],
+                parameters,
+                quadratures[-1] if quadratures is not None else (),
+            )
+        )[0]
 
     def _raw_guess(self, parameter):
         guess = float(parameter.guess)
@@ -210,15 +354,19 @@ class PytorchVariationalSolver(VariationalSolver):
                 f"Initial guess for parameter {parameter.name!r} "
                 "must be finite"
             )
-        if (np.isfinite(parameter.lower) and guess < parameter.lower) or (
-            np.isfinite(parameter.upper) and guess > parameter.upper
+        if (
+            np.isfinite(parameter.lower_bound)
+            and guess < parameter.lower_bound
+        ) or (
+            np.isfinite(parameter.upper_bound)
+            and guess > parameter.upper_bound
         ):
             raise ValueError(
                 f"Initial guess for parameter {parameter.name!r} is outside "
                 "its bounds"
             )
         epsilon = torch.finfo(self._dtype).eps
-        lower, upper = parameter.lower, parameter.upper
+        lower, upper = parameter.lower_bound, parameter.upper_bound
         if np.isfinite(lower) and np.isfinite(upper):
             if lower >= upper:
                 raise ValueError(
@@ -248,7 +396,7 @@ class PytorchVariationalSolver(VariationalSolver):
         return torch.tensor(guess, device=self._device, dtype=self._dtype)
 
     def _parameter_value(self, raw_value, parameter):
-        lower, upper = parameter.lower, parameter.upper
+        lower, upper = parameter.lower_bound, parameter.upper_bound
         if np.isfinite(lower) and np.isfinite(upper):
             return lower + (upper - lower) * torch.sigmoid(raw_value)
         if np.isfinite(lower):
@@ -293,15 +441,19 @@ class PytorchVariationalSolver(VariationalSolver):
 
         def objective():
             values = values_from_raw()
+            if self._loss_is_trace:
+                return self._evaluate_trace_loss(values)
             output_native, solution_space = self._evaluate(values)
             signature = FunctionSignature(
                 tuple(
-                    FunctionInputSpec(f"arg_{i}", s)
-                    for i, s in enumerate(solution_space.arguments)
+                    FunctionInputSpec(f"arg_{i}", space)
+                    for i, space in enumerate(solution_space.arguments)
                 ),
                 (FunctionOutputSpec("output", solution_space.output[0]),),
             )
-            solution = self._backend.import_function(output_native, signature)
+            solution = create_function_from_native(
+                output_native, signature, backend="pytorch"
+            )
             args = [solution]
             if len(self.problem.loss.input_spaces()) > 1:
                 args.append(values)
@@ -309,12 +461,8 @@ class PytorchVariationalSolver(VariationalSolver):
 
         try:
             if free:
-                optimizer = torch.optim.LBFGS(
-                    [raw],
-                    max_iter=100,
-                    tolerance_grad=1e-6,
-                    tolerance_change=1e-9,
-                    line_search_fn="strong_wolfe",
+                optimizer = _OPTIMISER_TYPES[self._options.optimiser_method](
+                    [raw], **dict(self._options.optimiser_options)
                 )
 
                 def closure():
@@ -333,22 +481,55 @@ class PytorchVariationalSolver(VariationalSolver):
                 raise FloatingPointError("non-finite variational objective")
         except Exception as ex:
             info = SolveInfo(
-                "pytorch", "LBFGS", False, str(ex), iteration_count=None
+                "pytorch",
+                self._options.optimiser_method,
+                False,
+                str(ex),
+                iteration_count=None,
             )
             raise SolveFailure(
                 "PyTorch variational solve failed", info
             ) from ex
         values = values_from_raw().detach()
-        times, states, _ = self._evaluate(values, trajectory=True)
+        times = self._trajectory_times()
+        states, quadratures = self._integrate(values, times)
         state_values = states.detach().cpu().numpy()
+        quadrature_values = (
+            quadratures.detach().cpu().numpy()
+            if quadratures is not None
+            else None
+        )
+        path_values = (
+            np.concatenate((state_values, quadrature_values), axis=1)
+            if quadrature_values is not None
+            else state_values
+        )
         poly = InterpolatingPoly(
-            state_values.shape[1],
+            path_values.shape[1],
             (0.0, float(self.problem.t_final)),
             len(times) - 1,
-            state_values.reshape(-1, 1),
+            path_values.reshape(-1, 1),
         )
+        state_projector = np.zeros(
+            (state_values.shape[1], path_values.shape[1])
+        )
+        state_projector[:, : state_values.shape[1]] = np.eye(
+            state_values.shape[1]
+        )
+        quadrature_projector = None
+        if quadrature_values is not None:
+            quadrature_projector = np.zeros(
+                (quadrature_values.shape[1], path_values.shape[1])
+            )
+            quadrature_projector[:, state_values.shape[1] :] = np.eye(
+                quadrature_values.shape[1]
+            )
         info = SolveInfo(
-            "pytorch", "LBFGS", True, "converged", iteration_count=None
+            "pytorch",
+            self._options.optimiser_method,
+            True,
+            "converged",
+            iteration_count=None,
         )
         parameter_solutions = {
             p.name: float(values[i].cpu())
@@ -357,7 +538,7 @@ class PytorchVariationalSolver(VariationalSolver):
         return VariationalSolution(
             cost=float(cost.detach().cpu()),
             path=InterpolatingPolyCollection([poly]),
-            projectors=(np.eye(state_values.shape[1]), None, None),
+            projectors=(state_projector, None, quadrature_projector),
             control_solutions=[],
             parameter_solutions=parameter_solutions,
             parameters=values.cpu().numpy(),
@@ -367,11 +548,13 @@ class PytorchVariationalSolver(VariationalSolver):
         )
 
 
-def create_variational_solver(problem):
+def create_variational_solver(
+    problem, options: PytorchVariationalSolverOptions | None = None
+):
     from coker.dynamics.variational.problem import VariationalProblem
 
     if not isinstance(problem, VariationalProblem):
         raise NotImplementedError(
             "PyTorch variational solver requires a VariationalProblem"
         )
-    return PytorchVariationalSolver(problem)
+    return PytorchVariationalSolver(problem, options)

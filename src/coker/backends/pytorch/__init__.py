@@ -23,6 +23,9 @@ from .ops import (
 class PytorchBackend(Backend):
     """Evaluate Coker expression graphs using PyTorch tensors."""
 
+    def __init__(self, device: torch.device | str | None = None) -> None:
+        self.device = torch.device(device) if device is not None else None
+
     def to_numpy_array(self, array) -> ArrayLike:
         if array is None:
             return None
@@ -34,12 +37,14 @@ class PytorchBackend(Backend):
 
     def to_backend_array(self, array):
         if isinstance(array, torch.Tensor):
-            return array
+            if self.device is None or array.device == self.device:
+                return array
+            return array.to(self.device)
         import scipy.sparse
 
         if scipy.sparse.issparse(array):
             array = array.toarray()
-        return torch.as_tensor(array)
+        return torch.as_tensor(array, device=self.device)
 
     def reshape(self, arg, dim: Dimension):
         if arg is None:
@@ -63,7 +68,7 @@ class PytorchBackend(Backend):
         if isinstance(arg, np.ndarray):
             return np.reshape(arg, dim.dim)
         if isinstance(arg, (float, int, complex)):
-            return torch.as_tensor([arg]).reshape(dim.dim)
+            return self.to_backend_array([arg]).reshape(dim.dim)
         raise NotImplementedError(
             f"Don't know how to resize {arg.__class__.__name__}"
         )
@@ -103,7 +108,7 @@ class PytorchBackend(Backend):
         self, function: Function, options: LoweringOptions | None = None
     ) -> PytorchLoweredFunction:
         return PytorchLoweredFunction(
-            self,
+            self.name,
             function,
             self.get_evaluator().build_plan(function.tape),
         )
