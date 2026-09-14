@@ -243,13 +243,11 @@ def test_if_then_else_uses_tensor_where():
     assert torch.equal(result, torch.tensor([0.0, 0.0, 0.0]))
 
 
-def test_pytorch_nlp_solver_options_validate_cuda_float32_configuration():
+def test_pytorch_nlp_solver_options_defer_device_to_backend():
     options = SolverOptions(warm_start=True)
     assert options.warm_start
-    with pytest.raises(ValueError, match="CUDA"):
+    with pytest.raises(TypeError):
         PytorchNLPSolverOptions(device="cpu")
-    with pytest.raises(ValueError, match="float32"):
-        PytorchNLPSolverOptions(dtype="float64")
     options = PytorchNLPSolverOptions(
         inner_iterations=7, restoration_iterations=9, warm_start=True
     )
@@ -257,9 +255,16 @@ def test_pytorch_nlp_solver_options_validate_cuda_float32_configuration():
     assert options.restoration_iterations == 9
     assert options.warm_start
 
+    backend = PytorchBackend(device="cpu", dtype=torch.float32)
+    assert backend.device.type == "cpu"
+    assert backend.dtype is torch.float32
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 def test_pytorch_warm_start_reuses_detached_cuda_primal():
+    backend = get_backend_by_name("pytorch", set_current=False)
+    backend.device = torch.device("cuda")
+    backend.dtype = torch.float32
     with ProblemBuilder(
         solver_options=PytorchNLPSolverOptions(
             warm_start=True, inner_iterations=10
@@ -275,12 +280,17 @@ def test_pytorch_warm_start_reuses_detached_cuda_primal():
     assert implementation._warm_start_decision is not None
     assert implementation._warm_start_decision.device.type == "cuda"
     assert implementation._warm_start_decision.grad_fn is None
+    backend.device = None
+    backend.dtype = None
 
 
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="CUDA is unavailable"
 )
 def test_pytorch_optimisation_solves_and_reports_status():
+    backend = get_backend_by_name("pytorch", set_current=False)
+    backend.device = torch.device("cuda")
+    backend.dtype = torch.float32
     with ProblemBuilder() as builder:
         x = builder.new_variable("x", initial_value=3.0)
         builder.objective = Minimise((x - 1.0) * (x - 1.0))
@@ -292,6 +302,8 @@ def test_pytorch_optimisation_solves_and_reports_status():
     assert result == pytest.approx(1.0, abs=1e-3)
     assert problem.solve_info.success
     assert problem.solve_info.solver == "LBFGS"
+    backend.device = None
+    backend.dtype = None
 
 
 @pytest.mark.skipif(

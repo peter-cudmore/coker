@@ -23,8 +23,13 @@ from .ops import (
 class PytorchBackend(Backend):
     """Evaluate Coker expression graphs using PyTorch tensors."""
 
-    def __init__(self, device: torch.device | str | None = None) -> None:
+    def __init__(
+        self,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
         self.device = torch.device(device) if device is not None else None
+        self.dtype = dtype
 
     def to_numpy_array(self, array) -> ArrayLike:
         if array is None:
@@ -37,14 +42,16 @@ class PytorchBackend(Backend):
 
     def to_backend_array(self, array):
         if isinstance(array, torch.Tensor):
-            if self.device is None or array.device == self.device:
+            device_matches = self.device is None or array.device == self.device
+            dtype_matches = self.dtype is None or array.dtype == self.dtype
+            if device_matches and dtype_matches:
                 return array
-            return array.to(self.device)
+            return array.to(device=self.device, dtype=self.dtype)
         import scipy.sparse
 
         if scipy.sparse.issparse(array):
             array = array.toarray()
-        return torch.as_tensor(array, device=self.device)
+        return torch.as_tensor(array, device=self.device, dtype=self.dtype)
 
     def reshape(self, arg, dim: Dimension):
         if arg is None:
@@ -52,12 +59,14 @@ class PytorchBackend(Backend):
         if dim.is_scalar():
             if isinstance(arg, torch.Tensor):
                 if arg.ndim == 0:
-                    return arg
+                    return self.to_backend_array(arg)
                 if arg.numel() != 1:
                     raise TypeError(f"Expecting a scalar, got {arg}")
-                return arg.reshape(())
+                return self.to_backend_array(arg.reshape(()))
             if isinstance(arg, scalar_types):
-                return arg
+                if self.device is None and self.dtype is None:
+                    return arg
+                return self.to_backend_array(arg)
             try:
                 (inner,) = arg
             except (ValueError, TypeError) as ex:

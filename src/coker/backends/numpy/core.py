@@ -36,6 +36,15 @@ class Solver(Enum):
 
 
 class NumpySolverParameters(SolverParameters):
+    """SciPy ODE initial-value integration settings.
+
+    The ``solver`` attribute selects the method name passed to
+    :func:`scipy.integrate.solve_ivp`; tolerances and other method-specific
+    settings are currently controlled by the backend rather than this type.
+    """
+
+    solver: Solver
+
     def __init__(self, solver: Solver = Solver.RK45):
         self.solver = solver
 

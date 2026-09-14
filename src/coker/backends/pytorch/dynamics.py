@@ -1,6 +1,6 @@
 """Pure ODE integration for the PyTorch backend."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 import torch
@@ -17,10 +17,33 @@ class PytorchODESolverParameters(SolverParameters):
     configure PyTorch NLP or variational solvers.
     """
 
-    method: str = "dopri5"
-    rtol: float = 1e-6
-    atol: float = 1e-8
-    options: Mapping[str, object] | None = None
+    method: str = field(
+        default="dopri5",
+        metadata={
+            "doc": "torchdiffeq integration method name, such as ``dopri5``."
+        },
+    )
+    rtol: float = field(
+        default=1e-6,
+        metadata={
+            "doc": "Relative error tolerance passed to torchdiffeq.odeint."
+        },
+    )
+    atol: float = field(
+        default=1e-8,
+        metadata={
+            "doc": "Absolute error tolerance passed to torchdiffeq.odeint."
+        },
+    )
+    options: Mapping[str, object] | None = field(
+        default=None,
+        metadata={
+            "doc": (
+                "Optional solver-specific keyword arguments passed as "
+                "torchdiffeq.odeint's ``options`` mapping."
+            )
+        },
+    )
 
 
 def evaluate_integrals(
