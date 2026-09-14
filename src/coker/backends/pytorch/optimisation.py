@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Sequence
 
 import torch
@@ -41,68 +41,130 @@ def _to_numpy_array(value):
 
 @dataclass(frozen=True)
 class PytorchNLPSolverOptions(SolverOptions):
-    """CUDA float32 settings for the PyTorch LBFGS NLP solver.
+    """Settings for the CUDA float32 PyTorch LBFGS NLP solver.
 
-    These settings apply only to :class:`ProblemBuilder` programs built with
-    ``backend="pytorch"``. They do not configure PyTorch ODE integration or
-    variational fitting.
+    ``inner_iterations`` and ``restoration_iterations`` bound the LBFGS
+    iterations for the objective solve and feasibility-restoration solve.
+    ``barrier_stages`` and ``augmented_lagrangian_stages`` control the number
+    of outer penalty/barrier updates. ``barrier_reduction`` decreases the
+    barrier coefficient after each barrier stage, while ``penalty_growth``
+    increases the equality-constraint penalty. The three tolerance fields
+    configure LBFGS stopping and constraint feasibility, and
+    ``interior_margin`` keeps inequality iterates away from their bounds.
+    ``history_size`` is passed to :class:`torch.optim.LBFGS` as its curvature
+    history limit.
+
+    Device and dtype are properties of :class:`PytorchBackend`, rather than
+    solver options, and are validated when an optimisation problem is built.
     """
 
-    dtype: torch.dtype | str = torch.float32
-    device: torch.device | str = torch.device("cuda")
-    inner_iterations: int = 25
-    restoration_iterations: int = 25
-    barrier_stages: int = 8
-    augmented_lagrangian_stages: int = 10
-    barrier_reduction: float = 0.2
-    penalty_growth: float = 10.0
-    tolerance_grad: float = 1e-4
-    tolerance_change: float = 1e-5
-    tolerance_constraint: float = 1e-4
-    interior_margin: float = 1e-4
-    history_size: int = 10
+    inner_iterations: int = field(
+        default=25,
+        metadata={"doc": "Maximum LBFGS iterations for each objective solve."},
+    )
+    restoration_iterations: int = field(
+        default=25,
+        metadata={
+            "doc": "Maximum LBFGS iterations for feasibility restoration."
+        },
+    )
+    barrier_stages: int = field(
+        default=8,
+        metadata={"doc": "Number of inequality barrier stages."},
+    )
+    augmented_lagrangian_stages: int = field(
+        default=10,
+        metadata={"doc": "Number of equality augmented-Lagrangian stages."},
+    )
+    barrier_reduction: float = field(
+        default=0.2,
+        metadata={"doc": "Multiplicative barrier coefficient reduction."},
+    )
+    penalty_growth: float = field(
+        default=10.0,
+        metadata={"doc": "Multiplicative equality penalty growth."},
+    )
+    tolerance_grad: float = field(
+        default=1e-4,
+        metadata={"doc": "LBFGS gradient convergence tolerance."},
+    )
+    tolerance_change: float = field(
+        default=1e-5,
+        metadata={"doc": "LBFGS objective/parameter change tolerance."},
+    )
+    tolerance_constraint: float = field(
+        default=1e-4,
+        metadata={"doc": "Maximum accepted constraint violation."},
+    )
+    interior_margin: float = field(
+        default=1e-4,
+        metadata={"doc": "Minimum inequality interior slack."},
+    )
+    history_size: int = field(
+        default=10,
+        metadata={"doc": "LBFGS curvature history size."},
+    )
 
     def __post_init__(self):
         super().__post_init__()
-        device = torch.device(self.device)
-        if isinstance(self.dtype, str):
-            try:
-                dtype = getattr(torch, self.dtype)
-            except AttributeError as ex:
-                raise ValueError(
-                    f"unknown PyTorch dtype: {self.dtype}"
-                ) from ex
-        else:
-            dtype = self.dtype
-        if device.type != "cuda":
-            raise ValueError("PyTorch NLP solving requires a CUDA device")
-        if dtype is not torch.float32:
-            raise ValueError("PyTorch NLP solving supports only float32")
-        for name in (
-            "inner_iterations",
-            "restoration_iterations",
-            "barrier_stages",
-            "augmented_lagrangian_stages",
-            "history_size",
+        if (
+            not isinstance(self.inner_iterations, int)
+            or self.inner_iterations <= 0
         ):
-            value = getattr(self, name)
-            if not isinstance(value, int) or value <= 0:
-                raise ValueError(f"{name} must be a positive integer")
-        for name in (
-            "barrier_reduction",
-            "penalty_growth",
-            "tolerance_grad",
-            "tolerance_change",
-            "tolerance_constraint",
-            "interior_margin",
+            raise ValueError("inner_iterations must be a positive integer")
+        if (
+            not isinstance(self.restoration_iterations, int)
+            or self.restoration_iterations <= 0
         ):
-            value = getattr(self, name)
-            if not isinstance(value, (int, float)) or value <= 0:
-                raise ValueError(f"{name} must be positive")
+            raise ValueError(
+                "restoration_iterations must be a positive integer"
+            )
+        if (
+            not isinstance(self.barrier_stages, int)
+            or self.barrier_stages <= 0
+        ):
+            raise ValueError("barrier_stages must be a positive integer")
+        if (
+            not isinstance(self.augmented_lagrangian_stages, int)
+            or self.augmented_lagrangian_stages <= 0
+        ):
+            raise ValueError(
+                "augmented_lagrangian_stages must be a positive integer"
+            )
+        if not isinstance(self.history_size, int) or self.history_size <= 0:
+            raise ValueError("history_size must be a positive integer")
+        if (
+            not isinstance(self.barrier_reduction, (int, float))
+            or self.barrier_reduction <= 0
+        ):
+            raise ValueError("barrier_reduction must be positive")
+        if (
+            not isinstance(self.penalty_growth, (int, float))
+            or self.penalty_growth <= 0
+        ):
+            raise ValueError("penalty_growth must be positive")
+        if (
+            not isinstance(self.tolerance_grad, (int, float))
+            or self.tolerance_grad <= 0
+        ):
+            raise ValueError("tolerance_grad must be positive")
+        if (
+            not isinstance(self.tolerance_change, (int, float))
+            or self.tolerance_change <= 0
+        ):
+            raise ValueError("tolerance_change must be positive")
+        if (
+            not isinstance(self.tolerance_constraint, (int, float))
+            or self.tolerance_constraint <= 0
+        ):
+            raise ValueError("tolerance_constraint must be positive")
+        if (
+            not isinstance(self.interior_margin, (int, float))
+            or self.interior_margin <= 0
+        ):
+            raise ValueError("interior_margin must be positive")
         if self.barrier_reduction >= 1:
             raise ValueError("barrier_reduction must be less than 1")
-        object.__setattr__(self, "device", device)
-        object.__setattr__(self, "dtype", dtype)
 
 
 class _PytorchOptimisationProblem:
@@ -117,6 +179,8 @@ class _PytorchOptimisationProblem:
         outputs,
         initial_guess,
         options,
+        device,
+        dtype,
     ):
         self.tape = tape
         self.decision_bindings = decision_bindings
@@ -126,6 +190,8 @@ class _PytorchOptimisationProblem:
         self.outputs = outputs
         self.initial_guess = initial_guess
         self.options = options
+        self.device = device
+        self.dtype = dtype
         self._warm_start_decision = None
         self._warm_start_multipliers = None
         self.last_solve_info: SolveInfo | None = None
@@ -135,8 +201,8 @@ class _PytorchOptimisationProblem:
         decision = (
             torch.as_tensor(
                 self.initial_guess,
-                dtype=self.options.dtype,
-                device=self.options.device,
+                dtype=self.dtype,
+                device=self.device,
             )
             .clone()
             .detach()
@@ -187,17 +253,12 @@ class _PytorchOptimisationProblem:
             ):
                 cached = self._warm_start_multipliers
                 if len(cached) == len(multipliers) and all(
-                    v.device == self.options.device
-                    and v.dtype == self.options.dtype
+                    v.device == self.device and v.dtype == self.dtype
                     for v in cached
                 ):
                     multipliers = [v.clone().detach() for v in cached]
-            penalty = torch.tensor(
-                1.0, dtype=self.options.dtype, device=self.options.device
-            )
-            barrier = torch.tensor(
-                1.0, dtype=self.options.dtype, device=self.options.device
-            )
+            penalty = torch.tensor(1.0, dtype=self.dtype, device=self.device)
+            barrier = torch.tensor(1.0, dtype=self.dtype, device=self.device)
 
             # Equality constraints are handled by an augmented Lagrangian.  The
             # barrier is kept separate so equality residuals never enter a log.
@@ -352,9 +413,7 @@ class _PytorchOptimisationProblem:
     def _restore_feasibility(self, decision, runtime_args, bounds):
         def restoration():
             values = self._constraint_values(decision, runtime_args)
-            loss = torch.zeros(
-                (), dtype=self.options.dtype, device=self.options.device
-            )
+            loss = torch.zeros((), dtype=self.dtype, device=self.device)
             for i, value in enumerate(values):
                 lower, upper = bounds[i]
                 if self._bounds_equal(
@@ -391,7 +450,7 @@ class _PytorchOptimisationProblem:
     def _constraint_values(self, decision, runtime_args):
         return [
             torch.as_tensor(
-                value, dtype=self.options.dtype, device=self.options.device
+                value, dtype=self.dtype, device=self.device
             ).reshape(-1)
             for value in self._evaluate_tracers(
                 [constraint.residual for constraint in self.constraints],
@@ -419,7 +478,7 @@ class _PytorchOptimisationProblem:
         else:
             value = bound
         result = torch.as_tensor(
-            value, dtype=self.options.dtype, device=self.options.device
+            value, dtype=self.dtype, device=self.device
         ).reshape(-1)
         if bool(torch.all(torch.isinf(result))):
             return None
@@ -438,9 +497,7 @@ class _PytorchOptimisationProblem:
     def _constraint_violation(self, decision, runtime_args):
         vals = self._constraint_values(decision, runtime_args)
         bounds = self._constraint_bounds(decision, runtime_args)
-        result = torch.zeros(
-            (), dtype=self.options.dtype, device=self.options.device
-        )
+        result = torch.zeros((), dtype=self.dtype, device=self.device)
         for i, (value, (lower, upper)) in enumerate(zip(vals, bounds)):
             if self._bounds_equal(
                 self.constraints[i].lower_bound,
@@ -492,7 +549,7 @@ class _PytorchOptimisationProblem:
                 )
             values = tuple(
                 _reshape(
-                    _to_backend_array(value, self.options.device),
+                    _to_backend_array(value, self.device),
                     binding.dim,
                 )
                 for value, binding in zip(
@@ -504,9 +561,7 @@ class _PytorchOptimisationProblem:
                 runtime_args, self.parameter_bindings
             )
         return tuple(
-            torch.as_tensor(
-                value, dtype=self.options.dtype, device=self.options.device
-            )
+            torch.as_tensor(value, dtype=self.dtype, device=self.device)
             for value in values
         )
 
@@ -527,7 +582,7 @@ class _PytorchOptimisationProblem:
         inputs = self._materialise_inputs(decision, runtime_args)
         workspace = {-1: None}
         for index, value in zip(self.tape.input_indicies, inputs):
-            workspace[index] = _to_backend_array(value, self.options.device)
+            workspace[index] = _to_backend_array(value, self.device)
         for index in range(len(self.tape.nodes)):
             if index in workspace:
                 continue
@@ -536,7 +591,7 @@ class _PytorchOptimisationProblem:
                 (
                     workspace[node.index]
                     if isinstance(node, Tracer) and node.tape == self.tape
-                    else _to_backend_array(node, self.options.device)
+                    else _to_backend_array(node, self.device)
                 )
                 for node in nodes
             ]
@@ -565,8 +620,8 @@ class _PytorchOptimisationProblem:
     def _evaluate_cost(self, decision, runtime_args):
         return torch.as_tensor(
             self._evaluate_tracers([self.cost], decision, runtime_args)[0],
-            dtype=self.options.dtype,
-            device=self.options.device,
+            dtype=self.dtype,
+            device=self.device,
         ).reshape(())
 
     def _results(self, decision, runtime_args):
@@ -616,6 +671,14 @@ def build_optimisation_problem(
 ):
     if not torch.cuda.is_available():
         raise RuntimeError("PyTorch optimisation requires CUDA availability")
+    device = backend.device or torch.device("cuda")
+    dtype = backend.dtype or torch.float32
+    if device.type != "cuda":
+        raise ValueError("PyTorch NLP solving requires a CUDA backend device")
+    if dtype is not torch.float32:
+        raise ValueError(
+            "PyTorch NLP solving requires a float32 backend dtype"
+        )
     tape = cost.tape
     if any(
         item.tape != tape for item in (*constraints, *parameters, *outputs)
@@ -648,4 +711,6 @@ def build_optimisation_problem(
             bindings.decision_bindings, initial_conditions
         ),
         options=selected,
+        device=device,
+        dtype=dtype,
     )
