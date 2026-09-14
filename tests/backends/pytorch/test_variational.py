@@ -11,6 +11,9 @@ from coker.dynamics import (
 from coker.dynamics.system import create_autonomous_ode
 from coker.toolkits.codesign import Minimise
 from coker.backends.pytorch.variational import PytorchVariationalSolverOptions
+from coker.algebra.ops import Noop
+from coker.dynamics import DynamicsSpec
+from coker.dynamics.system import create_dynamics_from_spec
 
 
 pytestmark = pytest.mark.skipif(
@@ -100,3 +103,31 @@ def test_cuda_integrates_registered_quadratures():
         rate, abs=2e-3
     )
     assert solution.quadratures(1.0)[0] == pytest.approx(target, abs=2e-3)
+
+
+def test_cuda_integrates_system_quadratures():
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=VectorSpace("p", 1),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, p: (p * 0, None),
+            dynamics=lambda _t, x, _z, _u, _p: x * 0,
+            constraints=Noop(),
+            outputs=lambda _t, _x, _z, _u, _p, q: q,
+            quadratures=lambda _t, _x, _z, _u, p: p[0],
+        ),
+        backend="pytorch",
+    )
+    problem = VariationalProblem(
+        t_final=1.0,
+        system=system,
+        parameters=[BoundedVariable("rate", -2.0, 2.0, guess=0.7)],
+        backend="pytorch",
+        loss=lambda solution, p: (solution(1.0, p) - 0.7) ** 2,
+    )
+
+    solution = problem.get_solver("pytorch").solve()
+
+    assert solution.solve_info.success
+    assert solution.quadratures(1.0)[0] == pytest.approx(0.7, abs=2e-3)
