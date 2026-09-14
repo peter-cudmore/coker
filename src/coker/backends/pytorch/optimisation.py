@@ -14,7 +14,29 @@ from coker.backends.optimisation import (
     build_problem_bindings,
     normalise_runtime_args,
 )
-from coker.toolkits.codesign import SolveFailure, SolveInfo, SolverOptions
+from coker.toolkits.codesign import (
+    BoundedConstraint,
+    SolveFailure,
+    SolveInfo,
+    SolverOptions,
+)
+from .ops import call_parameterised_op, impls, parameterised_impls
+
+
+def _reshape(value, dimension):
+    if dimension.is_scalar():
+        return value.reshape(())
+    return torch.reshape(value, dimension.dim)
+
+
+def _to_backend_array(value, device):
+    if isinstance(value, torch.Tensor):
+        return value if value.device == device else value.to(device)
+    return torch.as_tensor(value, device=device)
+
+
+def _to_numpy_array(value):
+    return value.detach().cpu().numpy()
 
 
 @dataclass(frozen=True)
@@ -83,18 +105,10 @@ class PytorchNLPSolverOptions(SolverOptions):
         object.__setattr__(self, "dtype", dtype)
 
 
-@dataclass(frozen=True)
-class _Constraint:
-    residual: Tracer
-    lower_bound: object
-    upper_bound: object
-
-
 class _PytorchOptimisationProblem:
     def __init__(
         self,
         *,
-        backend,
         tape,
         decision_bindings,
         parameter_bindings,
@@ -104,7 +118,6 @@ class _PytorchOptimisationProblem:
         initial_guess,
         options,
     ):
-        self.backend = backend
         self.tape = tape
         self.decision_bindings = decision_bindings
         self.parameter_bindings = parameter_bindings
@@ -478,13 +491,9 @@ class _PytorchOptimisationProblem:
                     f"got {len(runtime_args)}"
                 )
             values = tuple(
-                (
-                    self.backend.reshape(value, binding.dim)
-                    if isinstance(value, torch.Tensor)
-                    else self.backend.reshape(
-                        torch.as_tensor(value, device=self.options.device),
-                        binding.dim,
-                    )
+                _reshape(
+                    _to_backend_array(value, self.options.device),
+                    binding.dim,
                 )
                 for value, binding in zip(
                     runtime_args, self.parameter_bindings
@@ -503,7 +512,7 @@ class _PytorchOptimisationProblem:
 
     def _materialise_inputs(self, decision, runtime_args):
         decisions = {
-            b.index: self.backend.reshape(decision[b.start : b.stop], b.dim)
+            b.index: _reshape(decision[b.start : b.stop], b.dim)
             for b in self.decision_bindings
         }
         parameters = {
@@ -518,7 +527,7 @@ class _PytorchOptimisationProblem:
         inputs = self._materialise_inputs(decision, runtime_args)
         workspace = {-1: None}
         for index, value in zip(self.tape.input_indicies, inputs):
-            workspace[index] = self.backend.to_backend_array(value)
+            workspace[index] = _to_backend_array(value, self.options.device)
         for index in range(len(self.tape.nodes)):
             if index in workspace:
                 continue
@@ -527,15 +536,18 @@ class _PytorchOptimisationProblem:
                 (
                     workspace[node.index]
                     if isinstance(node, Tracer) and node.tape == self.tape
-                    else self.backend.to_backend_array(node)
+                    else _to_backend_array(node, self.options.device)
                 )
                 for node in nodes
             ]
-            value = (
-                args[0]
-                if op in {OP.VALUE, OP.FUNCTION_VALUE}
-                else self.backend.call(op, *args)
-            )
+            if op in {OP.VALUE, OP.FUNCTION_VALUE}:
+                value = args[0]
+            elif op in impls:
+                value = impls[op](*args)
+            elif op in parameterised_impls:
+                value = call_parameterised_op(op, *args)
+            else:
+                raise NotImplementedError(f"{op} is not implemented")
             value = _normalize_evaluate_result(
                 op, args, value, self.tape.dim[index]
             )
@@ -543,7 +555,7 @@ class _PytorchOptimisationProblem:
                 value
                 if isinstance(value, Tracer)
                 or isinstance(self.tape.dim[index], ResultBundleDimension)
-                else self.backend.reshape(value, self.tape.dim[index])
+                else _reshape(value, self.tape.dim[index])
             )
         return [
             None if tracer is None else workspace[tracer.index]
@@ -559,8 +571,8 @@ class _PytorchOptimisationProblem:
 
     def _results(self, decision, runtime_args):
         return [
-            self.backend.to_numpy_array(v)
-            for v in self._evaluate_tracers(
+            _to_numpy_array(value)
+            for value in self._evaluate_tracers(
                 self.outputs, decision, runtime_args
             )
         ]
@@ -624,9 +636,8 @@ def build_optimisation_problem(
     normalised = []
     for constraint in constraints:
         residual, lower, upper = constraint.as_halfplane_bound()
-        normalised.append(_Constraint(residual, lower, upper))
+        normalised.append(BoundedConstraint(residual, lower, upper))
     return _PytorchOptimisationProblem(
-        backend=backend,
         tape=tape,
         decision_bindings=bindings.decision_bindings,
         parameter_bindings=bindings.parameter_bindings,

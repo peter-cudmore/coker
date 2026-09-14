@@ -3,9 +3,14 @@ import pytest
 import torch
 
 from coker import VectorSpace
-from coker.dynamics import BoundedVariable, VariationalProblem
+from coker.dynamics import (
+    BoundedVariable,
+    VariationalProblem,
+    VariationalProblemBuilder,
+)
 from coker.dynamics.system import create_autonomous_ode
-from coker.dynamics.variational.problem import QuadratureSpec
+from coker.toolkits.codesign import Minimise
+from coker.backends.pytorch.variational import PytorchVariationalSolverOptions
 
 
 pytestmark = pytest.mark.skipif(
@@ -60,8 +65,38 @@ def test_cuda_parameter_guess_initializes_bound_transform():
         make_problem(guess=3.0).get_solver("pytorch").solve()
 
 
-def test_cuda_rejects_quadratures_explicitly():
-    problem = make_problem()
-    problem.quadratures = [QuadratureSpec("q")]
-    with pytest.raises(NotImplementedError, match="Quadratures"):
-        problem.get_solver("pytorch")
+def test_variational_options_follow_solver_option_contract():
+    options = PytorchVariationalSolverOptions(warm_start=True)
+
+    assert options.warm_start
+    assert options.optimiser_method == "LBFGS"
+    with pytest.raises(ValueError, match="Unsupported PyTorch optimiser"):
+        PytorchVariationalSolverOptions(optimiser_method="SGD")
+
+
+def test_cuda_integrates_registered_quadratures():
+    parameters = VectorSpace("p", 1)
+    system = create_autonomous_ode(
+        x0=1.0,
+        xdot=lambda x, p: p[0] * x,
+        parameters=parameters,
+        backend="pytorch",
+    )
+    rate = 0.7
+    target = float(np.expm1(2 * rate) / (2 * rate))
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        parameters=[BoundedVariable("rate", -2.0, 2.0)],
+        backend="pytorch",
+    ) as builder:
+        integral = builder.integrate(builder.output(builder.t)[0] ** 2)
+        problem = builder.build(Minimise((integral - target) ** 2))
+
+    solution = problem.get_solver("pytorch").solve()
+
+    assert solution.solve_info.success
+    assert solution.parameter_solutions["rate"] == pytest.approx(
+        rate, abs=2e-3
+    )
+    assert solution.quadratures(1.0)[0] == pytest.approx(target, abs=2e-3)

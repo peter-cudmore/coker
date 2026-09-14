@@ -10,7 +10,11 @@ from coker import Scalar, VectorSpace
 from coker.algebra import Dimension, OP
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
-from coker.backends.pytorch import PytorchModule, PytorchNLPSolverOptions
+from coker.backends.pytorch import (
+    PytorchBackend,
+    PytorchModule,
+    PytorchNLPSolverOptions,
+)
 from coker.toolkits.codesign import (
     Minimise,
     ProblemBuilder,
@@ -38,6 +42,15 @@ def test_to_backend_array_preserves_tensor_dtype_device_and_identity(
     assert converted is value
     assert converted.dtype == value.dtype
     assert converted.device == value.device
+
+
+def test_backend_configured_device_converts_arrays():
+    backend = PytorchBackend(device="cpu")
+
+    value = backend.to_backend_array([1.0])
+
+    assert backend.device == torch.device("cpu")
+    assert value.device == backend.device
 
 
 def test_function_returns_tensor_and_preserves_autograd():
