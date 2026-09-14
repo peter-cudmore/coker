@@ -121,11 +121,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 "Algebraic states are not supported by "
                 "PyTorch variational solving"
             )
-        if q_dim is not None:
-            raise NotImplementedError(
-                "System quadrature states are not supported by "
-                "PyTorch variational solving"
-            )
+        self._system_quadrature_size = q_dim.flat() if q_dim else 0
         self._parameters = []
         seen = set()
         for declaration in problem.parameters or []:
@@ -240,7 +236,12 @@ class PytorchVariationalSolver(VariationalSolver):
         x0 = torch.as_tensor(
             x0, device=self._device, dtype=self._dtype
         ).reshape(-1)
-        q0 = torch.as_tensor(
+        system_q0 = torch.zeros(
+            self._system_quadrature_size,
+            device=self._device,
+            dtype=self._dtype,
+        )
+        registered_q0 = torch.as_tensor(
             [spec.initial_state for spec in self.problem.quadratures],
             device=self._device,
             dtype=self._dtype,
@@ -254,28 +255,38 @@ class PytorchVariationalSolver(VariationalSolver):
             ) from ex
 
         def rhs(time, integrated):
-            state = integrated[: x0.numel()]
-            quadratures = integrated[x0.numel() :]
+            state_end = x0.numel()
+            system_q_end = state_end + self._system_quadrature_size
+            state = integrated[:state_end]
+            registered_quadratures = integrated[system_q_end:]
             dx = system.dxdt(time, state, None, None, parameters).reshape(-1)
-            if not self._quadratures:
-                return dx
-            dq = torch.stack(
-                [
-                    quadrature.execute(
-                        self._trace_arguments(
-                            quadrature.signature,
-                            time,
-                            state,
-                            parameters,
-                            quadratures,
-                        )
-                    )[0].reshape(())
-                    for quadrature in self._quadratures
-                ]
-            )
-            return torch.cat((dx, dq))
+            derivatives = [dx]
+            if self._system_quadrature_size:
+                derivatives.append(
+                    system.dqdt(time, state, None, None, parameters).reshape(
+                        -1
+                    )
+                )
+            if self._quadratures:
+                derivatives.append(
+                    torch.stack(
+                        [
+                            quadrature.execute(
+                                self._trace_arguments(
+                                    quadrature.signature,
+                                    time,
+                                    state,
+                                    parameters,
+                                    registered_quadratures,
+                                )
+                            )[0].reshape(())
+                            for quadrature in self._quadratures
+                        ]
+                    )
+                )
+            return torch.cat(derivatives)
 
-        initial_state = torch.cat((x0, q0)) if self._quadratures else x0
+        initial_state = torch.cat((x0, system_q0, registered_q0))
         integrated = odeint(
             rhs,
             initial_state,
@@ -285,9 +296,16 @@ class PytorchVariationalSolver(VariationalSolver):
             atol=self._options.ode.atol,
             options=self._options.ode.options,
         )
+        state_end = x0.numel()
+        system_q_end = state_end + self._system_quadrature_size
         return (
-            integrated[..., : x0.numel()],
-            integrated[..., x0.numel() :] if self._quadratures else None,
+            integrated[..., :state_end],
+            (
+                integrated[..., state_end:system_q_end]
+                if self._system_quadrature_size
+                else None
+            ),
+            integrated[..., system_q_end:] if self._quadratures else None,
         )
 
     def _evaluate(self, values):
@@ -309,34 +327,28 @@ class PytorchVariationalSolver(VariationalSolver):
                     if bool(time[0] == 0)
                     else torch.cat((torch.zeros_like(time[:1]), time))
                 )
-                state, quadratures = self._integrate(parameter_values, grid)
+                state, system_q, _ = self._integrate(parameter_values, grid)
                 state = state[-1]
-                quadratures = (
-                    quadratures[-1] if quadratures is not None else None
-                )
+                system_q = system_q[-1] if system_q is not None else None
             elif bool(time == 0):
-                state, quadratures = self._integrate(
+                state, system_q, _ = self._integrate(
                     parameter_values, time.reshape(1)
                 )
                 state = state[0]
-                quadratures = (
-                    quadratures[0] if quadratures is not None else None
-                )
+                system_q = system_q[0] if system_q is not None else None
             else:
-                state, quadratures = self._integrate(
+                state, system_q, _ = self._integrate(
                     parameter_values,
                     torch.stack((torch.zeros_like(time), time)),
                 )
                 state = state[-1]
-                quadratures = (
-                    quadratures[-1] if quadratures is not None else None
-                )
-            return system.y(time, state, None, None, parameters, quadratures)
+                system_q = system_q[-1] if system_q is not None else None
+            return system.y(time, state, None, None, parameters, system_q)
 
         return output_native, self.problem.loss.input_spaces()[0]
 
     def _evaluate_trace_loss(self, values):
-        states, quadratures = self._integrate(
+        states, _, registered_q = self._integrate(
             values, torch.stack((self._t_initial, self._t_final))
         )
         parameters = self._system_parameters(values)
@@ -348,7 +360,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 self._t_final,
                 states[-1],
                 parameters,
-                quadratures[-1] if quadratures is not None else (),
+                registered_q[-1] if registered_q is not None else (),
             )
         )[0]
 
@@ -497,16 +509,21 @@ class PytorchVariationalSolver(VariationalSolver):
             ) from ex
         values = values_from_raw().detach()
         times = self._trajectory_times()
-        states, quadratures = self._integrate(values, times)
+        states, system_q, registered_q = self._integrate(values, times)
         state_values = states.detach().cpu().numpy()
-        quadrature_values = (
-            quadratures.detach().cpu().numpy()
-            if quadratures is not None
+        quadrature_values = [
+            quadrature.detach().cpu().numpy()
+            for quadrature in (system_q, registered_q)
+            if quadrature is not None
+        ]
+        all_quadrature_values = (
+            np.concatenate(quadrature_values, axis=1)
+            if quadrature_values
             else None
         )
         path_values = (
-            np.concatenate((state_values, quadrature_values), axis=1)
-            if quadrature_values is not None
+            np.concatenate((state_values, all_quadrature_values), axis=1)
+            if all_quadrature_values is not None
             else state_values
         )
         poly = InterpolatingPoly(
@@ -522,12 +539,12 @@ class PytorchVariationalSolver(VariationalSolver):
             state_values.shape[1]
         )
         quadrature_projector = None
-        if quadrature_values is not None:
+        if all_quadrature_values is not None:
             quadrature_projector = np.zeros(
-                (quadrature_values.shape[1], path_values.shape[1])
+                (all_quadrature_values.shape[1], path_values.shape[1])
             )
             quadrature_projector[:, state_values.shape[1] :] = np.eye(
-                quadrature_values.shape[1]
+                all_quadrature_values.shape[1]
             )
         info = SolveInfo(
             "pytorch",
