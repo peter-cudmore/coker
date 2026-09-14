@@ -24,17 +24,15 @@ class PytorchLoweredFunction(LoweredFunction):
 
     def __init__(
         self,
-        backend_name: str,
         function: Function,
         plan: CompiledPlan,
     ) -> None:
-        self._backend_name = backend_name
         self._function = function
         self._plan = plan
 
     @property
     def backend_name(self) -> str:
-        return self._backend_name
+        return "pytorch"
 
     @property
     def signature(self) -> FunctionSignature:

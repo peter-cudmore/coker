@@ -105,7 +105,6 @@ class PytorchBackend(Backend):
         solver_parameters=None,
     ):
         return evaluate_integrals(
-            self,
             functions,
             initial_conditions,
             end_point,
@@ -117,7 +116,6 @@ class PytorchBackend(Backend):
         self, function: Function, options: LoweringOptions | None = None
     ) -> PytorchLoweredFunction:
         return PytorchLoweredFunction(
-            self.name,
             function,
             self.get_evaluator().build_plan(function.tape),
         )
@@ -137,7 +135,6 @@ class PytorchBackend(Backend):
         options=None,
     ):
         return build_optimisation_problem(
-            self,
             cost,
             constraints,
             parameters,
