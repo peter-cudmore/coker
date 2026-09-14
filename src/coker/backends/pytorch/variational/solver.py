@@ -38,41 +38,22 @@ _OPTIMISER_TYPES = {
 
 @dataclass(frozen=True)
 class PytorchVariationalSolverOptions(SolverOptions):
-    """CUDA direct-shooting configuration for a PyTorch variational solve."""
+    """CUDA direct-shooting configuration for a PyTorch variational solve.
 
-    ode: PytorchODESolverParameters = field(
-        default=PytorchODESolverParameters(),
-        metadata={
-            "doc": (
-                "ODE integration settings; each nested field is forwarded "
-                "to torchdiffeq.odeint during trajectory evaluation."
-            )
-        },
-    )
-    optimiser_method: str = field(
-        default="LBFGS",
-        metadata={
-            "doc": (
-                "Name of the torch.optim optimiser class used for fitting "
-                "the variational parameters."
-            )
-        },
-    )
+    ``ode`` is forwarded to :func:`torchdiffeq.odeint`. ``optimiser_method``
+    selects a supported :mod:`torch.optim` optimiser, while
+    ``optimiser_options`` are forwarded to its constructor.
+    """
+
+    ode: PytorchODESolverParameters = PytorchODESolverParameters()
+    optimiser_method: str = "LBFGS"
     optimiser_options: Mapping[str, object] = field(
         default_factory=lambda: {
             "max_iter": 100,
             "tolerance_grad": 1e-6,
             "tolerance_change": 1e-9,
             "line_search_fn": "strong_wolfe",
-        },
-        metadata={
-            "doc": (
-                "Keyword arguments forwarded to the selected "
-                "torch.optim optimiser constructor; for LBFGS, these "
-                "control per-step iterations, stopping tolerances, and "
-                "line-search selection."
-            )
-        },
+        }
     )
 
     def __post_init__(self):

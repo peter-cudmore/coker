@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence
 
 import torch
@@ -58,52 +58,17 @@ class PytorchNLPSolverOptions(SolverOptions):
     solver options, and are validated when an optimisation problem is built.
     """
 
-    inner_iterations: int = field(
-        default=25,
-        metadata={"doc": "Maximum LBFGS iterations for each objective solve."},
-    )
-    restoration_iterations: int = field(
-        default=25,
-        metadata={
-            "doc": "Maximum LBFGS iterations for feasibility restoration."
-        },
-    )
-    barrier_stages: int = field(
-        default=8,
-        metadata={"doc": "Number of inequality barrier stages."},
-    )
-    augmented_lagrangian_stages: int = field(
-        default=10,
-        metadata={"doc": "Number of equality augmented-Lagrangian stages."},
-    )
-    barrier_reduction: float = field(
-        default=0.2,
-        metadata={"doc": "Multiplicative barrier coefficient reduction."},
-    )
-    penalty_growth: float = field(
-        default=10.0,
-        metadata={"doc": "Multiplicative equality penalty growth."},
-    )
-    tolerance_grad: float = field(
-        default=1e-4,
-        metadata={"doc": "LBFGS gradient convergence tolerance."},
-    )
-    tolerance_change: float = field(
-        default=1e-5,
-        metadata={"doc": "LBFGS objective/parameter change tolerance."},
-    )
-    tolerance_constraint: float = field(
-        default=1e-4,
-        metadata={"doc": "Maximum accepted constraint violation."},
-    )
-    interior_margin: float = field(
-        default=1e-4,
-        metadata={"doc": "Minimum inequality interior slack."},
-    )
-    history_size: int = field(
-        default=10,
-        metadata={"doc": "LBFGS curvature history size."},
-    )
+    inner_iterations: int = 25
+    restoration_iterations: int = 25
+    barrier_stages: int = 8
+    augmented_lagrangian_stages: int = 10
+    barrier_reduction: float = 0.2
+    penalty_growth: float = 10.0
+    tolerance_grad: float = 1e-4
+    tolerance_change: float = 1e-5
+    tolerance_constraint: float = 1e-4
+    interior_margin: float = 1e-4
+    history_size: int = 10
 
     def __post_init__(self):
         super().__post_init__()

@@ -1,6 +1,6 @@
 """Pure ODE integration for the PyTorch backend."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Mapping
 
 import torch
@@ -13,37 +13,15 @@ from coker.backends.backend import SolverParameters
 class PytorchODESolverParameters(SolverParameters):
     """PyTorch ODE initial-value integration settings.
 
-    These settings are passed to :func:`torchdiffeq.odeint`. They do not
+    ``method``, ``rtol``, ``atol``, and ``options`` map directly to the
+    corresponding :func:`torchdiffeq.odeint` arguments. These settings do not
     configure PyTorch NLP or variational solvers.
     """
 
-    method: str = field(
-        default="dopri5",
-        metadata={
-            "doc": "torchdiffeq integration method name, such as ``dopri5``."
-        },
-    )
-    rtol: float = field(
-        default=1e-6,
-        metadata={
-            "doc": "Relative error tolerance passed to torchdiffeq.odeint."
-        },
-    )
-    atol: float = field(
-        default=1e-8,
-        metadata={
-            "doc": "Absolute error tolerance passed to torchdiffeq.odeint."
-        },
-    )
-    options: Mapping[str, object] | None = field(
-        default=None,
-        metadata={
-            "doc": (
-                "Optional solver-specific keyword arguments passed as "
-                "torchdiffeq.odeint's ``options`` mapping."
-            )
-        },
-    )
+    method: str = "dopri5"
+    rtol: float = 1e-6
+    atol: float = 1e-8
+    options: Mapping[str, object] | None = None
 
 
 def evaluate_integrals(
