@@ -228,6 +228,26 @@ def test_fitting_constant(enable_scaling, monkeypatch):
     assert sol.solve_info.success
 
 
+def test_fixed_non_unit_horizon_scales_interval_continuity():
+    """A fixed horizon must scale collocation and continuity residuals alike."""
+    system = create_autonomous_ode(
+        x0=0.0,
+        xdot=lambda _x, _p: 1.0,
+        backend="numpy",
+    )
+    problem = VariationalProblem(
+        loss=lambda solution, _p: (solution(0.5) - 0.5) ** 2,
+        system=system,
+        t_final=0.5,
+        backend="casadi",
+    )
+
+    solution = problem()
+
+    assert solution.solve_info.success
+    assert solution.cost < 1e-8
+
+
 def test_fitting_line():
     def x0(p):
         return p[0]
