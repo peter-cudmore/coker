@@ -176,7 +176,6 @@ def create_variational_solver(
     problem: VariationalProblem,
 ) -> CasadiVariationalSolver:
     casadi = get_backend_by_name("casadi")
-    loss = problem.loss
 
     x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
     x_size = x_dim.flat()
@@ -414,13 +413,14 @@ def create_variational_solver(
         path_upper_bound, u_upper, p_upper_base
     )
 
+    def normalized_time(time):
+        return time if free_horizon else time / duration
+
     def state_proxy(time):
-        tau = time if free_horizon else time / duration
-        return proj_x @ poly_collection(tau)
+        return proj_x @ poly_collection(normalized_time(time))
 
     def input_proxy(time):
-        tau = time if free_horizon else time / duration
-        return control_eval(tau)
+        return control_eval(normalized_time(time))
 
     def solution_proxy(*args):
         if len(args) == 1:
@@ -430,7 +430,7 @@ def create_variational_solver(
             control_val = control_eval
         else:
             time, control_val, p_val = args
-        tau = time if free_horizon else time / duration
+        tau = normalized_time(time)
         u_val = control_val(tau)
         inner = poly_collection(tau)
         x_tau = proj_x @ inner
@@ -442,7 +442,7 @@ def create_variational_solver(
         )
         return y_val
 
-    if isinstance(loss, Tracer):
+    if isinstance(problem.loss, Tracer):
         values = {
             "t": duration,
             "t_final": duration,
@@ -456,15 +456,18 @@ def create_variational_solver(
         workspace = {
             index: values[name]
             for index, name in zip(
-                loss.tape.input_indicies, loss.tape.input_names
+                problem.loss.tape.input_indicies,
+                problem.loss.tape.input_names,
             )
             if name in values
         }
-        (cost,) = substitute([loss], workspace)
+        (cost,) = substitute([problem.loss], workspace)
     elif control_factory is None:
-        (cost,) = casadi.evaluate(loss, [solution_proxy, p])
+        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
     else:
-        (cost,) = casadi.evaluate(loss, [solution_proxy, control_factory, p])
+        (cost,) = casadi.evaluate(
+            problem.loss, [solution_proxy, control_factory, p]
+        )
 
     equality_values = [e for e in equalities if e is not None]
     g = ca.vertcat(*equality_values, *g_constraints)
