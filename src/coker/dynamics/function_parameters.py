@@ -63,7 +63,7 @@ class MonotonePiecewiseLinear:
         return len(self.knots)
 
     @property
-    def theta_space(self) -> VectorSpace:
+    def basis_space(self) -> VectorSpace:
         return VectorSpace("theta", self.size)
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
@@ -99,7 +99,7 @@ class MonotonePiecewiseLinear:
         self,
     ) -> tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]:
         return (
-            self.theta_space,
+            self.basis_space,
             self.initial_values,
             self.lower_bounds,
             self.upper_bounds,
