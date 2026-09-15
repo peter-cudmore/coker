@@ -358,17 +358,14 @@ class _PytorchOptimisationProblem:
         optimiser_type = _OPTIMISER_TYPES[self.options.optimiser_method]
         optimiser_options = dict(self.options.optimiser_options)
         if self.options.optimiser_method == "LBFGS":
-            optimizer = optimiser_type(
-                [decision],
+            optimiser_options.update(
                 max_iter=max_iter,
                 tolerance_grad=self.options.tolerance_grad,
                 tolerance_change=self.options.tolerance_change,
                 history_size=self.options.history_size,
                 line_search_fn="strong_wolfe",
-                **optimiser_options,
             )
-        else:
-            optimizer = optimiser_type([decision], **optimiser_options)
+        optimizer = optimiser_type([decision], **optimiser_options)
         state = {"iterations": 0}
 
         def closure():
