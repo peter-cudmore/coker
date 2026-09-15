@@ -229,7 +229,7 @@ def test_fitting_constant(enable_scaling, monkeypatch):
 
 
 def test_fixed_non_unit_horizon_scales_interval_continuity():
-    """A fixed horizon must scale collocation and continuity residuals alike."""
+    """Scale collocation and continuity residuals for a fixed horizon."""
     system = create_autonomous_ode(
         x0=0.0,
         xdot=lambda _x, _p: 1.0,
