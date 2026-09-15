@@ -345,7 +345,7 @@ def create_variational_solver(
                 physical_t, x, z, control_eval(t), proj_p @ p
             )
             scale = duration
-            interval_dynamics.append(dynamics_ij)
+            interval_dynamics.append(scale * dynamics_ij)
             equalities.append(dx - scale * dynamics_ij)
 
             if q_size > 0:
