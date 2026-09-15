@@ -22,18 +22,15 @@ def _space_size(
     space: Scalar | VectorSpace | FunctionSpace | tuple[object, ...],
 ) -> int:
     """Return the flattened scalar width of a finite parameter space."""
-    if isinstance(space, Scalar):
-        return 1
-    if isinstance(space, VectorSpace):
-        return space.size
+    if isinstance(space, tuple):
+        return sum(_space_size(element) for element in space)
     if isinstance(space, FunctionSpace):
         raise TypeError(
             "Function-valued parameters must be specialized by "
             "VariationalProblemBuilder"
         )
-    if isinstance(space, tuple):
-        return sum(_space_size(element) for element in space)
-    raise TypeError(f"Unsupported parameter space {space!r}")
+    assert isinstance(space, (Scalar, VectorSpace))
+    return space.size
 
 
 class VariationalIterationCallback:
