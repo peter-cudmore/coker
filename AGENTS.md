@@ -26,3 +26,8 @@ The currently selected `osqp` Rust crate is `std`/allocator-oriented and is not 
 
 For every hypothesized bug fix, first add the smallest behavioral regression that reproduces the suspected cause. Implement only after that test demonstrates the diagnosis; remove the test afterward only when it provides no durable contract coverage.
 
+## Python style
+
+Prefer explicit interfaces and direct attribute access. Do not use `getattr` or
+`hasattr` for normal control flow; add or use a defined protocol instead.
+
