@@ -451,10 +451,15 @@ def create_variational_solver(
         }
         (cost,) = casadi.evaluate(
             problem.loss,
-            [values[input_spec.name] for input_spec in problem.loss.signature.inputs],
+            [
+                values[input_spec.name]
+                for input_spec in problem.loss.signature.inputs
+            ],
         )
     elif isinstance(problem.loss, Tracer):
-        workspace = dict(zip(problem.loss.tape.input_indicies, (solution_proxy, p)))
+        workspace = dict(
+            zip(problem.loss.tape.input_indicies, (solution_proxy, p))
+        )
         _, outputs = lower_casadi(problem.loss.tape, [problem.loss], workspace)
         (cost,) = outputs
     elif control_factory is None:
@@ -754,6 +759,7 @@ class CasadiSolutionAssembler:
             projectors=self.projectors,
             parameter_solutions=self.parameter_solution_map(free_parameters),
             parameters=system_parameters,
+            parameter_block_layouts=self.problem.system.parameter_blocks,
             path=path,
             control_solutions=control_solutions,
             output=self.problem.system.y,

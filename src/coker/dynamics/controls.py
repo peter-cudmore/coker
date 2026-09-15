@@ -25,6 +25,51 @@ class BoundedVariable(ParameterMixin):
 
 
 @dataclass
+class DenseTensorVariable(ParameterMixin):
+    """Finite dense decision block reconstructed with its declared shape."""
+
+    name: str
+    guess: np.ndarray
+    lower_bound: float | np.ndarray = -np.inf
+    upper_bound: float | np.ndarray = np.inf
+
+    def __post_init__(self):
+        guess = np.asarray(self.guess, dtype=float)
+        if guess.ndim == 0:
+            raise TypeError("DenseTensorVariable guess must be an array")
+        lower = np.broadcast_to(self.lower_bound, guess.shape).astype(float)
+        upper = np.broadcast_to(self.upper_bound, guess.shape).astype(float)
+        if not np.all(np.isfinite(guess)) or np.any(lower > upper):
+            raise ValueError("tensor bounds and guess are invalid")
+        if np.any(guess < lower) or np.any(guess > upper):
+            raise ValueError("tensor guess must be within bounds")
+        self.guess = guess
+        self.lower_bound = lower
+        self.upper_bound = upper
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.guess.shape
+
+    @property
+    def size(self) -> int:
+        return self.guess.size
+
+    def degrees_of_freedom(self, *interval):
+        return self.size
+
+
+@dataclass
+class BoundVector(DenseTensorVariable):
+    """One-dimensional bounded dense decision block."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.guess.ndim != 1:
+            raise ValueError("BoundVector guess must be one-dimensional")
+
+
+@dataclass
 class PiecewiseConstantVariable(ParameterMixin):
     name: str
     sample_rate: float
@@ -108,7 +153,7 @@ ControlLaw = Callable[[Scalar], ValueType]
 ControlVariable = (
     ConstantControlVariable | PiecewiseConstantVariable | SpikeVariable
 )
-ParameterVariable = BoundedVariable | Constant
+ParameterVariable = BoundedVariable | DenseTensorVariable | Constant
 Solution = (
     "DynamicalSystem" | Callable[[Scalar, ControlLaw, ValueType], Scalar]
 )

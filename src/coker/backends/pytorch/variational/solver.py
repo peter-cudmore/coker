@@ -564,6 +564,7 @@ class PytorchVariationalSolver(VariationalSolver):
             control_solutions=[],
             parameter_solutions=parameter_solutions,
             parameters=values.cpu().numpy(),
+            parameter_block_layouts=self.problem.system.parameter_blocks,
             output=self.problem.system.y,
             t_final=float(self.problem.t_final),
             solve_info=info,
