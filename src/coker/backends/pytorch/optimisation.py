@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Sequence
+from dataclasses import dataclass, field
+from typing import Mapping, Sequence
 
 import torch
 
@@ -40,25 +40,28 @@ def _to_numpy_array(value):
     return value.detach().cpu().numpy()
 
 
+_OPTIMISER_TYPES = {
+    "Adam": torch.optim.Adam,
+    "LBFGS": torch.optim.LBFGS,
+}
+
+
 @dataclass(frozen=True)
 class PytorchNLPSolverOptions(SolverOptions):
-    """Settings for the CUDA float32 PyTorch LBFGS NLP solver.
+    """Settings for the CUDA float32 PyTorch NLP solver.
 
-    ``inner_iterations`` and ``restoration_iterations`` bound the LBFGS
-    iterations for the objective solve and feasibility-restoration solve.
-    ``barrier_stages`` and ``augmented_lagrangian_stages`` control the number
-    of outer penalty/barrier updates. ``barrier_reduction`` decreases the
-    barrier coefficient after each barrier stage, while ``penalty_growth``
-    increases the equality-constraint penalty. The three tolerance fields
-    configure LBFGS stopping and constraint feasibility, and
-    ``interior_margin`` keeps inequality iterates away from their bounds.
-    ``history_size`` is passed to :class:`torch.optim.LBFGS` as its curvature
-    history limit.
+    ``optimiser_method`` selects ``"LBFGS"`` or ``"Adam"``.
+    ``optimiser_options`` are passed to the selected PyTorch optimiser.
+    ``inner_iterations`` and ``restoration_iterations`` bound objective and
+    feasibility-restoration iterations. The tolerance and history settings
+    apply to LBFGS; the remaining settings control constrained solves.
 
     Device and dtype are properties of :class:`PytorchBackend`, rather than
     solver options, and are validated when an optimisation problem is built.
     """
 
+    optimiser_method: str = "LBFGS"
+    optimiser_options: Mapping[str, object] = field(default_factory=dict)
     inner_iterations: int = 25
     restoration_iterations: int = 25
     barrier_stages: int = 8
@@ -73,6 +76,12 @@ class PytorchNLPSolverOptions(SolverOptions):
 
     def __post_init__(self):
         super().__post_init__()
+        if self.optimiser_method not in _OPTIMISER_TYPES:
+            raise ValueError(
+                f"Unsupported PyTorch optimiser {self.optimiser_method!r}"
+            )
+        if not isinstance(self.optimiser_options, Mapping):
+            raise TypeError("optimiser_options must be a mapping")
         if (
             not isinstance(self.inner_iterations, int)
             or self.inner_iterations <= 0
@@ -190,7 +199,7 @@ class _PytorchOptimisationProblem:
             return self._results(decision, runtime_args)
         decision.requires_grad_(True)
         if not self.constraints:
-            iterations = self._run_lbfgs(
+            iterations = self._run_optimiser(
                 decision, lambda: self._evaluate_cost(decision, runtime_args)
             )
             self._remember_warm_start(decision, None)
@@ -242,7 +251,7 @@ class _PytorchOptimisationProblem:
                         penalty,
                     )
 
-                n = self._run_lbfgs(decision, equality_objective)
+                n = self._run_optimiser(decision, equality_objective)
                 iterations += n
                 decision = self._restore_feasibility(
                     decision, runtime_args, bounds
@@ -317,7 +326,7 @@ class _PytorchOptimisationProblem:
                         + decision.sum() * 0
                     )
 
-                n = self._run_lbfgs(decision, barrier_objective)
+                n = self._run_optimiser(decision, barrier_objective)
                 iterations += n
                 barrier = barrier * self.options.barrier_reduction
 
@@ -342,18 +351,24 @@ class _PytorchOptimisationProblem:
         except Exception as ex:
             return self._fail(str(ex), iterations, ex)
 
-    def _run_lbfgs(self, decision, objective, *, max_iter=None):
+    def _run_optimiser(self, decision, objective, *, max_iter=None):
         max_iter = (
             self.options.inner_iterations if max_iter is None else max_iter
         )
-        optimizer = torch.optim.LBFGS(
-            [decision],
-            max_iter=max_iter,
-            tolerance_grad=self.options.tolerance_grad,
-            tolerance_change=self.options.tolerance_change,
-            history_size=self.options.history_size,
-            line_search_fn="strong_wolfe",
-        )
+        optimiser_type = _OPTIMISER_TYPES[self.options.optimiser_method]
+        optimiser_options = dict(self.options.optimiser_options)
+        if self.options.optimiser_method == "LBFGS":
+            optimizer = optimiser_type(
+                [decision],
+                max_iter=max_iter,
+                tolerance_grad=self.options.tolerance_grad,
+                tolerance_change=self.options.tolerance_change,
+                history_size=self.options.history_size,
+                line_search_fn="strong_wolfe",
+                **optimiser_options,
+            )
+        else:
+            optimizer = optimiser_type([decision], **optimiser_options)
         state = {"iterations": 0}
 
         def closure():
@@ -372,7 +387,12 @@ class _PytorchOptimisationProblem:
             state["iterations"] += 1
             return loss
 
-        optimizer.step(closure)
+        if self.options.optimiser_method == "LBFGS":
+            optimizer.step(closure)
+        else:
+            for _ in range(max_iter):
+                closure()
+                optimizer.step()
         return state["iterations"]
 
     def _restore_feasibility(self, decision, runtime_args, bounds):
@@ -407,7 +427,7 @@ class _PytorchOptimisationProblem:
                     )
             return loss
 
-        self._run_lbfgs(
+        self._run_optimiser(
             decision, restoration, max_iter=self.options.restoration_iterations
         )
         return decision.detach()
@@ -607,13 +627,24 @@ class _PytorchOptimisationProblem:
             else [value.detach().clone() for value in multipliers]
         )
 
-    @staticmethod
-    def _success_info(iterations):
-        return SolveInfo("pytorch", "LBFGS", True, "success", None, iterations)
+    def _success_info(self, iterations):
+        return SolveInfo(
+            "pytorch",
+            self.options.optimiser_method,
+            True,
+            "success",
+            None,
+            iterations,
+        )
 
     def _fail(self, status, iterations, cause=None):
         self.last_solve_info = SolveInfo(
-            "pytorch", "LBFGS", False, status, None, iterations
+            "pytorch",
+            self.options.optimiser_method,
+            False,
+            status,
+            None,
+            iterations,
         )
         failure = SolveFailure(
             f"PyTorch optimisation solve failed: {status}",
