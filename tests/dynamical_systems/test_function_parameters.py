@@ -30,7 +30,7 @@ def test_system_accepts_a_function_valued_positional_parameter():
             initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
             dynamics=lambda _t, x, _z, _u, p: p[0](x) + p[1],
             constraints=Noop(),
-            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            outputs=lambda _t, x, _z, _u, p, _q: p[0](x) + p[1],
             quadratures=Noop(),
         )
     )
@@ -39,6 +39,19 @@ def test_system_accepts_a_function_valued_positional_parameter():
 
     np.testing.assert_allclose(
         system.dxdt(0.0, np.array([2.0]), None, None, lambda x: x * 3, 1.0),
+        np.array([7.0]),
+    )
+
+    np.testing.assert_allclose(
+        system.y(
+            0.0,
+            np.array([2.0]),
+            None,
+            None,
+            lambda x: x * 3,
+            1.0,
+            None,
+        ),
         np.array([7.0]),
     )
 

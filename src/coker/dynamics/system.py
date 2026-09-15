@@ -19,7 +19,11 @@ def _dynamics_parameters(callback):
 
 
 def _output_parameters(callback):
-    return lambda t, x, z, u, *p: callback(t, x, z, u, p[0], p[1])
+    def wrapped(t, x, z, u, *parameters_and_quadrature):
+        *parameters, quadrature = parameters_and_quadrature
+        return callback(t, x, z, u, tuple(parameters), quadrature)
+
+    return wrapped
 
 
 def _parameter_callback(callback, heterogeneous, adapter):
