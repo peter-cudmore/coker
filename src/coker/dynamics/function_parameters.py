@@ -32,7 +32,7 @@ class MonotonePiecewiseLinear:
             ) from exc
         if domain_knots.ndim != 1 or domain_knots.size < 2:
             raise ValueError(
-                "domain_knots must be one-dimensional with at least two entries"
+                "domain_knots must have at least two one-dimensional entries"
             )
         if not np.all(np.isfinite(domain_knots)) or not np.all(
             np.diff(domain_knots) > 0
