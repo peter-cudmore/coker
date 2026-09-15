@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from collections.abc import Sequence
 
 from coker.algebra.dimensions import FunctionSpace, VectorSpace
 from coker.algebra.function import function
 from coker.algebra.ops import Noop
-from coker.dynamics.controls import BoundedVariable
+from coker.dynamics.controls import BoundedVariable, DenseTensorVariable
 from coker.dynamics.model import DynamicalSystem
 
 
@@ -21,6 +23,20 @@ def _theta_declarations(index: int, declaration) -> list[BoundedVariable]:
             guess=float(initial[offset]),
         )
         for offset in range(declaration.size)
+    ]
+
+
+def _tensor_declarations(
+    declaration: DenseTensorVariable,
+) -> list[BoundedVariable]:
+    return [
+        BoundedVariable(
+            f"{declaration.name}_{index}",
+            float(declaration.lower_bound.reshape(-1)[index]),
+            float(declaration.upper_bound.reshape(-1)[index]),
+            guess=float(declaration.guess.reshape(-1)[index]),
+        )
+        for index in range(declaration.size)
     ]
 
 
@@ -43,10 +59,33 @@ def specialize_system_parameters(
             offsets.append((width, width + size))
             solver_declarations.extend(_theta_declarations(index, declaration))
             width += size
+        elif isinstance(target, VectorSpace):
+            if not isinstance(declaration, DenseTensorVariable):
+                raise TypeError(
+                    "VectorSpace parameters require DenseTensorVariable"
+                )
+            if declaration.shape != (
+                (target.dimension,)
+                if isinstance(target.dimension, int)
+                else target.dimension
+            ):
+                raise ValueError(
+                    "DenseTensorVariable shape does not match VectorSpace"
+                )
+            offsets.append((width, width + target.size))
+            solver_declarations.extend(_tensor_declarations(declaration))
+            width += target.size
         else:
             offsets.append((width, width + 1))
             solver_declarations.append(declaration)
             width += 1
+    parameter_blocks = {
+        declaration.name: (start, end, declaration.shape)
+        for target, declaration, (start, end) in zip(
+            space, declarations, offsets
+        )
+        if isinstance(target, VectorSpace)
+    }
 
     numeric_parameters = VectorSpace("p", width)
 
@@ -63,6 +102,10 @@ def specialize_system_parameters(
             if isinstance(target, FunctionSpace):
                 theta = parameters[start:end]
                 values.append(bound_function(declaration, theta))
+            elif isinstance(target, VectorSpace):
+                values.append(
+                    np.reshape(parameters[start:end], declaration.shape)
+                )
             else:
                 values.append(parameters[start])
         return values
@@ -107,6 +150,7 @@ def specialize_system_parameters(
             bind_dynamics(system.dqdt),
             bind_outputs(system.y),
             solver_parameters=system.solver_parameters,
+            parameter_blocks=parameter_blocks,
         ),
         solver_declarations,
     )

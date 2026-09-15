@@ -55,6 +55,9 @@ class VariationalSolution:
         [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         np.ndarray,
     ]
+    parameter_block_layouts: dict[str, tuple[int, int, tuple[int, ...]]] = (
+        field(default_factory=dict)
+    )
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
     path_constraint_exprs: List[InequalityExpression] = field(
@@ -132,6 +135,17 @@ class VariationalSolution:
         u = self.control_law(t)
         z = self.algebraic(t)
         return self.output(t, x, z, u, self.parameters, q)
+
+    @property
+    def parameter_blocks(self) -> dict[str, np.ndarray]:
+        return {
+            name: self.parameters[start:end].reshape(shape)
+            for name, (
+                start,
+                end,
+                shape,
+            ) in self.parameter_block_layouts.items()
+        }
 
     def to_poly(self) -> InterpolatingPolyCollection:
 

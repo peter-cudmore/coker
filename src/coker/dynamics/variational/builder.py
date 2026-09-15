@@ -16,6 +16,7 @@ from coker.algebra.ops import Noop, OP
 from coker.dynamics.controls import (
     BoundedVariable,
     ControlVariable,
+    DenseTensorVariable,
     ParameterVariable,
 )
 from coker.dynamics.function_parameters import MonotonePiecewiseLinear
@@ -125,9 +126,26 @@ class VariationalProblemBuilder:
                     f"Parameter {index} must be {expected}, got "
                     f"{type(declaration).__name__}"
                 )
-            if not is_function_space and not isinstance(
-                declaration,
-                (BoundedVariable, ParameterVariable, int, float, np.number),
+            if isinstance(element, VectorSpace) and not isinstance(
+                declaration, DenseTensorVariable
+            ):
+                raise TypeError(
+                    f"Parameter {index} VectorSpace requires "
+                    "DenseTensorVariable"
+                )
+            if (
+                not is_function_space
+                and not isinstance(element, VectorSpace)
+                and not isinstance(
+                    declaration,
+                    (
+                        BoundedVariable,
+                        ParameterVariable,
+                        int,
+                        float,
+                        np.number,
+                    ),
+                )
             ):
                 raise TypeError(
                     f"Parameter {index} must be a finite declaration"

@@ -7,6 +7,8 @@ import numpy as np
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.ops import Noop
 from coker.dynamics import (
+    BoundVector,
+    DenseTensorVariable,
     BoundedVariable,
     DynamicsSpec,
     MonotonePiecewiseLinear,
@@ -107,6 +109,80 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
         "p_0_theta_2",
         "p_1",
         "p_2",
+    ]
+
+
+def test_builder_specializes_bound_vector_parameter():
+    function_parameter = FunctionSpace(
+        "p_0", arguments=[Scalar("x")], output=[Scalar("y")]
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(function_parameter, VectorSpace("gain", 2)),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (0.0, None),
+            dynamics=lambda _t, x, _z, _u, p: p[0](x[0]) + p[1][0],
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        )
+    )
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        parameters=[
+            MonotonePiecewiseLinear(
+                knots=[-1.0, 0.0, 1.0],
+                lower_bound=0.0,
+                upper_bound=2.0,
+            ),
+            BoundVector("gain", guess=[0.0, 0.0]),
+        ],
+    ) as builder:
+        problem = builder.build(
+            Minimise(builder.output(builder.t_final)[0] ** 2)
+        )
+
+    assert problem.system.parameters.dimension == 5
+    assert [parameter.name for parameter in problem.parameters] == [
+        "p_0_theta_0",
+        "p_0_theta_1",
+        "p_0_theta_2",
+        "gain_0",
+        "gain_1",
+    ]
+
+
+def test_builder_specializes_dense_tensor_parameter():
+
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(VectorSpace("weights", (2, 2)),),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
+            dynamics=lambda _t, x, _z, _u, _p: x,
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        )
+    )
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        parameters=[DenseTensorVariable("weights", guess=np.zeros((2, 2)))],
+    ) as builder:
+        problem = builder.build(
+            Minimise(builder.output(builder.t_final)[0] ** 2)
+        )
+
+    assert problem.system.parameters.dimension == 4
+    assert [parameter.name for parameter in problem.parameters] == [
+        "weights_0",
+        "weights_1",
+        "weights_2",
+        "weights_3",
     ]
 
 

@@ -2,9 +2,11 @@
 
 from coker.dynamics.controls import (
     BoundedVariable,
+    BoundVector,
     Constant,
     ConstantControlSolution,
     ConstantControlVariable,
+    DenseTensorVariable,
     ControlLaw,
     ControlSolution,
     ControlVariable,
@@ -49,6 +51,7 @@ from coker.toolkits.codesign.optimisation import SolveFailure, SolveInfo
 __all__ = [
     "BoundedVariable",
     "Constant",
+    "BoundVector",
     "ConstantControlSolution",
     "ConstantControlVariable",
     "ConstraintSpec",
@@ -58,6 +61,7 @@ __all__ = [
     "DynamicalSystem",
     "DynamicsSpec",
     "InterpolatingPoly",
+    "DenseTensorVariable",
     "InterpolatingPolyCollection",
     "LossFunction",
     "MonotonePiecewiseLinear",
