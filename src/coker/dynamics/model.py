@@ -147,21 +147,20 @@ class DynamicalSystem:
         return y
 
     def output_as_function_space(self) -> FunctionSpace:
-        shapes = self.y.input_shape()
-        t = shapes[0]
+        t, _x, _z, u, *parameter_shapes, _q = self.y.input_shape()
         (out,) = self.y.output_shape()
         args = [t.to_space("t")]
         if self.inputs is not Noop():
-            u = shapes[3]
             args.append(u if isinstance(u, FunctionSpace) else u.to_space("u"))
         if isinstance(self.parameters, tuple):
-            for index, element in enumerate(self.parameters):
-                shape = shapes[4 + index]
+            for index, (element, shape) in enumerate(
+                zip(self.parameters, parameter_shapes)
+            ):
                 args.append(
                     element
                     if isinstance(shape, FunctionSpace)
                     else shape.to_space(f"p{index}")
                 )
         elif self.parameters is not None:
-            args.append(shapes[4].to_space("p"))
+            args.append(parameter_shapes[0].to_space("p"))
         return FunctionSpace("y", args, [out.to_space("y")])
