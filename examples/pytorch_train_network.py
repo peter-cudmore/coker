@@ -4,6 +4,11 @@ import torch
 
 from coker import VectorSpace, function
 from coker.backends import get_backend_by_name
+from coker.backends.lowered import (
+    FunctionInputSpec,
+    FunctionOutputSpec,
+    FunctionSignature,
+)
 from coker.backends.pytorch import PytorchBackend
 
 
@@ -27,12 +32,14 @@ def main() -> None:
     assert isinstance(backend, PytorchBackend)
 
     network = Regressor().to(dtype=dtype)
-    # Coker needs explicit symbolic input/output spaces for native modules.
-    network_signature = function(
-        [VectorSpace("features", 2)],
-        lambda features, *_: features,
-        backend="pytorch",
-    ).signature
+    network_signature = FunctionSignature(
+        inputs=(
+            FunctionInputSpec("features", VectorSpace("features", 2)),
+        ),
+        outputs=(
+            FunctionOutputSpec("prediction", VectorSpace("prediction", 2)),
+        ),
+    )
     imported_network = backend.import_module(network, network_signature)
     predict = function(
         [VectorSpace("features", 2)],
