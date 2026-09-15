@@ -1,13 +1,18 @@
 import numpy as np
+import torch
 
 from coker import VectorSpace
 from coker.algebra.ops import Noop
+from coker.backends import get_backend_by_name
 from coker.dynamics import BoundVector, DynamicsSpec, VariationalProblemBuilder
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.toolkits.codesign import Minimise
 
 
-def test_pytorch_fits_bound_vector_parameter():
+def test_pytorch_fits_bound_vector_parameter(monkeypatch):
+    backend = get_backend_by_name("pytorch", set_current=False)
+    monkeypatch.setattr(backend, "device", torch.device("cpu"))
+    monkeypatch.setattr(backend, "dtype", torch.float64)
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
