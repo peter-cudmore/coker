@@ -9,7 +9,6 @@ from coker.algebra.function import function
 from coker.algebra.ops import Noop
 from coker.dynamics.controls import BoundedVariable
 from coker.dynamics.model import DynamicalSystem
-from coker.dynamics.parameters import ParameterSpace
 
 
 def _theta_declarations(index: int, declaration) -> list[BoundedVariable]:
@@ -29,8 +28,8 @@ def specialize_system_parameters(
     system: DynamicalSystem, declarations: Sequence[object]
 ) -> tuple[DynamicalSystem, list[object]]:
     """Bind function-valued parameters and return a numeric solver system."""
-    space = system.parameter_space
-    if space is None:
+    space = system.parameters
+    if not isinstance(space, tuple):
         return system, list(declarations)
     if len(space) != len(declarations):
         raise ValueError("parameter specialization has the wrong arity")

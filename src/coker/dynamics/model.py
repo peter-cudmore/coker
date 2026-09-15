@@ -10,13 +10,19 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.function import Function
 from coker.algebra.ops import Noop
-from .parameters import ParameterSpace, normalize_parameters
 
 
 @dataclass
 class DynamicsSpec:
     inputs: FunctionSpace | Noop
-    parameters: Scalar | VectorSpace | FunctionSpace | ParameterSpace | list | tuple | None
+    parameters: (
+        Scalar
+        | VectorSpace
+        | FunctionSpace
+        | tuple[Scalar | VectorSpace | FunctionSpace, ...]
+        | list[Scalar | VectorSpace | FunctionSpace]
+        | None
+    )
     algebraic: Optional[VectorSpace]
 
     initial_conditions: Callable
@@ -35,15 +41,28 @@ class DynamicsSpec:
     """dq/dt = quadratures(t, x, z, u, p)"""
 
     def __post_init__(self):
-        self.parameters = normalize_parameters(self.parameters)
-
-
+        if isinstance(self.parameters, list):
+            self.parameters = tuple(self.parameters)
+        if isinstance(self.parameters, tuple) and not all(
+            isinstance(parameter, (Scalar, VectorSpace, FunctionSpace))
+            for parameter in self.parameters
+        ):
+            raise TypeError(
+                "parameter tuples must contain Scalar, VectorSpace, or "
+                "FunctionSpace elements"
+            )
 
 
 @dataclass
 class DynamicalSystem:
     inputs: FunctionSpace
-    parameters: VectorSpace | Scalar | FunctionSpace | ParameterSpace | None
+    parameters: (
+        VectorSpace
+        | Scalar
+        | FunctionSpace
+        | tuple[Scalar | VectorSpace | FunctionSpace, ...]
+        | None
+    )
     x0: Function
     dxdt: Function
     g: Optional[Function]
@@ -52,24 +71,12 @@ class DynamicalSystem:
     solver_parameters: Optional[object] = field(default=None)
 
     @property
-    def parameter_space(self):
-        return self.parameters if isinstance(self.parameters, ParameterSpace) else None
-
-    @property
     def flattened_parameter_count(self) -> int:
         return (
             len(self.parameters)
-            if isinstance(self.parameters, ParameterSpace)
+            if isinstance(self.parameters, tuple)
             else (0 if self.parameters is None else 1)
         )
-
-    def specialize_parameters(self, parameters):
-        """Return metadata used by builders when replacing function parameters."""
-        if not isinstance(self.parameters, ParameterSpace):
-            return self
-        if len(parameters) != len(self.parameters):
-            raise ValueError("parameter specialization has the wrong arity")
-        return self
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
         shapes = self.y.input_shape()
@@ -152,15 +159,19 @@ class DynamicalSystem:
     def output_as_function_space(self) -> FunctionSpace:
         shapes = self.y.input_shape()
         t = shapes[0]
-        out, = self.y.output_shape()
+        (out,) = self.y.output_shape()
         args = [t.to_space("t")]
         if self.inputs is not Noop():
             u = shapes[3]
             args.append(u if isinstance(u, FunctionSpace) else u.to_space("u"))
-        if isinstance(self.parameters, ParameterSpace):
+        if isinstance(self.parameters, tuple):
             for index, element in enumerate(self.parameters):
                 shape = shapes[4 + index]
-                args.append(element if isinstance(shape, FunctionSpace) else shape.to_space(f"p{index}"))
+                args.append(
+                    element
+                    if isinstance(shape, FunctionSpace)
+                    else shape.to_space(f"p{index}")
+                )
         elif self.parameters is not None:
             args.append(shapes[4].to_space("p"))
         return FunctionSpace("y", args, [out.to_space("y")])

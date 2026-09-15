@@ -3,7 +3,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from coker.algebra.dimensions import VectorSpace
+from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, InequalityExpression, function
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
@@ -18,20 +18,22 @@ from coker.dynamics.system import DynamicalSystem
 from coker.dynamics.variational.solution import VariationalSolution
 
 
-def _space_size(space) -> int:
-    """Return the flattened scalar width of a legacy or heterogeneous space."""
-    size = getattr(space, "size", None)
-    if size is not None:
-        return int(size)
-    elements = getattr(space, "elements", None)
-    if elements is not None:
-        return sum(int(getattr(item, "size", 1)) for item in elements)
+def _space_size(
+    space: Scalar | VectorSpace | FunctionSpace | tuple[object, ...],
+) -> int:
+    """Return the flattened scalar width of a finite parameter space."""
+    if isinstance(space, Scalar):
+        return 1
+    if isinstance(space, VectorSpace):
+        return space.size
+    if isinstance(space, FunctionSpace):
+        raise TypeError(
+            "Function-valued parameters must be specialized by "
+            "VariationalProblemBuilder"
+        )
+    if isinstance(space, tuple):
+        return sum(_space_size(element) for element in space)
     raise TypeError(f"Unsupported parameter space {space!r}")
-
-
-def _space_elements(space):
-    elements = getattr(space, "elements", None)
-    return tuple(elements) if elements is not None else None
 
 
 class VariationalIterationCallback:
@@ -153,10 +155,10 @@ class VariationalProblem:
         self.initial_constraints = _normalize_constraints(
             self.initial_constraints
         )
-        system_space = getattr(self.system, "parameter_space", None)
-        if system_space is None:
-            system_space = self.system.parameters
-        system_width = _space_size(system_space) if system_space is not None else 0
+        system_space = self.system.parameters
+        system_width = (
+            _space_size(system_space) if system_space is not None else 0
+        )
         declaration_width = len(self.parameters or [])
         if self.system_parameter_map is not None:
             expected_shape = (system_width, declaration_width)
