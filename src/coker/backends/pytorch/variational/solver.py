@@ -38,7 +38,7 @@ _OPTIMISER_TYPES = {
 
 @dataclass(frozen=True)
 class PytorchVariationalSolverOptions(SolverOptions):
-    """CUDA direct-shooting configuration for a PyTorch variational solve.
+    """Direct-shooting configuration for a PyTorch variational solve.
 
     ``ode`` is forwarded to :func:`torchdiffeq.odeint`. ``optimiser_method``
     selects a supported :mod:`torch.optim` optimiser, while
@@ -92,10 +92,6 @@ class PytorchVariationalSolver(VariationalSolver):
             )
             for spec in problem.quadratures
         )
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "PyTorch variational solving requires CUDA availability"
-            )
         if problem.horizon_decision is not None:
             raise NotImplementedError(
                 "Optimized horizons are not supported by "
@@ -135,8 +131,10 @@ class PytorchVariationalSolver(VariationalSolver):
             seen.add(declaration.name)
             self._parameters.append(declaration)
         self._names = [p.name for p in self._parameters]
-        self._device = torch.device("cuda")
-        self._dtype = torch.float32
+        self._device = backend.device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        self._dtype = backend.dtype or torch.get_default_dtype()
         self._t_initial = torch.zeros(
             (), device=self._device, dtype=self._dtype
         )

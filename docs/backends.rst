@@ -58,8 +58,7 @@ Backend capability matrix
        implementation defaults.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
        backend tests. Algebraic DAEs, variational controls, quadratures,
-       constraints, and optimized horizons are unsupported; CPU variational
-       solving is unsupported.
+       constraints, and optimized horizons are unsupported.
 
 Choosing a backend
 ------------------

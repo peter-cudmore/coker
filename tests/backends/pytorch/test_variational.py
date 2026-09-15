@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import torch
 
 from coker import VectorSpace
 from coker.dynamics import (
@@ -14,12 +13,6 @@ from coker.backends.pytorch.variational import PytorchVariationalSolverOptions
 from coker.algebra.ops import Noop
 from coker.dynamics import DynamicsSpec
 from coker.dynamics.system import create_dynamics_from_spec
-
-
-pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="CUDA is required for PyTorch variational solving",
-)
 
 
 def make_problem(*, guess=0.0):
