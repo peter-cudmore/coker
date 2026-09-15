@@ -189,6 +189,38 @@ def test_builder_specializes_dense_tensor_parameter():
 @pytest.mark.skipif(
     importlib.util.find_spec("casadi") is None, reason="CasADi not available"
 )
+def test_casadi_fits_bound_vector_parameter():
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(VectorSpace("gain", 1),),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (0.0, None),
+            dynamics=lambda _t, _x, _z, _u, p: p[0],
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        )
+    )
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        parameters=[BoundVector("gain", guess=[0.0])],
+        backend="casadi",
+    ) as builder:
+        problem = builder.build(
+            Minimise((builder.output(builder.t_final)[0] - 0.5) ** 2)
+        )
+
+    solution = problem()
+    np.testing.assert_allclose(
+        solution.parameter_blocks["gain"], [0.5], atol=1e-3
+    )
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("casadi") is None, reason="CasADi not available"
+)
 def test_casadi_fits_monotone_function_parameter():
     function_parameter = FunctionSpace(
         "p_0", arguments=[Scalar("x")], output=[Scalar("y")]
