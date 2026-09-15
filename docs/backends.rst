@@ -45,24 +45,21 @@ Backend capability matrix
      - Backend code exists in ``src/coker/backends/jax/``. The current test
        suite does not include a dedicated ``tests/backends/jax/`` directory.
    * - ``pytorch``
-     - Tensor-valued numerical execution with PyTorch autograd plus ODE
-       initial-value integration and quadratures.  CUDA-only nonlinear
-       mathematical-program solving is also supported through
-       :class:`~coker.toolkits.codesign.ProblemBuilder` and
-       :class:`~coker.backends.pytorch.PytorchNLPSolverOptions`.
-     - Install with ``pip install "coker[pytorch]"``. NLP and variational
-       solves require a CUDA-capable PyTorch installation. NLP uses float32
-       LBFGS with barrier/augmented-Lagrangian stages; variational fitting
-       supports fixed-horizon, bound-only ODE parameters.
-     - ``SolverOptions`` contains backend-independent NLP settings;
-       ``PytorchNLPSolverOptions`` adds CUDA LBFGS/barrier settings.
+     - Tensor-valued execution, PyTorch autograd, native-module composition,
+       and CUDA mathematical-program solves.
+     - Install with ``pip install "coker[pytorch]"``. Mathematical-program NLP
+       solves require CUDA and float32. ``PytorchNLPSolverOptions`` selects
+       ``"LBFGS"`` (default) or ``"Adam"`` and forwards
+       ``optimiser_options`` to the selected PyTorch optimizer. Constraint
+       handling uses the backend's barrier and augmented-Lagrangian stages.
        ``PytorchODESolverParameters`` configures ``torchdiffeq`` initial-value
        solves only. Variational fitting currently has no separate options
        object: its fixed integration and LBFGS settings are implementation
-       defaults. Covered by ``tests/backends/pytorch/`` and dedicated
-       tensor/autograd backend tests. Algebraic DAEs, variational controls,
-       quadratures, constraints, and optimized horizons are unsupported; CPU
-       NLP and variational solving are unsupported.
+       defaults.
+     - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
+       backend tests. Algebraic DAEs, variational controls, quadratures,
+       constraints, and optimized horizons are unsupported; CPU NLP and
+       variational solving are unsupported.
 
 Choosing a backend
 ------------------
@@ -140,6 +137,50 @@ error rather than passing Coker tracers into a native callable.
 Successful CasADi lowered calls return native CasADi values. PyTorch module
 import transfers logical ownership to the Coker wrapper, which retains a strong
 reference to the module; Python aliases cannot be invalidated automatically.
+
+PyTorch training patterns
+-------------------------
+
+There are three distinct PyTorch workflows:
+
+1. **Explicit Coker parameters.** Declare weights and biases as ordinary Coker
+   function inputs, pass ``torch.nn.Parameter`` tensors at evaluation time,
+   and train them with any normal PyTorch optimizer. This preserves a fully
+   visible Coker network expression.
+2. **Imported native modules.** Import a ``torch.nn.Module`` with an explicit
+   :class:`~coker.backends.lowered.FunctionSignature`. The module retains
+   ownership of its parameters and buffers; Coker records the module call as a
+   native evaluation node while PyTorch owns training.
+3. **Mathematical programs.** Declare weights with
+   :meth:`~coker.toolkits.codesign.ProblemBuilder.new_variable`, build a
+   :class:`~coker.toolkits.codesign.MathematicalProgram`, and let Coker's CUDA
+   NLP backend solve the fitting problem. The solver owns one packed decision
+   vector and returns the declared outputs rather than caller-owned PyTorch
+   parameters.
+
+For the third form, configure the CUDA float32 backend and select the solver
+through ``PytorchNLPSolverOptions``:
+
+.. code-block:: python
+
+   import torch
+
+   from coker.backends import get_backend_by_name
+   from coker.backends.pytorch import PytorchNLPSolverOptions
+
+   backend = get_backend_by_name("pytorch")
+   backend.device = torch.device("cuda")
+   backend.dtype = torch.float32
+   options = PytorchNLPSolverOptions(
+       optimiser_method="Adam",
+       optimiser_options={"lr": 0.05},
+       inner_iterations=1_000,
+   )
+
+``LBFGS`` remains the default and uses the tolerance/history settings on
+``PytorchNLPSolverOptions``. ``Adam`` performs ``inner_iterations`` explicit
+optimizer steps. See the three ``examples/pytorch_*training.py`` programs for
+runnable versions of each workflow.
 
 Optimisation program composition
 --------------------------------

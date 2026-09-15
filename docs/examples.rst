@@ -21,6 +21,22 @@ Repository entry points
    standard library. This is the best starting point for block/component
    composition.
 
+
+``examples/pytorch_explicit_network_training.py``
+   Defines a small network as a Coker function with explicit weight and bias
+   inputs, then trains caller-owned ``torch.nn.Parameter`` tensors through the
+   lowered PyTorch graph.
+
+``examples/pytorch_imported_module_training.py``
+   Imports a native ``torch.nn.Module`` using a direct
+   ``FunctionSignature`` declaration and trains the module's own parameters
+   through the returned Coker function.
+
+``examples/pytorch_mathematical_program_training.py``
+   Builds the same style of explicit network as a CUDA float32
+   ``MathematicalProgram``. The example selects Adam with
+   ``PytorchNLPSolverOptions`` and lets the program own its packed decision
+   vector.
 ``scripts/double_pendulum.py``
    Builds a two-link rigid-body model with ``RigidBody``, ``Revolute``,
    ``Inertia``, :class:`coker.toolkits.spatial.Isometry3`, and
@@ -50,3 +66,18 @@ A good workflow is:
 - move to ``casadi`` when the workflow becomes solve-heavy;
 - use the kinematics and dynamics tests as executable specifications for more
   complex models.
+
+PyTorch examples
+----------------
+
+The PyTorch examples require the optional extra:
+
+.. code-block:: console
+
+   uv run --extra pytorch python examples/pytorch_explicit_network_training.py
+   uv run --extra pytorch python examples/pytorch_imported_module_training.py
+   uv run --extra pytorch python examples/pytorch_mathematical_program_training.py
+
+The mathematical-program example additionally requires CUDA. The direct
+explicit-parameter and imported-module examples use ordinary PyTorch execution
+and can run without the CUDA NLP solver.
