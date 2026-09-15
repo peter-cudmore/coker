@@ -455,10 +455,6 @@ def create_variational_solver(
             loss,
             [values[input_spec.name] for input_spec in loss.signature.inputs],
         )
-    elif isinstance(loss, Tracer):
-        workspace = dict(zip(loss.tape.input_indicies, (solution_proxy, p)))
-        _, outputs = lower_casadi(loss.tape, [loss], workspace)
-        (cost,) = outputs
     elif control_factory is None:
         (cost,) = casadi.evaluate(loss, [solution_proxy, p])
     else:
