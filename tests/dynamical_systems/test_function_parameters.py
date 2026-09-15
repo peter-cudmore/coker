@@ -15,6 +15,7 @@ from coker.dynamics import (
     VariationalProblemBuilder,
 )
 from coker.dynamics.system import create_dynamics_from_spec
+from coker.dynamics.variables import ConstantControlVariable
 from coker.toolkits.codesign import Minimise
 
 
@@ -189,6 +190,38 @@ def test_builder_specializes_dense_tensor_parameter():
         "weights_2",
         "weights_3",
     ]
+
+
+def test_variational_lowers_output_loss_with_control_input(
+    variational_backend,
+):
+    control = FunctionSpace("u", arguments=[Scalar("t")], output=[Scalar("u")])
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=control,
+            parameters=None,
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (0.0, None),
+            dynamics=lambda _t, x, _z, _u, _p: x * 0,
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        ),
+        backend=variational_backend,
+    )
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        control=[
+            ConstantControlVariable("u", upper_bound=0.0, lower_bound=0.0)
+        ],
+        backend=variational_backend,
+    ) as builder:
+        problem = builder.build(
+            Minimise(builder.output(builder.t_final)[0] ** 2)
+        )
+
+    assert problem().cost == pytest.approx(0.0)
 
 
 def test_variational_fits_bound_vector_parameter(variational_backend):
