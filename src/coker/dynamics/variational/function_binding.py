@@ -74,19 +74,6 @@ def specialize_system_parameters(
             solver_declarations.extend(_theta_declarations(index, declaration))
             width += size
         elif isinstance(target, VectorSpace):
-            if not isinstance(declaration, (BoundVector, DenseTensorVariable)):
-                raise TypeError(
-                    "VectorSpace parameters require BoundVector or "
-                    "DenseTensorVariable"
-                )
-            if declaration.shape != (
-                (target.dimension,)
-                if isinstance(target.dimension, int)
-                else target.dimension
-            ):
-                raise ValueError(
-                    "parameter block shape does not match VectorSpace"
-                )
             offsets.append((width, width + target.size))
             solver_declarations.extend(_tensor_declarations(declaration))
             width += target.size
