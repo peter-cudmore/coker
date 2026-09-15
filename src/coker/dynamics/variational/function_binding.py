@@ -17,7 +17,7 @@ from coker.dynamics.variables import (
 from coker.dynamics.model import DynamicalSystem
 
 
-def _theta_declarations(index: int, declaration) -> list[BoundedVariable]:
+def _basis_declarations(index: int, declaration) -> list[BoundedVariable]:
     _, initial, lower, upper = declaration.decision_declarations()
     return [
         BoundedVariable(
@@ -71,7 +71,7 @@ def specialize_system_parameters(
         if isinstance(target, FunctionSpace):
             size = declaration.size
             offsets.append((width, width + size))
-            solver_declarations.extend(_theta_declarations(index, declaration))
+            solver_declarations.extend(_basis_declarations(index, declaration))
             width += size
         elif isinstance(target, VectorSpace):
             offsets.append((width, width + target.size))
