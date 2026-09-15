@@ -5,6 +5,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
+from coker.algebra.function import Function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import Noop, OP
 from coker.dynamics.controls import (
@@ -18,6 +19,9 @@ from coker.dynamics.variational.problem import (
     QuadratureSpec,
     TranscriptionOptions,
     VariationalProblem,
+)
+from coker.dynamics.variational.function_binding import (
+    specialize_system_parameters,
 )
 from coker.toolkits.codesign import Minimise
 
@@ -74,10 +78,90 @@ class VariationalProblemBuilder:
         self.control = list(control or [])
         self._parameter_declarations = list(parameters or [])
         self._quadratures: list[QuadratureSpec] = []
+        if self.system.parameter_space is not None:
+            self._validate_parameters()
+            self.system, self._parameter_declarations = (
+                specialize_system_parameters(
+                    self.system, self._parameter_declarations
+                )
+            )
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
         self._closed = False
         self._make_symbols()
+    @staticmethod
+    def _is_function_declaration(declaration: object) -> bool:
+        """Identify the supported finite function declaration protocol."""
+        return (
+            declaration.__class__.__name__ == "MonotonePiecewiseLinear"
+            and hasattr(declaration, "knots")
+            and hasattr(declaration, "bind")
+        )
+
+    def _validate_parameters(self) -> None:
+        """Validate positional declarations against the system parameter space."""
+        declarations = self._parameter_declarations
+        space = getattr(self.system, "parameter_space", None)
+        if space is None:
+            space = self.system.parameters
+        elements = getattr(space, "elements", None)
+        if elements is None:
+            expected = 0 if space is None else int(getattr(space, "size", 1))
+            if len(declarations) != expected:
+                raise ValueError(
+                    "Number of parameters does not match: expected "
+                    f"{expected} but got {len(declarations)}"
+                )
+            if any(self._is_function_declaration(item) for item in declarations):
+                raise TypeError(
+                    "Function declarations require a heterogeneous ParameterSpace"
+                )
+            return
+        elements = tuple(elements)
+        if len(declarations) != len(elements):
+            raise ValueError(
+                "Number of parameters does not match ParameterSpace: expected "
+                f"{len(elements)} but got {len(declarations)}"
+            )
+        for index, (element, declaration) in enumerate(
+            zip(elements, declarations)
+        ):
+            is_function_space = isinstance(element, FunctionSpace)
+            is_function_decl = self._is_function_declaration(declaration)
+            if is_function_space != is_function_decl:
+                expected = "MonotonePiecewiseLinear" if is_function_space else (
+                    "a finite scalar/vector declaration"
+                )
+                raise TypeError(
+                    f"Parameter {index} must be {expected}, got "
+                    f"{type(declaration).__name__}"
+                )
+            if not is_function_space and not isinstance(
+                declaration, (BoundedVariable, ParameterVariable, int, float, np.number)
+            ):
+                raise TypeError(
+                    f"Parameter {index} must be a finite declaration"
+                )
+            if is_function_space:
+                declared_space = getattr(declaration, "function_space", None)
+                if declared_space is not None:
+                    if declared_space.arguments != element.arguments:
+                        raise TypeError(
+                            f"Parameter {index} function domain does not match "
+                            "the declared FunctionSpace"
+                        )
+
+    def _specialize_system(self):
+        """Ask a heterogeneous system to bind its positional declarations.
+
+        Model construction owns graph-level wrappers.  Keeping this hook
+        optional preserves legacy systems and lets older models pass through
+        unchanged.
+        """
+        specialize = getattr(self.system, "specialize_parameters", None)
+        if specialize is None:
+            return self.system
+        return specialize(tuple(self._parameter_declarations))
 
     def _make_symbols(self) -> None:
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
@@ -218,7 +302,6 @@ class VariationalProblemBuilder:
             )
         )
         return state
-
     def build(
         self,
         objective: Minimise,
@@ -226,6 +309,7 @@ class VariationalProblemBuilder:
         subject_to: Optional[Sequence[object]] = None,
     ) -> VariationalProblem:
         """Build a problem from a ``Minimise`` objective and constraints."""
+        self._require_open()
         if not isinstance(objective, Minimise):
             raise TypeError("build requires a Minimise objective")
         loss = objective.expression
@@ -261,12 +345,15 @@ class VariationalProblemBuilder:
                 initial.append(record)
             else:
                 terminal.append(record)
-        if isinstance(loss, Tracer):
-            self._validate_trace(loss, "cost")
+        result_loss = (
+            Function(self._trace, loss, backend=self.backend)
+            if self.backend == "casadi"
+            else loss
+        )
 
         return VariationalProblem(
             path_constraints=path,
-            loss=loss,
+            loss=result_loss,
             system=self.system,
             t_final=self.t_final_declaration,
             control=self.control or None,

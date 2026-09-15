@@ -10,45 +10,40 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.function import Function
 from coker.algebra.ops import Noop
+from .parameters import ParameterSpace, normalize_parameters
 
 
 @dataclass
 class DynamicsSpec:
-    inputs: FunctionSpace
-    parameters: Scalar | VectorSpace
+    inputs: FunctionSpace | Noop
+    parameters: Scalar | VectorSpace | FunctionSpace | ParameterSpace | list | tuple | None
     algebraic: Optional[VectorSpace]
 
-    initial_conditions: Callable[
-        [VectorSpace, VectorSpace], Tuple[np.ndarray, np.ndarray]
-    ]
+    initial_conditions: Callable
     """ [x, z] = initial_conditions(t_0, p) """
 
-    dynamics: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray
-    ]
+    dynamics: Callable
     """dx = dynamics(t, x, z, u, p)"""
 
-    constraints: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray
-    ]
-    """ g(t, x, z, u, p) = constraints(t, x, z, u, p) = 0."""
+    constraints: Callable
+    """g(t, x, z, u, p) = 0."""
 
-    outputs: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-        np.ndarray,
-    ]
-    """ y(t) = outputs(t, x, z, u, p, q) """
+    outputs: Callable
+    """y(t) = outputs(t, x, z, u, p, q)"""
 
-    quadratures: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray], np.ndarray
-    ]
-    """ dq/dt = quadratures(t, x, u, p) """
+    quadratures: Callable
+    """dq/dt = quadratures(t, x, z, u, p)"""
+
+    def __post_init__(self):
+        self.parameters = normalize_parameters(self.parameters)
+
+
 
 
 @dataclass
 class DynamicalSystem:
     inputs: FunctionSpace
-    parameters: VectorSpace | Scalar
+    parameters: VectorSpace | Scalar | FunctionSpace | ParameterSpace | None
     x0: Function
     dxdt: Function
     g: Optional[Function]
@@ -56,9 +51,29 @@ class DynamicalSystem:
     y: Function
     solver_parameters: Optional[object] = field(default=None)
 
+    @property
+    def parameter_space(self):
+        return self.parameters if isinstance(self.parameters, ParameterSpace) else None
+
+    @property
+    def flattened_parameter_count(self) -> int:
+        return (
+            len(self.parameters)
+            if isinstance(self.parameters, ParameterSpace)
+            else (0 if self.parameters is None else 1)
+        )
+
+    def specialize_parameters(self, parameters):
+        """Return metadata used by builders when replacing function parameters."""
+        if not isinstance(self.parameters, ParameterSpace):
+            return self
+        if len(parameters) != len(self.parameters):
+            raise ValueError("parameter specialization has the wrong arity")
+        return self
+
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
-        _t, x_dim, z_dim, _u, _p, q_dim = self.y.input_shape()
-        return x_dim, z_dim, q_dim
+        shapes = self.y.input_shape()
+        return shapes[1], shapes[2], shapes[-1]
 
     def backend(self):
         return self.dxdt.backend
@@ -135,11 +150,17 @@ class DynamicalSystem:
         return y
 
     def output_as_function_space(self) -> FunctionSpace:
-        t, _x_dim, _z_dim, u, p, _q_dim = self.y.input_shape()
-        (out,) = self.y.output_shape()
+        shapes = self.y.input_shape()
+        t = shapes[0]
+        out, = self.y.output_shape()
         args = [t.to_space("t")]
         if self.inputs is not Noop():
+            u = shapes[3]
             args.append(u if isinstance(u, FunctionSpace) else u.to_space("u"))
-        if p is not None:
-            args.append(p.to_space("p"))
+        if isinstance(self.parameters, ParameterSpace):
+            for index, element in enumerate(self.parameters):
+                shape = shapes[4 + index]
+                args.append(element if isinstance(shape, FunctionSpace) else shape.to_space(f"p{index}"))
+        elif self.parameters is not None:
+            args.append(shapes[4].to_space("p"))
         return FunctionSpace("y", args, [out.to_space("y")])

@@ -9,6 +9,8 @@ import numpy as np
 
 from coker.backends.backend import VariationalSolver, get_backend_by_name
 from coker.backends.casadi.lower import lower as lower_casadi
+from coker.algebra.graph import Tracer
+from coker.algebra.function import Function
 from coker.backends.casadi.variational.layout import DecisionLayout
 from coker.dynamics import (
     BoundedVariable,
@@ -409,6 +411,10 @@ def create_variational_solver(
         path_upper_bound, u_upper, p_upper_base
     )
 
+    def state_proxy(time):
+        tau = time if free_horizon else time / duration
+        return proj_x @ poly_collection(tau)
+
     def solution_proxy(*args):
         if control_factory is None:
             if len(args) == 1:
@@ -431,12 +437,31 @@ def create_variational_solver(
         )
         return y_val
 
-    if control_factory is None:
+    if (
+        isinstance(problem.loss, Function)
+        and "_output" in problem.loss.arguments
+    ):
+        values = {
+            "t": duration,
+            "t_final": duration,
+            "t_0": ca.DM.zeros(1, 1),
+            "_state": state_proxy,
+            "p": p,
+            "_output": solution_proxy,
+        }
+        (cost,) = casadi.evaluate(
+            problem.loss,
+            [values[input_spec.name] for input_spec in problem.loss.signature.inputs],
+        )
+    elif isinstance(problem.loss, Tracer):
+        workspace = dict(zip(problem.loss.tape.input_indicies, (solution_proxy, p)))
+        _, outputs = lower_casadi(problem.loss.tape, [problem.loss], workspace)
+        (cost,) = outputs
+    elif control_factory is None:
         (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
     else:
         (cost,) = casadi.evaluate(
-            problem.loss,
-            [solution_proxy, control_factory, p],
+            problem.loss, [solution_proxy, control_factory, p]
         )
 
     equality_values = [e for e in equalities if e is not None]
