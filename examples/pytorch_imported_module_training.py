@@ -2,7 +2,7 @@
 
 import torch
 
-from coker import VectorSpace, function
+from coker import VectorSpace
 from coker.backends import get_backend_by_name
 from coker.backends.lowered import (
     FunctionInputSpec,
@@ -39,11 +39,6 @@ def main() -> None:
         ),
     )
     imported_network = backend.import_module(network, network_signature)
-    predict = function(
-        [VectorSpace("features", 2)],
-        lambda features, *_: imported_network(features),
-        backend="pytorch",
-    )
 
     features = torch.tensor(
         [[-1.0, 0.0], [0.0, 1.0], [1.0, -1.0], [2.0, 1.0]],
@@ -57,13 +52,13 @@ def main() -> None:
 
     for _ in range(200):
         optimizer.zero_grad()
-        predictions = torch.stack([predict(row) for row in features])
+        predictions = torch.stack([imported_network(row) for row in features])
         loss = torch.mean((predictions - targets) ** 2)
         loss.backward()
         optimizer.step()
 
     with torch.no_grad():
-        predictions = torch.stack([predict(row) for row in features])
+        predictions = torch.stack([imported_network(row) for row in features])
         loss = torch.mean((predictions - targets) ** 2)
     print(f"mean squared error: {loss.item():.6f}")
 
