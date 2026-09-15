@@ -19,7 +19,6 @@ from coker.dynamics.controls import (
     ValueType,
 )
 from coker.dynamics.function_parameters import MonotonePiecewiseLinear
-from coker.dynamics.parameters import ParameterSpace
 from coker.dynamics.system import create_autonomous_ode, direct_sum
 from coker.interfaces import SolverParameters
 
@@ -62,7 +61,6 @@ __all__ = [
     "InterpolatingPolyCollection",
     "LossFunction",
     "MonotonePiecewiseLinear",
-    "ParameterSpace",
     "ParameterMixin",
     "ParameterVariable",
     "PiecewiseConstantVariable",

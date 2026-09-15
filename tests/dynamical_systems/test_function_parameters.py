@@ -10,7 +10,6 @@ from coker.dynamics import (
     BoundedVariable,
     DynamicsSpec,
     MonotonePiecewiseLinear,
-    ParameterSpace,
     VariationalProblemBuilder,
 )
 from coker.dynamics.system import create_dynamics_from_spec
@@ -26,7 +25,7 @@ def test_system_accepts_a_function_valued_positional_parameter():
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
-            parameters=ParameterSpace([function_parameter, Scalar("p_1")]),
+            parameters=[function_parameter, Scalar("p_1")],
             algebraic=None,
             initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
             dynamics=lambda _t, x, _z, _u, p: p[0](x) + p[1],
@@ -35,6 +34,8 @@ def test_system_accepts_a_function_valued_positional_parameter():
             quadratures=Noop(),
         )
     )
+
+    assert isinstance(system.parameters, tuple)
 
     np.testing.assert_allclose(
         system.dxdt(0.0, np.array([2.0]), None, None, lambda x: x * 3, 1.0),
@@ -49,7 +50,7 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
-            parameters=ParameterSpace([function_parameter, Scalar("p_1")]),
+            parameters=(function_parameter, Scalar("p_1")),
             algebraic=None,
             initial_conditions=lambda _z, _u, _p: (0.0, None),
             dynamics=lambda _t, x, _z, _u, p: p[0](x[0]) + p[1],
@@ -67,7 +68,9 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
         t_final=1.0,
         parameters=[declaration, BoundedVariable("p_1", -1.0, 1.0)],
     ) as builder:
-        problem = builder.build(Minimise(builder.output(builder.t_final)[0] ** 2))
+        problem = builder.build(
+            Minimise(builder.output(builder.t_final)[0] ** 2)
+        )
 
     assert problem.system.parameters.dimension == 4
     assert [parameter.name for parameter in problem.parameters] == [
@@ -88,7 +91,7 @@ def test_casadi_fits_monotone_function_parameter():
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
-            parameters=ParameterSpace([function_parameter, Scalar("p_1")]),
+            parameters=(function_parameter, Scalar("p_1")),
             algebraic=None,
             initial_conditions=lambda _z, _u, _p: (0.0, None),
             dynamics=lambda _t, x, _z, _u, p: p[0](x[0]) + p[1],

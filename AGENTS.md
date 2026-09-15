@@ -30,4 +30,6 @@ For every hypothesized bug fix, first add the smallest behavioral regression tha
 
 Prefer explicit interfaces and direct attribute access. Do not use `getattr` or
 `hasattr` for normal control flow; add or use a defined protocol instead.
+Avoid string arguments except for names; use typed values, enums, or dedicated
+objects for behavioral choices.
 

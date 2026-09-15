@@ -6,38 +6,41 @@ from coker.algebra.dimensions import Dimension
 from coker.algebra.ops import Noop
 
 from .model import DynamicsSpec, DynamicalSystem
-from .parameters import ParameterSpace, normalize_parameters
 from ..algebra import is_scalar
 from typing import Tuple
 
 
 def _parameter_arguments(parameters):
-    parameters = normalize_parameters(parameters)
-    if isinstance(parameters, ParameterSpace):
-        return list(parameters.elements), True
+    if isinstance(parameters, tuple):
+        return list(parameters), True
     return [parameters], False
 
 
-def _parameter_callback(callback, heterogeneous, prefix):
-    if not heterogeneous:
-        return callback
-    if prefix == "x0":
-        return lambda z, u, *p: callback(z, u, p)
-    if prefix in ("dxdt", "constraints", "quadratures"):
-        return lambda t, x, z, u, *p: callback(t, x, z, u, p)
-    if prefix == "outputs":
-        return lambda t, x, z, u, *p: callback(t, x, z, u, p[0], p[1])
-    return callback
+def _initial_parameters(callback):
+    return lambda z, u, *p: callback(z, u, p)
+
+
+def _dynamics_parameters(callback):
+    return lambda t, x, z, u, *p: callback(t, x, z, u, p)
+
+
+def _output_parameters(callback):
+    return lambda t, x, z, u, *p: callback(t, x, z, u, p[0], p[1])
+
+
+def _parameter_callback(callback, heterogeneous, adapter):
+    return adapter(callback) if heterogeneous else callback
 
 
 def create_dynamics_from_spec(
     spec: DynamicsSpec, backend="numpy"
 ) -> DynamicalSystem:
-    spec.parameters = normalize_parameters(spec.parameters)
     parameter_arguments, heterogeneous = _parameter_arguments(spec.parameters)
     x0 = function(
         arguments=[spec.algebraic, spec.inputs, *parameter_arguments],
-        implementation=_parameter_callback(spec.initial_conditions, heterogeneous, "x0"),
+        implementation=_parameter_callback(
+            spec.initial_conditions, heterogeneous, _initial_parameters
+        ),
         backend=backend,
     )
     assert len(x0.output) == 2, (
@@ -52,11 +55,18 @@ def create_dynamics_from_spec(
             "as the algebraic variables"
         )
     arguments = [
-        Scalar("t"), state_space, spec.algebraic, spec.inputs,
+        Scalar("t"),
+        state_space,
+        spec.algebraic,
+        spec.inputs,
         *parameter_arguments,
     ]
     xdot = function(
-        arguments, _parameter_callback(spec.dynamics, heterogeneous, "dxdt"), backend
+        arguments,
+        _parameter_callback(
+            spec.dynamics, heterogeneous, _dynamics_parameters
+        ),
+        backend,
     )
     assert len(xdot.output) == 1, "Dynamics must return a single vector"
     assert xdot.output[0].dim.shape == state.dim.shape, (
@@ -73,31 +83,42 @@ def create_dynamics_from_spec(
     constraint = (
         function(
             arguments,
-            _parameter_callback(spec.constraints, heterogeneous, "constraints"),
+            _parameter_callback(
+                spec.constraints, heterogeneous, _dynamics_parameters
+            ),
             backend,
         )
-        if spec.algebraic is not None else Noop()
+        if spec.algebraic is not None
+        else Noop()
     )
     quadrature = (
         function(
             arguments,
-            _parameter_callback(spec.quadratures, heterogeneous, "quadratures"),
+            _parameter_callback(
+                spec.quadratures, heterogeneous, _dynamics_parameters
+            ),
             backend,
         )
-        if spec.quadratures is not Noop() else Noop()
+        if spec.quadratures is not Noop()
+        else Noop()
     )
     if quadrature is not Noop():
-        assert len(quadrature.output) == 1, "Quadratures must be a scalar or vector space"
+        assert (
+            len(quadrature.output) == 1
+        ), "Quadratures must be a scalar or vector space"
         q = quadrature.output[0]
-        arguments.append(VectorSpace("q", q.dim.flat()) if not q.dim.is_scalar() else Scalar("q"))
+        arguments.append(
+            VectorSpace("q", q.dim.flat())
+            if not q.dim.is_scalar()
+            else Scalar("q")
+        )
     else:
         arguments.append(None)
-    if heterogeneous:
-        def output_callback(t, x, z, u, *rest):
-            return spec.outputs(t, x, z, u, tuple(rest[:-1]), rest[-1])
-    else:
-        output_callback = spec.outputs
-    output = function(arguments, output_callback, backend)
+    output = function(
+        arguments,
+        _parameter_callback(spec.outputs, heterogeneous, _output_parameters),
+        backend,
+    )
     return DynamicalSystem(
         spec.inputs, spec.parameters, x0, xdot, constraint, quadrature, output
     )
