@@ -59,11 +59,10 @@ Backend capability matrix
        ``PytorchODESolverParameters`` configures ``torchdiffeq`` initial-value
        solves only. Variational fitting currently has no separate options
        object: its fixed integration and LBFGS settings are implementation
-       defaults.
-     - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
-       backend tests. Algebraic DAEs, variational controls, quadratures,
-       constraints, and optimized horizons are unsupported; CPU NLP and
-       variational solving are unsupported.
+       defaults. Covered by ``tests/backends/pytorch/`` and dedicated
+       tensor/autograd backend tests. Algebraic DAEs, variational controls,
+       quadratures, constraints, and optimized horizons are unsupported; CPU
+       NLP and variational solving are unsupported.
 
 Choosing a backend
 ------------------
