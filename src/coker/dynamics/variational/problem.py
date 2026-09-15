@@ -7,7 +7,7 @@ from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, InequalityExpression, function
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
-from coker.dynamics.controls import (
+from coker.dynamics.variables import (
     BoundedVariable,
     ControlVariable,
     LossFunction,

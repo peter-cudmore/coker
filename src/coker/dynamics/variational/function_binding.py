@@ -9,7 +9,11 @@ from collections.abc import Sequence
 from coker.algebra.dimensions import FunctionSpace, VectorSpace
 from coker.algebra.function import function
 from coker.algebra.ops import Noop
-from coker.dynamics.controls import BoundedVariable, DenseTensorVariable
+from coker.dynamics.variables import (
+    BoundVector,
+    BoundedVariable,
+    DenseTensorVariable,
+)
 from coker.dynamics.model import DynamicalSystem
 
 
@@ -27,13 +31,23 @@ def _theta_declarations(index: int, declaration) -> list[BoundedVariable]:
 
 
 def _tensor_declarations(
-    declaration: DenseTensorVariable,
+    declaration: BoundVector | DenseTensorVariable,
 ) -> list[BoundedVariable]:
+    lower = (
+        declaration.lower_bound
+        if isinstance(declaration, BoundVector)
+        else np.full(declaration.size, -np.inf)
+    )
+    upper = (
+        declaration.upper_bound
+        if isinstance(declaration, BoundVector)
+        else np.full(declaration.size, np.inf)
+    )
     return [
         BoundedVariable(
             f"{declaration.name}_{index}",
-            float(declaration.lower_bound.reshape(-1)[index]),
-            float(declaration.upper_bound.reshape(-1)[index]),
+            float(lower.reshape(-1)[index]),
+            float(upper.reshape(-1)[index]),
             guess=float(declaration.guess.reshape(-1)[index]),
         )
         for index in range(declaration.size)
@@ -60,9 +74,10 @@ def specialize_system_parameters(
             solver_declarations.extend(_theta_declarations(index, declaration))
             width += size
         elif isinstance(target, VectorSpace):
-            if not isinstance(declaration, DenseTensorVariable):
+            if not isinstance(declaration, (BoundVector, DenseTensorVariable)):
                 raise TypeError(
-                    "VectorSpace parameters require DenseTensorVariable"
+                    "VectorSpace parameters require BoundVector or "
+                    "DenseTensorVariable"
                 )
             if declaration.shape != (
                 (target.dimension,)
@@ -70,7 +85,7 @@ def specialize_system_parameters(
                 else target.dimension
             ):
                 raise ValueError(
-                    "DenseTensorVariable shape does not match VectorSpace"
+                    "parameter block shape does not match VectorSpace"
                 )
             offsets.append((width, width + target.size))
             solver_declarations.extend(_tensor_declarations(declaration))

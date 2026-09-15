@@ -24,7 +24,14 @@ def test_pytorch_fits_bound_vector_parameter():
     with VariationalProblemBuilder(
         system,
         t_final=1.0,
-        parameters=[BoundVector("gain", guess=[0.0])],
+        parameters=[
+            BoundVector(
+                "gain",
+                lower_bound=[-1.0],
+                upper_bound=[1.0],
+                guess=[0.0],
+            )
+        ],
         backend="pytorch",
     ) as builder:
         problem = builder.build(
