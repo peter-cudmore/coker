@@ -10,12 +10,6 @@ from ..algebra import is_scalar
 from typing import Tuple
 
 
-def _parameter_arguments(parameters):
-    if isinstance(parameters, tuple):
-        return list(parameters), True
-    return [parameters], False
-
-
 def _initial_parameters(callback):
     return lambda z, u, *p: callback(z, u, p)
 
@@ -35,7 +29,10 @@ def _parameter_callback(callback, heterogeneous, adapter):
 def create_dynamics_from_spec(
     spec: DynamicsSpec, backend="numpy"
 ) -> DynamicalSystem:
-    parameter_arguments, heterogeneous = _parameter_arguments(spec.parameters)
+    heterogeneous = isinstance(spec.parameters, tuple)
+    parameter_arguments = (
+        list(spec.parameters) if heterogeneous else [spec.parameters]
+    )
     x0 = function(
         arguments=[spec.algebraic, spec.inputs, *parameter_arguments],
         implementation=_parameter_callback(

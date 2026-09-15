@@ -6,7 +6,7 @@ from numbers import Real
 from typing import Any, Sequence
 import numpy as np
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
-from coker.algebra.function import Function, function
+
 from coker.algebra.graph import if_then_else
 
 
@@ -18,7 +18,6 @@ class MonotonePiecewiseLinear:
     lower_bound: Real
     upper_bound: Real
     guess: Sequence[Real] | None = None
-    constraint_mode: str = "intrinsic"
 
     def __post_init__(self) -> None:
         try:
@@ -41,10 +40,6 @@ class MonotonePiecewiseLinear:
         if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
             raise ValueError(
                 "lower_bound must be finite and less than upper_bound"
-            )
-        if self.constraint_mode not in ("intrinsic", "explicit"):
-            raise ValueError(
-                "constraint_mode must be 'intrinsic' or 'explicit'"
             )
         if self.guess is None:
             guess = None
@@ -71,14 +66,6 @@ class MonotonePiecewiseLinear:
     def theta_space(self) -> VectorSpace:
         return VectorSpace("theta", self.size)
 
-    @property
-    def parameter_space(self) -> FunctionSpace:
-        return FunctionSpace("function", [Scalar("x")], [Scalar("value")])
-
-    @property
-    def decision_space(self) -> VectorSpace:
-        return self.theta_space
-
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
         if not isinstance(target, FunctionSpace):
             raise TypeError("target must be a FunctionSpace")
@@ -94,33 +81,19 @@ class MonotonePiecewiseLinear:
             raise ValueError("target must have exactly one scalar output")
         return target
 
-    validate_function_space = validate_target
-
     @property
     def initial_values(self) -> np.ndarray:
         if self.guess is not None:
             return np.asarray(self.guess, dtype=float).copy()
-        return (
-            np.linspace(self.lower_bound, self.upper_bound, self.size)
-            if self.constraint_mode == "explicit"
-            else np.zeros(self.size)
-        )
+        return np.zeros(self.size)
 
     @property
     def lower_bounds(self) -> np.ndarray:
-        return (
-            np.full(self.size, -np.inf)
-            if self.constraint_mode == "intrinsic"
-            else np.full(self.size, self.lower_bound)
-        )
+        return np.full(self.size, -np.inf)
 
     @property
     def upper_bounds(self) -> np.ndarray:
-        return (
-            np.full(self.size, np.inf)
-            if self.constraint_mode == "intrinsic"
-            else np.full(self.size, self.upper_bound)
-        )
+        return np.full(self.size, np.inf)
 
     def decision_declarations(
         self,
@@ -132,16 +105,7 @@ class MonotonePiecewiseLinear:
             self.upper_bounds,
         )
 
-    def constraints(self, theta: Any) -> list[Any]:
-        return (
-            []
-            if self.constraint_mode == "intrinsic"
-            else [theta[i + 1] - theta[i] for i in range(self.size - 1)]
-        )
-
     def _values(self, theta: Any) -> list[Any]:
-        if self.constraint_mode == "explicit":
-            return [theta[i] for i in range(self.size)]
         weights = [np.exp(theta[i]) for i in range(self.size)] + [1.0, 1.0]
         total = sum(weights)
         cumulative = 0.0
@@ -166,24 +130,3 @@ class MonotonePiecewiseLinear:
                 if_then_else(x <= self.knots[i + 1], segment, result),
             )
         return if_then_else(x <= self.knots[0], values[0], result)
-
-    def symbolic_callable(self, backend: str = "numpy") -> Function:
-        return function(
-            [self.theta_space, Scalar("x")],
-            lambda theta, x: self._evaluate(theta, x),
-            backend=backend,
-            name="monotone_piecewise_linear",
-        )
-
-    build_callable = symbolic_callable
-
-    def bind(self, theta: Any, backend: str = "numpy") -> Function:
-        values = np.asarray(theta, dtype=float)
-        if values.ndim != 1 or values.size != self.size:
-            raise ValueError("theta must contain one value per knot")
-        return function(
-            [Scalar("x")],
-            lambda x: self._evaluate(values, x),
-            backend=backend,
-            name="bound_monotone_piecewise_linear",
-        )
