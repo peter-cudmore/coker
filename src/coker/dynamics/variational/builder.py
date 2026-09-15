@@ -111,43 +111,24 @@ class VariationalProblemBuilder:
         for index, (element, declaration) in enumerate(
             zip(space, declarations)
         ):
-            is_function_space = isinstance(element, FunctionSpace)
-            if is_function_space != isinstance(
-                declaration, MonotonePiecewiseLinear
+            if isinstance(element, FunctionSpace):
+                if isinstance(declaration, MonotonePiecewiseLinear):
+                    continue
+                expected = "MonotonePiecewiseLinear"
+            elif isinstance(element, VectorSpace):
+                if isinstance(declaration, (BoundVector, DenseTensorVariable)):
+                    continue
+                expected = "BoundVector or DenseTensorVariable"
+            elif isinstance(
+                declaration, (ParameterVariable, float, np.number)
             ):
-                expected = (
-                    "MonotonePiecewiseLinear"
-                    if is_function_space
-                    else "a finite scalar/vector declaration"
-                )
-                raise TypeError(
-                    f"Parameter {index} must be {expected}, got "
-                    f"{type(declaration).__name__}"
-                )
-            if isinstance(element, VectorSpace) and not isinstance(
-                declaration, (BoundVector, DenseTensorVariable)
-            ):
-                raise TypeError(
-                    f"Parameter {index} VectorSpace requires BoundVector "
-                    "or DenseTensorVariable"
-                )
-            if (
-                not is_function_space
-                and not isinstance(element, VectorSpace)
-                and not isinstance(
-                    declaration,
-                    (
-                        BoundedVariable,
-                        ParameterVariable,
-                        int,
-                        float,
-                        np.number,
-                    ),
-                )
-            ):
-                raise TypeError(
-                    f"Parameter {index} must be a finite declaration"
-                )
+                continue
+            else:
+                expected = "a finite parameter declaration"
+            raise TypeError(
+                f"Parameter {index} must be {expected}, got "
+                f"{type(declaration).__name__}"
+            )
 
     def _make_symbols(self) -> None:
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()
