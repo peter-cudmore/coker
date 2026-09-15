@@ -162,5 +162,6 @@ class DynamicalSystem:
                     else shape.to_space(f"p{index}")
                 )
         elif self.parameters is not None:
-            args.append(parameter_shapes[0].to_space("p"))
+            (parameter_shape,) = parameter_shapes
+            args.append(parameter_shape.to_space("p"))
         return FunctionSpace("y", args, [out.to_space("y")])
