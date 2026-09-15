@@ -18,6 +18,22 @@ from coker.dynamics.system import DynamicalSystem
 from coker.dynamics.variational.solution import VariationalSolution
 
 
+def _space_size(space) -> int:
+    """Return the flattened scalar width of a legacy or heterogeneous space."""
+    size = getattr(space, "size", None)
+    if size is not None:
+        return int(size)
+    elements = getattr(space, "elements", None)
+    if elements is not None:
+        return sum(int(getattr(item, "size", 1)) for item in elements)
+    raise TypeError(f"Unsupported parameter space {space!r}")
+
+
+def _space_elements(space):
+    elements = getattr(space, "elements", None)
+    return tuple(elements) if elements is not None else None
+
+
 class VariationalIterationCallback:
 
     def __call__(
@@ -137,26 +153,25 @@ class VariationalProblem:
         self.initial_constraints = _normalize_constraints(
             self.initial_constraints
         )
+        system_space = getattr(self.system, "parameter_space", None)
+        if system_space is None:
+            system_space = self.system.parameters
+        system_width = _space_size(system_space) if system_space is not None else 0
+        declaration_width = len(self.parameters or [])
         if self.system_parameter_map is not None:
-            expected_shape = (
-                self.system.parameters.size,
-                len(self.parameters),
-            )
+            expected_shape = (system_width, declaration_width)
             assert expected_shape == self.system_parameter_map.shape, (
                 "Parameter map is invalid. Expected an "
                 f"{expected_shape} matrix, but got "
                 f"{self.system_parameter_map.shape}."
             )
-        elif (
-            self.parameters is not None
-            and self.system.parameters.size != len(self.parameters)
-        ):
+        elif self.parameters is not None and system_width != declaration_width:
+            # Heterogeneous spaces are bound by the builder before reaching
+            # the backend; at this point a normal numeric vector is expected.
             raise ValueError(
                 "Number of parameters does not match: expected "
-                f"{self.system.parameters.size} but got "
-                f"{len(self.parameters)}. Please provide a "
-                "parameter map or specify the same number of "
-                "parameters."
+                f"{system_width} but got {declaration_width}. Please provide "
+                "a parameter map or specify the same number of parameters."
             )
         if self.control is not None:
             assert self.system.inputs is not Noop()
