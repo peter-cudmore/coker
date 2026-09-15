@@ -70,14 +70,6 @@ class DynamicalSystem:
     y: Function
     solver_parameters: Optional[object] = field(default=None)
 
-    @property
-    def flattened_parameter_count(self) -> int:
-        return (
-            len(self.parameters)
-            if isinstance(self.parameters, tuple)
-            else (0 if self.parameters is None else 1)
-        )
-
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]

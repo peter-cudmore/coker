@@ -132,8 +132,6 @@ class VariationalProblemBuilder:
                 raise TypeError(
                     f"Parameter {index} must be a finite declaration"
                 )
-            if is_function_space:
-                declaration.validate_target(element)
 
     def _make_symbols(self) -> None:
         x_dim, z_dim, _q_dim = self.system.get_state_dimensions()

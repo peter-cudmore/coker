@@ -35,11 +35,10 @@ def specialize_system_parameters(
         raise ValueError("parameter specialization has the wrong arity")
 
     solver_declarations: list[object] = []
-    offsets: list[tuple[int, int] | None] = []
+    offsets: list[tuple[int, int]] = []
     width = 0
     for index, (target, declaration) in enumerate(zip(space, declarations)):
         if isinstance(target, FunctionSpace):
-            declaration.validate_target(target)
             size = declaration.size
             offsets.append((width, width + size))
             solver_declarations.extend(_theta_declarations(index, declaration))
@@ -60,7 +59,6 @@ def specialize_system_parameters(
     def bound_arguments(parameters):
         values = []
         for target, declaration, offset in zip(space, declarations, offsets):
-            assert offset is not None
             start, end = offset
             if isinstance(target, FunctionSpace):
                 theta = parameters[start:end]
@@ -69,30 +67,33 @@ def specialize_system_parameters(
                 values.append(parameters[start])
         return values
 
-    def component(original, prefix):
+    def bind_initial_conditions(original):
         if original is Noop():
             return Noop()
         spaces = original.input_spaces()
-        if prefix == "x0":
-            arguments = [spaces[0], spaces[1], numeric_parameters]
-            return function(
-                arguments,
-                lambda z, u, p: original(z, u, *bound_arguments(p)),
-                backend=system.backend(),
-            )
-        if prefix == "output":
-            arguments = [*spaces[:4], numeric_parameters, spaces[-1]]
-            return function(
-                arguments,
-                lambda t, x, z, u, p, q: original(
-                    t, x, z, u, *bound_arguments(p), q
-                ),
-                backend=system.backend(),
-            )
-        arguments = [*spaces[:4], numeric_parameters]
         return function(
-            arguments,
+            [spaces[0], spaces[1], numeric_parameters],
+            lambda z, u, p: original(z, u, *bound_arguments(p)),
+            backend=system.backend(),
+        )
+
+    def bind_dynamics(original):
+        if original is Noop():
+            return Noop()
+        spaces = original.input_spaces()
+        return function(
+            [*spaces[:4], numeric_parameters],
             lambda t, x, z, u, p: original(t, x, z, u, *bound_arguments(p)),
+            backend=system.backend(),
+        )
+
+    def bind_outputs(original):
+        spaces = original.input_spaces()
+        return function(
+            [*spaces[:4], numeric_parameters, spaces[-1]],
+            lambda t, x, z, u, p, q: original(
+                t, x, z, u, *bound_arguments(p), q
+            ),
             backend=system.backend(),
         )
 
@@ -100,11 +101,11 @@ def specialize_system_parameters(
         DynamicalSystem(
             system.inputs,
             numeric_parameters,
-            component(system.x0, "x0"),
-            component(system.dxdt, "dynamics"),
-            component(system.g, "constraints"),
-            component(system.dqdt, "quadratures"),
-            component(system.y, "output"),
+            bind_initial_conditions(system.x0),
+            bind_dynamics(system.dxdt),
+            bind_dynamics(system.g),
+            bind_dynamics(system.dqdt),
+            bind_outputs(system.y),
             solver_parameters=system.solver_parameters,
         ),
         solver_declarations,

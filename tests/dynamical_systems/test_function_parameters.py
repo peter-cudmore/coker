@@ -117,3 +117,13 @@ def test_casadi_fits_monotone_function_parameter():
 
     assert solution.solve_info.success
     assert solution.cost < 1e-4
+
+
+def test_monotone_function_rejects_unimplemented_explicit_constraints():
+    with pytest.raises(TypeError, match="constraint_mode"):
+        MonotonePiecewiseLinear(
+            knots=[-1.0, 1.0],
+            lower_bound=0.0,
+            upper_bound=2.0,
+            constraint_mode="explicit",
+        )
