@@ -91,19 +91,21 @@ def specialize_system_parameters(
 
     numeric_parameters = VectorSpace("p", width)
 
-    def bound_function(declaration, theta):
+    def reconstruct_function_parameter(declaration, basis):
         def evaluate(x):
-            return declaration._evaluate(theta, x)
+            return declaration._evaluate(basis, x)
 
         return evaluate
 
-    def bound_arguments(parameters):
+    def reconstruct_parameters(parameters):
         values = []
         for target, declaration, offset in zip(space, declarations, offsets):
             start, end = offset
             if isinstance(target, FunctionSpace):
-                theta = parameters[start:end]
-                values.append(bound_function(declaration, theta))
+                basis = parameters[start:end]
+                values.append(
+                    reconstruct_function_parameter(declaration, basis)
+                )
             elif isinstance(target, VectorSpace):
                 values.append(
                     np.reshape(parameters[start:end], declaration.shape)
@@ -118,7 +120,7 @@ def specialize_system_parameters(
         spaces = original.input_spaces()
         return function(
             [spaces[0], spaces[1], numeric_parameters],
-            lambda z, u, p: original(z, u, *bound_arguments(p)),
+            lambda z, u, p: original(z, u, *reconstruct_parameters(p)),
             backend=system.backend(),
         )
 
@@ -128,7 +130,9 @@ def specialize_system_parameters(
         spaces = original.input_spaces()
         return function(
             [*spaces[:4], numeric_parameters],
-            lambda t, x, z, u, p: original(t, x, z, u, *bound_arguments(p)),
+            lambda t, x, z, u, p: original(
+                t, x, z, u, *reconstruct_parameters(p)
+            ),
             backend=system.backend(),
         )
 
@@ -137,7 +141,7 @@ def specialize_system_parameters(
         return function(
             [*spaces[:4], numeric_parameters, spaces[-1]],
             lambda t, x, z, u, p, q: original(
-                t, x, z, u, *bound_arguments(p), q
+                t, x, z, u, *reconstruct_parameters(p), q
             ),
             backend=system.backend(),
         )
