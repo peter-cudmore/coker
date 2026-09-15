@@ -331,11 +331,7 @@ class VariationalProblemBuilder:
                 initial.append(record)
             else:
                 terminal.append(record)
-        result_loss = (
-            Function(self._trace, loss, backend=self.backend)
-            if self.backend == "casadi"
-            else loss
-        )
+        result_loss = loss
 
         return VariationalProblem(
             path_constraints=path,

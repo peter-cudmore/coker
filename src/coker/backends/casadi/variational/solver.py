@@ -174,6 +174,11 @@ def create_variational_solver(
     problem: VariationalProblem,
 ) -> CasadiVariationalSolver:
     casadi = get_backend_by_name("casadi")
+    loss = (
+        Function(problem.loss.tape, problem.loss, backend="casadi")
+        if isinstance(problem.loss, Tracer)
+        else problem.loss
+    )
 
     x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
     x_size = x_dim.flat()
@@ -437,10 +442,7 @@ def create_variational_solver(
         )
         return y_val
 
-    if (
-        isinstance(problem.loss, Function)
-        and "_output" in problem.loss.arguments
-    ):
+    if isinstance(loss, Function) and "_output" in loss.arguments:
         values = {
             "t": duration,
             "t_final": duration,
@@ -450,24 +452,17 @@ def create_variational_solver(
             "_output": solution_proxy,
         }
         (cost,) = casadi.evaluate(
-            problem.loss,
-            [
-                values[input_spec.name]
-                for input_spec in problem.loss.signature.inputs
-            ],
+            loss,
+            [values[input_spec.name] for input_spec in loss.signature.inputs],
         )
-    elif isinstance(problem.loss, Tracer):
-        workspace = dict(
-            zip(problem.loss.tape.input_indicies, (solution_proxy, p))
-        )
-        _, outputs = lower_casadi(problem.loss.tape, [problem.loss], workspace)
+    elif isinstance(loss, Tracer):
+        workspace = dict(zip(loss.tape.input_indicies, (solution_proxy, p)))
+        _, outputs = lower_casadi(loss.tape, [loss], workspace)
         (cost,) = outputs
     elif control_factory is None:
-        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
+        (cost,) = casadi.evaluate(loss, [solution_proxy, p])
     else:
-        (cost,) = casadi.evaluate(
-            problem.loss, [solution_proxy, control_factory, p]
-        )
+        (cost,) = casadi.evaluate(loss, [solution_proxy, control_factory, p])
 
     equality_values = [e for e in equalities if e is not None]
     g = ca.vertcat(*equality_values, *g_constraints)
