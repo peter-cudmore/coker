@@ -25,12 +25,16 @@ def test_system_accepts_a_function_valued_positional_parameter():
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
-            parameters=[function_parameter, Scalar("p_1")],
+            parameters=[
+                function_parameter,
+                Scalar("p_1"),
+                Scalar("p_2"),
+            ],
             algebraic=None,
             initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
-            dynamics=lambda _t, x, _z, _u, p: p[0](x) + p[1],
+            dynamics=lambda _t, x, _z, _u, p: p[0](x) + p[1] + p[2],
             constraints=Noop(),
-            outputs=lambda _t, x, _z, _u, p, _q: p[0](x) + p[1],
+            outputs=lambda _t, x, _z, _u, p, _q: p[0](x) + p[1] + p[2],
             quadratures=Noop(),
         )
     )
@@ -38,8 +42,10 @@ def test_system_accepts_a_function_valued_positional_parameter():
     assert isinstance(system.parameters, tuple)
 
     np.testing.assert_allclose(
-        system.dxdt(0.0, np.array([2.0]), None, None, lambda x: x * 3, 1.0),
-        np.array([7.0]),
+        system.dxdt(
+            0.0, np.array([2.0]), None, None, lambda x: x * 3, 1.0, 2.0
+        ),
+        np.array([9.0]),
     )
 
     np.testing.assert_allclose(
@@ -50,9 +56,10 @@ def test_system_accepts_a_function_valued_positional_parameter():
             None,
             lambda x: x * 3,
             1.0,
+            2.0,
             None,
         ),
-        np.array([7.0]),
+        np.array([9.0]),
     )
 
 
@@ -63,10 +70,14 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
-            parameters=(function_parameter, Scalar("p_1")),
+            parameters=(
+                function_parameter,
+                Scalar("p_1"),
+                Scalar("p_2"),
+            ),
             algebraic=None,
             initial_conditions=lambda _z, _u, _p: (0.0, None),
-            dynamics=lambda _t, x, _z, _u, p: p[0](x[0]) + p[1],
+            dynamics=lambda _t, x, _z, _u, p: p[0](x[0]) + p[1] + p[2],
             constraints=Noop(),
             outputs=lambda _t, x, _z, _u, _p, _q: x,
             quadratures=Noop(),
@@ -79,18 +90,23 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
     with VariationalProblemBuilder(
         system,
         t_final=1.0,
-        parameters=[declaration, BoundedVariable("p_1", -1.0, 1.0)],
+        parameters=[
+            declaration,
+            BoundedVariable("p_1", -1.0, 1.0),
+            BoundedVariable("p_2", -1.0, 1.0),
+        ],
     ) as builder:
         problem = builder.build(
             Minimise(builder.output(builder.t_final)[0] ** 2)
         )
 
-    assert problem.system.parameters.dimension == 4
+    assert problem.system.parameters.dimension == 5
     assert [parameter.name for parameter in problem.parameters] == [
         "p_0_theta_0",
         "p_0_theta_1",
         "p_0_theta_2",
         "p_1",
+        "p_2",
     ]
 
 
