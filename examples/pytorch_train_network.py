@@ -27,12 +27,13 @@ def main() -> None:
     assert isinstance(backend, PytorchBackend)
 
     network = Regressor().to(dtype=dtype)
-    signature_source = function(
+    # Coker needs explicit symbolic input/output spaces for native modules.
+    network_signature = function(
         [VectorSpace("features", 2)],
         lambda features, *_: features,
         backend="pytorch",
-    )
-    imported_network = backend.import_module(network, signature_source.signature)
+    ).signature
+    imported_network = backend.import_module(network, network_signature)
     predict = function(
         [VectorSpace("features", 2)],
         lambda features, *_: imported_network(features),
