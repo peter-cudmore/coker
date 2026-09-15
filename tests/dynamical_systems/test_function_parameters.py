@@ -87,7 +87,7 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
         )
     )
     declaration = MonotonePiecewiseLinear(
-        knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
+        domain_knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
     )
 
     with VariationalProblemBuilder(
@@ -134,7 +134,7 @@ def test_builder_specializes_bound_vector_parameter():
         t_final=1.0,
         parameters=[
             MonotonePiecewiseLinear(
-                knots=[-1.0, 0.0, 1.0],
+                domain_knots=[-1.0, 0.0, 1.0],
                 lower_bound=0.0,
                 upper_bound=2.0,
             ),
@@ -283,7 +283,7 @@ def test_casadi_fits_monotone_function_parameter():
         )
     )
     declaration = MonotonePiecewiseLinear(
-        knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
+        domain_knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
     )
     with VariationalProblemBuilder(
         system,
@@ -304,7 +304,7 @@ def test_casadi_fits_monotone_function_parameter():
 def test_monotone_function_rejects_unimplemented_explicit_constraints():
     with pytest.raises(TypeError, match="constraint_mode"):
         MonotonePiecewiseLinear(
-            knots=[-1.0, 1.0],
+            domain_knots=[-1.0, 1.0],
             lower_bound=0.0,
             upper_bound=2.0,
             constraint_mode="explicit",

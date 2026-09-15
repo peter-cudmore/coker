@@ -12,26 +12,34 @@ from coker.algebra.graph import if_then_else
 
 @dataclass(frozen=True)
 class MonotonePiecewiseLinear:
-    """Bounded scalar piecewise-linear fixed-knot function realization."""
+    """Bounded scalar realization over fixed function-domain knots.
 
-    knots: Sequence[Real]
+    ``domain_knots`` are positions in the parameter function's scalar input
+    domain. They are independent of the variational time discretization.
+    """
+
+    domain_knots: Sequence[Real]
     lower_bound: Real
     upper_bound: Real
     guess: Sequence[Real] | None = None
 
     def __post_init__(self) -> None:
         try:
-            knots = np.asarray(self.knots, dtype=float)
+            domain_knots = np.asarray(self.domain_knots, dtype=float)
         except (TypeError, ValueError) as exc:
             raise TypeError(
-                "knots must be a one-dimensional numeric sequence"
+                "domain_knots must be a one-dimensional numeric sequence"
             ) from exc
-        if knots.ndim != 1 or knots.size < 2:
+        if domain_knots.ndim != 1 or domain_knots.size < 2:
             raise ValueError(
-                "knots must be one-dimensional with at least two entries"
+                "domain_knots must be one-dimensional with at least two entries"
             )
-        if not np.all(np.isfinite(knots)) or not np.all(np.diff(knots) > 0):
-            raise ValueError("knots must be finite and strictly increasing")
+        if not np.all(np.isfinite(domain_knots)) or not np.all(
+            np.diff(domain_knots) > 0
+        ):
+            raise ValueError(
+                "domain_knots must be finite and strictly increasing"
+            )
         if not isinstance(self.lower_bound, Real) or not isinstance(
             self.upper_bound, Real
         ):
@@ -48,19 +56,23 @@ class MonotonePiecewiseLinear:
                 arr = np.asarray(self.guess, dtype=float)
             except (TypeError, ValueError) as exc:
                 raise TypeError("guess must be a numeric sequence") from exc
-            if arr.ndim != 1 or arr.size != knots.size:
-                raise ValueError("guess must have one value per knot")
+            if arr.ndim != 1 or arr.size != domain_knots.size:
+                raise ValueError("guess must have one value per domain knot")
             if not np.all(np.isfinite(arr)):
                 raise ValueError("guess must contain only finite values")
             guess = tuple(float(v) for v in arr)
-        object.__setattr__(self, "knots", tuple(float(v) for v in knots))
+        object.__setattr__(
+            self,
+            "domain_knots",
+            tuple(float(value) for value in domain_knots),
+        )
         object.__setattr__(self, "lower_bound", lower)
         object.__setattr__(self, "upper_bound", upper)
         object.__setattr__(self, "guess", guess)
 
     @property
     def size(self) -> int:
-        return len(self.knots)
+        return len(self.domain_knots)
 
     @property
     def basis_space(self) -> VectorSpace:
@@ -121,12 +133,12 @@ class MonotonePiecewiseLinear:
         result = values[-1]
         for i in range(self.size - 2, -1, -1):
             slope = (values[i + 1] - values[i]) / (
-                self.knots[i + 1] - self.knots[i]
+                self.domain_knots[i + 1] - self.domain_knots[i]
             )
-            segment = values[i] + slope * (x - self.knots[i])
+            segment = values[i] + slope * (x - self.domain_knots[i])
             result = if_then_else(
-                x <= self.knots[i],
+                x <= self.domain_knots[i],
                 values[i],
-                if_then_else(x <= self.knots[i + 1], segment, result),
+                if_then_else(x <= self.domain_knots[i + 1], segment, result),
             )
-        return if_then_else(x <= self.knots[0], values[0], result)
+        return if_then_else(x <= self.domain_knots[0], values[0], result)
