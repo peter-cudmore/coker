@@ -331,11 +331,10 @@ class VariationalProblemBuilder:
                 initial.append(record)
             else:
                 terminal.append(record)
-        result_loss = loss
 
         return VariationalProblem(
             path_constraints=path,
-            loss=result_loss,
+            loss=loss,
             system=self.system,
             t_final=self.t_final_declaration,
             control=self.control or None,
