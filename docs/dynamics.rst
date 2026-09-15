@@ -17,6 +17,9 @@ The main public surface is re-exported from :mod:`coker.dynamics`:
 - :class:`coker.dynamics.BoundedVariable`
 - :class:`coker.dynamics.TranscriptionOptions`
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
+- :class:`coker.dynamics.BoundVector`
+- :class:`coker.dynamics.DenseTensorVariable`
+- :class:`coker.dynamics.MonotonePiecewiseLinear`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -79,6 +82,83 @@ observed system output (and may include algebraic or quadrature channels).
 The current executable lowering boundary is the CasADi backend; symbolic
 construction is backend-independent, but solving a built problem currently
 requires CasADi.
+
+Heterogeneous and function-valued parameters
+--------------------------------------------
+
+``DynamicsSpec.parameters`` may be one declaration or a positional tuple of
+``Scalar``, ``VectorSpace``, and ``FunctionSpace`` declarations. A dynamics
+callback receives that same positional layout as one final ``p`` tuple:
+
+
+.. code-block:: python
+
+   from coker import FunctionSpace, Scalar, VectorSpace
+   from coker.algebra.ops import Noop
+   from coker.dynamics import DynamicsSpec, create_dynamics_from_spec
+
+   gain_curve = FunctionSpace(
+       "gain_curve",
+       arguments=[Scalar("speed")],
+       output=[Scalar("gain")],
+   )
+   system = create_dynamics_from_spec(
+       DynamicsSpec(
+           inputs=Noop(),
+           parameters=(gain_curve, VectorSpace("offset", 2)),
+           algebraic=None,
+           initial_conditions=lambda _z, _u, _p: (0.0, None),
+           dynamics=lambda _t, x, _z, _u, p: p[0](x[0]) + p[1][0],
+           constraints=Noop(),
+           outputs=lambda _t, x, _z, _u, _p, _q: x,
+           quadratures=Noop(),
+       )
+   )
+
+The variational builder receives one declaration for each positional parameter.
+Use ``BoundVector`` for a bounded vector decision block, and
+``DenseTensorVariable`` for an unbounded dense block reconstructed with the
+shape of its initial guess:
+
+.. code-block:: python
+
+   from coker.dynamics import (
+       BoundVector,
+       MonotonePiecewiseLinear,
+       VariationalProblemBuilder,
+   )
+
+   with VariationalProblemBuilder(
+       system,
+       t_final=1.0,
+       parameters=[
+           MonotonePiecewiseLinear(
+               domain_knots=[0.0, 1.0, 2.0],
+               lower_bound=0.0,
+               upper_bound=2.0,
+           ),
+           BoundVector(
+               "offset",
+               lower_bound=[-1.0, -1.0],
+               upper_bound=[1.0, 1.0],
+               guess=[0.0, 0.0],
+           ),
+       ],
+   ) as builder:
+       problem = builder.build(Minimise(builder.output(builder.t_final)[0] ** 2))
+
+Function-valued parameters currently require one scalar argument and one scalar
+output. ``MonotonePiecewiseLinear`` expands its monotonic basis into scalar
+solver decisions, then reconstructs a callable parameter for the original
+system. Vector blocks are similarly flattened for solving and are available in
+the returned solution through ``solution.parameter_blocks["offset"]`` with
+their declared shape restored.
+
+``domain_knots`` are breakpoints in the parameter function's argument domain,
+not transcription times. For ``gain_curve(speed)`` above, they are speed
+breakpoints. They only happen to be time values when the function parameter is
+explicitly a function of time. The current temporal transcription mesh is
+independent of them.
 
 Worked parameter-fitting example
 --------------------------------
