@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, TypeAlias
 
 import numpy as np
 from coker.algebra.dimensions import (
@@ -11,18 +11,19 @@ from coker.algebra.dimensions import (
 from coker.algebra.function import Function
 from coker.algebra.ops import Noop
 
+ParameterDeclaration: TypeAlias = Scalar | VectorSpace | FunctionSpace
+DynamicsParameters: TypeAlias = (
+    ParameterDeclaration
+    | tuple[ParameterDeclaration, ...]
+    | list[ParameterDeclaration]
+    | None
+)
+
 
 @dataclass
 class DynamicsSpec:
     inputs: FunctionSpace | Noop
-    parameters: (
-        Scalar
-        | VectorSpace
-        | FunctionSpace
-        | tuple[Scalar | VectorSpace | FunctionSpace, ...]
-        | list[Scalar | VectorSpace | FunctionSpace]
-        | None
-    )
+    parameters: DynamicsParameters
     algebraic: Optional[VectorSpace]
 
     initial_conditions: Callable
@@ -56,13 +57,7 @@ class DynamicsSpec:
 @dataclass
 class DynamicalSystem:
     inputs: FunctionSpace
-    parameters: (
-        VectorSpace
-        | Scalar
-        | FunctionSpace
-        | tuple[Scalar | VectorSpace | FunctionSpace, ...]
-        | None
-    )
+    parameters: ParameterDeclaration | tuple[ParameterDeclaration, ...] | None
     x0: Function
     dxdt: Function
     g: Optional[Function]
