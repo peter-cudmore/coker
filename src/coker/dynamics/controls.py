@@ -1,6 +1,6 @@
 import abc
 from dataclasses import dataclass
-from typing import Callable, Union
+from typing import Callable, Sequence, Union
 
 import numpy as np
 
@@ -29,7 +29,7 @@ class DenseTensorVariable(ParameterMixin):
     """Finite dense decision block reconstructed with its declared shape."""
 
     name: str
-    guess: np.ndarray
+    guess: np.ndarray | Sequence[float]
     lower_bound: float | np.ndarray = -np.inf
     upper_bound: float | np.ndarray = np.inf
 
