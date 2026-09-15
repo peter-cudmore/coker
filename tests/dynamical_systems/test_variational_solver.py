@@ -17,7 +17,7 @@ from coker.backends.casadi.variational.solver import (
     ControlFactory,
     _is_acceptable_small_search_direction,
 )
-from coker.dynamics.controls import ConstantControlVariable
+from coker.dynamics.variables import ConstantControlVariable
 
 
 from coker.dynamics.system import (

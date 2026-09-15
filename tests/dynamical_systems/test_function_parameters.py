@@ -137,7 +137,12 @@ def test_builder_specializes_bound_vector_parameter():
                 lower_bound=0.0,
                 upper_bound=2.0,
             ),
-            BoundVector("gain", guess=[0.0, 0.0]),
+            BoundVector(
+                "gain",
+                lower_bound=[-1.0, -1.0],
+                upper_bound=[1.0, 1.0],
+                guess=[0.0, 0.0],
+            ),
         ],
     ) as builder:
         problem = builder.build(
@@ -203,7 +208,14 @@ def test_variational_fits_bound_vector_parameter(variational_backend):
     with VariationalProblemBuilder(
         system,
         t_final=1.0,
-        parameters=[BoundVector("gain", guess=[0.0])],
+        parameters=[
+            BoundVector(
+                "gain",
+                lower_bound=[-1.0],
+                upper_bound=[1.0],
+                guess=[0.0],
+            )
+        ],
         backend=variational_backend,
     ) as builder:
         problem = builder.build(

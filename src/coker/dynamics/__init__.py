@@ -1,6 +1,6 @@
 """Dynamical-system modelling and variational optimisation API."""
 
-from coker.dynamics.controls import (
+from coker.dynamics.variables import (
     BoundedVariable,
     BoundVector,
     Constant,

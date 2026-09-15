@@ -13,7 +13,8 @@ from coker.algebra.dimensions import (
 from coker.algebra.function import Function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import Noop, OP
-from coker.dynamics.controls import (
+from coker.dynamics.variables import (
+    BoundVector,
     BoundedVariable,
     ControlVariable,
     DenseTensorVariable,
@@ -124,11 +125,11 @@ class VariationalProblemBuilder:
                     f"{type(declaration).__name__}"
                 )
             if isinstance(element, VectorSpace) and not isinstance(
-                declaration, DenseTensorVariable
+                declaration, (BoundVector, DenseTensorVariable)
             ):
                 raise TypeError(
-                    f"Parameter {index} VectorSpace requires "
-                    "DenseTensorVariable"
+                    f"Parameter {index} VectorSpace requires BoundVector "
+                    "or DenseTensorVariable"
                 )
             if (
                 not is_function_space

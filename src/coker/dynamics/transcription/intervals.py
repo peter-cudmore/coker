@@ -1,6 +1,6 @@
 from typing import List, Optional, Tuple
 
-from coker.dynamics.controls import (
+from coker.dynamics.variables import (
     ControlVariable,
     PiecewiseConstantVariable,
     SpikeVariable,
