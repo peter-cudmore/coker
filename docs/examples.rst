@@ -33,10 +33,10 @@ Repository entry points
    through the returned Coker function.
 
 ``examples/pytorch_mathematical_program_training.py``
-   Builds the same style of explicit network as a CUDA float32
-   ``MathematicalProgram``. The example selects Adam with
-   ``PytorchNLPSolverOptions`` and lets the program own its packed decision
-   vector.
+   Builds the same style of explicit network as a ``MathematicalProgram`` on
+   CUDA float32 when available, otherwise CPU float64. The example selects Adam
+   with ``PytorchNLPSolverOptions`` and lets the program own its packed
+   decision vector.
 ``scripts/double_pendulum.py``
    Builds a two-link rigid-body model with ``RigidBody``, ``Revolute``,
    ``Inertia``, :class:`coker.toolkits.spatial.Isometry3`, and
@@ -78,6 +78,6 @@ The PyTorch examples require the optional extra:
    uv run --extra pytorch python examples/pytorch_imported_module_training.py
    uv run --extra pytorch python examples/pytorch_mathematical_program_training.py
 
-The mathematical-program example additionally requires CUDA. The direct
-explicit-parameter and imported-module examples use ordinary PyTorch execution
-and can run without the CUDA NLP solver.
+The mathematical-program example selects CUDA float32 when available and CPU
+float64 otherwise. The direct explicit-parameter and imported-module examples
+use ordinary PyTorch execution.

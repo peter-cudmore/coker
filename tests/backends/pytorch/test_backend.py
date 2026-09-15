@@ -337,7 +337,7 @@ def test_pytorch_optimisation_selects_adam():
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="CUDA is unavailable"
 )
-def test_pytorch_optimisation_accepts_cuda_runtime_and_rejects_cpu():
+def test_pytorch_optimisation_accepts_cuda_runtime():
     with ProblemBuilder(arguments=[Scalar("target")]) as builder:
         target = builder.arguments[0]
         x = builder.new_variable("x", initial_value=0.0)
@@ -347,8 +347,23 @@ def test_pytorch_optimisation_accepts_cuda_runtime_and_rejects_cpu():
 
     _, result = problem(torch.tensor(2.0, device="cuda"))
     assert result == pytest.approx(2.0, abs=1e-3)
-    with pytest.raises(ValueError, match="CUDA"):
-        problem(torch.tensor(2.0))
+
+
+def test_pytorch_optimisation_accepts_cpu_float64_runtime():
+    backend = get_backend_by_name("pytorch", set_current=False)
+    backend.device = torch.device("cpu")
+    backend.dtype = torch.float64
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        target = builder.arguments[0]
+        x = builder.new_variable("x", initial_value=0.0)
+        builder.objective = Minimise((x - target) * (x - target))
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+
+    _, result = problem(torch.tensor(2.0, dtype=torch.float64))
+    assert result == pytest.approx(2.0, abs=1e-3)
+    backend.device = None
+    backend.dtype = None
 
 
 @pytest.mark.skipif(

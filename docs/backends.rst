@@ -46,20 +46,20 @@ Backend capability matrix
        suite does not include a dedicated ``tests/backends/jax/`` directory.
    * - ``pytorch``
      - Tensor-valued execution, PyTorch autograd, native-module composition,
-       and CUDA mathematical-program solves.
+       and CPU or CUDA mathematical-program solves.
      - Install with ``pip install "coker[pytorch]"``. Mathematical-program NLP
-       solves require CUDA and float32. ``PytorchNLPSolverOptions`` selects
-       ``"LBFGS"`` (default) or ``"Adam"`` and forwards
-       ``optimiser_options`` to the selected PyTorch optimizer. Constraint
-       handling uses the backend's barrier and augmented-Lagrangian stages.
-       ``PytorchODESolverParameters`` configures ``torchdiffeq`` initial-value
-       solves only. Variational fitting currently has no separate options
-       object: its fixed integration and LBFGS settings are implementation
-       defaults.
+       solves use the configured CPU or CUDA device and floating dtype.
+       ``PytorchNLPSolverOptions`` selects ``"LBFGS"`` (default) or ``"Adam"``
+       and forwards ``optimiser_options`` to the selected PyTorch optimizer.
+       Constraint handling uses the backend's barrier and augmented-Lagrangian
+       stages. ``PytorchODESolverParameters`` configures ``torchdiffeq``
+       initial-value solves only. Variational fitting currently has no
+       separate options object: its fixed integration and LBFGS settings are
+       implementation defaults.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
        backend tests. Algebraic DAEs, variational controls, quadratures,
-       constraints, and optimized horizons are unsupported; CPU NLP and
-       variational solving are unsupported.
+       constraints, and optimized horizons are unsupported; CPU variational
+       solving is unsupported.
 
 Choosing a backend
 ------------------
@@ -69,7 +69,7 @@ A good default is:
 - use ``numpy`` while bringing up a model or debugging array shapes;
 - use ``casadi`` for solve-heavy optimisation and parameter-fitting problems;
 - use ``pytorch`` when you need tensor-valued execution, autograd, or a
-  CUDA-only nonlinear mathematical-program solve;
+  nonlinear mathematical-program solve on PyTorch;
 - use ``sympy`` when you need symbolic forms or printable expressions;
 - use ``coker`` when you want the native compact execution graph documented in
   :doc:`backend_architecture`.
@@ -153,13 +153,13 @@ There are three distinct PyTorch workflows:
    native evaluation node while PyTorch owns training.
 3. **Mathematical programs.** Declare weights with
    :meth:`~coker.toolkits.codesign.ProblemBuilder.new_variable`, build a
-   :class:`~coker.toolkits.codesign.MathematicalProgram`, and let Coker's CUDA
-   NLP backend solve the fitting problem. The solver owns one packed decision
-   vector and returns the declared outputs rather than caller-owned PyTorch
-   parameters.
+   :class:`~coker.toolkits.codesign.MathematicalProgram`, and let Coker's
+   PyTorch NLP backend solve the fitting problem. The solver owns one packed
+   decision vector and returns the declared outputs rather than caller-owned
+   PyTorch parameters.
 
-For the third form, configure the CUDA float32 backend and select the solver
-through ``PytorchNLPSolverOptions``:
+For the third form, configure the PyTorch device and dtype, then select the
+solver through ``PytorchNLPSolverOptions``:
 
 .. code-block:: python
 
@@ -169,8 +169,12 @@ through ``PytorchNLPSolverOptions``:
    from coker.backends.pytorch import PytorchNLPSolverOptions
 
    backend = get_backend_by_name("pytorch")
-   backend.device = torch.device("cuda")
-   backend.dtype = torch.float32
+   backend.device = torch.device(
+       "cuda" if torch.cuda.is_available() else "cpu"
+   )
+   backend.dtype = (
+       torch.float32 if backend.device.type == "cuda" else torch.float64
+   )
    options = PytorchNLPSolverOptions(
        optimiser_method="Adam",
        optimiser_options={"lr": 0.05},
@@ -212,8 +216,8 @@ solver/backend combination is rejected while building or lowering, before
 evaluation. Derivatives through an argmin or argmax are not defined.
 
 ``numpy``, ``casadi``, and ``coker`` support host-side program composition.
-PyTorch supports direct CUDA mathematical-program construction/solving and
-fixed-horizon, bound-only ODE parameter fitting; JAX does not construct
+PyTorch supports direct CPU or CUDA mathematical-program construction/solving
+and fixed-horizon, bound-only ODE parameter fitting; JAX does not construct
 optimisation programs.
 
 Embedded mapped QP calls

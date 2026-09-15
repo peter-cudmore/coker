@@ -164,8 +164,10 @@ class _PytorchOptimisationProblem:
         self.initial_guess = initial_guess
         self.options = options
         backend = get_backend_by_name("pytorch", set_current=False)
-        self.device = backend.device or torch.device("cuda")
-        self.dtype = backend.dtype or torch.float32
+        self.device = backend.device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        self.dtype = backend.dtype or torch.get_default_dtype()
         self._warm_start_decision = None
         self._warm_start_multipliers = None
         self.last_solve_info: SolveInfo | None = None
@@ -512,16 +514,13 @@ class _PytorchOptimisationProblem:
             return False
 
     def _normalise_runtime_args(self, runtime_args: Sequence[object]):
-        tensors = [v for v in runtime_args if isinstance(v, torch.Tensor)]
+        tensors = [
+            value for value in runtime_args if isinstance(value, torch.Tensor)
+        ]
         if tensors:
-            if any(v.device.type != "cuda" for v in tensors):
+            if len({value.device for value in tensors}) != 1:
                 raise ValueError(
-                    "PyTorch optimisation runtime tensors must be on CUDA"
-                )
-            if len({v.device for v in tensors}) != 1:
-                raise ValueError(
-                    "PyTorch optimisation runtime tensors must use one CUDA "
-                    "device"
+                    "PyTorch optimisation runtime tensors must use one device"
                 )
             if len(runtime_args) != len(self.parameter_bindings):
                 raise ValueError(
@@ -661,17 +660,6 @@ def build_optimisation_problem(
     *,
     options=None,
 ):
-    backend = get_backend_by_name("pytorch", set_current=False)
-    if not torch.cuda.is_available():
-        raise RuntimeError("PyTorch optimisation requires CUDA availability")
-    device = backend.device or torch.device("cuda")
-    dtype = backend.dtype or torch.float32
-    if device.type != "cuda":
-        raise ValueError("PyTorch NLP solving requires a CUDA backend device")
-    if dtype is not torch.float32:
-        raise ValueError(
-            "PyTorch NLP solving requires a float32 backend dtype"
-        )
     tape = cost.tape
     if any(
         item.tape != tape for item in (*constraints, *parameters, *outputs)

@@ -10,7 +10,6 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.function import Function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import Noop, OP
 from coker.dynamics.variables import (
@@ -99,7 +98,7 @@ class VariationalProblemBuilder:
         self._make_symbols()
 
     def _validate_parameters(self) -> None:
-        """Validate positional declarations against the system parameter tuple."""
+        """Validate positional declarations against the parameter tuple."""
         declarations = self._parameter_declarations
         space = self.system.parameters
         assert isinstance(space, tuple)

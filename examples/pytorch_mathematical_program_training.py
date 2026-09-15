@@ -1,4 +1,4 @@
-"""Fit explicit Coker network parameters with a CUDA PyTorch program."""
+"""Fit explicit Coker network parameters with a PyTorch program."""
 
 import numpy as np
 import torch
@@ -21,8 +21,11 @@ def main() -> None:
     torch.manual_seed(0)
     backend = get_backend_by_name("pytorch")
     assert isinstance(backend, PytorchBackend)
-    backend.device = torch.device("cuda")
-    backend.dtype = torch.float32
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch_dtype = torch.float32 if device.type == "cuda" else torch.float64
+    numpy_dtype = np.float32 if device.type == "cuda" else np.float64
+    backend.device = device
+    backend.dtype = torch_dtype
     options = PytorchNLPSolverOptions(
         optimiser_method="Adam",
         optimiser_options={"lr": 0.05},
@@ -30,30 +33,32 @@ def main() -> None:
     )
     features = np.array(
         [[-1.0, 0.0], [0.0, 1.0], [1.0, -1.0], [2.0, 1.0]],
-        dtype=np.float32,
+        dtype=numpy_dtype,
     )
-    targets = np.array([-1.0, 1.0, 0.0, 3.0], dtype=np.float32)
+    targets = np.array([-1.0, 1.0, 0.0, 3.0], dtype=numpy_dtype)
 
     with ProblemBuilder(solver_options=options) as builder:
         weights_1 = builder.new_variable(
             "weights_1",
             shape=(HIDDEN, FEATURES),
-            initial_value=np.random.randn(HIDDEN, FEATURES).astype(np.float32),
+            initial_value=np.random.randn(HIDDEN, FEATURES).astype(
+                numpy_dtype
+            ),
         )
         bias_1 = builder.new_variable(
             "bias_1",
             shape=HIDDEN,
-            initial_value=np.zeros(HIDDEN, dtype=np.float32),
+            initial_value=np.zeros(HIDDEN, dtype=numpy_dtype),
         )
         weights_2 = builder.new_variable(
             "weights_2",
             shape=(1, HIDDEN),
-            initial_value=np.random.randn(1, HIDDEN).astype(np.float32),
+            initial_value=np.random.randn(1, HIDDEN).astype(numpy_dtype),
         )
         bias_2 = builder.new_variable(
             "bias_2",
             shape=1,
-            initial_value=np.zeros(1, dtype=np.float32),
+            initial_value=np.zeros(1, dtype=numpy_dtype),
         )
         parameters = (weights_1, bias_1, weights_2, bias_2)
         predictions = [
