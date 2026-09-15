@@ -8,9 +8,11 @@ import casadi as ca
 import numpy as np
 
 from coker.backends.backend import VariationalSolver, get_backend_by_name
-from coker.backends.casadi.lower import lower as lower_casadi
+from coker.backends.casadi.lower import (
+    lower as lower_casadi,
+    substitute,
+)
 from coker.algebra.graph import Tracer
-from coker.algebra.function import Function
 from coker.backends.casadi.variational.layout import DecisionLayout
 from coker.dynamics import (
     BoundedVariable,
@@ -174,11 +176,7 @@ def create_variational_solver(
     problem: VariationalProblem,
 ) -> CasadiVariationalSolver:
     casadi = get_backend_by_name("casadi")
-    loss = (
-        Function(problem.loss.tape, problem.loss, backend="casadi")
-        if isinstance(problem.loss, Tracer)
-        else problem.loss
-    )
+    loss = problem.loss
 
     x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
     x_size = x_dim.flat()
@@ -420,18 +418,20 @@ def create_variational_solver(
         tau = time if free_horizon else time / duration
         return proj_x @ poly_collection(tau)
 
+    def input_proxy(time):
+        tau = time if free_horizon else time / duration
+        return control_eval(tau)
+
     def solution_proxy(*args):
-        if control_factory is None:
-            if len(args) == 1:
-                time, p_val = args[0], p
-            else:
-                time, p_val = args
-            tau = time if free_horizon else time / duration
-            u_val = control_eval(tau)
+        if len(args) == 1:
+            time, control_val, p_val = args[0], control_eval, p
+        elif control_factory is None:
+            time, p_val = args
+            control_val = control_eval
         else:
             time, control_val, p_val = args
-            tau = time if free_horizon else time / duration
-            u_val = control_val(tau)
+        tau = time if free_horizon else time / duration
+        u_val = control_val(tau)
         inner = poly_collection(tau)
         x_tau = proj_x @ inner
         z_tau = proj_z @ inner
@@ -442,7 +442,7 @@ def create_variational_solver(
         )
         return y_val
 
-    if isinstance(loss, Function) and "_output" in loss.arguments:
+    if isinstance(loss, Tracer):
         values = {
             "t": duration,
             "t_final": duration,
@@ -451,10 +451,16 @@ def create_variational_solver(
             "p": p,
             "_output": solution_proxy,
         }
-        (cost,) = casadi.evaluate(
-            loss,
-            [values[input_spec.name] for input_spec in loss.signature.inputs],
-        )
+        if control_factory is not None:
+            values[problem.system.inputs.name] = input_proxy
+        workspace = {
+            index: values[name]
+            for index, name in zip(
+                loss.tape.input_indicies, loss.tape.input_names
+            )
+            if name in values
+        }
+        (cost,) = substitute([loss], workspace)
     elif control_factory is None:
         (cost,) = casadi.evaluate(loss, [solution_proxy, p])
     else:
