@@ -254,6 +254,8 @@ def test_pytorch_nlp_solver_options_defer_device_to_backend():
     assert options.inner_iterations == 7
     assert options.restoration_iterations == 9
     assert options.warm_start
+    with pytest.raises(ValueError, match="Unsupported PyTorch optimiser"):
+        PytorchNLPSolverOptions(optimiser_method="SGD")
 
     backend = PytorchBackend(device="cpu", dtype=torch.float32)
     assert backend.device.type == "cpu"
@@ -302,6 +304,32 @@ def test_pytorch_optimisation_solves_and_reports_status():
     assert result == pytest.approx(1.0, abs=1e-3)
     assert problem.solve_info.success
     assert problem.solve_info.solver == "LBFGS"
+    backend.device = None
+    backend.dtype = None
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA is unavailable"
+)
+def test_pytorch_optimisation_selects_adam():
+    backend = get_backend_by_name("pytorch", set_current=False)
+    backend.device = torch.device("cuda")
+    backend.dtype = torch.float32
+    options = PytorchNLPSolverOptions(
+        optimiser_method="Adam",
+        optimiser_options={"lr": 0.1},
+        inner_iterations=100,
+    )
+    with ProblemBuilder(solver_options=options) as builder:
+        x = builder.new_variable("x", initial_value=3.0)
+        builder.objective = Minimise((x - 1.0) * (x - 1.0))
+        builder.outputs = [x]
+        problem = builder.build("pytorch")
+
+    cost, result = problem()
+    assert cost == pytest.approx(0.0, abs=1e-4)
+    assert result == pytest.approx(1.0, abs=1e-2)
+    assert problem.solve_info.solver == "Adam"
     backend.device = None
     backend.dtype = None
 
