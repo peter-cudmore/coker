@@ -97,10 +97,6 @@ class VariationalProblemBuilder:
         self._closed = False
         self._make_symbols()
 
-    @staticmethod
-    def _is_function_declaration(declaration: object) -> bool:
-        return isinstance(declaration, MonotonePiecewiseLinear)
-
     def _validate_parameters(self) -> None:
         """Validate positional declarations against the system parameter tuple."""
         declarations = self._parameter_declarations
@@ -115,8 +111,9 @@ class VariationalProblemBuilder:
             zip(space, declarations)
         ):
             is_function_space = isinstance(element, FunctionSpace)
-            is_function_decl = self._is_function_declaration(declaration)
-            if is_function_space != is_function_decl:
+            if is_function_space != isinstance(
+                declaration, MonotonePiecewiseLinear
+            ):
                 expected = (
                     "MonotonePiecewiseLinear"
                     if is_function_space
