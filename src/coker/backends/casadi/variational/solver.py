@@ -1,3 +1,4 @@
+from coker.dynamics.transcription.collocation import lgr_points
 import math
 
 from dataclasses import replace
@@ -14,6 +15,7 @@ from coker.backends.casadi.lower import (
 )
 from coker.algebra.graph import Tracer
 from coker.backends.casadi.variational.layout import DecisionLayout
+from coker.backends.casadi.variational.options import CasadiVariationalOptions
 from coker.dynamics import (
     BoundedVariable,
     ConstantControlVariable,
@@ -34,6 +36,19 @@ from coker.toolkits.codesign.optimisation import (
 from coker.backends.casadi.variational.variable_scaling import (
     _derive_variable_scaling,
 )
+
+
+def _casadi_options(problem: VariationalProblem) -> CasadiVariationalOptions:
+    """Return validated CasADi options for a variational problem."""
+    options = problem.transcription_options.backend_options
+    if options is None:
+        return CasadiVariationalOptions()
+    if not isinstance(options, CasadiVariationalOptions):
+        raise TypeError(
+            "CasADi variational solving requires "
+            "CasadiVariationalOptions as backend_options"
+        )
+    return options
 
 
 def noop(*_args):
@@ -101,12 +116,21 @@ class CasadiVariationalSolver(VariationalSolver):
         self._last_primal: Optional[ca.DM] = None
         self._last_lam_x: Optional[ca.DM] = None
         self._last_lam_g: Optional[ca.DM] = None
+        self._adaptive_solve: Optional[
+            Callable[[Dict[str, float]], VariationalSolution]
+        ] = None
 
     @property
     def parameters(self) -> List[str]:
         return list(self._parameters)
 
     def solve(self, **fixed_parameters) -> VariationalSolution:
+        if self._adaptive_solve is not None:
+            return self._adaptive_solve(fixed_parameters)
+        return self._solve_once(**fixed_parameters)
+
+    def _solve_once(self, **fixed_parameters) -> VariationalSolution:
+        """Solve one fixed transcription without adaptive mesh dispatch."""
         solver_arguments = self._map_arguments(fixed_parameters)
         x0 = solver_arguments["x0"]
         solver_kwargs = {
@@ -172,10 +196,13 @@ class CasadiVariationalSolver(VariationalSolver):
         )
 
 
-def create_variational_solver(
+def _create_variational_solver_once(
     problem: VariationalProblem,
+    intervals: Optional[List[Tuple[float, float]]] = None,
+    degrees: Optional[List[int]] = None,
 ) -> CasadiVariationalSolver:
     casadi = get_backend_by_name("casadi")
+    casadi_options = _casadi_options(problem)
 
     x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
     x_size = x_dim.flat()
@@ -183,15 +210,17 @@ def create_variational_solver(
     q_size = (q_dim.flat() if q_dim else 0) + len(problem.quadratures)
     tolerance = problem.transcription_options.absolute_tolerance
     free_horizon = problem.horizon_decision is not None
-
-    intervals = split_at_non_differentiable_points(
-        problem.control if problem.control else [],
-        1.0,
-        problem.transcription_options,
-    )
-    colocation_points = [problem.transcription_options.minimum_degree] * len(
-        intervals
-    )
+    if intervals is None:
+        intervals = split_at_non_differentiable_points(
+            problem.control if problem.control else [],
+            1.0,
+            problem.transcription_options,
+        )
+    if degrees is None:
+        degrees = [problem.transcription_options.minimum_degree] * len(
+            intervals
+        )
+    colocation_points = list(degrees)
     poly_collection = SymbolicPolyCollection(
         name="x",
         dimension=x_size + z_size + q_size,
@@ -502,9 +531,9 @@ def create_variational_solver(
         lbg = ca.vertcat(lbg, g_lower)
         ubg = ca.vertcat(ubg, g_upper)
 
-    solver_options = dict(problem.transcription_options.optimiser_options)
+    solver_options = dict(casadi_options.optimiser_options)
     warm_start = bool(solver_options.pop("warm_start", False))
-    if not problem.transcription_options.verbose:
+    if not casadi_options.verbose:
         solver_options.update(
             {
                 "ipopt.print_level": 0,
@@ -529,7 +558,7 @@ def create_variational_solver(
     normalized_g = g
     objective_scale = 1.0
 
-    if problem.transcription_options.enable_scaling:
+    if casadi_options.enable_scaling:
         variable_scaling = _derive_variable_scaling(
             np.asarray(raw_lower).reshape(-1),
             np.asarray(decision_variables_0).reshape(-1),
@@ -605,10 +634,10 @@ def create_variational_solver(
     nlp_solver_options = dict(solver_options)
     if warm_start:
         nlp_solver_options["ipopt.warm_start_init_point"] = "yes"
-    if problem.transcription_options.interation_callback is not None:
+    if casadi_options.interation_callback is not None:
         callback_wrapper = CallbackWrapper.new(
             "variational_iteration_callback",
-            problem.transcription_options.interation_callback,
+            casadi_options.interation_callback,
             nx=decision_variables.shape[0],
             ng=normalized_g.shape[0],
             assemble_solution=assemble_solution,
@@ -616,7 +645,7 @@ def create_variational_solver(
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
     init_solver = None
-    if problem.transcription_options.initialise_near_guess:
+    if casadi_options.initialise_near_guess:
         init_spec = {
             "f": normalized_cost,
             "x": decision_variables,
@@ -707,6 +736,147 @@ def create_variational_solver(
     )
     solver._callback_wrapper = callback_wrapper
     return solver
+
+
+def create_variational_solver(
+    problem: VariationalProblem,
+) -> CasadiVariationalSolver:
+    """Create a CasADi solver, optionally applying p-then-h refinement."""
+    options = _casadi_options(problem)
+    if not options.refinement_enabled:
+        return _create_variational_solver_once(problem)
+    if options.maximum_degree < problem.transcription_options.minimum_degree:
+        raise ValueError(
+            "maximum_degree must be at least transcription minimum_degree"
+        )
+
+    initial_intervals = split_at_non_differentiable_points(
+        problem.control or [], 1.0, problem.transcription_options
+    )
+    initial_degrees = [problem.transcription_options.minimum_degree] * len(
+        initial_intervals
+    )
+    initial_solver = _create_variational_solver_once(
+        problem, initial_intervals, initial_degrees
+    )
+
+    def solve_adaptive(
+        fixed_parameters: Dict[str, float],
+    ) -> VariationalSolution:
+        intervals = initial_intervals
+        degrees = initial_degrees
+        casadi = get_backend_by_name("casadi")
+        for iteration in range(options.maximum_iterations + 1):
+            current_solver = (
+                initial_solver
+                if iteration == 0
+                else _create_variational_solver_once(
+                    problem, intervals, degrees
+                )
+            )
+            solution = current_solver._solve_once(**fixed_parameters)
+            errors = []
+            for start, stop in intervals:
+                local = np.asarray(
+                    lgr_points(max(max(degrees) + 2, 4)), dtype=float
+                )
+                times = start + (local + 1.0) * (stop - start) / 2.0
+                defect = []
+                for tau in times:
+                    poly = next(
+                        p
+                        for p in solution.path.polys
+                        if p.interval[0] <= tau <= p.interval[1]
+                    )
+                    s = float(poly._interval_to_s(tau))
+                    values = poly.values.reshape(poly.dimension, -1)
+                    derivative_powers = np.array(
+                        [
+                            0.0,
+                            *(
+                                i * s ** (i - 1)
+                                for i in range(1, poly.bases.shape[0])
+                            ),
+                        ]
+                    )
+                    derivative = (
+                        values
+                        @ poly.bases.T
+                        @ derivative_powers
+                        / (poly.width * solution.t_final)
+                    )
+                    physical_t = float(tau) * solution.t_final
+                    (model_dx,) = casadi.evaluate(
+                        problem.system.dxdt,
+                        [
+                            physical_t,
+                            solution.state(float(tau)),
+                            solution.algebraic(float(tau)),
+                            solution.control_law(float(tau)),
+                            solution.parameters,
+                        ],
+                    )
+                    model_dx = np.asarray(model_dx, dtype=float).reshape(-1)
+                    scale = np.maximum(1.0, np.abs(model_dx))
+                    defect.append(
+                        np.max(
+                            np.abs(derivative.reshape(-1) - model_dx) / scale
+                        )
+                    )
+                errors.append(float(max(defect, default=0.0)))
+            maximum_error = max(errors, default=0.0)
+            if maximum_error <= options.mesh_tolerance:
+                return solution
+            if iteration == options.maximum_iterations:
+                raise RuntimeError(
+                    "CasADi adaptive refinement reached maximum_iterations "
+                    f"({options.maximum_iterations}) with defect "
+                    f"{maximum_error:.3e}"
+                )
+
+            new_intervals = []
+            new_degrees = []
+            for (start, stop), degree, error in zip(
+                intervals, degrees, errors
+            ):
+                if error <= options.mesh_tolerance:
+                    new_intervals.append((start, stop))
+                    new_degrees.append(degree)
+                    continue
+                predicted = degree + max(
+                    1,
+                    int(
+                        math.ceil(
+                            math.log(
+                                max(error, 1e-300) / options.mesh_tolerance
+                            )
+                        )
+                    ),
+                )
+                if predicted <= options.maximum_degree:
+                    new_intervals.append((start, stop))
+                    new_degrees.append(predicted)
+                    continue
+                midpoint = (start + stop) / 2.0
+                if stop - start <= 2.0 * options.minimum_interval_duration:
+                    raise RuntimeError(
+                        "CasADi adaptive refinement cannot split interval "
+                        f"[{start}, {stop}] below minimum_interval_duration"
+                    )
+                new_intervals.extend(((start, midpoint), (midpoint, stop)))
+                new_degrees.extend(
+                    (
+                        problem.transcription_options.minimum_degree,
+                        problem.transcription_options.minimum_degree,
+                    )
+                )
+            intervals, degrees = new_intervals, new_degrees
+        raise RuntimeError(
+            "CasADi adaptive refinement terminated unexpectedly"
+        )
+
+    initial_solver._adaptive_solve = solve_adaptive
+    return initial_solver
 
 
 class CasadiSolutionAssembler:

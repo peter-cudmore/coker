@@ -1,5 +1,6 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Generic, List, Optional, TypeVar
 
 import numpy as np
 
@@ -56,16 +57,26 @@ class VariationalIterationCallback:
         return True
 
 
+class BackendTranscriptionOptions(ABC):
+    """Interface for a backend-owned variational transcription policy."""
+
+    @property
+    @abstractmethod
+    def backend_name(self) -> str:
+        """Return the identifier of the backend that consumes this policy."""
+
+
+T = TypeVar("T", bound=BackendTranscriptionOptions)
+
+
 @dataclass
-class TranscriptionOptions:
+class TranscriptionOptions(Generic[T]):
+    """Configure backend-independent collocation transcription settings."""
+
     minimum_n_intervals: int = 4
     minimum_degree: int = 7
     absolute_tolerance: float = 1e-12
-    verbose: bool = False
-    optimiser_options: dict = field(default_factory=dict)
-    initialise_near_guess: bool = True
-    enable_scaling: bool = True
-    interation_callback: Optional[VariationalIterationCallback] = None
+    backend_options: Optional[T] = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +127,10 @@ class VariationalProblem:
     parameters: Optional[List[ParameterVariable]] = None
     system_parameter_map: Optional[np.ndarray] = None
     quadratures: List[QuadratureSpec] = field(default_factory=list)
+    transcription_options: TranscriptionOptions = field(
+        default_factory=TranscriptionOptions
+    )
+    backend: Optional[str] = "casadi"
     path_constraints: List[InequalityExpression] = field(default_factory=list)
     terminal_constraints: List[InequalityExpression] = field(
         default_factory=list
@@ -123,10 +138,6 @@ class VariationalProblem:
     initial_constraints: List[InequalityExpression] = field(
         default_factory=list
     )
-    transcription_options: TranscriptionOptions = field(
-        default_factory=TranscriptionOptions
-    )
-    backend: Optional[str] = "casadi"
 
     @property
     def horizon_decision(self) -> Optional[BoundedVariable]:
