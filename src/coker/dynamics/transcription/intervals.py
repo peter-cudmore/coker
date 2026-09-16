@@ -75,7 +75,9 @@ def split_at_non_differentiable_points(
 
     sorted_boundaries.sort()
 
-    while len(sorted_boundaries) < transcription_options.minimum_n_intervals:
+    while (
+        len(sorted_boundaries) - 1 < transcription_options.minimum_n_intervals
+    ):
         intervals = [
             (stop - start, (stop + start) / 2)
             for start, stop in zip(

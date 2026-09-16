@@ -542,8 +542,6 @@ def _create_variational_solver_once(
     for constraint in problem.initial_constraints:
         append_constraint(constraint, initial_args)
 
-    interval_dynamics = []
-    interval_quadratures = []
     for poly in poly_collection.polys:
         interval_dynamics = []
         interval_quadratures = []
@@ -815,7 +813,7 @@ def _create_variational_solver_once(
     if warm_start:
         nlp_solver_options["ipopt.warm_start_init_point"] = "yes"
     if casadi_options.interation_callback is not None:
-        callback_wrapper = CallbackWrapper.new(
+        callback_wrapper = CallbackWrapper(
             "variational_iteration_callback",
             casadi_options.interation_callback,
             nx=decision_variables.shape[0],
@@ -957,7 +955,6 @@ def create_variational_solver(
     initial_solver = _create_variational_solver_once(
         preparation, initial_intervals, initial_degrees
     )
-    initial_solver._static_preparation = preparation
     if not options.refinement_enabled:
         return initial_solver
 
@@ -1061,7 +1058,6 @@ def create_variational_solver(
             "CasADi adaptive refinement terminated unexpectedly"
         )
 
-    initial_solver._compiled_transcriptions = compiled_transcriptions
     initial_solver._adaptive_solve = solve_adaptive
     return initial_solver
 
@@ -1356,10 +1352,6 @@ class CallbackWrapper(ca.Callback):
         self.unscale_objective = unscale_objective
         self.construct(name, {} if opts is None else opts)
         self._iterate_count = 0
-
-    @staticmethod
-    def new(*args, **kwargs) -> "CallbackWrapper":
-        return CallbackWrapper(*args, **kwargs)
 
     def get_n_in(self):
         return ca.nlpsol_n_out()

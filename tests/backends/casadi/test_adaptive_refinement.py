@@ -77,6 +77,6 @@ def test_casadi_refinement_disabled_preserves_initial_mesh():
 
     assert solution.solve_info is not None
     assert solution.solve_info.success
-    assert len(_interval_starts(solution)) == 1
+    assert len(_interval_starts(solution)) == 2
     assert np.isfinite(solution.cost)
     np.testing.assert_allclose(solution.state(0.0), [0.0], atol=1e-7)

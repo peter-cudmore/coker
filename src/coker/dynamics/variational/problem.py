@@ -1,6 +1,5 @@
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Generic, List, Optional, TypeVar
+from typing import List, Optional
 
 import numpy as np
 
@@ -57,26 +56,14 @@ class VariationalIterationCallback:
         return True
 
 
-class BackendTranscriptionOptions(ABC):
-    """Interface for a backend-owned variational transcription policy."""
-
-    @property
-    @abstractmethod
-    def backend_name(self) -> str:
-        """Return the identifier of the backend that consumes this policy."""
-
-
-T = TypeVar("T", bound=BackendTranscriptionOptions)
-
-
 @dataclass
-class TranscriptionOptions(Generic[T]):
+class TranscriptionOptions:
     """Configure backend-independent collocation transcription settings."""
 
     minimum_n_intervals: int = 4
     minimum_degree: int = 7
     absolute_tolerance: float = 1e-12
-    backend_options: Optional[T] = None
+    backend_options: Optional[object] = None
 
 
 @dataclass(frozen=True)

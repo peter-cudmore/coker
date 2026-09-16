@@ -39,7 +39,6 @@ from coker.dynamics.transcription.intervals import (
 from coker.dynamics.variational.builder import VariationalProblemBuilder
 from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
 from coker.dynamics.variational.problem import (
-    BackendTranscriptionOptions,
     ConstraintSpec,
     QuadratureSpec,
     TranscriptionOptions,
@@ -55,7 +54,6 @@ __all__ = [
     "BoundVector",
     "ConstantControlSolution",
     "ConstantControlVariable",
-    "BackendTranscriptionOptions",
     "ConstraintSpec",
     "ControlLaw",
     "ControlSolution",
