@@ -1,4 +1,5 @@
-from functools import reduce
+from dataclasses import dataclass
+from functools import lru_cache, reduce
 from operator import mul
 from typing import Callable, Iterator, List, Tuple
 
@@ -70,6 +71,63 @@ def evaluate_legendre_polynomial(x, n):
     return np.polynomial.legendre.legval(x, [0] * n + [1])
 
 
+_REFERENCE_OPERATOR_CACHE_SIZE = 32
+
+
+@dataclass(frozen=True)
+class _ReferenceCollocationOperators:
+    """Degree-specific operators on the reference interval [-1, 1]."""
+
+    nodes: tuple[float, ...]
+    basis_coefficients: tuple[tuple[float, ...], ...]
+    derivative_matrix: tuple[tuple[float, ...], ...]
+    continuity_coefficients: tuple[float, ...]
+    quadrature_weights: tuple[float, ...]
+
+
+@lru_cache(maxsize=_REFERENCE_OPERATOR_CACHE_SIZE)
+def _reference_operators(n: int) -> _ReferenceCollocationOperators:
+    """Build immutable LGR operators that do not depend on an interval."""
+    colocation_times = np.asarray(lgr_points(n), dtype=float)
+    bases = np.empty((n + 1, n + 1))
+    derivative_matrix = np.empty((n + 1, n + 1))
+    continuity_coefficients = np.empty(n + 1)
+
+    for i, tau_i in enumerate(colocation_times):
+        factors = [
+            np.poly1d([1, -tau_j]) / (tau_i - tau_j)
+            for tau_j in colocation_times
+            if tau_i != tau_j
+        ]
+        basis_i = reduce(mul, factors)
+        bases[:, i] = basis_i.c[::-1]
+        dbasis_i = np.polyder(basis_i)
+
+        continuity_coefficients[i] = basis_i(1)
+        derivative_matrix[:, i] = [
+            dbasis_i(tau_j) for tau_j in colocation_times
+        ]
+
+    # See https://mathworld.wolfram.com/RadauQuadrature.html.
+    quadrature_weights = np.array(
+        [2 / n**2]
+        + [
+            (1 - x_i) / (n * evaluate_legendre_polynomial(x_i, n - 1)) ** 2
+            for x_i in colocation_times[1:-1]
+        ]
+        + [0],
+        dtype=float,
+    )
+
+    return _ReferenceCollocationOperators(
+        nodes=tuple(colocation_times),
+        basis_coefficients=tuple(tuple(row) for row in bases),
+        derivative_matrix=tuple(tuple(row) for row in derivative_matrix),
+        continuity_coefficients=tuple(continuity_coefficients),
+        quadrature_weights=tuple(quadrature_weights),
+    )
+
+
 def generate_discritisation_operators(
     interval: Tuple[float, float], n: int
 ) -> Tuple[
@@ -98,53 +156,25 @@ def generate_discritisation_operators(
             List[np.ndarray]: Derivative operators at each knot point.
             np.ndarray: Integral operator for the interval.
     """
-    colocation_times = np.array(lgr_points(n))
-
-    # using n LRG collocation points covering [-1, 1)
-    # plus an additional non-collocated point a +1
-    #
-
-    bases = np.empty((n + 1, n + 1))
+    reference = _reference_operators(n)
     time_scaling_factor = (interval[1] - interval[0]) / 2
-    colocation_coeff = np.zeros((n + 1, n + 1))
-    continuity_coeff = np.zeros(n + 1)
-    quad_coeff = np.zeros_like(continuity_coeff)
-
-    for i in range(n + 1):
-        tau_i = colocation_times[i]
-        factors = [
-            np.poly1d([1, -tau_j]) / (tau_i - tau_j)
-            for tau_j in colocation_times
-            if tau_i != tau_j
-        ]
-        basis_i = reduce(mul, factors)
-        bases[:, i] = basis_i.c[::-1]
-        dbasis_i = np.polyder(basis_i)
-
-        continuity_coeff[i] = basis_i(1)
-        colocation_coeff[i, :] = [
-            dbasis_i(tau_j) / time_scaling_factor for tau_j in colocation_times
-        ]
-        quad_coeff[i] = np.polyint(basis_i)(1.0) * time_scaling_factor
-    # see https://mathworld.wolfram.com/RadauQuadrature.html
-    weights = (
-        np.array(
-            [2 / n**2]
-            + [
-                (1 - x_i) / (n * evaluate_legendre_polynomial(x_i, n - 1)) ** 2
-                for x_i in colocation_times[1:-1]
-            ]
-            + [0]
-        )
-        * time_scaling_factor
-    )
 
     def t(tau):
         return (interval[0] + interval[1]) / 2 + tau * time_scaling_factor
 
-    derivative: List[np.ndarray] = [row for row in colocation_coeff.T]
-    bases: List[np.ndarray] = [row for row in bases]
-    integral_weights: np.ndarray = weights.reshape(1, n + 1)
+    colocation_times = np.array(reference.nodes, dtype=float)
+    bases = [
+        np.array(coefficients, dtype=float)
+        for coefficients in reference.basis_coefficients
+    ]
+    derivative = []
+    for row in reference.derivative_matrix:
+        scaled_row = np.array(row, dtype=float)
+        scaled_row /= time_scaling_factor
+        derivative.append(scaled_row)
+    integral_weights = np.array(reference.quadrature_weights, dtype=float)
+    integral_weights *= time_scaling_factor
+    integral_weights = integral_weights.reshape(1, n + 1)
     return colocation_times, t, bases, derivative, integral_weights
 
 
