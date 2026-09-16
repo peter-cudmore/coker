@@ -83,6 +83,55 @@ The current executable lowering boundary is the CasADi backend; symbolic
 construction is backend-independent, but solving a built problem currently
 requires CasADi.
 
+Adaptive CasADi transcription
+-----------------------------
+
+Use :class:`~coker.backends.casadi.CasadiVariationalOptions` through
+``TranscriptionOptions.backend_options`` to enable adaptive collocation. The
+initial mesh uses ``minimum_n_intervals`` intervals at ``minimum_degree``.
+After each solve, CasADi estimates a local state defect. An interval first has
+its polynomial degree increased up to ``maximum_degree``; it is bisected only
+when that limit is reached. Refinement stops when every interval is at or below
+``mesh_tolerance`` or raises :class:`RuntimeError` after
+``maximum_iterations`` refinements.
+
+.. code-block:: python
+
+   from coker.backends.casadi import CasadiVariationalOptions
+   from coker.dynamics import TranscriptionOptions
+
+   transcription_options = TranscriptionOptions(
+       minimum_n_intervals=4,
+       minimum_degree=3,
+       backend_options=CasadiVariationalOptions(
+           refinement_enabled=True,
+           mesh_tolerance=1e-5,
+           maximum_degree=10,
+           maximum_iterations=6,
+       ),
+   )
+   problem = VariationalProblem(
+       system=system,
+       loss=loss,
+       t_final=1.0,
+       backend="casadi",
+       transcription_options=transcription_options,
+   )
+
+``mesh_tolerance`` is the maximum scaled relative state defect per interval.
+``minimum_interval_duration`` prevents h-refinement from splitting an interval
+below that normalized width. ``maximum_degree`` must be no less than
+``minimum_degree``. Leave ``refinement_enabled`` at its default ``False`` for
+a single transcription solve.
+
+During one adaptive solve, the CasADi model setup is retained while only
+mesh-dependent NLPs are compiled. Refined meshes interpolate the preceding
+path as their initial state, and previously visited mesh signatures are reused
+by a bounded cache. These are implementation details: callers should treat
+adaptive solving as deterministic for a fixed problem, options, and parameter
+values, rather than rely on a cache lifetime across separately created
+problems.
+
 Heterogeneous and function-valued parameters
 --------------------------------------------
 
