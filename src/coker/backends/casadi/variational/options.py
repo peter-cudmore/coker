@@ -14,8 +14,28 @@ class CasadiVariationalOptions(BackendTranscriptionOptions):
     """Configure CasADi variational transcription and adaptive refinement.
 
     These options apply only when a :class:`~coker.dynamics.VariationalProblem`
-    is solved by the CasADi backend.  Leave ``refinement_enabled`` false to
+    is solved by the CasADi backend. Leave ``refinement_enabled`` false to
     retain the single-transcription solve path.
+
+    Attributes:
+        verbose: Enable IPOPT and CasADi solver output.
+        optimiser_options: Options passed directly to the CasADi NLP solver.
+        initialise_near_guess: Run the feasibility initialiser before the
+            optimisation solve.
+        enable_scaling: Normalize decision variables, constraints, and the
+            objective before solving.
+        interation_callback: Receive each IPOPT iterate as a variational
+            solution. The field name preserves the existing public spelling.
+        refinement_enabled: Re-solve using p-then-h mesh refinement until the
+            local state defect meets ``mesh_tolerance``.
+        mesh_tolerance: Maximum scaled relative state defect permitted in each
+            collocation interval.
+        maximum_degree: Largest local collocation polynomial degree selected by
+            p-refinement before the interval is split.
+        maximum_iterations: Maximum number of mesh-refinement iterations after
+            the initial transcription solve.
+        minimum_interval_duration: Smallest normalized interval width allowed
+            when h-refinement bisects an interval.
     """
 
     verbose: bool = False
