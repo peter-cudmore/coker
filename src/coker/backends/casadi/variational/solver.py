@@ -143,7 +143,6 @@ class CasadiVariationalSolver(VariationalSolver):
 
     def _solve_once(
         self,
-        *,
         path_initial_guess=None,
         **fixed_parameters,
     ) -> VariationalSolution:
@@ -462,36 +461,8 @@ def _create_variational_solver_once(
 ) -> CasadiVariationalSolver:
     """Compile one mesh-bound NLP from mesh-independent preparation."""
     problem = preparation.problem
-    casadi = preparation.casadi
-    casadi_options = preparation.options
-    z_size = preparation.z_size
-    q_size = preparation.q_size
-    has_state_quadrature = preparation.has_state_quadrature
-    tolerance = preparation.tolerance
-    free_horizon = preparation.free_horizon
-    proj_x = preparation.proj_x
-    proj_z = preparation.proj_z
-    proj_q = preparation.proj_q
-    projectors = preparation.solution_projectors()
-    control_factory = preparation.control_factory
-    u_symbols = preparation.u_symbols
-    u_lower = preparation.u_lower
-    u_upper = preparation.u_upper
-    u_guess = preparation.u_guess
-    control_eval = preparation.control_eval
-    control_decoder = preparation.control_decoder
-    p = preparation.p
-    p_symbols = preparation.p_symbols
-    p0_guess = preparation.p0_guess
-    p_lower_base = preparation.p_lower_base
-    p_guess_base = preparation.p_guess_base
-    p_upper_base = preparation.p_upper_base
-    p_output_map = preparation.p_output_map
-    proj_p = preparation.proj_p
-    horizon_symbol = preparation.horizon_symbol
     duration = preparation.duration
-    parameter_names = preparation.parameter_names
-    parameter_indices = preparation.parameter_indices
+    projectors = preparation.solution_projectors()
 
     poly_collection = SymbolicPolyCollection(
         name="x",
@@ -501,10 +472,10 @@ def _create_variational_solver_once(
     )
     horizon = problem.horizon_decision
     layout = DecisionLayout(
-        horizon_size=1 if free_horizon else 0,
+        horizon_size=1 if preparation.free_horizon else 0,
         path_size=int(poly_collection.symbols().shape[0]),
-        control_size=int(u_symbols.shape[0]),
-        parameter_size=int(p_symbols.shape[0]),
+        control_size=int(preparation.u_symbols.shape[0]),
+        parameter_size=int(preparation.p_symbols.shape[0]),
         horizon_lower=horizon.lower_bound if horizon else -ca.inf,
         horizon_guess=horizon.guess if horizon else 1.0,
         horizon_upper=horizon.upper_bound if horizon else ca.inf,
@@ -512,44 +483,56 @@ def _create_variational_solver_once(
 
     path_symbols = poly_collection.symbols()
     decision_variables = layout.vector(
-        horizon_symbol, path_symbols, u_symbols, p_symbols
+        preparation.horizon_symbol,
+        path_symbols,
+        preparation.u_symbols,
+        preparation.p_symbols,
     )
 
     equalities = []
     (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
     x_end = list(poly_collection.interval_ends())[:-1]
 
-    x0_guess, z0_guess = casadi.evaluate(
-        problem.system.x0, [t0, u_guess, proj_p @ p0_guess]
+    x0_guess, z0_guess = preparation.casadi.evaluate(
+        problem.system.x0,
+        [t0, preparation.u_guess, preparation.proj_p @ preparation.p0_guess],
     )
-    x0_val, z0_val = casadi.evaluate(
-        problem.system.x0, [t0, control_eval, proj_p @ p]
+    x0_val, z0_val = preparation.casadi.evaluate(
+        problem.system.x0,
+        [t0, preparation.control_eval, preparation.proj_p @ preparation.p],
     )
 
-    equalities.append(proj_x @ x0_symbol - x0_val)
-    if z_size > 0:
-        equalities.append(proj_z @ z0_val)
+    equalities.append(preparation.proj_x @ x0_symbol - x0_val)
+    if preparation.z_size > 0:
+        equalities.append(preparation.proj_z @ z0_val)
 
     equalities.extend(
         xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
     )
 
     def append_constraint(constraint, args):
-        (value,) = casadi.evaluate(constraint.residual, args)
+        (value,) = preparation.casadi.evaluate(constraint.residual, args)
         g_constraints.append(value)
         g_constraint_lowers.append(
-            casadi.to_backend_array(constraint.lower_bound)
+            preparation.casadi.to_backend_array(constraint.lower_bound)
         )
         g_constraint_uppers.append(
-            casadi.to_backend_array(constraint.upper_bound)
+            preparation.casadi.to_backend_array(constraint.upper_bound)
         )
 
     g_constraints = []
     g_constraint_lowers = []
     g_constraint_uppers = []
-    q_initial = ca.DM.zeros(q_size, 1)
-    u_initial = control_eval(t0)
-    initial_args = (t0, proj_x @ x0_symbol, z0_val, u_initial, p, q_initial)
+    q_initial = ca.DM.zeros(preparation.q_size, 1)
+    u_initial = preparation.control_eval(t0)
+    initial_args = (
+        t0,
+        preparation.proj_x @ x0_symbol,
+        z0_val,
+        u_initial,
+        preparation.p,
+        q_initial,
+    )
     for constraint in problem.initial_constraints:
         append_constraint(constraint, initial_args)
 
@@ -558,24 +541,32 @@ def _create_variational_solver_once(
         interval_quadratures = []
         for t, v, dv in poly.knot_points():
             physical_t = duration * t
-            x = proj_x @ v
-            z = proj_z @ v
-            if z_size > 0:
+            x = preparation.proj_x @ v
+            z = preparation.proj_z @ v
+            if preparation.z_size > 0:
                 z += z0_val
-            dx = proj_x @ dv
+            dx = preparation.proj_x @ dv
             (dynamics_ij,) = preparation.dynamics(
-                physical_t, x, z, control_eval(t), proj_p @ p
+                physical_t,
+                x,
+                z,
+                preparation.control_eval(t),
+                preparation.proj_p @ preparation.p,
             )
             scale = duration
             interval_dynamics.append(scale * dynamics_ij)
             equalities.append(dx - scale * dynamics_ij)
 
-            if q_size > 0:
-                dq = proj_q @ dv
+            if preparation.q_size > 0:
+                dq = preparation.proj_q @ dv
                 quadrature_values = []
-                if has_state_quadrature:
+                if preparation.has_state_quadrature:
                     (base_quadrature,) = preparation.quadrature(
-                        physical_t, x, z, control_eval(t), proj_p @ p
+                        physical_t,
+                        x,
+                        z,
+                        preparation.control_eval(t),
+                        preparation.proj_p @ preparation.p,
                     )
                     quadrature_values.append(base_quadrature)
                 quadrature_values.extend(
@@ -584,9 +575,9 @@ def _create_variational_solver_once(
                             physical_t,
                             x,
                             z,
-                            control_eval(t),
-                            proj_p @ p,
-                            proj_q @ v,
+                            preparation.control_eval(t),
+                            preparation.proj_p @ preparation.p,
+                            preparation.proj_q @ v,
                         )
                     )
                 )
@@ -594,9 +585,13 @@ def _create_variational_solver_once(
                 equalities.append(dq - quadrature_ij)
                 interval_quadratures.append(quadrature_ij)
 
-            if z_size > 0:
+            if preparation.z_size > 0:
                 (alg,) = preparation.algebraic(
-                    physical_t, x, z, control_eval(t), proj_p @ p
+                    physical_t,
+                    x,
+                    z,
+                    preparation.control_eval(t),
+                    preparation.proj_p @ preparation.p,
                 )
                 equalities.append(alg)
 
@@ -604,59 +599,78 @@ def _create_variational_solver_once(
         _, v_end = poly.end_point()
         d_x = ca.hcat(interval_dynamics)
         weights = ca.DM(poly.weights[0, :-1])
-        equalities.append(proj_x @ v_end - proj_x @ v_start - d_x @ weights)
-        if q_size > 0:
+        equalities.append(
+            preparation.proj_x @ v_end
+            - preparation.proj_x @ v_start
+            - d_x @ weights
+        )
+        if preparation.q_size > 0:
             d_q = ca.hcat(interval_quadratures)
             equalities.append(
-                proj_q @ v_end - proj_q @ v_start - d_q @ weights
+                preparation.proj_q @ v_end
+                - preparation.proj_q @ v_start
+                - d_q @ weights
             )
 
     # Path constraints apply at interval endpoints and collocation knots.
     for poly in poly_collection.polys:
         for t, v in (poly.start_point(), poly.end_point()):
             physical_t = duration * t
-            x = proj_x @ v
-            z = proj_z @ v
-            if z_size > 0:
+            x = preparation.proj_x @ v
+            z = preparation.proj_z @ v
+            if preparation.z_size > 0:
                 z += z0_val
-            q = proj_q @ v
-            args = (physical_t, x, z, control_eval(t), proj_p @ p, q)
+            q = preparation.proj_q @ v
+            args = (
+                physical_t,
+                x,
+                z,
+                preparation.control_eval(t),
+                preparation.proj_p @ preparation.p,
+                q,
+            )
             for constraint in problem.path_constraints:
                 append_constraint(constraint, args)
 
     path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
     path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
-    lower_bound_base = layout.bounds(path_lower_bound, u_lower, p_lower_base)
+    lower_bound_base = layout.bounds(
+        path_lower_bound, preparation.u_lower, preparation.p_lower_base
+    )
     upper_bound_base = layout.upper_bounds(
-        path_upper_bound, u_upper, p_upper_base
+        path_upper_bound, preparation.u_upper, preparation.p_upper_base
     )
 
     def normalized_time(time):
-        return time if free_horizon else time / duration
+        return time if preparation.free_horizon else time / duration
 
     def state_proxy(time):
-        return proj_x @ poly_collection(normalized_time(time))
+        return preparation.proj_x @ poly_collection(normalized_time(time))
 
     def input_proxy(time):
-        return control_eval(normalized_time(time))
+        return preparation.control_eval(normalized_time(time))
 
     def solution_proxy(*args):
         if len(args) == 1:
-            time, control_val, p_val = args[0], control_eval, p
-        elif control_factory is None:
+            time, control_val, p_val = (
+                args[0],
+                preparation.control_eval,
+                preparation.p,
+            )
+        elif preparation.control_factory is None:
             time, p_val = args
-            control_val = control_eval
+            control_val = preparation.control_eval
         else:
             time, control_val, p_val = args
         tau = normalized_time(time)
         u_val = control_val(tau)
         inner = poly_collection(tau)
-        x_tau = proj_x @ inner
-        z_tau = proj_z @ inner
-        q_tau = proj_q @ inner
-        (y_val,) = casadi.evaluate(
+        x_tau = preparation.proj_x @ inner
+        z_tau = preparation.proj_z @ inner
+        q_tau = preparation.proj_q @ inner
+        (y_val,) = preparation.casadi.evaluate(
             problem.system.y,
-            [time, x_tau, z_tau, u_val, proj_p @ p_val, q_tau],
+            [time, x_tau, z_tau, u_val, preparation.proj_p @ p_val, q_tau],
         )
         return y_val
 
@@ -666,10 +680,10 @@ def _create_variational_solver_once(
             "t_final": duration,
             "t_0": ca.DM.zeros(1, 1),
             "_state": state_proxy,
-            "p": p,
+            "p": preparation.p,
             "_output": solution_proxy,
         }
-        if control_factory is not None:
+        if preparation.control_factory is not None:
             values[problem.system.inputs.name] = input_proxy
         workspace = {
             index: values[name]
@@ -680,49 +694,54 @@ def _create_variational_solver_once(
             if name in values
         }
         (cost,) = substitute([problem.loss], workspace)
-    elif control_factory is None:
-        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
+    elif preparation.control_factory is None:
+        (cost,) = preparation.casadi.evaluate(
+            problem.loss, [solution_proxy, preparation.p]
+        )
     else:
-        (cost,) = casadi.evaluate(
-            problem.loss, [solution_proxy, control_factory, p]
+        (cost,) = preparation.casadi.evaluate(
+            problem.loss,
+            [solution_proxy, preparation.control_factory, preparation.p],
         )
 
     equality_values = [e for e in equalities if e is not None]
     g = ca.vertcat(*equality_values, *g_constraints)
     equality_size = sum(e.shape[0] for e in equality_values)
     ubg = ca.vertcat(
-        tolerance * ca.DM.ones(equality_size, 1), *g_constraint_uppers
+        preparation.tolerance * ca.DM.ones(equality_size, 1),
+        *g_constraint_uppers,
     )
     lbg = ca.vertcat(
-        -tolerance * ca.DM.ones(equality_size, 1), *g_constraint_lowers
+        -preparation.tolerance * ca.DM.ones(equality_size, 1),
+        *g_constraint_lowers,
     )
 
     t_end, v_end = poly_collection.polys[-1].end_point()
-    x_end_val = proj_x @ v_end
-    z_end_val = proj_z @ v_end
-    q_end_val = proj_q @ v_end
-    u_end = control_eval(t_end)
+    x_end_val = preparation.proj_x @ v_end
+    z_end_val = preparation.proj_z @ v_end
+    q_end_val = preparation.proj_q @ v_end
+    u_end = preparation.control_eval(t_end)
     end_args = (
         duration * t_end,
         x_end_val,
         z_end_val,
         u_end,
-        p,
+        preparation.p,
         q_end_val,
     )
 
     for constraint in problem.terminal_constraints:
-        (g_inner,) = casadi.evaluate(constraint.residual, end_args)
-        g_lower = casadi.to_backend_array(constraint.lower_bound)
-        g_upper = casadi.to_backend_array(constraint.upper_bound)
+        (g_inner,) = preparation.casadi.evaluate(constraint.residual, end_args)
+        g_lower = preparation.casadi.to_backend_array(constraint.lower_bound)
+        g_upper = preparation.casadi.to_backend_array(constraint.upper_bound)
         assert g_lower.shape == g_inner.shape == g_upper.shape
         g = ca.vertcat(g, g_inner)
         lbg = ca.vertcat(lbg, g_lower)
         ubg = ca.vertcat(ubg, g_upper)
 
-    solver_options = dict(casadi_options.optimiser_options)
+    solver_options = dict(preparation.options.optimiser_options)
     warm_start = bool(solver_options.pop("warm_start", False))
-    if not casadi_options.verbose:
+    if not preparation.options.verbose:
         solver_options.update(
             {
                 "ipopt.print_level": 0,
@@ -733,14 +752,18 @@ def _create_variational_solver_once(
 
     state_guess = ca.vertcat(
         x0_guess,
-        z0_guess if z0_guess is not None else ca.DM.zeros(z_size, 1),
-        ca.DM.zeros(q_size, 1),
+        (
+            z0_guess
+            if z0_guess is not None
+            else ca.DM.zeros(preparation.z_size, 1)
+        ),
+        ca.DM.zeros(preparation.q_size, 1),
     )
     n_reps = int(path_symbols.shape[0] / state_guess.shape[0])
     path_guess = ca.repmat(state_guess, n_reps)
     raw_decision_variables = decision_variables
     physical_decision_variables_0 = layout.guess(
-        path_guess, u_guess, p_guess_base
+        path_guess, preparation.u_guess, preparation.p_guess_base
     )
     physical_lower_bound_base = ca.DM(lower_bound_base)
     physical_upper_bound_base = ca.DM(upper_bound_base)
@@ -750,7 +773,7 @@ def _create_variational_solver_once(
     objective_scale = 1.0
     variable_scaling = None
 
-    if casadi_options.enable_scaling:
+    if preparation.options.enable_scaling:
         variable_scaling = _derive_variable_scaling(
             np.asarray(physical_lower_bound_base).reshape(-1),
             np.asarray(physical_decision_variables_0).reshape(-1),
@@ -772,7 +795,7 @@ def _create_variational_solver_once(
                     physical_decision_variables_0
                 )
             ),
-            tolerance,
+            preparation.tolerance,
         )
         normalized_cost /= objective_scale
         decision_variables = normalized_variables
@@ -791,19 +814,25 @@ def _create_variational_solver_once(
                 path_symbols, raw_decision_variables, physical_variables
             ),
             ca.substitute(
-                u_symbols, raw_decision_variables, physical_variables
+                preparation.u_symbols,
+                raw_decision_variables,
+                physical_variables,
             ),
-            ca.substitute(p, raw_decision_variables, physical_variables),
             ca.substitute(
-                p_symbols, raw_decision_variables, physical_variables
+                preparation.p, raw_decision_variables, physical_variables
+            ),
+            ca.substitute(
+                preparation.p_symbols,
+                raw_decision_variables,
+                physical_variables,
             ),
             (
                 ca.substitute(
-                    horizon_symbol,
+                    preparation.horizon_symbol,
                     raw_decision_variables,
                     physical_variables,
                 )
-                if free_horizon
+                if preparation.free_horizon
                 else ca.DM(problem.t_final)
             ),
         ],
@@ -814,19 +843,19 @@ def _create_variational_solver_once(
         output_function=f_out,
         poly_collection=poly_collection,
         projectors=projectors,
-        proj_p=proj_p,
-        parameter_solution_map=p_output_map,
-        decode_controls=control_decoder,
+        proj_p=preparation.proj_p,
+        parameter_solution_map=preparation.p_output_map,
+        decode_controls=preparation.control_decoder,
     )
 
     callback_wrapper = None
     nlp_solver_options = dict(solver_options)
     if warm_start:
         nlp_solver_options["ipopt.warm_start_init_point"] = "yes"
-    if casadi_options.interation_callback is not None:
+    if preparation.options.interation_callback is not None:
         callback_wrapper = CallbackWrapper(
             "variational_iteration_callback",
-            casadi_options.interation_callback,
+            preparation.options.interation_callback,
             nx=decision_variables.shape[0],
             ng=normalized_g.shape[0],
             assemble_solution=assemble_solution,
@@ -834,17 +863,21 @@ def _create_variational_solver_once(
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
     init_solver = None
-    if casadi_options.initialise_near_guess:
+    if preparation.options.initialise_near_guess:
         init_spec = {
             "f": normalized_cost,
             "x": decision_variables,
             "g": ca.vertcat(
                 normalized_g,
                 ca.substitute(
-                    p_symbols, raw_decision_variables, physical_variables
+                    preparation.p_symbols,
+                    raw_decision_variables,
+                    physical_variables,
                 ),
                 ca.substitute(
-                    u_symbols, raw_decision_variables, physical_variables
+                    preparation.u_symbols,
+                    raw_decision_variables,
+                    physical_variables,
                 ),
             ),
         }
@@ -878,17 +911,19 @@ def _create_variational_solver_once(
         fixed_parameters: Dict[str, ParameterVariable],
         path_initial_guess=None,
     ) -> Dict[str, ca.DM]:
-        unknown = sorted(set(fixed_parameters) - set(parameter_indices))
+        unknown = sorted(
+            set(fixed_parameters) - set(preparation.parameter_indices)
+        )
         if unknown:
             raise KeyError(f"Unknown solver parameters: {', '.join(unknown)}")
 
         physical_x0 = ca.DM(physical_decision_variables_0)
         physical_lbx = ca.DM(physical_lower_bound_base)
         physical_ubx = ca.DM(physical_upper_bound_base)
-        p_guess = ca.DM(p_guess_base)
+        p_guess = ca.DM(preparation.p_guess_base)
 
         for name, value in fixed_parameters.items():
-            index = parameter_indices[name]
+            index = preparation.parameter_indices[name]
             decision_index = parameter_offset + index
             if isinstance(value, BoundedVariable):
                 p_guess[index] = value.guess
@@ -916,8 +951,12 @@ def _create_variational_solver_once(
             lbx, ubx = variable_scaling.encode_bounds(
                 physical_lbx, physical_ubx
             )
-        init_lbg = ca.vertcat(lbg, p_guess, ca.DM.zeros(u_symbols.shape))
-        init_ubg = ca.vertcat(ubg, p_guess, ca.DM.zeros(u_symbols.shape))
+        init_lbg = ca.vertcat(
+            lbg, p_guess, ca.DM.zeros(preparation.u_symbols.shape)
+        )
+        init_ubg = ca.vertcat(
+            ubg, p_guess, ca.DM.zeros(preparation.u_symbols.shape)
+        )
         return {
             "x0": x0,
             "lbx": lbx,
@@ -930,7 +969,7 @@ def _create_variational_solver_once(
 
     solver = CasadiVariationalSolver(
         problem=problem,
-        parameters=parameter_names,
+        parameters=preparation.parameter_names,
         map_arguments=map_arguments,
         solver=nlp_solver,
         assemble_solution=assemble_solution,
