@@ -58,12 +58,27 @@ class VariationalIterationCallback:
 
 @dataclass
 class TranscriptionOptions:
-    """Configure collocation transcription.
+    """Control the collocation mesh and solve behavior.
 
-    ``verbose``, ``optimiser_options``, ``initialise_near_guess``,
-    ``enable_scaling``, and ``interation_callback`` are retained for CasADi
-    compatibility. New code SHOULD place CasADi-specific settings in
-    ``backend_options``.
+    Attributes:
+        minimum_n_intervals: Minimum number of intervals in the initial mesh.
+        minimum_degree: Collocation polynomial degree for each initial interval.
+        absolute_tolerance: Permitted absolute residual for transcription
+            equality constraints.
+        verbose: Show CasADi/IPOPT solver output when no explicit backend
+            options are supplied.
+        optimiser_options: CasADi/IPOPT solver settings when no explicit
+            backend options are supplied.
+        initialise_near_guess: Run CasADi's feasibility initializer before
+            optimization when no explicit backend options are supplied.
+        enable_scaling: Scale CasADi decision variables, constraints, and
+            objective when no explicit backend options are supplied.
+        interation_callback: Receive CasADi solver iterations when no explicit
+            backend options are supplied.
+        backend_options: Backend-specific solve policy. Use
+            ``CasadiVariationalOptions`` to configure CasADi, including
+            adaptive mesh refinement.
+
     """
 
     minimum_n_intervals: int = 4

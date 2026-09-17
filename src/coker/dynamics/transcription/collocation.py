@@ -81,8 +81,39 @@ class _ReferenceCollocationOperators:
     nodes: tuple[float, ...]
     basis_coefficients: tuple[tuple[float, ...], ...]
     derivative_matrix: tuple[tuple[float, ...], ...]
-    continuity_coefficients: tuple[float, ...]
     quadrature_weights: tuple[float, ...]
+
+    def for_interval(self, interval: Tuple[float, float]) -> Tuple[
+        List[float],
+        Callable[[float], float],
+        List[np.ndarray],
+        List[np.ndarray],
+        np.ndarray,
+    ]:
+        """Return fresh interval-scaled operators."""
+        time_scaling_factor = (interval[1] - interval[0]) / 2
+
+        def t(tau):
+            return (interval[0] + interval[1]) / 2 + tau * time_scaling_factor
+
+        derivative = [
+            np.asarray(row, dtype=float) / time_scaling_factor
+            for row in self.derivative_matrix
+        ]
+        weights = (
+            np.asarray(self.quadrature_weights, dtype=float)
+            * time_scaling_factor
+        )
+        return (
+            np.asarray(self.nodes, dtype=float),
+            t,
+            [
+                np.asarray(coefficients, dtype=float)
+                for coefficients in self.basis_coefficients
+            ],
+            derivative,
+            weights.reshape(1, len(self.nodes)),
+        )
 
 
 def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
@@ -90,7 +121,6 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
     colocation_times = np.asarray(lgr_points(n), dtype=float)
     bases = np.empty((n + 1, n + 1))
     derivative_matrix = np.empty((n + 1, n + 1))
-    continuity_coefficients = np.empty(n + 1)
 
     for i, tau_i in enumerate(colocation_times):
         factors = [
@@ -102,7 +132,6 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
         bases[:, i] = basis_i.c[::-1]
         dbasis_i = np.polyder(basis_i)
 
-        continuity_coefficients[i] = basis_i(1)
         derivative_matrix[:, i] = [
             dbasis_i(tau_j) for tau_j in colocation_times
         ]
@@ -122,7 +151,6 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
         nodes=tuple(colocation_times),
         basis_coefficients=tuple(tuple(row) for row in bases),
         derivative_matrix=tuple(tuple(row) for row in derivative_matrix),
-        continuity_coefficients=tuple(continuity_coefficients),
         quadrature_weights=tuple(quadrature_weights),
     )
 
@@ -132,57 +160,6 @@ def _reference_operator_cache():
     return lru_cache(maxsize=_REFERENCE_OPERATOR_CACHE_SIZE)(
         _build_reference_operators
     )
-
-
-def _generate_discritisation_operators(
-    interval: Tuple[float, float],
-    n: int,
-    reference: _ReferenceCollocationOperators,
-) -> Tuple[
-    List[float],
-    Callable[[float], float],
-    List[np.ndarray],
-    List[np.ndarray],
-    np.ndarray,
-]:
-    """
-    Generates discretisation operators over an interval using
-    Legendre-Gauss-Radau (LGR) collocation points. This function
-    computes knot points, Legendre polynomial bases, and derivative
-    and integral operators for numerical methods.
-
-    Args:
-        interval: A tuple representing the interval [a, b] over which
-            the discretisation is computed.
-        n: The number of discretisation points.
-
-    Returns:
-        Tuple containing:
-            List[float]: Knot points of length (n + 1).
-            Callable[[float], float]: Transformed time variable.
-            List[np.ndarray]: Legendre polynomial bases at each point.
-            List[np.ndarray]: Derivative operators at each knot point.
-            np.ndarray: Integral operator for the interval.
-    """
-    time_scaling_factor = (interval[1] - interval[0]) / 2
-
-    def t(tau):
-        return (interval[0] + interval[1]) / 2 + tau * time_scaling_factor
-
-    colocation_times = np.array(reference.nodes, dtype=float)
-    bases = [
-        np.array(coefficients, dtype=float)
-        for coefficients in reference.basis_coefficients
-    ]
-    derivative = []
-    for row in reference.derivative_matrix:
-        scaled_row = np.array(row, dtype=float)
-        scaled_row /= time_scaling_factor
-        derivative.append(scaled_row)
-    integral_weights = np.array(reference.quadrature_weights, dtype=float)
-    integral_weights *= time_scaling_factor
-    integral_weights = integral_weights.reshape(1, n + 1)
-    return colocation_times, t, bases, derivative, integral_weights
 
 
 def generate_discritisation_operators(
@@ -195,9 +172,7 @@ def generate_discritisation_operators(
     np.ndarray,
 ]:
     """Generate uncached discretisation operators for one interval."""
-    return _generate_discritisation_operators(
-        interval, n, _build_reference_operators(n)
-    )
+    return _build_reference_operators(n).for_interval(interval)
 
 
 class InterpolatingPoly:
@@ -264,15 +239,12 @@ class InterpolatingPoly:
         self.dimension = dimension
         self.degree = degree
         self.values = values
-        self._reference_operators = reference_operators
-
-        op_values = (
-            _generate_discritisation_operators(
-                interval, degree, reference_operators
-            )
+        self._reference_operators = (
+            reference_operators
             if reference_operators is not None
-            else generate_discritisation_operators(interval, degree)
+            else _build_reference_operators(degree)
         )
+        op_values = self._reference_operators.for_interval(interval)
         self.s, self.s_to_interval, bases, derivatives, self.weights = (
             op_values
         )
