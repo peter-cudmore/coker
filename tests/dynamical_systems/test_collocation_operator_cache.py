@@ -3,10 +3,7 @@ import numpy as np
 from coker.dynamics.transcription import collocation
 
 
-def test_reference_operators_are_cached_and_returned_operators_are_independent(
-    monkeypatch,
-):
-    collocation._reference_operators.cache_clear()
+def test_reference_operator_caches_are_scoped(monkeypatch):
     lgr_points = collocation.lgr_points
     calls = 0
 
@@ -16,7 +13,16 @@ def test_reference_operators_are_cached_and_returned_operators_are_independent(
         return lgr_points(degree)
 
     monkeypatch.setattr(collocation, "lgr_points", count_lgr_points)
+    first_cache = collocation._reference_operator_cache()
+    second_cache = collocation._reference_operator_cache()
 
+    first = first_cache(4)
+    assert first_cache(4) is first
+    assert second_cache(4) is not first
+    assert calls == 2
+
+
+def test_returned_operator_arrays_are_independent():
     first = collocation.generate_discritisation_operators((0.0, 2.0), 4)
     expected = collocation.generate_discritisation_operators((3.0, 5.0), 4)
 
@@ -28,8 +34,9 @@ def test_reference_operators_are_cached_and_returned_operators_are_independent(
     first_bases.clear()
     first_derivative.clear()
 
-    actual = collocation.generate_discritisation_operators((3.0, 5.0), 4)
-    actual_nodes, _, actual_bases, actual_derivative, actual_weights = actual
+    actual_nodes, _, actual_bases, actual_derivative, actual_weights = (
+        collocation.generate_discritisation_operators((3.0, 5.0), 4)
+    )
     (
         expected_nodes,
         _,
@@ -38,7 +45,6 @@ def test_reference_operators_are_cached_and_returned_operators_are_independent(
         expected_weights,
     ) = expected
 
-    assert calls == 1
     np.testing.assert_allclose(actual_nodes, expected_nodes)
     np.testing.assert_allclose(actual_bases, expected_bases)
     np.testing.assert_allclose(actual_derivative, expected_derivative)

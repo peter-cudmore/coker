@@ -7,7 +7,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import casadi as ca
 import numpy as np
-from coker.dynamics.transcription.collocation import lgr_points
+from coker.dynamics.transcription.collocation import (
+    _reference_operator_cache,
+    lgr_points,
+)
 
 from coker.backends.backend import VariationalSolver, get_backend_by_name
 from coker.backends.casadi.lower import (
@@ -310,6 +313,7 @@ class _StaticVariationalPreparation:
         )
         self.parameter_names = list(self.p_output_map.indices)
         self.parameter_indices = dict(self.p_output_map.indices)
+        self.reference_operators = _reference_operator_cache()
 
         self._defect_dynamics_maps: OrderedDict[int, ca.Function] = (
             OrderedDict()
@@ -469,6 +473,7 @@ def _create_variational_solver_once(
         dimension=preparation.path_size,
         intervals=intervals,
         degrees=list(degrees),
+        preparation=preparation,
     )
     horizon = problem.horizon_decision
     layout = DecisionLayout(
@@ -1177,10 +1182,27 @@ class CasadiSolutionAssembler:
 
 
 class SymbolicPoly(InterpolatingPoly):
-    def __init__(self, name, dimension, interval, degree):
+    def __init__(
+        self,
+        name,
+        dimension,
+        interval,
+        degree,
+        preparation: Optional[_StaticVariationalPreparation] = None,
+    ):
         size = (degree + 1) * dimension
         values = ca.MX.sym(name, size)
-        super().__init__(dimension, interval, degree, values)
+        super().__init__(
+            dimension,
+            interval,
+            degree,
+            values,
+            reference_operators=(
+                preparation.reference_operators(degree)
+                if preparation is not None
+                else None
+            ),
+        )
 
     def symbols(self):
         return self.values
@@ -1208,10 +1230,23 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
     def symbols(self):
         return ca.vertcat(*[p.values for p in self.polys])
 
-    def __init__(self, name, dimension, intervals, degrees):
+    def __init__(
+        self,
+        name,
+        dimension,
+        intervals,
+        degrees,
+        preparation: Optional[_StaticVariationalPreparation] = None,
+    ):
         assert len(intervals) == len(degrees)
         polys = [
-            SymbolicPoly(f"{name}_{i}", dimension, interval, degree)
+            SymbolicPoly(
+                f"{name}_{i}",
+                dimension,
+                interval,
+                degree,
+                preparation=preparation,
+            )
             for i, (interval, degree) in enumerate(zip(intervals, degrees))
         ]
         super().__init__(polys)
@@ -1228,7 +1263,13 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
             offset += p.size()
 
         polys = [
-            InterpolatingPoly(p.dimension, p.interval, p.degree, np_array[slc])
+            InterpolatingPoly(
+                p.dimension,
+                p.interval,
+                p.degree,
+                np_array[slc],
+                reference_operators=p._reference_operators,
+            )
             for (p, slc) in zip(self.polys, slices)
         ]
         return InterpolatingPolyCollection(polys)

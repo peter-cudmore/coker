@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from functools import lru_cache, reduce
 from operator import mul
-from typing import Callable, Iterator, List, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple
 
 import numpy as np
 
@@ -85,8 +85,7 @@ class _ReferenceCollocationOperators:
     quadrature_weights: tuple[float, ...]
 
 
-@lru_cache(maxsize=_REFERENCE_OPERATOR_CACHE_SIZE)
-def _reference_operators(n: int) -> _ReferenceCollocationOperators:
+def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
     """Build immutable LGR operators that do not depend on an interval."""
     colocation_times = np.asarray(lgr_points(n), dtype=float)
     bases = np.empty((n + 1, n + 1))
@@ -128,8 +127,17 @@ def _reference_operators(n: int) -> _ReferenceCollocationOperators:
     )
 
 
-def generate_discritisation_operators(
-    interval: Tuple[float, float], n: int
+def _reference_operator_cache():
+    """Create an LRU cache owned by one transcription formulation."""
+    return lru_cache(maxsize=_REFERENCE_OPERATOR_CACHE_SIZE)(
+        _build_reference_operators
+    )
+
+
+def _generate_discritisation_operators(
+    interval: Tuple[float, float],
+    n: int,
+    reference: _ReferenceCollocationOperators,
 ) -> Tuple[
     List[float],
     Callable[[float], float],
@@ -156,7 +164,6 @@ def generate_discritisation_operators(
             List[np.ndarray]: Derivative operators at each knot point.
             np.ndarray: Integral operator for the interval.
     """
-    reference = _reference_operators(n)
     time_scaling_factor = (interval[1] - interval[0]) / 2
 
     def t(tau):
@@ -176,6 +183,21 @@ def generate_discritisation_operators(
     integral_weights *= time_scaling_factor
     integral_weights = integral_weights.reshape(1, n + 1)
     return colocation_times, t, bases, derivative, integral_weights
+
+
+def generate_discritisation_operators(
+    interval: Tuple[float, float], n: int
+) -> Tuple[
+    List[float],
+    Callable[[float], float],
+    List[np.ndarray],
+    List[np.ndarray],
+    np.ndarray,
+]:
+    """Generate uncached discretisation operators for one interval."""
+    return _generate_discritisation_operators(
+        interval, n, _build_reference_operators(n)
+    )
 
 
 class InterpolatingPoly:
@@ -210,7 +232,14 @@ class InterpolatingPoly:
             polynomial.
     """
 
-    def __init__(self, dimension, interval, degree, values):
+    def __init__(
+        self,
+        dimension,
+        interval,
+        degree,
+        values,
+        reference_operators: Optional[_ReferenceCollocationOperators] = None,
+    ):
         """
         Initializes an instance of the class with given parameters
         and specific configurations required for discretization and
@@ -235,9 +264,15 @@ class InterpolatingPoly:
         self.dimension = dimension
         self.degree = degree
         self.values = values
+        self._reference_operators = reference_operators
 
-        op_values = generate_discritisation_operators(interval, degree)
-
+        op_values = (
+            _generate_discritisation_operators(
+                interval, degree, reference_operators
+            )
+            if reference_operators is not None
+            else generate_discritisation_operators(interval, degree)
+        )
         self.s, self.s_to_interval, bases, derivatives, self.weights = (
             op_values
         )
@@ -357,4 +392,10 @@ class InterpolatingPoly:
 
         dimension = size // len(self.s)
 
-        return InterpolatingPoly(dimension, self.interval, self.degree, values)
+        return InterpolatingPoly(
+            dimension,
+            self.interval,
+            self.degree,
+            values,
+            reference_operators=self._reference_operators,
+        )
