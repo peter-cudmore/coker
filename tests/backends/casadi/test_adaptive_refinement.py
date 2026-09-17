@@ -21,6 +21,29 @@ def test_transcription_options_default_to_no_backend_policy():
     assert TranscriptionOptions().backend_options is None
 
 
+def test_legacy_casadi_options_are_forwarded():
+    callback = object()
+    transcription = TranscriptionOptions(
+        verbose=True,
+        optimiser_options={"ipopt.max_iter": 3},
+        initialise_near_guess=False,
+        enable_scaling=False,
+        interation_callback=callback,
+    )
+
+    from coker.backends.casadi.variational.solver import _casadi_options
+
+    options = _casadi_options(
+        type("Problem", (), {"transcription_options": transcription})()
+    )
+
+    assert options.verbose
+    assert options.optimiser_options == {"ipopt.max_iter": 3}
+    assert not options.initialise_near_guess
+    assert not options.enable_scaling
+    assert options.interation_callback is callback
+
+
 def _boundary_layer_problem(*, options: CasadiVariationalOptions):
     """Build a deliberately under-resolved, stable fast-mode trajectory."""
     system = create_autonomous_ode(

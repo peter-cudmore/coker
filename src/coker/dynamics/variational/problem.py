@@ -58,11 +58,22 @@ class VariationalIterationCallback:
 
 @dataclass
 class TranscriptionOptions:
-    """Configure backend-independent collocation transcription settings."""
+    """Configure collocation transcription.
+
+    ``verbose``, ``optimiser_options``, ``initialise_near_guess``,
+    ``enable_scaling``, and ``interation_callback`` are retained for CasADi
+    compatibility. New code SHOULD place CasADi-specific settings in
+    ``backend_options``.
+    """
 
     minimum_n_intervals: int = 4
     minimum_degree: int = 7
     absolute_tolerance: float = 1e-12
+    verbose: bool = False
+    optimiser_options: dict = field(default_factory=dict)
+    initialise_near_guess: bool = True
+    enable_scaling: bool = True
+    interation_callback: Optional[VariationalIterationCallback] = None
     backend_options: Optional[object] = None
 
 

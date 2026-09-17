@@ -40,10 +40,21 @@ from coker.backends.casadi.variational.variable_scaling import (
 
 
 def _casadi_options(problem: VariationalProblem) -> CasadiVariationalOptions:
-    """Return validated CasADi options for a variational problem."""
+    """Return validated CasADi options for a variational problem.
+
+    Legacy ``TranscriptionOptions`` fields remain supported when no explicit
+    backend policy is supplied. An explicit backend policy takes precedence.
+    """
     options = problem.transcription_options.backend_options
     if options is None:
-        return CasadiVariationalOptions()
+        transcription = problem.transcription_options
+        return CasadiVariationalOptions(
+            verbose=transcription.verbose,
+            optimiser_options=transcription.optimiser_options,
+            initialise_near_guess=transcription.initialise_near_guess,
+            enable_scaling=transcription.enable_scaling,
+            interation_callback=transcription.interation_callback,
+        )
     if not isinstance(options, CasadiVariationalOptions):
         raise TypeError(
             "CasADi variational solving requires "
