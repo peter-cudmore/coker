@@ -36,3 +36,7 @@ Do not use `typing.Protocol`. Prefer a local abstract base class or metaclass
 when an interface is required. Keep inheritance shallow: one interface or base
 class and one child class unless additional depth is necessary.
 
+Function and method names MUST use an active verb, omit context apparent from
+their module or owning type, and remain concise. Abbreviations are allowed when
+they are established, consistent conventions in the existing codebase.
+

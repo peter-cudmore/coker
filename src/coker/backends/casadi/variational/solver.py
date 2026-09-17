@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import casadi as ca
 import numpy as np
 from coker.dynamics.transcription.collocation import (
-    _reference_operator_cache,
+    _create_reference_operator_cache,
     lgr_points,
 )
 
@@ -42,7 +42,7 @@ from coker.backends.casadi.variational.variable_scaling import (
 )
 
 
-def _casadi_options(problem: VariationalProblem) -> CasadiVariationalOptions:
+def _resolve_options(problem: VariationalProblem) -> CasadiVariationalOptions:
     """Return validated CasADi options for a variational problem.
 
     Legacy ``TranscriptionOptions`` fields remain supported when no explicit
@@ -70,7 +70,7 @@ def noop(*_args):
     return None
 
 
-def _is_acceptable_small_search_direction(
+def _accepts_small_search_direction(
     solve_info,
     result: Dict[str, ca.DM],
     lower_bounds: ca.DM,
@@ -194,7 +194,7 @@ class CasadiVariationalSolver(VariationalSolver):
         )
         solve_info = solve_info_from_casadi_stats(self._solver.stats())
         if not solve_info.success:
-            if _is_acceptable_small_search_direction(
+            if _accepts_small_search_direction(
                 solve_info,
                 result,
                 solver_arguments["lbg"],
@@ -230,7 +230,7 @@ class _TranscriptionFactory:
     def __init__(self, problem: VariationalProblem):
         self.problem = problem
         self.casadi = get_backend_by_name("casadi")
-        self.options = _casadi_options(problem)
+        self.options = _resolve_options(problem)
         x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
         self.x_size = x_dim.flat()
         self.z_size = z_dim.flat() if z_dim else 0
@@ -313,7 +313,7 @@ class _TranscriptionFactory:
         )
         self.parameter_names = list(self.p_output_map.indices)
         self.parameter_indices = dict(self.p_output_map.indices)
-        self.reference_operator_cache = _reference_operator_cache()
+        self.reference_operator_cache = _create_reference_operator_cache()
 
         self._defect_dynamics_maps: OrderedDict[int, ca.Function] = (
             OrderedDict()
@@ -321,7 +321,7 @@ class _TranscriptionFactory:
         self._defect_nodes: OrderedDict[int, tuple[float, ...]] = OrderedDict()
         self._defect_dynamics = self._build_defect_dynamics()
 
-    def solution_projectors(
+    def copy_solution_projectors(
         self,
     ) -> Tuple[
         Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
@@ -332,20 +332,20 @@ class _TranscriptionFactory:
             for projector in self._projectors
         )
 
-    def dynamics(self, *args):
+    def evaluate_dynamics(self, *args):
         return self.casadi.evaluate(self.problem.system.dxdt, args)
 
-    def quadrature(self, *args):
+    def evaluate_quadrature(self, *args):
         if self.problem.system.dqdt is not None:
             return self.casadi.evaluate(self.problem.system.dqdt, args)
         return noop
 
-    def algebraic(self, *args):
+    def evaluate_algebraic(self, *args):
         if self.problem.system.g:
             return self.casadi.evaluate(self.problem.system.g, args)
         return noop
 
-    def registered_quadratures(self, args):
+    def evaluate_registered_quadratures(self, args):
         values = []
         for spec in self.problem.quadratures:
             workspace = dict(zip(spec.integrand.tape.input_indicies, args))
@@ -361,7 +361,7 @@ class _TranscriptionFactory:
         algebraic = ca.MX.sym("defect_algebraic", self.z_size)
         control = ca.MX.sym("defect_control", self.u_symbols.shape[0])
         parameters = ca.MX.sym("defect_parameters", self.proj_p.shape[0])
-        (dynamics,) = self.dynamics(
+        (dynamics,) = self.evaluate_dynamics(
             time, state, algebraic, control, parameters
         )
         return ca.Function(
@@ -370,7 +370,7 @@ class _TranscriptionFactory:
             [dynamics],
         )
 
-    def defect_nodes(self, degree: int) -> np.ndarray:
+    def get_defect_nodes(self, degree: int) -> np.ndarray:
         """Return fresh elevated LGR defect nodes for one local degree."""
         try:
             nodes = self._defect_nodes.pop(degree)
@@ -409,9 +409,11 @@ class _TranscriptionFactory:
             dtype=float,
         )
 
-    def interval_defect(self, poly, solution: VariationalSolution) -> float:
+    def measure_interval_defect(
+        self, poly, solution: VariationalSolution
+    ) -> float:
         """Return the maximum scaled state defect for one solved polynomial."""
-        reference_nodes = self.defect_nodes(poly.degree)
+        reference_nodes = self.get_defect_nodes(poly.degree)
         times = poly.interval[0] + (reference_nodes + 1.0) * poly.width
         path_values = np.asarray(poly.values, dtype=float).reshape(
             poly.dimension, -1
@@ -458,7 +460,7 @@ class _TranscriptionFactory:
         )
 
 
-def _create_variational_solver_once(
+def _create_solver(
     factory: _TranscriptionFactory,
     intervals: List[Tuple[float, float]],
     degrees: List[int],
@@ -466,7 +468,7 @@ def _create_variational_solver_once(
     """Compile one mesh-specific NLP from shared factory state."""
     problem = factory.problem
     duration = factory.duration
-    projectors = factory.solution_projectors()
+    projectors = factory.copy_solution_projectors()
 
     poly_collection = SymbolicPolyCollection(
         name="x",
@@ -551,7 +553,7 @@ def _create_variational_solver_once(
             if factory.z_size > 0:
                 z += z0_val
             dx = factory.proj_x @ dv
-            (dynamics_ij,) = factory.dynamics(
+            (dynamics_ij,) = factory.evaluate_dynamics(
                 physical_t,
                 x,
                 z,
@@ -566,7 +568,7 @@ def _create_variational_solver_once(
                 dq = factory.proj_q @ dv
                 quadrature_values = []
                 if factory.has_state_quadrature:
-                    (base_quadrature,) = factory.quadrature(
+                    (base_quadrature,) = factory.evaluate_quadrature(
                         physical_t,
                         x,
                         z,
@@ -575,7 +577,7 @@ def _create_variational_solver_once(
                     )
                     quadrature_values.append(base_quadrature)
                 quadrature_values.extend(
-                    factory.registered_quadratures(
+                    factory.evaluate_registered_quadratures(
                         (
                             physical_t,
                             x,
@@ -591,7 +593,7 @@ def _create_variational_solver_once(
                 interval_quadratures.append(quadrature_ij)
 
             if factory.z_size > 0:
-                (alg,) = factory.algebraic(
+                (alg,) = factory.evaluate_algebraic(
                     physical_t,
                     x,
                     z,
@@ -984,7 +986,7 @@ def create_variational_solver(
     problem: VariationalProblem,
 ) -> CasadiVariationalSolver:
     """Create a CasADi solver, optionally applying p-then-h refinement."""
-    options = _casadi_options(problem)
+    options = _resolve_options(problem)
     if (
         options.refinement_enabled
         and options.maximum_degree
@@ -1001,7 +1003,7 @@ def create_variational_solver(
     initial_degrees = [problem.transcription_options.minimum_degree] * len(
         initial_intervals
     )
-    initial_solver = _create_variational_solver_once(
+    initial_solver = _create_solver(
         factory, initial_intervals, initial_degrees
     )
     if not options.refinement_enabled:
@@ -1031,7 +1033,7 @@ def create_variational_solver(
         try:
             solver = compiled_transcriptions.pop(signature)
         except KeyError:
-            solver = _create_variational_solver_once(
+            solver = _create_solver(
                 factory, list(signature[0]), list(signature[1])
             )
             if len(compiled_transcriptions) == cache_capacity:
@@ -1052,7 +1054,7 @@ def create_variational_solver(
                 **fixed_parameters,
             )
             errors = [
-                factory.interval_defect(poly, solution)
+                factory.measure_interval_defect(poly, solution)
                 for poly in solution.path.polys
             ]
             maximum_error = max(errors, default=0.0)
@@ -1202,7 +1204,7 @@ class SymbolicPoly(InterpolatingPoly):
         return self.values
 
     def __call__(self, t):
-        s = self._interval_to_s(t)
+        s = self._map_to_reference_coordinate(t)
         if not isinstance(s, (ca.SX, ca.MX)):
             try:
                 i = next(

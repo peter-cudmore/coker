@@ -83,7 +83,7 @@ class _ReferenceCollocationOperators:
     derivative_matrix: tuple[tuple[float, ...], ...]
     quadrature_weights: tuple[float, ...]
 
-    def for_interval(self, interval: Tuple[float, float]) -> Tuple[
+    def scale_to_interval(self, interval: Tuple[float, float]) -> Tuple[
         List[float],
         Callable[[float], float],
         List[np.ndarray],
@@ -155,7 +155,7 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
     )
 
 
-def _reference_operator_cache():
+def _create_reference_operator_cache():
     """Create an LRU cache owned by one transcription formulation."""
     return lru_cache(maxsize=_REFERENCE_OPERATOR_CACHE_SIZE)(
         _build_reference_operators
@@ -172,7 +172,7 @@ def generate_discritisation_operators(
     np.ndarray,
 ]:
     """Generate uncached discretisation operators for one interval."""
-    return _build_reference_operators(n).for_interval(interval)
+    return _build_reference_operators(n).scale_to_interval(interval)
 
 
 class InterpolatingPoly:
@@ -244,7 +244,7 @@ class InterpolatingPoly:
             if reference_operators is not None
             else _build_reference_operators(degree)
         )
-        op_values = self._reference_operators.for_interval(interval)
+        op_values = self._reference_operators.scale_to_interval(interval)
         self.s, self.s_to_interval, bases, derivatives, self.weights = (
             op_values
         )
@@ -268,7 +268,7 @@ class InterpolatingPoly:
     def size(self) -> int:
         return len(self.s) * self.dimension
 
-    def _interval_to_s(self, t):
+    def _map_to_reference_coordinate(self, t):
         mean = (self.interval[1] + self.interval[0]) / 2
         return (t - mean) / self.width
 
@@ -321,7 +321,7 @@ class InterpolatingPoly:
             self.interval[0] <= t <= self.interval[1]
         ), f"Value {t} is not in interval {self.interval}"
 
-        s = self._interval_to_s(t)
+        s = self._map_to_reference_coordinate(t)
         try:
             i = next(i for i, s_i in enumerate(self.s) if abs(s_i - s) < 1e-9)
             return np.reshape(

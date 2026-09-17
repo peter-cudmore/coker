@@ -80,15 +80,13 @@ def _assert_refined(solution):
 def test_parameter_sweeps_reuse_compiled_exact_mesh(monkeypatch):
     problem = _slow_fast_problem()
     builds = []
-    create_once = solver_module._create_variational_solver_once
+    create_once = solver_module._create_solver
 
     def track_construction(*args, **kwargs):
         builds.append(None)
         return create_once(*args, **kwargs)
 
-    monkeypatch.setattr(
-        solver_module, "_create_variational_solver_once", track_construction
-    )
+    monkeypatch.setattr(solver_module, "_create_solver", track_construction)
     solver = problem.get_solver("casadi")
 
     first = solver.solve(rate_offset=0.0)
@@ -107,7 +105,7 @@ def test_adaptive_refinement_uses_previous_path_as_refined_guess(monkeypatch):
         initialise_near_guess=False,
         enable_scaling=False,
     )
-    create_once = solver_module._create_variational_solver_once
+    create_once = solver_module._create_solver
     nlp_calls = []
 
     class NlpCallRecorder:
@@ -129,9 +127,7 @@ def test_adaptive_refinement_uses_previous_path_as_refined_guess(monkeypatch):
         nlp_calls.append(recorder)
         return constructed
 
-    monkeypatch.setattr(
-        solver_module, "_create_variational_solver_once", track_construction
-    )
+    monkeypatch.setattr(solver_module, "_create_solver", track_construction)
     solution = problem.get_solver("casadi").solve(rate_offset=0.0)
     _assert_refined(solution)
 

@@ -27,9 +27,9 @@ def test_legacy_casadi_options_are_forwarded():
         interation_callback=callback,
     )
 
-    from coker.backends.casadi.variational.solver import _casadi_options
+    from coker.backends.casadi.variational.solver import _resolve_options
 
-    options = _casadi_options(
+    options = _resolve_options(
         type("Problem", (), {"transcription_options": transcription})()
     )
 

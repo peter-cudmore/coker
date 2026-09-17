@@ -13,8 +13,8 @@ def test_reference_operator_caches_are_scoped(monkeypatch):
         return lgr_points(degree)
 
     monkeypatch.setattr(collocation, "lgr_points", count_lgr_points)
-    first_cache = collocation._reference_operator_cache()
-    second_cache = collocation._reference_operator_cache()
+    first_cache = collocation._create_reference_operator_cache()
+    second_cache = collocation._create_reference_operator_cache()
 
     first = first_cache(4)
     assert first_cache(4) is first
