@@ -45,3 +45,10 @@ they are established, consistent conventions in the existing codebase.
 Pull requests SHOULD be squash-merged by default. Their descriptions MUST
 include a changelog of user-visible changes.
 
+Commits with user-facing or functional changes MUST use the headline format
+`(type): Description`, where `type` is `fix` for a bug fix, `add` for a new
+feature, `mod` for modified functionality, or `rem` for a removed feature.
+Only formatted headlines are aggregated when a pull request is squash-merged;
+internal documentation, test, tooling, and refactoring commits MUST omit the
+format to avoid changelog noise.
+
