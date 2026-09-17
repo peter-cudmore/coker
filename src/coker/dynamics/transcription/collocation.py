@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from functools import lru_cache, reduce
+from functools import reduce
 from operator import mul
 from typing import Callable, Iterator, List, Optional, Tuple
 
@@ -69,9 +69,6 @@ def lgr_points(n: int) -> List[float]:
 
 def evaluate_legendre_polynomial(x, n):
     return np.polynomial.legendre.legval(x, [0] * n + [1])
-
-
-_REFERENCE_OPERATOR_CACHE_SIZE = 32
 
 
 @dataclass(frozen=True)
@@ -152,13 +149,6 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
         basis_coefficients=tuple(tuple(row) for row in bases),
         derivative_matrix=tuple(tuple(row) for row in derivative_matrix),
         quadrature_weights=tuple(quadrature_weights),
-    )
-
-
-def _create_reference_operator_cache():
-    """Create an LRU cache owned by one transcription formulation."""
-    return lru_cache(maxsize=_REFERENCE_OPERATOR_CACHE_SIZE)(
-        _build_reference_operators
     )
 
 

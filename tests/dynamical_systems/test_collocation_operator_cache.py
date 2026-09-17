@@ -3,25 +3,6 @@ import numpy as np
 from coker.dynamics.transcription import collocation
 
 
-def test_reference_operator_caches_are_scoped(monkeypatch):
-    lgr_points = collocation.lgr_points
-    calls = 0
-
-    def count_lgr_points(degree):
-        nonlocal calls
-        calls += 1
-        return lgr_points(degree)
-
-    monkeypatch.setattr(collocation, "lgr_points", count_lgr_points)
-    first_cache = collocation._create_reference_operator_cache()
-    second_cache = collocation._create_reference_operator_cache()
-
-    first = first_cache(4)
-    assert first_cache(4) is first
-    assert second_cache(4) is not first
-    assert calls == 2
-
-
 def test_returned_operator_arrays_are_independent():
     first = collocation.generate_discritisation_operators((0.0, 2.0), 4)
     expected = collocation.generate_discritisation_operators((3.0, 5.0), 4)

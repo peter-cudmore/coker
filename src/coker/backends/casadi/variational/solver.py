@@ -1,6 +1,6 @@
 from collections import OrderedDict
 import math
-
+from functools import lru_cache
 from dataclasses import replace
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional, Tuple
@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import casadi as ca
 import numpy as np
 from coker.dynamics.transcription.collocation import (
-    _create_reference_operator_cache,
+    _build_reference_operators,
     lgr_points,
 )
 
@@ -221,6 +221,7 @@ class CasadiVariationalSolver(VariationalSolver):
         )
 
 
+_REFERENCE_OPERATOR_CACHE_SIZE = 32
 _DEFECT_EVALUATOR_CACHE_SIZE = 16
 
 
@@ -313,7 +314,9 @@ class _TranscriptionFactory:
         )
         self.parameter_names = list(self.p_output_map.indices)
         self.parameter_indices = dict(self.p_output_map.indices)
-        self.reference_operator_cache = _create_reference_operator_cache()
+        self.reference_operator_cache = lru_cache(
+            maxsize=_REFERENCE_OPERATOR_CACHE_SIZE
+        )(_build_reference_operators)
 
         self._defect_dynamics_maps: OrderedDict[int, ca.Function] = (
             OrderedDict()
