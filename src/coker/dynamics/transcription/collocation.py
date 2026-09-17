@@ -118,14 +118,14 @@ class _ReferenceCollocationOperators:
 
 def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
     """Build immutable LGR operators that do not depend on an interval."""
-    colocation_times = np.asarray(lgr_points(n), dtype=float)
+    collocation_times = np.asarray(lgr_points(n), dtype=float)
     bases = np.empty((n + 1, n + 1))
     derivative_matrix = np.empty((n + 1, n + 1))
 
-    for i, tau_i in enumerate(colocation_times):
+    for i, tau_i in enumerate(collocation_times):
         factors = [
             np.poly1d([1, -tau_j]) / (tau_i - tau_j)
-            for tau_j in colocation_times
+            for tau_j in collocation_times
             if tau_i != tau_j
         ]
         basis_i = reduce(mul, factors)
@@ -133,7 +133,7 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
         dbasis_i = np.polyder(basis_i)
 
         derivative_matrix[:, i] = [
-            dbasis_i(tau_j) for tau_j in colocation_times
+            dbasis_i(tau_j) for tau_j in collocation_times
         ]
 
     # See https://mathworld.wolfram.com/RadauQuadrature.html.
@@ -141,14 +141,14 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
         [2 / n**2]
         + [
             (1 - x_i) / (n * evaluate_legendre_polynomial(x_i, n - 1)) ** 2
-            for x_i in colocation_times[1:-1]
+            for x_i in collocation_times[1:-1]
         ]
         + [0],
         dtype=float,
     )
 
     return _ReferenceCollocationOperators(
-        nodes=tuple(colocation_times),
+        nodes=tuple(collocation_times),
         basis_coefficients=tuple(tuple(row) for row in bases),
         derivative_matrix=tuple(tuple(row) for row in derivative_matrix),
         quadrature_weights=tuple(quadrature_weights),
