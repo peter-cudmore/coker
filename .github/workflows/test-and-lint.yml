@@ -58,3 +58,16 @@ jobs:
         run: uv run black --check --diff src
       - name: Run flake8
         run: uv run flake8 src tests docs examples scripts
+
+  pr-metadata:
+    name: PR metadata and changelog
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate PR metadata
+        run: python scripts/check_pr_metadata.py
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}

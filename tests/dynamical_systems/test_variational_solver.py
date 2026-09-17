@@ -6,6 +6,7 @@ import casadi as ca
 import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace, function
+from coker.backends.casadi import CasadiVariationalOptions
 from coker.dynamics import (
     BoundedVariable,
     TranscriptionOptions,
@@ -15,7 +16,7 @@ from coker.dynamics import (
 from coker.toolkits.codesign import SolveFailure
 from coker.backends.casadi.variational.solver import (
     ControlFactory,
-    _is_acceptable_small_search_direction,
+    _accepts_small_search_direction,
 )
 from coker.dynamics.variables import ConstantControlVariable
 
@@ -66,7 +67,7 @@ def test_accepts_feasible_small_search_direction():
         return_status="Search_Direction_Becomes_Too_Small"
     )
 
-    assert _is_acceptable_small_search_direction(
+    assert _accepts_small_search_direction(
         solve_info,
         result,
         ca.DM([0.0]),
@@ -213,10 +214,10 @@ def test_fitting_constant(enable_scaling, monkeypatch):
             BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2)
         ],
         t_final=1,
-        transcription_options=(
-            TranscriptionOptions()
-            if enable_scaling
-            else TranscriptionOptions(enable_scaling=False)
+        transcription_options=TranscriptionOptions(
+            backend_options=CasadiVariationalOptions(
+                enable_scaling=enable_scaling
+            )
         ),
         backend="casadi",
     )
@@ -588,7 +589,9 @@ def test_variational_solver_raises_on_infeasible_problem(variational_backend):
         terminal_constraints=[impossible_constraint >= 0],
         backend=variational_backend,
     )
-    problem.transcription_options.optimiser_options = {"ipopt.max_iter": 20}
+    problem.transcription_options.backend_options = CasadiVariationalOptions(
+        optimiser_options={"ipopt.max_iter": 20}
+    )
 
     with pytest.raises(SolveFailure) as exc_info:
         problem()
@@ -706,7 +709,9 @@ def test_reentrant_solver_warm_starts_from_previous_solution(
         t_final=1,
         backend=variational_backend,
     )
-    problem.transcription_options.optimiser_options = {"warm_start": True}
+    problem.transcription_options.backend_options = CasadiVariationalOptions(
+        optimiser_options={"warm_start": True}
+    )
 
     solver = problem.get_solver()
     assert solver is not None

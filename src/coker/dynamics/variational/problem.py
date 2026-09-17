@@ -58,6 +58,30 @@ class VariationalIterationCallback:
 
 @dataclass
 class TranscriptionOptions:
+    """Control the collocation mesh and solve behavior.
+
+    Attributes:
+        minimum_n_intervals: Minimum number of intervals in the initial mesh.
+        minimum_degree: Collocation polynomial degree for each initial
+            interval.
+        absolute_tolerance: Permitted absolute residual for transcription
+            equality constraints.
+        verbose: Show CasADi/IPOPT solver output when no explicit backend
+            options are supplied.
+        optimiser_options: CasADi/IPOPT solver settings when no explicit
+            backend options are supplied.
+        initialise_near_guess: Run CasADi's feasibility initializer before
+            optimization when no explicit backend options are supplied.
+        enable_scaling: Scale CasADi decision variables, constraints, and
+            objective when no explicit backend options are supplied.
+        interation_callback: Receive CasADi solver iterations when no explicit
+            backend options are supplied.
+        backend_options: Backend-specific solve policy. Use
+            ``CasadiVariationalOptions`` to configure CasADi, including
+            adaptive mesh refinement.
+
+    """
+
     minimum_n_intervals: int = 4
     minimum_degree: int = 7
     absolute_tolerance: float = 1e-12
@@ -66,6 +90,7 @@ class TranscriptionOptions:
     initialise_near_guess: bool = True
     enable_scaling: bool = True
     interation_callback: Optional[VariationalIterationCallback] = None
+    backend_options: Optional[object] = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +141,10 @@ class VariationalProblem:
     parameters: Optional[List[ParameterVariable]] = None
     system_parameter_map: Optional[np.ndarray] = None
     quadratures: List[QuadratureSpec] = field(default_factory=list)
+    transcription_options: TranscriptionOptions = field(
+        default_factory=TranscriptionOptions
+    )
+    backend: Optional[str] = "casadi"
     path_constraints: List[InequalityExpression] = field(default_factory=list)
     terminal_constraints: List[InequalityExpression] = field(
         default_factory=list
@@ -123,10 +152,6 @@ class VariationalProblem:
     initial_constraints: List[InequalityExpression] = field(
         default_factory=list
     )
-    transcription_options: TranscriptionOptions = field(
-        default_factory=TranscriptionOptions
-    )
-    backend: Optional[str] = "casadi"
 
     @property
     def horizon_decision(self) -> Optional[BoundedVariable]:

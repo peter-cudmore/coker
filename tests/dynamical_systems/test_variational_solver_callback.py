@@ -1,6 +1,7 @@
 import numpy as np
 
 from coker import VectorSpace
+from coker.backends.casadi import CasadiVariationalOptions
 
 from coker.dynamics import (
     BoundedVariable,
@@ -81,7 +82,9 @@ def test_variational_iteration_callback_loss_matches_payload(
         t_final=1,
         backend=variational_backend,
     )
-    problem.transcription_options.interation_callback = callback
+    problem.transcription_options.backend_options = CasadiVariationalOptions(
+        interation_callback=callback
+    )
 
     solution_out = problem()
 
@@ -134,9 +137,11 @@ def test_variational_iteration_callback_stepwise_payload_loss(
         t_final=1,
         backend=variational_backend,
     )
-    problem.transcription_options.initialise_near_guess = False
-    problem.transcription_options.optimiser_options = {"ipopt.max_iter": 50}
-    problem.transcription_options.interation_callback = callback
+    problem.transcription_options.backend_options = CasadiVariationalOptions(
+        initialise_near_guess=False,
+        optimiser_options={"ipopt.max_iter": 50},
+        interation_callback=callback,
+    )
 
     solution_out = problem()
 

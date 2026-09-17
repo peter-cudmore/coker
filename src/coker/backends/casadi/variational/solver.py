@@ -1,11 +1,16 @@
+from collections import OrderedDict
 import math
-
+from functools import lru_cache
 from dataclasses import replace
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional, Tuple
 
 import casadi as ca
 import numpy as np
+from coker.dynamics.transcription.collocation import (
+    _build_reference_operators,
+    lgr_points,
+)
 
 from coker.backends.backend import VariationalSolver, get_backend_by_name
 from coker.backends.casadi.lower import (
@@ -14,6 +19,7 @@ from coker.backends.casadi.lower import (
 )
 from coker.algebra.graph import Tracer
 from coker.backends.casadi.variational.layout import DecisionLayout
+from coker.backends.casadi.variational.options import CasadiVariationalOptions
 from coker.dynamics import (
     BoundedVariable,
     ConstantControlVariable,
@@ -36,11 +42,35 @@ from coker.backends.casadi.variational.variable_scaling import (
 )
 
 
+def _resolve_options(problem: VariationalProblem) -> CasadiVariationalOptions:
+    """Return validated CasADi options for a variational problem.
+
+    Legacy ``TranscriptionOptions`` fields remain supported when no explicit
+    backend policy is supplied. An explicit backend policy takes precedence.
+    """
+    options = problem.transcription_options.backend_options
+    if options is None:
+        transcription = problem.transcription_options
+        return CasadiVariationalOptions(
+            verbose=transcription.verbose,
+            optimiser_options=transcription.optimiser_options,
+            initialise_near_guess=transcription.initialise_near_guess,
+            enable_scaling=transcription.enable_scaling,
+            interation_callback=transcription.interation_callback,
+        )
+    if not isinstance(options, CasadiVariationalOptions):
+        raise TypeError(
+            "CasADi variational solving requires "
+            "CasadiVariationalOptions as backend_options"
+        )
+    return options
+
+
 def noop(*_args):
     return None
 
 
-def _is_acceptable_small_search_direction(
+def _accepts_small_search_direction(
     solve_info,
     result: Dict[str, ca.DM],
     lower_bounds: ca.DM,
@@ -81,7 +111,7 @@ class CasadiVariationalSolver(VariationalSolver):
         *,
         problem: VariationalProblem,
         parameters: List[str],
-        map_arguments: Callable[[Dict[str, float]], Dict[str, ca.DM]],
+        map_arguments: Callable[..., Dict[str, ca.DM]],
         solver: ca.Function,
         assemble_solution: Callable[
             [ca.DM, float, object], VariationalSolution
@@ -101,13 +131,28 @@ class CasadiVariationalSolver(VariationalSolver):
         self._last_primal: Optional[ca.DM] = None
         self._last_lam_x: Optional[ca.DM] = None
         self._last_lam_g: Optional[ca.DM] = None
+        self._adaptive_solve: Optional[
+            Callable[[Dict[str, float]], VariationalSolution]
+        ] = None
 
     @property
     def parameters(self) -> List[str]:
         return list(self._parameters)
 
     def solve(self, **fixed_parameters) -> VariationalSolution:
-        solver_arguments = self._map_arguments(fixed_parameters)
+        if self._adaptive_solve is not None:
+            return self._adaptive_solve(fixed_parameters)
+        return self._solve_once(**fixed_parameters)
+
+    def _solve_once(
+        self,
+        path_initial_guess=None,
+        **fixed_parameters,
+    ) -> VariationalSolution:
+        """Solve one fixed transcription without adaptive mesh dispatch."""
+        solver_arguments = self._map_arguments(
+            fixed_parameters, path_initial_guess
+        )
         x0 = solver_arguments["x0"]
         solver_kwargs = {
             "lbx": solver_arguments["lbx"],
@@ -116,7 +161,11 @@ class CasadiVariationalSolver(VariationalSolver):
             "ubg": solver_arguments["ubg"],
         }
 
-        if self._warm_start and self._last_primal is not None:
+        if (
+            path_initial_guess is None
+            and self._warm_start
+            and self._last_primal is not None
+        ):
             x0 = ca.fmin(
                 ca.fmax(self._last_primal, solver_kwargs["lbx"]),
                 solver_kwargs["ubx"],
@@ -145,7 +194,7 @@ class CasadiVariationalSolver(VariationalSolver):
         )
         solve_info = solve_info_from_casadi_stats(self._solver.stats())
         if not solve_info.success:
-            if _is_acceptable_small_search_direction(
+            if _accepts_small_search_direction(
                 solve_info,
                 result,
                 solver_arguments["lbg"],
@@ -172,66 +221,136 @@ class CasadiVariationalSolver(VariationalSolver):
         )
 
 
-def create_variational_solver(
-    problem: VariationalProblem,
-) -> CasadiVariationalSolver:
-    casadi = get_backend_by_name("casadi")
+_REFERENCE_OPERATOR_CACHE_SIZE = 32
+_DEFECT_EVALUATOR_CACHE_SIZE = 16
 
-    x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
-    x_size = x_dim.flat()
-    z_size = z_dim.flat() if z_dim else 0
-    q_size = (q_dim.flat() if q_dim else 0) + len(problem.quadratures)
-    tolerance = problem.transcription_options.absolute_tolerance
-    free_horizon = problem.horizon_decision is not None
 
-    intervals = split_at_non_differentiable_points(
-        problem.control if problem.control else [],
-        1.0,
-        problem.transcription_options,
-    )
-    colocation_points = [problem.transcription_options.minimum_degree] * len(
-        intervals
-    )
-    poly_collection = SymbolicPolyCollection(
-        name="x",
-        dimension=x_size + z_size + q_size,
-        intervals=intervals,
-        degrees=colocation_points,
-    )
-    proj_x = ca.hcat([ca.MX.eye(x_size), ca.MX.zeros(x_size, z_size + q_size)])
-    proj_z = ca.hcat(
-        [
-            ca.MX.zeros(z_size, x_size),
-            ca.MX.eye(z_size),
-            ca.MX.zeros(z_size, q_size),
-        ]
-    )
-    proj_q = ca.hcat(
-        [
-            ca.MX.zeros(q_size, x_size + z_size),
-            ca.MX.eye(q_size),
-        ]
-    )
-    projectors = tuple(
-        _to_output_projector(proj) for proj in (proj_x, proj_z, proj_q)
-    )
+class _TranscriptionFactory:
+    """Mesh-independent CasADi bindings shared by all transcriptions."""
 
-    def dynamics(*args):
-        return casadi.evaluate(problem.system.dxdt, args)
+    def __init__(self, problem: VariationalProblem):
+        self.problem = problem
+        self.casadi = get_backend_by_name("casadi")
+        self.options = _resolve_options(problem)
+        x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
+        self.x_size = x_dim.flat()
+        self.z_size = z_dim.flat() if z_dim else 0
+        self.q_size = (q_dim.flat() if q_dim else 0) + len(problem.quadratures)
+        self.has_state_quadrature = bool(q_dim)
+        self.path_size = self.x_size + self.z_size + self.q_size
+        self.tolerance = problem.transcription_options.absolute_tolerance
+        self.free_horizon = problem.horizon_decision is not None
 
-    def quadrature(*args):
-        if problem.system.dqdt is not None:
-            return casadi.evaluate(problem.system.dqdt, args)
+        self.proj_x = ca.hcat(
+            [
+                ca.MX.eye(self.x_size),
+                ca.MX.zeros(self.x_size, self.z_size + self.q_size),
+            ]
+        )
+        self.proj_z = ca.hcat(
+            [
+                ca.MX.zeros(self.z_size, self.x_size),
+                ca.MX.eye(self.z_size),
+                ca.MX.zeros(self.z_size, self.q_size),
+            ]
+        )
+        self.proj_q = ca.hcat(
+            [
+                ca.MX.zeros(self.q_size, self.x_size + self.z_size),
+                ca.MX.eye(self.q_size),
+            ]
+        )
+        self._projectors = tuple(
+            _to_output_projector(proj)
+            for proj in (self.proj_x, self.proj_z, self.proj_q)
+        )
+
+        control_variables = problem.control or []
+        self.control_factory = (
+            ControlFactory(control_variables, 1.0)
+            if control_variables
+            else None
+        )
+        if self.control_factory is None:
+            self.u_symbols = ca.MX.zeros(0, 1)
+            self.u_lower = []
+            self.u_upper = []
+            self.u_guess = ca.DM.zeros(0, 1)
+            self.control_eval = noop
+            self.control_decoder = None
+        else:
+            self.u_symbols = self.control_factory.symbols()
+            self.u_lower = self.control_factory.lower_bounds
+            self.u_upper = self.control_factory.upper_bounds
+            self.u_guess = self.control_factory.guess(0)
+            self.control_eval = self.control_factory
+            self.control_decoder = self.control_factory.to_output_array
+
+        (
+            self.p,
+            self.p_symbols,
+            self.p0_guess,
+            (
+                self.p_lower_base,
+                self.p_guess_base,
+                self.p_upper_base,
+            ),
+            self.p_output_map,
+        ) = construct_parameters(problem.parameters)
+        self.proj_p = (
+            ca.DM(problem.system_parameter_map)
+            if problem.system_parameter_map is not None
+            else ca.DM.eye(self.p.shape[0])
+        )
+        self.horizon_symbol = (
+            ca.MX.sym(problem.horizon_decision.name)
+            if self.free_horizon
+            else None
+        )
+        self.duration = (
+            self.horizon_symbol
+            if self.free_horizon
+            else float(problem.t_final)
+        )
+        self.parameter_names = list(self.p_output_map.indices)
+        self.parameter_indices = dict(self.p_output_map.indices)
+        self.reference_operator_cache = lru_cache(
+            maxsize=_REFERENCE_OPERATOR_CACHE_SIZE
+        )(_build_reference_operators)
+
+        self._defect_dynamics_maps: OrderedDict[int, ca.Function] = (
+            OrderedDict()
+        )
+        self._defect_nodes: OrderedDict[int, tuple[float, ...]] = OrderedDict()
+        self._defect_dynamics = self._build_defect_dynamics()
+
+    def copy_solution_projectors(
+        self,
+    ) -> Tuple[
+        Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
+    ]:
+        """Return solution-owned projector arrays."""
+        return tuple(
+            projector.copy() if projector is not None else None
+            for projector in self._projectors
+        )
+
+    def evaluate_dynamics(self, *args):
+        return self.casadi.evaluate(self.problem.system.dxdt, args)
+
+    def evaluate_quadrature(self, *args):
+        if self.problem.system.dqdt is not None:
+            return self.casadi.evaluate(self.problem.system.dqdt, args)
         return noop
 
-    def algebraic(*args):
-        if problem.system.g:
-            return casadi.evaluate(problem.system.g, args)
+    def evaluate_algebraic(self, *args):
+        if self.problem.system.g:
+            return self.casadi.evaluate(self.problem.system.g, args)
         return noop
 
-    def registered_quadratures(args):
+    def evaluate_registered_quadratures(self, args):
         values = []
-        for spec in problem.quadratures:
+        for spec in self.problem.quadratures:
             workspace = dict(zip(spec.integrand.tape.input_indicies, args))
             _, outputs = lower_casadi(
                 spec.integrand.tape, [spec.integrand], workspace
@@ -239,136 +358,236 @@ def create_variational_solver(
             values.append(outputs[0])
         return values
 
-    control_variables = problem.control or []
-    control_factory = (
-        ControlFactory(control_variables, 1.0) if control_variables else None
+    def _build_defect_dynamics(self) -> ca.Function:
+        time = ca.MX.sym("defect_time")
+        state = ca.MX.sym("defect_state", self.x_size)
+        algebraic = ca.MX.sym("defect_algebraic", self.z_size)
+        control = ca.MX.sym("defect_control", self.u_symbols.shape[0])
+        parameters = ca.MX.sym("defect_parameters", self.proj_p.shape[0])
+        (dynamics,) = self.evaluate_dynamics(
+            time, state, algebraic, control, parameters
+        )
+        return ca.Function(
+            "defect_dynamics",
+            [time, state, algebraic, control, parameters],
+            [dynamics],
+        )
+
+    def get_defect_nodes(self, degree: int) -> np.ndarray:
+        """Return fresh elevated LGR defect nodes for one local degree."""
+        try:
+            nodes = self._defect_nodes.pop(degree)
+        except KeyError:
+            nodes = tuple(float(point) for point in lgr_points(degree + 2))
+            if len(self._defect_nodes) == _DEFECT_EVALUATOR_CACHE_SIZE:
+                self._defect_nodes.popitem(last=False)
+        self._defect_nodes[degree] = nodes
+        return np.asarray(nodes, dtype=float)
+
+    def evaluate_defect_dynamics(
+        self,
+        times: np.ndarray,
+        states: np.ndarray,
+        algebraic: np.ndarray,
+        controls: np.ndarray,
+        parameters: np.ndarray,
+    ) -> np.ndarray:
+        """Evaluate state dynamics over one interval in a CasADi batch."""
+        count = int(times.shape[1])
+        try:
+            evaluator = self._defect_dynamics_maps.pop(count)
+        except KeyError:
+            evaluator = self._defect_dynamics.map(count)
+            if len(self._defect_dynamics_maps) == _DEFECT_EVALUATOR_CACHE_SIZE:
+                self._defect_dynamics_maps.popitem(last=False)
+        self._defect_dynamics_maps[count] = evaluator
+        return np.asarray(
+            evaluator(
+                ca.DM(times),
+                ca.DM(states),
+                ca.DM(algebraic),
+                ca.DM(controls),
+                ca.DM(parameters),
+            ),
+            dtype=float,
+        )
+
+    def measure_interval_defect(
+        self, poly, solution: VariationalSolution
+    ) -> float:
+        """Return the maximum scaled state defect for one solved polynomial."""
+        reference_nodes = self.get_defect_nodes(poly.degree)
+        times = poly.interval[0] + (reference_nodes + 1.0) * poly.width
+        path_values = np.asarray(poly.values, dtype=float).reshape(
+            poly.dimension, -1
+        )
+        powers = np.power(
+            reference_nodes,
+            np.arange(poly.bases.shape[0], dtype=float)[:, np.newaxis],
+        )
+        derivative_powers = np.zeros_like(powers)
+        derivative_powers[1:] = (
+            np.arange(1, poly.bases.shape[0], dtype=float)[:, np.newaxis]
+            * powers[:-1]
+        )
+        interpolation = path_values @ np.asarray(poly.bases).T
+        states = interpolation @ powers
+        derivatives = (
+            interpolation @ derivative_powers / (poly.width * solution.t_final)
+        )
+        controls = (
+            np.column_stack(
+                [solution.control_law(float(time)) for time in times]
+            )
+            if self.control_factory is not None
+            else np.zeros((0, len(times)))
+        )
+        parameters = np.repeat(
+            np.asarray(solution.parameters, dtype=float).reshape((-1, 1)),
+            len(times),
+            axis=1,
+        )
+        model_dynamics = self.evaluate_defect_dynamics(
+            (times * solution.t_final).reshape((1, -1)),
+            states[: self.x_size],
+            states[self.x_size : self.x_size + self.z_size],
+            controls,
+            parameters,
+        )
+        state_derivatives = derivatives[: self.x_size]
+        if state_derivatives.size == 0:
+            return 0.0
+        scale = np.maximum(1.0, np.abs(model_dynamics))
+        return float(
+            np.max(np.abs(state_derivatives - model_dynamics) / scale)
+        )
+
+
+def _create_solver(
+    factory: _TranscriptionFactory,
+    intervals: List[Tuple[float, float]],
+    degrees: List[int],
+) -> CasadiVariationalSolver:
+    """Compile one mesh-specific NLP from shared factory state."""
+    problem = factory.problem
+    duration = factory.duration
+    projectors = factory.copy_solution_projectors()
+
+    poly_collection = SymbolicPolyCollection(
+        name="x",
+        dimension=factory.path_size,
+        intervals=intervals,
+        degrees=list(degrees),
+        factory=factory,
     )
-
-    if control_factory is None:
-        u_symbols = ca.MX.zeros(0, 1)
-        u_lower = []
-        u_upper = []
-        u_guess = ca.DM.zeros(0, 1)
-        control_eval = noop
-        control_decoder = None
-    else:
-        u_symbols = control_factory.symbols()
-        u_lower = control_factory.lower_bounds
-        u_upper = control_factory.upper_bounds
-        u_guess = control_factory.guess(0)
-        control_eval = control_factory
-        control_decoder = control_factory.to_output_array
-
-    (
-        p,
-        p_symbols,
-        p0_guess,
-        (p_lower_base, p_guess_base, p_upper_base),
-        p_output_map,
-    ) = construct_parameters(problem.parameters)
-    if problem.system_parameter_map is not None:
-        proj_p = ca.DM(problem.system_parameter_map)
-    else:
-        proj_p = ca.DM.eye(p.shape[0])
-
-    horizon_symbol = (
-        ca.MX.sym(problem.horizon_decision.name) if free_horizon else None
-    )
-    duration = horizon_symbol if free_horizon else float(problem.t_final)
-
-    parameter_names = list(p_output_map.indices)
     horizon = problem.horizon_decision
     layout = DecisionLayout(
-        horizon_size=1 if free_horizon else 0,
+        horizon_size=1 if factory.free_horizon else 0,
         path_size=int(poly_collection.symbols().shape[0]),
-        control_size=int(u_symbols.shape[0]),
-        parameter_size=int(p_symbols.shape[0]),
+        control_size=int(factory.u_symbols.shape[0]),
+        parameter_size=int(factory.p_symbols.shape[0]),
         horizon_lower=horizon.lower_bound if horizon else -ca.inf,
         horizon_guess=horizon.guess if horizon else 1.0,
         horizon_upper=horizon.upper_bound if horizon else ca.inf,
     )
 
-    parameter_indices = dict(p_output_map.indices)
-
     path_symbols = poly_collection.symbols()
     decision_variables = layout.vector(
-        horizon_symbol, path_symbols, u_symbols, p_symbols
+        factory.horizon_symbol,
+        path_symbols,
+        factory.u_symbols,
+        factory.p_symbols,
     )
 
     equalities = []
     (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
     x_end = list(poly_collection.interval_ends())[:-1]
 
-    x0_guess, z0_guess = casadi.evaluate(
-        problem.system.x0, [t0, u_guess, proj_p @ p0_guess]
+    x0_guess, z0_guess = factory.casadi.evaluate(
+        problem.system.x0,
+        [t0, factory.u_guess, factory.proj_p @ factory.p0_guess],
     )
-    x0_val, z0_val = casadi.evaluate(
-        problem.system.x0, [t0, control_eval, proj_p @ p]
+    x0_val, z0_val = factory.casadi.evaluate(
+        problem.system.x0,
+        [t0, factory.control_eval, factory.proj_p @ factory.p],
     )
 
-    equalities.append(proj_x @ x0_symbol - x0_val)
-    if z_size > 0:
-        equalities.append(proj_z @ z0_val)
+    equalities.append(factory.proj_x @ x0_symbol - x0_val)
+    if factory.z_size > 0:
+        equalities.append(factory.proj_z @ z0_val)
 
     equalities.extend(
         xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
     )
 
     def append_constraint(constraint, args):
-        (value,) = casadi.evaluate(constraint.residual, args)
+        (value,) = factory.casadi.evaluate(constraint.residual, args)
         g_constraints.append(value)
         g_constraint_lowers.append(
-            casadi.to_backend_array(constraint.lower_bound)
+            factory.casadi.to_backend_array(constraint.lower_bound)
         )
         g_constraint_uppers.append(
-            casadi.to_backend_array(constraint.upper_bound)
+            factory.casadi.to_backend_array(constraint.upper_bound)
         )
 
     g_constraints = []
     g_constraint_lowers = []
     g_constraint_uppers = []
-    q_initial = ca.DM.zeros(q_size, 1)
-    u_initial = control_eval(t0)
-    initial_args = (t0, proj_x @ x0_symbol, z0_val, u_initial, p, q_initial)
+    q_initial = ca.DM.zeros(factory.q_size, 1)
+    u_initial = factory.control_eval(t0)
+    initial_args = (
+        t0,
+        factory.proj_x @ x0_symbol,
+        z0_val,
+        u_initial,
+        factory.p,
+        q_initial,
+    )
     for constraint in problem.initial_constraints:
         append_constraint(constraint, initial_args)
 
-    interval_dynamics = []
-    interval_quadratures = []
     for poly in poly_collection.polys:
         interval_dynamics = []
         interval_quadratures = []
         for t, v, dv in poly.knot_points():
             physical_t = duration * t
-            x = proj_x @ v
-            z = proj_z @ v
-            if z_size > 0:
+            x = factory.proj_x @ v
+            z = factory.proj_z @ v
+            if factory.z_size > 0:
                 z += z0_val
-            dx = proj_x @ dv
-            (dynamics_ij,) = dynamics(
-                physical_t, x, z, control_eval(t), proj_p @ p
+            dx = factory.proj_x @ dv
+            (dynamics_ij,) = factory.evaluate_dynamics(
+                physical_t,
+                x,
+                z,
+                factory.control_eval(t),
+                factory.proj_p @ factory.p,
             )
             scale = duration
             interval_dynamics.append(scale * dynamics_ij)
             equalities.append(dx - scale * dynamics_ij)
 
-            if q_size > 0:
-                dq = proj_q @ dv
+            if factory.q_size > 0:
+                dq = factory.proj_q @ dv
                 quadrature_values = []
-                if q_dim:
-                    (base_quadrature,) = quadrature(
-                        physical_t, x, z, control_eval(t), proj_p @ p
+                if factory.has_state_quadrature:
+                    (base_quadrature,) = factory.evaluate_quadrature(
+                        physical_t,
+                        x,
+                        z,
+                        factory.control_eval(t),
+                        factory.proj_p @ factory.p,
                     )
                     quadrature_values.append(base_quadrature)
                 quadrature_values.extend(
-                    registered_quadratures(
+                    factory.evaluate_registered_quadratures(
                         (
                             physical_t,
                             x,
                             z,
-                            control_eval(t),
-                            proj_p @ p,
-                            proj_q @ v,
+                            factory.control_eval(t),
+                            factory.proj_p @ factory.p,
+                            factory.proj_q @ v,
                         )
                     )
                 )
@@ -376,9 +595,13 @@ def create_variational_solver(
                 equalities.append(dq - quadrature_ij)
                 interval_quadratures.append(quadrature_ij)
 
-            if z_size > 0:
-                (alg,) = algebraic(
-                    physical_t, x, z, control_eval(t), proj_p @ p
+            if factory.z_size > 0:
+                (alg,) = factory.evaluate_algebraic(
+                    physical_t,
+                    x,
+                    z,
+                    factory.control_eval(t),
+                    factory.proj_p @ factory.p,
                 )
                 equalities.append(alg)
 
@@ -386,59 +609,76 @@ def create_variational_solver(
         _, v_end = poly.end_point()
         d_x = ca.hcat(interval_dynamics)
         weights = ca.DM(poly.weights[0, :-1])
-        equalities.append(proj_x @ v_end - proj_x @ v_start - d_x @ weights)
-        if q_size > 0:
+        equalities.append(
+            factory.proj_x @ v_end - factory.proj_x @ v_start - d_x @ weights
+        )
+        if factory.q_size > 0:
             d_q = ca.hcat(interval_quadratures)
             equalities.append(
-                proj_q @ v_end - proj_q @ v_start - d_q @ weights
+                factory.proj_q @ v_end
+                - factory.proj_q @ v_start
+                - d_q @ weights
             )
 
     # Path constraints apply at interval endpoints and collocation knots.
     for poly in poly_collection.polys:
         for t, v in (poly.start_point(), poly.end_point()):
             physical_t = duration * t
-            x = proj_x @ v
-            z = proj_z @ v
-            if z_size > 0:
+            x = factory.proj_x @ v
+            z = factory.proj_z @ v
+            if factory.z_size > 0:
                 z += z0_val
-            q = proj_q @ v
-            args = (physical_t, x, z, control_eval(t), proj_p @ p, q)
+            q = factory.proj_q @ v
+            args = (
+                physical_t,
+                x,
+                z,
+                factory.control_eval(t),
+                factory.proj_p @ factory.p,
+                q,
+            )
             for constraint in problem.path_constraints:
                 append_constraint(constraint, args)
 
     path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
     path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
-    lower_bound_base = layout.bounds(path_lower_bound, u_lower, p_lower_base)
+    lower_bound_base = layout.bounds(
+        path_lower_bound, factory.u_lower, factory.p_lower_base
+    )
     upper_bound_base = layout.upper_bounds(
-        path_upper_bound, u_upper, p_upper_base
+        path_upper_bound, factory.u_upper, factory.p_upper_base
     )
 
     def normalized_time(time):
-        return time if free_horizon else time / duration
+        return time if factory.free_horizon else time / duration
 
     def state_proxy(time):
-        return proj_x @ poly_collection(normalized_time(time))
+        return factory.proj_x @ poly_collection(normalized_time(time))
 
     def input_proxy(time):
-        return control_eval(normalized_time(time))
+        return factory.control_eval(normalized_time(time))
 
     def solution_proxy(*args):
         if len(args) == 1:
-            time, control_val, p_val = args[0], control_eval, p
-        elif control_factory is None:
+            time, control_val, p_val = (
+                args[0],
+                factory.control_eval,
+                factory.p,
+            )
+        elif factory.control_factory is None:
             time, p_val = args
-            control_val = control_eval
+            control_val = factory.control_eval
         else:
             time, control_val, p_val = args
         tau = normalized_time(time)
         u_val = control_val(tau)
         inner = poly_collection(tau)
-        x_tau = proj_x @ inner
-        z_tau = proj_z @ inner
-        q_tau = proj_q @ inner
-        (y_val,) = casadi.evaluate(
+        x_tau = factory.proj_x @ inner
+        z_tau = factory.proj_z @ inner
+        q_tau = factory.proj_q @ inner
+        (y_val,) = factory.casadi.evaluate(
             problem.system.y,
-            [time, x_tau, z_tau, u_val, proj_p @ p_val, q_tau],
+            [time, x_tau, z_tau, u_val, factory.proj_p @ p_val, q_tau],
         )
         return y_val
 
@@ -448,10 +688,10 @@ def create_variational_solver(
             "t_final": duration,
             "t_0": ca.DM.zeros(1, 1),
             "_state": state_proxy,
-            "p": p,
+            "p": factory.p,
             "_output": solution_proxy,
         }
-        if control_factory is not None:
+        if factory.control_factory is not None:
             values[problem.system.inputs.name] = input_proxy
         workspace = {
             index: values[name]
@@ -462,49 +702,54 @@ def create_variational_solver(
             if name in values
         }
         (cost,) = substitute([problem.loss], workspace)
-    elif control_factory is None:
-        (cost,) = casadi.evaluate(problem.loss, [solution_proxy, p])
+    elif factory.control_factory is None:
+        (cost,) = factory.casadi.evaluate(
+            problem.loss, [solution_proxy, factory.p]
+        )
     else:
-        (cost,) = casadi.evaluate(
-            problem.loss, [solution_proxy, control_factory, p]
+        (cost,) = factory.casadi.evaluate(
+            problem.loss,
+            [solution_proxy, factory.control_factory, factory.p],
         )
 
     equality_values = [e for e in equalities if e is not None]
     g = ca.vertcat(*equality_values, *g_constraints)
     equality_size = sum(e.shape[0] for e in equality_values)
     ubg = ca.vertcat(
-        tolerance * ca.DM.ones(equality_size, 1), *g_constraint_uppers
+        factory.tolerance * ca.DM.ones(equality_size, 1),
+        *g_constraint_uppers,
     )
     lbg = ca.vertcat(
-        -tolerance * ca.DM.ones(equality_size, 1), *g_constraint_lowers
+        -factory.tolerance * ca.DM.ones(equality_size, 1),
+        *g_constraint_lowers,
     )
 
     t_end, v_end = poly_collection.polys[-1].end_point()
-    x_end_val = proj_x @ v_end
-    z_end_val = proj_z @ v_end
-    q_end_val = proj_q @ v_end
-    u_end = control_eval(t_end)
+    x_end_val = factory.proj_x @ v_end
+    z_end_val = factory.proj_z @ v_end
+    q_end_val = factory.proj_q @ v_end
+    u_end = factory.control_eval(t_end)
     end_args = (
         duration * t_end,
         x_end_val,
         z_end_val,
         u_end,
-        p,
+        factory.p,
         q_end_val,
     )
 
     for constraint in problem.terminal_constraints:
-        (g_inner,) = casadi.evaluate(constraint.residual, end_args)
-        g_lower = casadi.to_backend_array(constraint.lower_bound)
-        g_upper = casadi.to_backend_array(constraint.upper_bound)
+        (g_inner,) = factory.casadi.evaluate(constraint.residual, end_args)
+        g_lower = factory.casadi.to_backend_array(constraint.lower_bound)
+        g_upper = factory.casadi.to_backend_array(constraint.upper_bound)
         assert g_lower.shape == g_inner.shape == g_upper.shape
         g = ca.vertcat(g, g_inner)
         lbg = ca.vertcat(lbg, g_lower)
         ubg = ca.vertcat(ubg, g_upper)
 
-    solver_options = dict(problem.transcription_options.optimiser_options)
+    solver_options = dict(factory.options.optimiser_options)
     warm_start = bool(solver_options.pop("warm_start", False))
-    if not problem.transcription_options.verbose:
+    if not factory.options.verbose:
         solver_options.update(
             {
                 "ipopt.print_level": 0,
@@ -515,25 +760,28 @@ def create_variational_solver(
 
     state_guess = ca.vertcat(
         x0_guess,
-        z0_guess if z0_guess is not None else ca.DM.zeros(z_size, 1),
-        ca.DM.zeros(q_size, 1),
+        (z0_guess if z0_guess is not None else ca.DM.zeros(factory.z_size, 1)),
+        ca.DM.zeros(factory.q_size, 1),
     )
     n_reps = int(path_symbols.shape[0] / state_guess.shape[0])
     path_guess = ca.repmat(state_guess, n_reps)
     raw_decision_variables = decision_variables
-    decision_variables_0 = layout.guess(path_guess, u_guess, p_guess_base)
-    raw_lower = ca.DM(lower_bound_base)
-    raw_upper = ca.DM(upper_bound_base)
+    physical_decision_variables_0 = layout.guess(
+        path_guess, factory.u_guess, factory.p_guess_base
+    )
+    physical_lower_bound_base = ca.DM(lower_bound_base)
+    physical_upper_bound_base = ca.DM(upper_bound_base)
     physical_variables = raw_decision_variables
     normalized_cost = cost
     normalized_g = g
     objective_scale = 1.0
+    variable_scaling = None
 
-    if problem.transcription_options.enable_scaling:
+    if factory.options.enable_scaling:
         variable_scaling = _derive_variable_scaling(
-            np.asarray(raw_lower).reshape(-1),
-            np.asarray(decision_variables_0).reshape(-1),
-            np.asarray(raw_upper).reshape(-1),
+            np.asarray(physical_lower_bound_base).reshape(-1),
+            np.asarray(physical_decision_variables_0).reshape(-1),
+            np.asarray(physical_upper_bound_base).reshape(-1),
         )
         normalized_variables = ca.MX.sym(
             "normalized_decision", decision_variables.shape[0]
@@ -548,18 +796,15 @@ def create_variational_solver(
         objective_scale = _derive_objective_scale(
             float(
                 ca.Function("nominal_cost", [raw_decision_variables], [cost])(
-                    decision_variables_0
+                    physical_decision_variables_0
                 )
             ),
-            tolerance,
+            factory.tolerance,
         )
         normalized_cost /= objective_scale
         decision_variables = normalized_variables
-        decision_variables_0 = ca.DM(
-            variable_scaling.encode(decision_variables_0)
-        )
         lower_bound_base, upper_bound_base = variable_scaling.encode_bounds(
-            raw_lower, raw_upper
+            physical_lower_bound_base, physical_upper_bound_base
         )
 
     def unscale_objective(value: float) -> float:
@@ -573,19 +818,25 @@ def create_variational_solver(
                 path_symbols, raw_decision_variables, physical_variables
             ),
             ca.substitute(
-                u_symbols, raw_decision_variables, physical_variables
+                factory.u_symbols,
+                raw_decision_variables,
+                physical_variables,
             ),
-            ca.substitute(p, raw_decision_variables, physical_variables),
             ca.substitute(
-                p_symbols, raw_decision_variables, physical_variables
+                factory.p, raw_decision_variables, physical_variables
+            ),
+            ca.substitute(
+                factory.p_symbols,
+                raw_decision_variables,
+                physical_variables,
             ),
             (
                 ca.substitute(
-                    horizon_symbol,
+                    factory.horizon_symbol,
                     raw_decision_variables,
                     physical_variables,
                 )
-                if free_horizon
+                if factory.free_horizon
                 else ca.DM(problem.t_final)
             ),
         ],
@@ -596,19 +847,19 @@ def create_variational_solver(
         output_function=f_out,
         poly_collection=poly_collection,
         projectors=projectors,
-        proj_p=proj_p,
-        parameter_solution_map=p_output_map,
-        decode_controls=control_decoder,
+        proj_p=factory.proj_p,
+        parameter_solution_map=factory.p_output_map,
+        decode_controls=factory.control_decoder,
     )
 
     callback_wrapper = None
     nlp_solver_options = dict(solver_options)
     if warm_start:
         nlp_solver_options["ipopt.warm_start_init_point"] = "yes"
-    if problem.transcription_options.interation_callback is not None:
-        callback_wrapper = CallbackWrapper.new(
+    if factory.options.interation_callback is not None:
+        callback_wrapper = CallbackWrapper(
             "variational_iteration_callback",
-            problem.transcription_options.interation_callback,
+            factory.options.interation_callback,
             nx=decision_variables.shape[0],
             ng=normalized_g.shape[0],
             assemble_solution=assemble_solution,
@@ -616,17 +867,21 @@ def create_variational_solver(
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
     init_solver = None
-    if problem.transcription_options.initialise_near_guess:
+    if factory.options.initialise_near_guess:
         init_spec = {
             "f": normalized_cost,
             "x": decision_variables,
             "g": ca.vertcat(
                 normalized_g,
                 ca.substitute(
-                    p_symbols, raw_decision_variables, physical_variables
+                    factory.p_symbols,
+                    raw_decision_variables,
+                    physical_variables,
                 ),
                 ca.substitute(
-                    u_symbols, raw_decision_variables, physical_variables
+                    factory.u_symbols,
+                    raw_decision_variables,
+                    physical_variables,
                 ),
             ),
         }
@@ -645,59 +900,80 @@ def create_variational_solver(
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, nlp_solver_options)
 
     parameter_offset = layout.parameter_slice.start
+    path_offset = layout.horizon_size
+    path_slice = slice(path_offset, path_offset + layout.path_size)
+
+    def interpolate_path_guess(previous_path) -> ca.DM:
+        knot_values = [
+            ca.DM(previous_path(float(t))).reshape((factory.path_size, 1))
+            for poly in poly_collection.polys
+            for t in poly.knot_times()
+        ]
+        return ca.vertcat(*knot_values)
 
     def map_arguments(
         fixed_parameters: Dict[str, ParameterVariable],
+        path_initial_guess=None,
     ) -> Dict[str, ca.DM]:
-        unknown = sorted(set(fixed_parameters) - set(parameter_indices))
+        unknown = sorted(
+            set(fixed_parameters) - set(factory.parameter_indices)
+        )
         if unknown:
             raise KeyError(f"Unknown solver parameters: {', '.join(unknown)}")
 
-        x0 = ca.DM(decision_variables_0)
-        lbx = ca.DM(lower_bound_base)
-        ubx = ca.DM(upper_bound_base)
-
-        path_x0 = ca.DM(decision_variables_0)
-        path_lbx = ca.DM(lower_bound_base)
-        path_ubx = ca.DM(upper_bound_base)
-
-        p_guess = ca.DM(p_guess_base)
+        physical_x0 = ca.DM(physical_decision_variables_0)
+        physical_lbx = ca.DM(physical_lower_bound_base)
+        physical_ubx = ca.DM(physical_upper_bound_base)
+        p_guess = ca.DM(factory.p_guess_base)
 
         for name, value in fixed_parameters.items():
-            index = parameter_indices[name]
+            index = factory.parameter_indices[name]
             decision_index = parameter_offset + index
-            offset = variable_scaling.offset[decision_index]
-            scale = variable_scaling.scale[decision_index]
             if isinstance(value, BoundedVariable):
                 p_guess[index] = value.guess
-                lbx[decision_index] = (value.lower_bound - offset) / scale
-                ubx[decision_index] = (value.upper_bound - offset) / scale
-                x0[decision_index] = (value.guess - offset) / scale
+                physical_lbx[decision_index] = value.lower_bound
+                physical_ubx[decision_index] = value.upper_bound
+                physical_x0[decision_index] = value.guess
             else:
                 scalar = float(value)
                 p_guess[index] = scalar
-                normalized = (scalar - offset) / scale
-                lbx[decision_index] = normalized
-                ubx[decision_index] = normalized
-                x0[decision_index] = normalized
-        init_lbg = ca.vertcat(lbg, p_guess, ca.DM.zeros(u_symbols.shape))
-        init_ubg = ca.vertcat(ubg, p_guess, ca.DM.zeros(u_symbols.shape))
+                physical_lbx[decision_index] = scalar
+                physical_ubx[decision_index] = scalar
+                physical_x0[decision_index] = scalar
+
+        if path_initial_guess is not None:
+            physical_x0[path_slice] = interpolate_path_guess(
+                path_initial_guess
+            )
+
+        if variable_scaling is None:
+            x0 = physical_x0
+            lbx = physical_lbx
+            ubx = physical_ubx
+        else:
+            x0 = ca.DM(variable_scaling.encode(physical_x0))
+            lbx, ubx = variable_scaling.encode_bounds(
+                physical_lbx, physical_ubx
+            )
+        init_lbg = ca.vertcat(
+            lbg, p_guess, ca.DM.zeros(factory.u_symbols.shape)
+        )
+        init_ubg = ca.vertcat(
+            ubg, p_guess, ca.DM.zeros(factory.u_symbols.shape)
+        )
         return {
             "x0": x0,
             "lbx": lbx,
             "ubx": ubx,
             "lbg": lbg,
             "ubg": ubg,
-            "init_x0": path_x0,
-            "init_lbx": path_lbx,
-            "init_ubx": path_ubx,
             "init_lbg": init_lbg,
             "init_ubg": init_ubg,
         }
 
     solver = CasadiVariationalSolver(
         problem=problem,
-        parameters=parameter_names,
+        parameters=factory.parameter_names,
         map_arguments=map_arguments,
         solver=nlp_solver,
         assemble_solution=assemble_solution,
@@ -707,6 +983,137 @@ def create_variational_solver(
     )
     solver._callback_wrapper = callback_wrapper
     return solver
+
+
+def create_variational_solver(
+    problem: VariationalProblem,
+) -> CasadiVariationalSolver:
+    """Create a CasADi solver, optionally applying p-then-h refinement."""
+    options = _resolve_options(problem)
+    if (
+        options.refinement_enabled
+        and options.maximum_degree
+        < problem.transcription_options.minimum_degree
+    ):
+        raise ValueError(
+            "maximum_degree must be at least transcription minimum_degree"
+        )
+
+    factory = _TranscriptionFactory(problem)
+    initial_intervals = split_at_non_differentiable_points(
+        problem.control or [], 1.0, problem.transcription_options
+    )
+    initial_degrees = [problem.transcription_options.minimum_degree] * len(
+        initial_intervals
+    )
+    initial_solver = _create_solver(
+        factory, initial_intervals, initial_degrees
+    )
+    if not options.refinement_enabled:
+        return initial_solver
+
+    cache_capacity = 8
+
+    def mesh_signature(
+        intervals: List[Tuple[float, float]], degrees: List[int]
+    ) -> Tuple[Tuple[Tuple[float, float], ...], Tuple[int, ...]]:
+        return (
+            tuple((float(start), float(stop)) for start, stop in intervals),
+            tuple(int(degree) for degree in degrees),
+        )
+
+    compiled_transcriptions: OrderedDict[
+        Tuple[Tuple[Tuple[float, float], ...], Tuple[int, ...]],
+        CasadiVariationalSolver,
+    ] = OrderedDict()
+    initial_signature = mesh_signature(initial_intervals, initial_degrees)
+    compiled_transcriptions[initial_signature] = initial_solver
+
+    def transcription_for(
+        intervals: List[Tuple[float, float]], degrees: List[int]
+    ) -> CasadiVariationalSolver:
+        signature = mesh_signature(intervals, degrees)
+        try:
+            solver = compiled_transcriptions.pop(signature)
+        except KeyError:
+            solver = _create_solver(
+                factory, list(signature[0]), list(signature[1])
+            )
+            if len(compiled_transcriptions) == cache_capacity:
+                compiled_transcriptions.popitem(last=False)
+        compiled_transcriptions[signature] = solver
+        return solver
+
+    def solve_adaptive(
+        fixed_parameters: Dict[str, float],
+    ) -> VariationalSolution:
+        intervals = initial_intervals
+        degrees = initial_degrees
+        previous_path = None
+        for iteration in range(options.maximum_iterations + 1):
+            current_solver = transcription_for(intervals, degrees)
+            solution = current_solver._solve_once(
+                path_initial_guess=previous_path,
+                **fixed_parameters,
+            )
+            errors = [
+                factory.measure_interval_defect(poly, solution)
+                for poly in solution.path.polys
+            ]
+            maximum_error = max(errors, default=0.0)
+            if maximum_error <= options.mesh_tolerance:
+                return solution
+            if iteration == options.maximum_iterations:
+                raise RuntimeError(
+                    "CasADi adaptive refinement reached maximum_iterations "
+                    f"({options.maximum_iterations}) with defect "
+                    f"{maximum_error:.3e}"
+                )
+
+            new_intervals = []
+            new_degrees = []
+            for (start, stop), degree, error in zip(
+                intervals, degrees, errors
+            ):
+                if error <= options.mesh_tolerance:
+                    new_intervals.append((start, stop))
+                    new_degrees.append(degree)
+                    continue
+                predicted = degree + max(
+                    1,
+                    int(
+                        math.ceil(
+                            math.log(
+                                max(error, 1e-300) / options.mesh_tolerance
+                            )
+                        )
+                    ),
+                )
+                if predicted <= options.maximum_degree:
+                    new_intervals.append((start, stop))
+                    new_degrees.append(predicted)
+                    continue
+                midpoint = (start + stop) / 2.0
+                if stop - start <= 2.0 * options.minimum_interval_duration:
+                    raise RuntimeError(
+                        "CasADi adaptive refinement cannot split interval "
+                        f"[{start}, {stop}] below minimum_interval_duration"
+                    )
+                new_intervals.extend(((start, midpoint), (midpoint, stop)))
+                new_degrees.extend(
+                    (
+                        problem.transcription_options.minimum_degree,
+                        problem.transcription_options.minimum_degree,
+                    )
+                )
+            previous_path = solution.path
+            intervals, degrees = new_intervals, new_degrees
+        raise RuntimeError(
+            "CasADi adaptive refinement terminated unexpectedly"
+        )
+
+    initial_solver._adaptive_solve = solve_adaptive
+    return initial_solver
 
 
 class CasadiSolutionAssembler:
@@ -756,7 +1163,10 @@ class CasadiSolutionAssembler:
         )
         return VariationalSolution(
             cost=loss,
-            projectors=self.projectors,
+            projectors=tuple(
+                projector.copy() if projector is not None else None
+                for projector in self.projectors
+            ),
             parameter_solutions=self.parameter_solution_map(free_parameters),
             parameters=system_parameters,
             parameter_block_layouts=self.problem.system.parameter_blocks,
@@ -771,16 +1181,33 @@ class CasadiSolutionAssembler:
 
 
 class SymbolicPoly(InterpolatingPoly):
-    def __init__(self, name, dimension, interval, degree):
+    def __init__(
+        self,
+        name,
+        dimension,
+        interval,
+        degree,
+        factory: Optional[_TranscriptionFactory] = None,
+    ):
         size = (degree + 1) * dimension
         values = ca.MX.sym(name, size)
-        super().__init__(dimension, interval, degree, values)
+        super().__init__(
+            dimension,
+            interval,
+            degree,
+            values,
+            reference_operators=(
+                factory.reference_operator_cache(degree)
+                if factory is not None
+                else None
+            ),
+        )
 
     def symbols(self):
         return self.values
 
     def __call__(self, t):
-        s = self._interval_to_s(t)
+        s = self._map_to_reference_coordinate(t)
         if not isinstance(s, (ca.SX, ca.MX)):
             try:
                 i = next(
@@ -802,10 +1229,23 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
     def symbols(self):
         return ca.vertcat(*[p.values for p in self.polys])
 
-    def __init__(self, name, dimension, intervals, degrees):
+    def __init__(
+        self,
+        name,
+        dimension,
+        intervals,
+        degrees,
+        factory: Optional[_TranscriptionFactory] = None,
+    ):
         assert len(intervals) == len(degrees)
         polys = [
-            SymbolicPoly(f"{name}_{i}", dimension, interval, degree)
+            SymbolicPoly(
+                f"{name}_{i}",
+                dimension,
+                interval,
+                degree,
+                factory=factory,
+            )
             for i, (interval, degree) in enumerate(zip(intervals, degrees))
         ]
         super().__init__(polys)
@@ -822,7 +1262,13 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
             offset += p.size()
 
         polys = [
-            InterpolatingPoly(p.dimension, p.interval, p.degree, np_array[slc])
+            InterpolatingPoly(
+                p.dimension,
+                p.interval,
+                p.degree,
+                np_array[slc],
+                reference_operators=p._reference_operators,
+            )
             for (p, slc) in zip(self.polys, slices)
         ]
         return InterpolatingPolyCollection(polys)
@@ -996,10 +1442,6 @@ class CallbackWrapper(ca.Callback):
         self.unscale_objective = unscale_objective
         self.construct(name, {} if opts is None else opts)
         self._iterate_count = 0
-
-    @staticmethod
-    def new(*args, **kwargs) -> "CallbackWrapper":
-        return CallbackWrapper(*args, **kwargs)
 
     def get_n_in(self):
         return ca.nlpsol_n_out()

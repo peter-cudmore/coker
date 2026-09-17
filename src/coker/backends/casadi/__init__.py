@@ -39,12 +39,15 @@ from coker.backends.casadi.optimiser import (
     build_optimisation_problem,
 )
 from coker.backends.casadi.lowered import CasadiLoweredFunction
+from coker.backends.casadi.variational.options import (  # noqa: F401
+    CasadiVariationalOptions,
+)
 from coker.backends.casadi.variational.solver import (
     create_variational_solver,
 )
 from coker.dynamics import VariationalProblem
 
-__all__ = ["CasadiBackend"]
+__all__ = ["CasadiBackend", "CasadiVariationalOptions"]
 
 scalar_types = (float, int)
 
