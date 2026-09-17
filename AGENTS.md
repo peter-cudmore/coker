@@ -40,3 +40,8 @@ Function and method names MUST use an active verb, omit context apparent from
 their module or owning type, and remain concise. Abbreviations are allowed when
 they are established, consistent conventions in the existing codebase.
 
+## Pull requests
+
+Pull requests SHOULD be squash-merged by default. Their descriptions MUST
+include a changelog of user-visible changes.
+
