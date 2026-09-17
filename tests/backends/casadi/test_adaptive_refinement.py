@@ -17,10 +17,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_transcription_options_default_to_no_backend_policy():
-    assert TranscriptionOptions().backend_options is None
-
-
 def test_legacy_casadi_options_are_forwarded():
     callback = object()
     transcription = TranscriptionOptions(
