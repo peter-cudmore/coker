@@ -62,7 +62,8 @@ class TranscriptionOptions:
 
     Attributes:
         minimum_n_intervals: Minimum number of intervals in the initial mesh.
-        minimum_degree: Collocation polynomial degree for each initial interval.
+        minimum_degree: Collocation polynomial degree for each initial
+            interval.
         absolute_tolerance: Permitted absolute residual for transcription
             equality constraints.
         verbose: Show CasADi/IPOPT solver output when no explicit backend

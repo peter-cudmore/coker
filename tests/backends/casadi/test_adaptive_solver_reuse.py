@@ -5,7 +5,6 @@ import importlib.util
 import numpy as np
 import pytest
 from coker import VectorSpace
-from coker.backends import get_backend_by_name
 from coker.backends.casadi import CasadiVariationalOptions
 from coker.backends.casadi.variational import solver as solver_module
 from coker.dynamics import (
