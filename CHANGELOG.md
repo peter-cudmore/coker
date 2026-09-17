@@ -14,3 +14,5 @@
 - Existing `TranscriptionOptions` CasADi fields remain supported and are translated when no explicit backend policy is provided.
 
 ### Fixed
+- Preserve configured adaptive transcription interval counts.
+- Preserve legacy CasADi `TranscriptionOptions` compatibility.
