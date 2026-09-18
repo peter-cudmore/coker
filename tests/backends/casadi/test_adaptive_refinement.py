@@ -80,6 +80,10 @@ def test_casadi_adaptive_refinement_resolves_fast_mode():
 
     assert solution.solve_info is not None
     assert solution.solve_info.success
+    assert solution.adaptive_refinement_rounds is not None
+    assert solution.adaptive_refinement_rounds > 0
+    assert solution.adaptive_maximum_defect is not None
+    assert solution.adaptive_maximum_defect <= 5e-2
     # The exact solution is 1 - exp(-8 t); refinement must resolve its
     samples = np.linspace(0.0, 1.0, 101)
     expected = 1.0 - np.exp(-8.0 * samples)
@@ -89,6 +93,44 @@ def test_casadi_adaptive_refinement_resolves_fast_mode():
     assert len(_interval_starts(solution)) > 2
 
 
+def test_casadi_adaptive_refinement_measures_multistate_defect():
+    system = create_autonomous_ode(
+        x0=np.zeros((2,)),
+        xdot=lambda x, _parameters: np.array([8.0, 2.0])
+        * (np.ones((2,)) - x),
+        backend="casadi",
+    )
+    problem = VariationalProblem(
+        loss=lambda solution, _parameters: solution(1.0)[0] ** 2
+        + solution(1.0)[1] ** 2,
+        system=system,
+        t_final=1.0,
+        transcription_options=TranscriptionOptions(
+            minimum_n_intervals=2,
+            minimum_degree=2,
+            absolute_tolerance=1e-9,
+            backend_options=CasadiVariationalOptions(
+                refinement_enabled=True,
+                mesh_tolerance=5e-2,
+                maximum_degree=2,
+                maximum_iterations=5,
+            ),
+        ),
+        backend="casadi",
+    )
+
+    solution = problem.get_solver("casadi").solve()
+
+    assert solution.adaptive_maximum_defect is not None
+    assert solution.adaptive_maximum_defect <= 5e-2
+    samples = np.linspace(0.0, 1.0, 101)
+    expected = np.column_stack(
+        [1.0 - np.exp(-8.0 * samples), 1.0 - np.exp(-2.0 * samples)]
+    )
+    actual = np.vstack([solution.state(float(t)) for t in samples])
+    np.testing.assert_allclose(actual, expected, atol=3e-3, rtol=3e-3)
+
+
 def test_casadi_refinement_disabled_preserves_initial_mesh():
     problem = _boundary_layer_problem(options=CasadiVariationalOptions())
 
@@ -96,6 +138,8 @@ def test_casadi_refinement_disabled_preserves_initial_mesh():
 
     assert solution.solve_info is not None
     assert solution.solve_info.success
+    assert solution.adaptive_refinement_rounds is None
+    assert solution.adaptive_maximum_defect is None
     assert len(_interval_starts(solution)) == 2
     assert np.isfinite(solution.cost)
     np.testing.assert_allclose(solution.state(0.0), [0.0], atol=1e-7)

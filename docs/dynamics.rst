@@ -125,12 +125,16 @@ below that normalized width. ``maximum_degree`` must be no less than
 a single transcription solve.
 
 During one adaptive solve, the CasADi model setup is retained while only
-mesh-dependent NLPs are compiled. Refined meshes interpolate the preceding
-path as their initial state, and previously visited mesh signatures are reused
-by a bounded cache. These are implementation details: callers should treat
-adaptive solving as deterministic for a fixed problem, options, and parameter
-values, rather than rely on a cache lifetime across separately created
-problems.
+mesh-dependent NLPs are compiled. Each refined mesh interpolates the preceding
+path and seeds compatible controls, free parameters, and a free horizon from
+the preceding solution. Explicit parameters passed to ``solve`` override that
+carried parameter value. Successful adaptive solutions expose
+``adaptive_refinement_rounds`` (the number of mesh updates after the initial
+solve) and ``adaptive_maximum_defect`` (the final maximum scaled state defect).
+Previously visited mesh signatures are reused by a bounded cache. Cache reuse
+is an implementation detail: callers should treat adaptive solving as
+deterministic for a fixed problem, options, and parameter values, rather than
+rely on a cache lifetime across separately created problems.
 
 Heterogeneous and function-valued parameters
 --------------------------------------------

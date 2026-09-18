@@ -60,6 +60,8 @@ class VariationalSolution:
     )
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
+    adaptive_refinement_rounds: Optional[int] = None
+    adaptive_maximum_defect: Optional[float] = None
     path_constraint_exprs: List[InequalityExpression] = field(
         default_factory=list
     )

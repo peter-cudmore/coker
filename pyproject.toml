@@ -37,7 +37,7 @@ sympy = "coker.backends.sympy:SympyBackend"
 
 [project.optional-dependencies]
 casadi = [
-    "casadi>=3.7.0,<4",
+    "casadi>=3.7.0,<3.8.0",
 ]
 jax = [
     "jax>=0.10,<0.11; python_version >= '3.11'",

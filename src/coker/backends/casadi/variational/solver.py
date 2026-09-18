@@ -146,12 +146,12 @@ class CasadiVariationalSolver(VariationalSolver):
 
     def _solve_once(
         self,
-        path_initial_guess=None,
+        previous_solution: Optional[VariationalSolution] = None,
         **fixed_parameters,
     ) -> VariationalSolution:
         """Solve one fixed transcription without adaptive mesh dispatch."""
         solver_arguments = self._map_arguments(
-            fixed_parameters, path_initial_guess
+            fixed_parameters, previous_solution
         )
         x0 = solver_arguments["x0"]
         solver_kwargs = {
@@ -162,7 +162,7 @@ class CasadiVariationalSolver(VariationalSolver):
         }
 
         if (
-            path_initial_guess is None
+            previous_solution is None
             and self._warm_start
             and self._last_primal is not None
         ):
@@ -365,7 +365,11 @@ class _TranscriptionFactory:
         control = ca.MX.sym("defect_control", self.u_symbols.shape[0])
         parameters = ca.MX.sym("defect_parameters", self.proj_p.shape[0])
         (dynamics,) = self.evaluate_dynamics(
-            time, state, algebraic, control, parameters
+            time,
+            state,
+            algebraic,
+            lambda _time: control,
+            parameters,
         )
         return ca.Function(
             "defect_dynamics",
@@ -419,7 +423,7 @@ class _TranscriptionFactory:
         reference_nodes = self.get_defect_nodes(poly.degree)
         times = poly.interval[0] + (reference_nodes + 1.0) * poly.width
         path_values = np.asarray(poly.values, dtype=float).reshape(
-            poly.dimension, -1
+            poly.dimension, -1, order="F"
         )
         powers = np.power(
             reference_nodes,
@@ -437,7 +441,12 @@ class _TranscriptionFactory:
         )
         controls = (
             np.column_stack(
-                [solution.control_law(float(time)) for time in times]
+                [
+                    np.asarray(
+                        solution.control_law(float(time)), dtype=float
+                    ).reshape((-1,))
+                    for time in times
+                ]
             )
             if self.control_factory is not None
             else np.zeros((0, len(times)))
@@ -883,6 +892,15 @@ def _create_solver(
                     raw_decision_variables,
                     physical_variables,
                 ),
+                (
+                    ca.substitute(
+                        factory.horizon_symbol,
+                        raw_decision_variables,
+                        physical_variables,
+                    )
+                    if factory.free_horizon
+                    else ca.MX.zeros(0, 1)
+                ),
             ),
         }
         init_solver = ca.nlpsol(
@@ -902,6 +920,7 @@ def _create_solver(
     parameter_offset = layout.parameter_slice.start
     path_offset = layout.horizon_size
     path_slice = slice(path_offset, path_offset + layout.path_size)
+    control_slice = slice(path_slice.stop, path_slice.stop + layout.control_size)
 
     def interpolate_path_guess(previous_path) -> ca.DM:
         knot_values = [
@@ -911,9 +930,25 @@ def _create_solver(
         ]
         return ca.vertcat(*knot_values)
 
+    def compatible_control_guess(previous_solution) -> Optional[ca.DM]:
+        if factory.control_factory is None:
+            return None
+        previous_controls = previous_solution.control_solutions
+        if len(previous_controls) != len(factory.control_factory.sizes):
+            return None
+        values = []
+        for control, size in zip(
+            previous_controls, factory.control_factory.sizes
+        ):
+            value = np.asarray(control.value, dtype=float).reshape((-1,))
+            if value.size != size:
+                return None
+            values.append(ca.DM(value).reshape((size, 1)))
+        return ca.vertcat(*values)
+
     def map_arguments(
         fixed_parameters: Dict[str, ParameterVariable],
-        path_initial_guess=None,
+        previous_solution: Optional[VariationalSolution] = None,
     ) -> Dict[str, ca.DM]:
         unknown = sorted(
             set(fixed_parameters) - set(factory.parameter_indices)
@@ -925,6 +960,22 @@ def _create_solver(
         physical_lbx = ca.DM(physical_lower_bound_base)
         physical_ubx = ca.DM(physical_upper_bound_base)
         p_guess = ca.DM(factory.p_guess_base)
+
+        if previous_solution is not None:
+            physical_x0[path_slice] = interpolate_path_guess(
+                previous_solution.path
+            )
+            if factory.free_horizon:
+                physical_x0[layout.horizon_slice] = previous_solution.t_final
+            control_guess = compatible_control_guess(previous_solution)
+            if control_guess is not None:
+                physical_x0[control_slice] = control_guess
+            for name, index in factory.parameter_indices.items():
+                if name not in previous_solution.parameter_solutions:
+                    continue
+                value = previous_solution.parameter_solutions[name]
+                physical_x0[parameter_offset + index] = value
+                p_guess[index] = value
 
         for name, value in fixed_parameters.items():
             index = factory.parameter_indices[name]
@@ -941,11 +992,6 @@ def _create_solver(
                 physical_ubx[decision_index] = scalar
                 physical_x0[decision_index] = scalar
 
-        if path_initial_guess is not None:
-            physical_x0[path_slice] = interpolate_path_guess(
-                path_initial_guess
-            )
-
         if variable_scaling is None:
             x0 = physical_x0
             lbx = physical_lbx
@@ -955,11 +1001,17 @@ def _create_solver(
             lbx, ubx = variable_scaling.encode_bounds(
                 physical_lbx, physical_ubx
             )
+        init_control_guess = physical_x0[control_slice]
+        init_horizon_guess = (
+            physical_x0[layout.horizon_slice]
+            if factory.free_horizon
+            else ca.DM.zeros(0, 1)
+        )
         init_lbg = ca.vertcat(
-            lbg, p_guess, ca.DM.zeros(factory.u_symbols.shape)
+            lbg, p_guess, init_control_guess, init_horizon_guess
         )
         init_ubg = ca.vertcat(
-            ubg, p_guess, ca.DM.zeros(factory.u_symbols.shape)
+            ubg, p_guess, init_control_guess, init_horizon_guess
         )
         return {
             "x0": x0,
@@ -1049,11 +1101,11 @@ def create_variational_solver(
     ) -> VariationalSolution:
         intervals = initial_intervals
         degrees = initial_degrees
-        previous_path = None
+        previous_solution = None
         for iteration in range(options.maximum_iterations + 1):
             current_solver = transcription_for(intervals, degrees)
             solution = current_solver._solve_once(
-                path_initial_guess=previous_path,
+                previous_solution=previous_solution,
                 **fixed_parameters,
             )
             errors = [
@@ -1062,7 +1114,11 @@ def create_variational_solver(
             ]
             maximum_error = max(errors, default=0.0)
             if maximum_error <= options.mesh_tolerance:
-                return solution
+                return replace(
+                    solution,
+                    adaptive_refinement_rounds=iteration,
+                    adaptive_maximum_defect=maximum_error,
+                )
             if iteration == options.maximum_iterations:
                 raise RuntimeError(
                     "CasADi adaptive refinement reached maximum_iterations "
@@ -1106,7 +1162,7 @@ def create_variational_solver(
                         problem.transcription_options.minimum_degree,
                     )
                 )
-            previous_path = solution.path
+            previous_solution = solution
             intervals, degrees = new_intervals, new_degrees
         raise RuntimeError(
             "CasADi adaptive refinement terminated unexpectedly"
@@ -1379,7 +1435,7 @@ class ControlFactory:
         self.offsets = offsets
 
     def guess(self, _):
-        return ca.DM.zeros(len(self.variables), 1)
+        return ca.DM.zeros(sum(self.sizes), 1)
 
     def symbols(self) -> ca.MX:
         return (

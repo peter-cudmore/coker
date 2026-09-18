@@ -12,6 +12,7 @@
 - Collocation reference-operator caching is scoped to a transcription factory rather than process-global state.
 - CasADi transcription compilation reuses bounded cached mesh-specific solvers during parameter sweeps.
 - Existing `TranscriptionOptions` CasADi fields remain supported and are translated when no explicit backend policy is provided.
+- Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
 - Preserve configured adaptive transcription interval counts.

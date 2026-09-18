@@ -315,7 +315,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "casadi", marker = "extra == 'casadi'", specifier = ">=3.7.0,<4" },
+    { name = "casadi", marker = "extra == 'casadi'", specifier = ">=3.7.0,<3.8.0" },
     { name = "jax", marker = "python_full_version >= '3.11' and extra == 'jax'", specifier = ">=0.10,<0.11" },
     { name = "numpy", specifier = ">=2" },
     { name = "scipy" },
