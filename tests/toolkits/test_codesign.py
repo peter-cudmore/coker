@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from coker import Dimension, Scalar, VectorSpace, function
+from coker import Dimension, FunctionSpace, Scalar, VectorSpace, function
 from coker.toolkits.codesign import (
     MathematicalProgram,
     Minimise,
@@ -10,6 +10,7 @@ from coker.toolkits.codesign import (
     bounded,
     norm as codesign_norm,
 )
+from coker.dynamics import RadialBasisFunction
 
 
 def quadratic(x, p, z):
@@ -123,6 +124,27 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
     assert objective == pytest.approx(0.0, abs=1e-6)
     assert x_val.shape == (2,)
     assert np.allclose(x_val, np.array([3.0, -1.0]), atol=1e-6)
+    assert problem.solve_info is not None
+    assert problem.solve_info.success
+
+
+def test_mathematical_program_fits_function_parameter(variational_backend):
+    rate = FunctionSpace(
+        "rate", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+    with ProblemBuilder() as builder:
+        response = builder.new_function_parameter(
+            rate, RadialBasisFunction([0.0], 1.0, name="response")
+        )
+        value = response(0.0)
+        builder.objective = Minimise((value - 0.5) ** 2)
+        builder.outputs = [value]
+        problem = builder.build(variational_backend)
+
+    objective, value = problem()
+
+    assert objective == pytest.approx(0.0, abs=1e-6)
+    assert value == pytest.approx(0.5, abs=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
 

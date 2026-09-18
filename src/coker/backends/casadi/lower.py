@@ -57,7 +57,7 @@ def casadi_eval(function, *args):
     # Native references and solver proxies are invoked directly.
     if not isinstance(function, coker.Function):
         return function(*args)
-    if function.backend != "casadi":
+    if function.backend not in (None, "casadi"):
         raise RuntimeError(
             "Cannot lower CasADi OP.EVALUATE node for "
             f"backend {function.backend!r}; node callable "

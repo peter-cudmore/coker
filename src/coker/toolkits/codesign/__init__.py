@@ -10,7 +10,7 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.function import SymbolicCallable, function
+from coker.algebra.function import BoundCallable, SymbolicCallable, function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import OP
 from .optimisation import (
@@ -211,6 +211,31 @@ class ProblemBuilder:
 
         self.initial_conditions[v.index] = initial_value
         return v
+
+    def new_function_parameter(self, target, declaration):
+        """Add a finite function parameter as optimisation decisions."""
+        from coker.dynamics.function_parameters import FunctionParameter
+
+        if not isinstance(target, FunctionSpace):
+            raise TypeError("target must be a FunctionSpace")
+        if not isinstance(declaration, FunctionParameter):
+            raise TypeError("declaration must implement FunctionParameter")
+        target = declaration.validate_target(target)
+        values = declaration.decision_declarations()
+        basis, initial, *bounds = values
+        basis_values = self.new_variable(
+            declaration.name or target.name,
+            shape=(basis.size,),
+            initial_value=initial,
+        )
+        if bounds:
+            lower, upper = bounds
+            self.constraints.append(bounded(basis_values, lower, upper))
+        return BoundCallable(
+            declaration.build_function(target, None),
+            target,
+            (basis_values,),
+        )
 
     @property
     def input_shape(self) -> Tuple[Dimension, ...]:
