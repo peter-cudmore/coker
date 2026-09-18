@@ -6,6 +6,8 @@
 - `CasadiVariationalOptions` for CasADi solver policy and adaptive mesh refinement controls.
 - Local defect estimation with p-refinement before h-refinement.
 - Reuse of the previous path as the refined NLP initial guess.
+- Function-valued variational parameters with monotone piecewise-linear, perceptron, and radial-basis realizations.
+- `UnboundedVariable` declarations for scalar decisions without user-supplied bounds.
 
 ### Changed
 - Bump Coker to version 0.4.2.
