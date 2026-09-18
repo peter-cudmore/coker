@@ -16,7 +16,6 @@ from coker.dynamics.system import (
     create_control_system,
     create_dynamics_from_spec,
 )
-from coker.toolkits.codesign import Minimise
 from ..util import is_close
 
 
@@ -203,7 +202,7 @@ def test_direct_sum_reconstructs_function_parameter(variational_backend):
     np.testing.assert_allclose(solution.state(1.0), [0.5, 0.5], atol=1e-2)
 
 
-def test_casadi_direct_sum_routes_function_parameter_through_algebraic_and_quadrature():
+def test_casadi_direct_sum_function_parameter_dae():
     pytest.importorskip("casadi")
     rate = FunctionSpace(
         "rate", arguments=[Scalar("t")], output=[Scalar("rate")]
