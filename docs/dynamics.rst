@@ -83,6 +83,10 @@ Coker replaces it with the realization's scalar basis decisions before solving.
 The function space and realization must agree on argument and scalar-output
 shapes.
 
+``Perceptron`` requires one vector argument and a scalar output.
+``RadialBasisFunction`` and ``MonotonePiecewiseLinear`` require one scalar
+argument and a scalar output.
+
 For example, a scalar response over a two-component state can use a perceptron:
 
 .. code-block:: python
