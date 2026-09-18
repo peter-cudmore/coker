@@ -88,7 +88,6 @@ class Operator:
         return not self.is_linear() and not self.is_bilinear()
 
 
-
 class FunctionParameterOP(Operator):
     """Evaluate a function-parameter declaration as a scalar graph node."""
 
@@ -97,7 +96,9 @@ class FunctionParameterOP(Operator):
     def __init__(self, declaration):
         self.declaration = declaration
 
-    def compute_shape(self, basis: Dimension, argument: Dimension) -> Dimension:
+    def compute_shape(
+        self, basis: Dimension, argument: Dimension
+    ) -> Dimension:
         return Dimension(None)
 
     def is_linear(self):
@@ -111,6 +112,7 @@ class FunctionParameterOP(Operator):
             isinstance(other, FunctionParameterOP)
             and self.declaration == other.declaration
         )
+
 
 class SelectOP(Operator):
     """Select one declared result from a native-call result bundle."""

@@ -85,7 +85,6 @@ def _norm(op, value):
     return torch.linalg.norm(value, ord=op.ord)
 
 
-
 def _function_parameter(op, basis, argument):
     from coker.dynamics.function_parameters import Perceptron
 
@@ -95,6 +94,7 @@ def _function_parameter(op, basis, argument):
             torch.dot(flat_basis[:-1], argument.reshape(-1)) + flat_basis[-1]
         )
     return op.declaration.evaluate(basis, argument)
+
 
 impls = {
     OP.ADD: torch.add,
