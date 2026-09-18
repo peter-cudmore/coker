@@ -140,6 +140,7 @@ class VariationalProblem:
     control: Optional[List[ControlVariable]] = None
     parameters: Optional[List[ParameterVariable]] = None
     system_parameter_map: Optional[np.ndarray] = None
+    parameter_layout: Optional[object] = field(default=None, init=False)
     quadratures: List[QuadratureSpec] = field(default_factory=list)
     transcription_options: TranscriptionOptions = field(
         default_factory=TranscriptionOptions
@@ -175,7 +176,11 @@ class VariationalProblem:
                 specialize_system_parameters,
             )
 
-            self.system, self.parameters = specialize_system_parameters(
+            (
+                self.system,
+                self.parameters,
+                self.parameter_layout,
+            ) = specialize_system_parameters(
                 self.system, self.parameters or []
             )
         self.path_constraints = _normalize_constraints(self.path_constraints)

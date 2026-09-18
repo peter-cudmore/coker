@@ -364,8 +364,12 @@ class CompositionOperator:
     @staticmethod
     def from_dimensions(name: str, *dims) -> "CompositionOperator":
         spaces = [
-            VectorSpace(f"{name}_{i}", dim) if dim else None
-            for i, dim in enumerate(dims)
+            (
+                dim.to_space(f"{name}_{index}")
+                if isinstance(dim, Dimension)
+                else VectorSpace(f"{name}_{index}", dim) if dim else None
+            )
+            for index, dim in enumerate(dims)
         ]
         return CompositionOperator(*spaces)
 
@@ -392,24 +396,82 @@ class ProjectionSet:
     controls: CompositionOperator
 
 
-def direct_sum(
-    *systems: DynamicalSystem, backend=None
-) -> Tuple[DynamicalSystem, ProjectionSet]:
+class StructuredParameterProjection:
+    """Partition a heterogeneous parameter tuple by subsystem."""
 
-    backend = backend or systems[0].backend()
+    def __init__(self, widths):
+        self.widths = tuple(widths)
 
-    proj_p = CompositionOperator(*[system.parameters for system in systems])
+    def split(self, parameters):
+        start = 0
+        groups = []
+        for width in self.widths:
+            groups.append(tuple(parameters[start : start + width]))
+            start += width
+        return groups
+
+
+class _NumericParameterPartition:
+    def __init__(self, systems):
+        self.projection = CompositionOperator(
+            *[system.parameters for system in systems]
+        )
+
+    def arguments(self):
+        return [self.projection.dim()]
+
+    def parameter_space(self):
+        return self.projection.dim()
+
+    def split(self, parameters):
+        return self.projection.inverse(parameters[0])
+
+    @staticmethod
+    def call_arguments(_system, values):
+        return (values,)
+
+
+class _StructuredParameterPartition:
+    def __init__(self, systems):
+        self.groups = tuple(_parameter_spaces(system) for system in systems)
+        self.projection = StructuredParameterProjection(
+            len(group) for group in self.groups
+        )
+
+    def arguments(self):
+        return [space for group in self.groups for space in group]
+
+    def parameter_space(self):
+        return tuple(self.arguments())
+
+    def split(self, parameters):
+        return self.projection.split(parameters)
+
+    @staticmethod
+    def call_arguments(system, values):
+        return values if system.parameters is not None else (None,)
+
+
+def _parameter_spaces(system):
+    if system.parameters is None:
+        return ()
+    return (
+        system.parameters
+        if isinstance(system.parameters, tuple)
+        else (system.parameters,)
+    )
+
+
+def _compose_direct_sum(systems, backend, partition):
     x_dim, z_dim, q_dim = zip(
         *[system.get_state_dimensions() for system in systems]
     )
-    y_dim = [system.y.output_shape()[0] for system in systems]
-
     proj_x = CompositionOperator.from_dimensions("x", *x_dim)
     proj_z = CompositionOperator.from_dimensions("z", *z_dim)
     proj_q = CompositionOperator.from_dimensions("q", *q_dim)
-
-    proj_y = CompositionOperator.from_dimensions("y", *y_dim)
-
+    proj_y = CompositionOperator.from_dimensions(
+        "y", *[system.y.output_shape()[0] for system in systems]
+    )
     u_range = [
         (
             system.inputs.output_dimensions()[0]
@@ -418,136 +480,135 @@ def direct_sum(
         )
         for system in systems
     ]
-
     proj_u = CompositionOperator.from_dimensions("u", *u_range)
-    if proj_u.dim() is None:
-        u_space = Noop()
-    else:
-        u_space = FunctionSpace(
-            proj_u.dim().name, [Scalar("t")], [proj_u.dim()]
-        )
+    u_space = (
+        Noop()
+        if proj_u.dim() is None
+        else FunctionSpace(proj_u.dim().name, [Scalar("t")], [proj_u.dim()])
+    )
 
-    def x0_impl(t, u_outer, p_outer):
-        p_inner = proj_p.inverse(p_outer)
-        u_inner = [
-            lambda t: proj_u.inverse(u_outer(t))[i]
-            for i, _ in enumerate(proj_u.spaces)
+    def inputs(u_outer, index):
+        return lambda time: proj_u.inverse(u_outer(time))[index]
+
+    def initial(z_outer, u_outer, *p_outer):
+        groups = partition.split(p_outer)
+        z = proj_z.inverse(z_outer)
+        values = [
+            system.x0.call_inline(
+                z[index],
+                inputs(u_outer, index),
+                *partition.call_arguments(system, groups[index]),
+            )
+            for index, system in enumerate(systems)
         ]
-        x0_inner, z0_inner = zip(
-            *[
-                system.x0.call_inline(t, u_i, p_i)
-                for system, u_i, p_i in zip(systems, u_inner, p_inner)
-            ]
-        )
-        x0_ab = proj_x(*x0_inner)
-        z0_ab = proj_z(*z0_inner)
-        return x0_ab, z0_ab
+        x, z = zip(*values)
+        return proj_x(*x), proj_z(*z)
 
+    def component_call(
+        component, t, x_outer, z_outer, u_outer, p_outer, projection
+    ):
+        groups = partition.split(p_outer)
+        x, z = proj_x.inverse(x_outer), proj_z.inverse(z_outer)
+
+        def evaluate(index, system):
+            function = component(system)
+            if function is Noop():
+                return 0
+            return function.call_inline(
+                t,
+                x[index],
+                z[index],
+                inputs(u_outer, index),
+                *partition.call_arguments(system, groups[index]),
+            )
+
+        return projection(
+            *[evaluate(index, system) for index, system in enumerate(systems)]
+        )
+
+    parameter_arguments = partition.arguments()
+    state_arguments = [
+        Scalar("t"),
+        proj_x.dim(),
+        proj_z.dim(),
+        u_space,
+        *parameter_arguments,
+    ]
     x0 = function(
-        [Scalar("t"), u_space, proj_p.dim()], x0_impl, backend=backend
+        [proj_z.dim(), u_space, *parameter_arguments], initial, backend=backend
+    )
+    dx = function(
+        state_arguments,
+        lambda t, x, z, u, *p: component_call(
+            lambda system: system.dxdt, t, x, z, u, p, proj_x
+        ),
+        backend=backend,
+    )
+    g = (
+        function(
+            state_arguments,
+            lambda t, x, z, u, *p: component_call(
+                lambda system: system.g, t, x, z, u, p, proj_z
+            ),
+            backend=backend,
+        )
+        if proj_z.dim() is not None
+        else Noop()
+    )
+    dqdt = (
+        function(
+            state_arguments,
+            lambda t, x, z, u, *p: component_call(
+                lambda system: system.dqdt, t, x, z, u, p, proj_q
+            ),
+            backend=backend,
+        )
+        if proj_q.dim() is not None
+        else Noop()
     )
 
-    def dxdt_impl(t, x_outer, z_outer, u_outer, p_outer):
-        p = proj_p.inverse(p_outer)
-        x = proj_x.inverse(x_outer)
-        z = proj_z.inverse(z_outer)
-
-        dx_inner = [
-            system.dxdt.call_inline(
-                t,
-                x[i],
-                z[i],
-                lambda t_i: proj_u.inverse(u_outer(t_i))[i],
-                p[i],
-            )
-            for i, system in enumerate(systems)
-        ]
-
-        return proj_x(*dx_inner)
-
-    args = [Scalar("t"), proj_x.dim(), proj_z.dim(), u_space, proj_p.dim()]
-    dx = function(args, dxdt_impl, backend=backend)
-    if proj_z.dim() is not None:
-
-        def g_impl(t, x_outer, z_outer, u_outer, p_outer):
-            p = proj_p.inverse(p_outer)
-            x = proj_x.inverse(x_outer)
-            z = proj_z.inverse(z_outer)
-            g_inner = [
-                system.g.call_inline(
+    def outputs(t, x_outer, z_outer, u_outer, *p_and_q):
+        *p_outer, q_outer = p_and_q
+        groups = partition.split(p_outer)
+        x, z, q = (
+            proj_x.inverse(x_outer),
+            proj_z.inverse(z_outer),
+            proj_q.inverse(q_outer),
+        )
+        return proj_y(
+            *[
+                system.y.call_inline(
                     t,
-                    x[i],
-                    z[i],
-                    lambda t_i: proj_u.inverse(u_outer(t_i))[i],
-                    p[i],
+                    x[index],
+                    z[index],
+                    inputs(u_outer, index),
+                    *partition.call_arguments(system, groups[index]),
+                    q[index],
                 )
-                for i, system in enumerate(systems)
+                for index, system in enumerate(systems)
             ]
-            return proj_z(*g_inner)
+        )
 
-        g = function(args, g_impl, backend=backend)
-    else:
-        g = Noop()
-
-    if proj_q.dim() is not None:
-
-        def dqdt_impl(t, x_outer, z_outer, u_outer, p_outer):
-            p = proj_p.inverse(p_outer)
-            x = proj_x.inverse(x_outer)
-            z = proj_z.inverse(z_outer)
-            dq_inner = [
-                system.dqdt.call_inline(
-                    t,
-                    x[i],
-                    z[i],
-                    lambda t_i: proj_u.inverse(u_outer(t_i))[i],
-                    p[i],
-                )
-                for i, system in enumerate(systems)
-            ]
-            return proj_q(*dq_inner)
-
-        dqdt = function(args, dqdt_impl, backend=backend)
-    else:
-        dqdt = Noop()
-
-    def y_impl(t, x_outer, z_outer, u_outer, p_outer, q_outer):
-        p = proj_p.inverse(p_outer)
-        x = proj_x.inverse(x_outer)
-        z = proj_z.inverse(z_outer)
-        q = proj_q.inverse(q_outer)
-        y_inner = [
-            system.y.call_inline(
-                t,
-                x[i],
-                z[i],
-                lambda t_i: proj_u.inverse(u_outer(t_i))[i],
-                p[i],
-                q[i],
-            )
-            for i, system in enumerate(systems)
-        ]
-
-        return proj_y(*y_inner)
-
-    y = function(args + [proj_q.dim()], y_impl, backend=backend)
-
-    system = DynamicalSystem(
-        inputs=u_space,
-        parameters=proj_p.dim(),
-        x0=x0,
-        dxdt=dx,
-        g=g,
-        dqdt=dqdt,
-        y=y,
-    )
+    y = function([*state_arguments, proj_q.dim()], outputs, backend=backend)
+    parameters = partition.parameter_space()
+    system = DynamicalSystem(u_space, parameters, x0, dx, g, dqdt, y)
     projections = ProjectionSet(
-        state=proj_x,
-        algebraic=proj_z,
-        quadratures=proj_q,
-        outputs=proj_y,
-        controls=proj_u,
-        parameters=proj_p,
+        partition.projection, proj_x, proj_z, proj_q, proj_y, proj_u
     )
-
     return system, projections
+
+
+def direct_sum(
+    *systems: DynamicalSystem, backend=None
+) -> Tuple[DynamicalSystem, ProjectionSet]:
+    backend = backend or systems[0].backend()
+    partition = (
+        _StructuredParameterPartition(systems)
+        if any(
+            isinstance(space, FunctionSpace)
+            for system in systems
+            for space in _parameter_spaces(system)
+        )
+        else _NumericParameterPartition(systems)
+    )
+    return _compose_direct_sum(systems, backend, partition)

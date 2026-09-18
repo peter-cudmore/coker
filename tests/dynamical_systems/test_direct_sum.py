@@ -1,8 +1,43 @@
 import numpy as np
+import pytest
 from coker import FunctionSpace, Scalar, VectorSpace
-from coker.dynamics import create_autonomous_ode, direct_sum
-from coker.dynamics.system import CompositionOperator, create_control_system
+from coker.dynamics import (
+    BoundedVariable,
+    DynamicsSpec,
+    FunctionParameter,
+    RadialBasisFunction,
+    VariationalProblem,
+    create_autonomous_ode,
+    direct_sum,
+)
+from coker.algebra.ops import Noop
+from coker.dynamics.system import (
+    CompositionOperator,
+    create_control_system,
+    create_dynamics_from_spec,
+)
+from coker.toolkits.codesign import Minimise
 from ..util import is_close
+
+
+class _ConstantFunctionParameter(FunctionParameter):
+    def __init__(self, name, guess):
+        self.name = name
+        self.guess = guess
+
+    def validate_target(self, target):
+        return target
+
+    def decision_declarations(self):
+        return (
+            VectorSpace("constant", 1),
+            np.array([self.guess]),
+            -np.ones(1),
+            np.ones(1),
+        )
+
+    def evaluate(self, basis, _argument):
+        return basis[0]
 
 
 def test_direct_sum_scalar(variational_backend):
@@ -112,3 +147,119 @@ def test_composition_operators():
 
     inverse = op(*result)
     assert is_close(inverse, test_array, tolerance=1e-9)
+
+
+def test_direct_sum_reconstructs_function_parameter(variational_backend):
+    rate = FunctionSpace(
+        "rate", arguments=[Scalar("t")], output=[Scalar("rate")]
+    )
+    gain_system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(Scalar("gain"),),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
+            dynamics=lambda _t, _x, _z, _u, p: np.array([p[0]]),
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        ),
+        backend=variational_backend,
+    )
+    rate_system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(rate,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
+            dynamics=lambda t, _x, _z, _u, p: np.array([p[0](t)]),
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=lambda t, _x, _z, _u, p: p[0](t),
+        ),
+        backend=variational_backend,
+    )
+    system, _ = direct_sum(gain_system, rate_system)
+    problem = VariationalProblem(
+        loss=lambda solution, parameters: (
+            (solution(1.0, parameters)[0] - 0.5) ** 2
+            + (solution(1.0, parameters)[1] - 0.5) ** 2
+        ),
+        t_final=1.0,
+        system=system,
+        parameters=[
+            BoundedVariable("gain", -1.0, 1.0),
+            RadialBasisFunction([0.0], 1.0, name="rate"),
+        ],
+        backend=variational_backend,
+    )
+
+    solution = problem()
+
+    fitted_rate = solution.parameter_values["rate"]
+    assert callable(fitted_rate)
+    assert np.isfinite(fitted_rate(0.25))
+    assert np.isfinite(solution.quadratures(1.0)[0])
+    np.testing.assert_allclose(solution.state(1.0), [0.5, 0.5], atol=1e-2)
+
+
+def test_casadi_direct_sum_routes_function_parameter_through_algebraic_and_quadrature():
+    pytest.importorskip("casadi")
+    rate = FunctionSpace(
+        "rate", arguments=[Scalar("t")], output=[Scalar("rate")]
+    )
+    gain_system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(Scalar("gain"),),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
+            dynamics=lambda _t, _x, _z, _u, p: np.array([p[0]]),
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        ),
+        backend="casadi",
+    )
+    rate_system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(rate,),
+            algebraic=VectorSpace("z", 1),
+            initial_conditions=lambda _z, _u, p: (
+                np.array([0.0]),
+                np.array([p[0](0.0)]),
+            ),
+            dynamics=lambda _t, _x, z, _u, _p: z,
+            constraints=lambda t, _x, z, _u, p: np.array([z[0] - p[0](t)]),
+            outputs=lambda _t, x, _z, _u, _p, q: x + q,
+            quadratures=lambda t, _x, _z, _u, p: np.array([p[0](t)]),
+        ),
+        backend="casadi",
+    )
+    system, _ = direct_sum(gain_system, rate_system)
+    problem = VariationalProblem(
+        loss=lambda solution, parameters: (
+            (solution(1.0, parameters)[0] - 0.5) ** 2
+            + (solution(1.0, parameters)[1] - 0.5) ** 2
+        ),
+        t_final=1.0,
+        system=system,
+        parameters=[
+            BoundedVariable("gain", -1.0, 1.0),
+            _ConstantFunctionParameter("rate", guess=0.25),
+        ],
+        backend="casadi",
+    )
+
+    solution = problem()
+
+    assert solution.solve_info.success
+    assert solution.cost < 1e-4
+    assert solution.parameter_values["gain"] == pytest.approx(0.5, abs=1e-2)
+    fitted_rate = solution.parameter_values["rate"]
+    assert callable(fitted_rate)
+    assert fitted_rate(0.25) == pytest.approx(0.25, abs=1e-2)
+    np.testing.assert_allclose(solution.state(1.0), [0.5, 0.25], atol=1e-2)
+    np.testing.assert_allclose(solution.algebraic(0.25), [0.25], atol=1e-2)
+    np.testing.assert_allclose(solution.quadratures(1.0), [0.25], atol=1e-2)

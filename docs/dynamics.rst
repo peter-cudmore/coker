@@ -104,7 +104,7 @@ For example, a scalar response over a two-component state can use a perceptron:
    with VariationalProblemBuilder(
        system,
        t_final=1.0,
-       parameters=[Perceptron(2)],
+       parameters=[Perceptron(2, name="response")],
    ) as problem:
        built = problem.build(
            Minimise((problem.output(problem.t_final)[0] - 0.5) ** 2)
@@ -235,6 +235,7 @@ shape of its initial guess:
                domain_knots=[0.0, 1.0, 2.0],
                lower_bound=0.0,
                upper_bound=2.0,
+               name="response",
            ),
            BoundVector(
                "offset",

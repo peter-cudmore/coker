@@ -90,8 +90,25 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
             quadratures=Noop(),
         )
     )
+    with pytest.raises(ValueError, match="function parameter name"):
+        VariationalProblemBuilder(
+            system,
+            t_final=1.0,
+            parameters=[
+                MonotonePiecewiseLinear(
+                    domain_knots=[-1.0, 0.0, 1.0],
+                    lower_bound=0.0,
+                    upper_bound=2.0,
+                ),
+                BoundedVariable("p_1", -1.0, 1.0),
+                BoundedVariable("p_2", -1.0, 1.0),
+            ],
+        )
     declaration = MonotonePiecewiseLinear(
-        domain_knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
+        domain_knots=[-1.0, 0.0, 1.0],
+        lower_bound=0.0,
+        upper_bound=2.0,
+        name="p_0",
     )
 
     with VariationalProblemBuilder(
@@ -145,6 +162,7 @@ def test_builder_specializes_bound_vector_parameter():
                 domain_knots=[-1.0, 0.0, 1.0],
                 lower_bound=0.0,
                 upper_bound=2.0,
+                name="p_0",
             ),
             BoundVector(
                 "gain",
@@ -291,7 +309,10 @@ def test_casadi_fits_monotone_function_parameter():
         )
     )
     declaration = MonotonePiecewiseLinear(
-        domain_knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
+        domain_knots=[-1.0, 0.0, 1.0],
+        lower_bound=0.0,
+        upper_bound=2.0,
+        name="p_0",
     )
     with VariationalProblemBuilder(
         system,
@@ -406,7 +427,9 @@ def test_variational_problem_specializes_radial_basis_parameter():
         loss=lambda solution, parameters: (solution(1.0, parameters)[0] - 0.5)
         ** 2,
         system=system,
-        parameters=[RadialBasisFunction(centers=[0.0], width=1.0)],
+        parameters=[
+            RadialBasisFunction(centers=[0.0], width=1.0, name="response")
+        ],
         t_final=1.0,
         backend="casadi",
     )

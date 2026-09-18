@@ -16,6 +16,8 @@ from coker.algebra.graph import if_then_else
 class FunctionParameter(ABC):
     """Declare finite numeric decisions that realize a function parameter."""
 
+    name: str | None
+
     @abstractmethod
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
         """Validate and return the compatible function parameter space."""
@@ -107,6 +109,7 @@ class MonotonePiecewiseLinear(FunctionParameter):
     lower_bound: Real
     upper_bound: Real
     guess: Sequence[Real] | None = None
+    name: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -203,6 +206,7 @@ class Perceptron(FunctionParameter):
     lower_bound: Real | None = None
     upper_bound: Real | None = None
     guess: Sequence[Real] | None = None
+    name: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -274,6 +278,7 @@ class RadialBasisFunction(FunctionParameter):
     lower_bound: Real | None = None
     upper_bound: Real | None = None
     guess: Sequence[Real] | None = None
+    name: str | None = None
 
     def __post_init__(self) -> None:
         try:

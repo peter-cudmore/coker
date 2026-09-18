@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+
 import numpy as np
-
-from collections.abc import Sequence
-
 from coker.algebra.dimensions import FunctionSpace, VectorSpace
 from coker.algebra.function import function
 from coker.algebra.ops import Noop
@@ -22,9 +22,38 @@ from coker.dynamics.variables import (
 from coker.dynamics.model import DynamicalSystem
 
 
+@dataclass(frozen=True)
+class ParameterValueLayout:
+    targets: tuple[object, ...]
+    declarations: tuple[object, ...]
+    offsets: tuple[tuple[int, int], ...]
+
+    def reconstruct(self, values: np.ndarray) -> Mapping[str, object]:
+        result = {}
+        for target, declaration, (start, end) in zip(
+            self.targets, self.declarations, self.offsets
+        ):
+            basis = np.asarray(values[start:end], dtype=float)
+            if isinstance(target, FunctionSpace):
+                result[declaration.name] = self._function(declaration, basis)
+            elif isinstance(target, VectorSpace):
+                result[declaration.name] = basis.reshape(declaration.shape)
+            else:
+                result[declaration.name] = float(basis[0])
+        return result
+
+    @staticmethod
+    def _function(
+        declaration: FunctionParameter, basis: np.ndarray
+    ) -> Callable:
+        return lambda argument: declaration.evaluate(basis, argument)
+
+
 def _basis_declarations(
     index: int, target: FunctionSpace, declaration: FunctionParameter
 ) -> list[BoundedVariable | UnboundedVariable]:
+    if not isinstance(declaration.name, str) or not declaration.name:
+        raise ValueError("function parameter name must be a non-empty string")
     declaration.validate_target(target)
     values = declaration.decision_declarations()
     if len(values) == 2:
@@ -101,11 +130,11 @@ def _tensor_declarations(
 
 def specialize_system_parameters(
     system: DynamicalSystem, declarations: Sequence[object]
-) -> tuple[DynamicalSystem, list[object]]:
+) -> tuple[DynamicalSystem, list[object], ParameterValueLayout | None]:
     """Bind function-valued parameters and return a numeric solver system."""
     space = system.parameters
     if not isinstance(space, tuple):
-        return system, list(declarations)
+        return system, list(declarations), None
     if len(space) != len(declarations):
         raise ValueError("parameter specialization has the wrong arity")
 
@@ -212,4 +241,7 @@ def specialize_system_parameters(
             parameter_blocks=parameter_blocks,
         ),
         solver_declarations,
+        ParameterValueLayout(
+            tuple(space), tuple(declarations), tuple(offsets)
+        ),
     )

@@ -106,7 +106,7 @@ def test_pytorch_variational_solver_lowers_perceptron_parameter(monkeypatch):
     with VariationalProblemBuilder(
         system,
         t_final=1.0,
-        parameters=[Perceptron(2)],
+        parameters=[Perceptron(2, name="response")],
         backend="pytorch",
     ) as builder:
         problem = builder.build(
@@ -116,3 +116,70 @@ def test_pytorch_variational_solver_lowers_perceptron_parameter(monkeypatch):
     solution = problem()
 
     assert solution.cost < 1e-4
+
+
+def test_pytorch_solution_reconstructs_mapped_function_parameter(
+    monkeypatch,
+):
+    backend = get_backend_by_name("pytorch", set_current=False)
+    monkeypatch.setattr(backend, "device", torch.device("cpu"))
+    monkeypatch.setattr(backend, "dtype", torch.float64)
+    function_parameter = FunctionSpace(
+        "response",
+        arguments=[VectorSpace("state", 2)],
+        output=[Scalar("rate")],
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(function_parameter,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.zeros(2), None),
+            dynamics=lambda _t, _state, _z, _u, _p: np.zeros(2),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend="pytorch",
+    )
+    parameter_map = np.diag([2.0, 3.0, 4.0])
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        parameters=[Perceptron(2, name="response")],
+        system_parameter_map=parameter_map,
+        backend="pytorch",
+    ) as builder:
+        problem = builder.build(Minimise(builder.output(builder.t_final)[0]))
+
+    raw_basis = np.array([0.1, -0.2, 0.3])
+    solver = problem.get_solver()
+    solution = solver.solve(**dict(zip(solver.parameters, raw_basis)))
+
+    argument = np.array([0.7, -0.4])
+    mapped_basis = parameter_map @ raw_basis
+    expected = 1.0 / (
+        1.0
+        + np.exp(
+            -(
+                mapped_basis[0] * argument[0]
+                + mapped_basis[1] * argument[1]
+                + mapped_basis[2]
+            )
+        )
+    )
+    raw_value = 1.0 / (
+        1.0
+        + np.exp(
+            -(
+                raw_basis[0] * argument[0]
+                + raw_basis[1] * argument[1]
+                + raw_basis[2]
+            )
+        )
+    )
+
+    np.testing.assert_allclose(
+        solution.parameter_values["response"](argument), expected
+    )
+    assert not np.isclose(expected, raw_value)

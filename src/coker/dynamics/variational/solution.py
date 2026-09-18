@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -58,6 +59,7 @@ class VariationalSolution:
     parameter_block_layouts: dict[str, tuple[int, int, tuple[int, ...]]] = (
         field(default_factory=dict)
     )
+    parameter_layout: Optional[object] = None
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
     adaptive_refinement_rounds: Optional[int] = None
@@ -148,6 +150,12 @@ class VariationalSolution:
                 shape,
             ) in self.parameter_block_layouts.items()
         }
+
+    @property
+    def parameter_values(self) -> Mapping[str, object]:
+        if self.parameter_layout is None:
+            return self.parameter_solutions
+        return self.parameter_layout.reconstruct(self.parameters)
 
     def to_poly(self) -> InterpolatingPolyCollection:
 

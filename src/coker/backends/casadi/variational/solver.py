@@ -244,21 +244,21 @@ class _TranscriptionFactory:
 
         self.proj_x = ca.hcat(
             [
-                ca.MX.eye(self.x_size),
-                ca.MX.zeros(self.x_size, self.z_size + self.q_size),
+                ca.DM.eye(self.x_size),
+                ca.DM.zeros(self.x_size, self.z_size + self.q_size),
             ]
         )
         self.proj_z = ca.hcat(
             [
-                ca.MX.zeros(self.z_size, self.x_size),
-                ca.MX.eye(self.z_size),
-                ca.MX.zeros(self.z_size, self.q_size),
+                ca.DM.zeros(self.z_size, self.x_size),
+                ca.DM.eye(self.z_size),
+                ca.DM.zeros(self.z_size, self.q_size),
             ]
         )
         self.proj_q = ca.hcat(
             [
-                ca.MX.zeros(self.q_size, self.x_size + self.z_size),
-                ca.MX.eye(self.q_size),
+                ca.DM.zeros(self.q_size, self.x_size + self.z_size),
+                ca.DM.eye(self.q_size),
             ]
         )
         self._projectors = tuple(
@@ -524,7 +524,9 @@ def _create_solver(
 
     equalities.append(factory.proj_x @ x0_symbol - x0_val)
     if factory.z_size > 0:
-        equalities.append(factory.proj_z @ z0_val)
+        equalities.append(factory.proj_z @ x0_symbol - z0_val)
+    if factory.q_size > 0:
+        equalities.append(factory.proj_q @ x0_symbol)
 
     equalities.extend(
         xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
@@ -563,8 +565,6 @@ def _create_solver(
             physical_t = duration * t
             x = factory.proj_x @ v
             z = factory.proj_z @ v
-            if factory.z_size > 0:
-                z += z0_val
             dx = factory.proj_x @ dv
             (dynamics_ij,) = factory.evaluate_dynamics(
                 physical_t,
@@ -636,8 +636,6 @@ def _create_solver(
             physical_t = duration * t
             x = factory.proj_x @ v
             z = factory.proj_z @ v
-            if factory.z_size > 0:
-                z += z0_val
             q = factory.proj_q @ v
             args = (
                 physical_t,
@@ -1229,6 +1227,7 @@ class CasadiSolutionAssembler:
             parameter_solutions=self.parameter_solution_map(free_parameters),
             parameters=system_parameters,
             parameter_block_layouts=self.problem.system.parameter_blocks,
+            parameter_layout=self.problem.parameter_layout,
             path=path,
             control_solutions=control_solutions,
             output=self.problem.system.y,
@@ -1469,10 +1468,10 @@ class ControlFactory:
         ]
 
 
-def _to_output_projector(proj: ca.MX) -> Optional[np.ndarray]:
+def _to_output_projector(proj: ca.DM) -> Optional[np.ndarray]:
     if proj.shape[0] == 0:
         return None
-    return np.array(proj.to_DM()).reshape(proj.shape)
+    return np.asarray(proj, dtype=float).reshape(proj.shape)
 
 
 class CallbackWrapper(ca.Callback):

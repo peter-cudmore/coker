@@ -85,12 +85,15 @@ class VariationalProblemBuilder:
         self.control = list(control or [])
         self._parameter_declarations = list(parameters or [])
         self._quadratures: list[QuadratureSpec] = []
+        self._parameter_layout = None
         if isinstance(self.system.parameters, tuple):
             self._validate_parameters()
-            self.system, self._parameter_declarations = (
-                specialize_system_parameters(
-                    self.system, self._parameter_declarations
-                )
+            (
+                self.system,
+                self._parameter_declarations,
+                self._parameter_layout,
+            ) = specialize_system_parameters(
+                self.system, self._parameter_declarations
             )
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
@@ -313,7 +316,7 @@ class VariationalProblemBuilder:
             else:
                 terminal.append(record)
 
-        return VariationalProblem(
+        problem = VariationalProblem(
             path_constraints=path,
             loss=loss,
             system=self.system,
@@ -328,6 +331,8 @@ class VariationalProblemBuilder:
             or TranscriptionOptions(),
             backend=self.backend,
         )
+        problem.parameter_layout = self._parameter_layout
+        return problem
 
     def _classify_time(self, expression: Tracer) -> object:
         if expression.tape is not self._trace:
