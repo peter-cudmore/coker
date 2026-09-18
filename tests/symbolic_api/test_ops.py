@@ -1,5 +1,7 @@
 import numpy as np
 import scipy.sparse
+import pytest
+
 
 from coker import (
     function,
@@ -49,6 +51,11 @@ def test_tape_stores_dense_and_sparse_matrix_constants_by_sparsity():
 
     assert isinstance(tape.nodes[dense.index][1], np.ndarray)
     assert scipy.sparse.issparse(tape.nodes[sparse.index][1])
+
+
+def test_tape_rejects_empty_matrix_constants_for_sparse_storage():
+    with pytest.raises(AssertionError, match="empty"):
+        Tape().insert_value(np.empty((0, 3)))
 
 
 def test_symbolic_scalar(backend):

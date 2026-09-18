@@ -141,6 +141,7 @@ class TapeInner:
         above."""
         if not isinstance(value, np.ndarray) or value.ndim != 2:
             return value
+        assert value.size != 0, "cannot determine sparsity of an empty matrix"
 
         sparsity = 1 - (np.count_nonzero(value) / value.size)
         if sparsity < SPARSE_STORAGE_MIN_SPARSITY:
