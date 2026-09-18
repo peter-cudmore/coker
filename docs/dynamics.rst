@@ -15,11 +15,15 @@ The main public surface is re-exported from :mod:`coker.dynamics`:
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
 - :class:`coker.dynamics.BoundedVariable`
+- :class:`coker.dynamics.UnboundedVariable`
 - :class:`coker.dynamics.TranscriptionOptions`
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
 - :class:`coker.dynamics.BoundVector`
 - :class:`coker.dynamics.DenseTensorVariable`
+- :class:`coker.dynamics.FunctionParameter`
 - :class:`coker.dynamics.MonotonePiecewiseLinear`
+- :class:`coker.dynamics.Perceptron`
+- :class:`coker.dynamics.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -69,6 +73,44 @@ symbolic observed output directly in the objective:
        built = problem.build(
            Minimise((problem.output(problem.t_final)[0] - observed) ** 2)
        )
+
+Function-valued parameters
+--------------------------
+
+Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
+:class:`~coker.dynamics.FunctionParameter` realization at problem construction;
+Coker replaces it with the realization's scalar basis decisions before solving.
+The function space and realization must agree on argument and scalar-output
+shapes.
+
+For example, a scalar response over a two-component state can use a perceptron:
+
+.. code-block:: python
+
+   from coker import FunctionSpace, Scalar, VectorSpace
+   from coker.dynamics import Perceptron, VariationalProblemBuilder
+   from coker.toolkits.codesign import Minimise
+
+   response = FunctionSpace(
+       "response",
+       arguments=[VectorSpace("state", 2)],
+       output=[Scalar("rate")],
+   )
+   # The system must declare ``parameters=(response,)`` and call ``p[0](x)``.
+   with VariationalProblemBuilder(
+       system,
+       t_final=1.0,
+       parameters=[Perceptron(2)],
+   ) as problem:
+       built = problem.build(
+           Minimise((problem.output(problem.t_final)[0] - 0.5) ** 2)
+       )
+
+``Perceptron`` and ``RadialBasisFunction`` decisions are unbounded by default.
+Pass both ``lower_bound`` and ``upper_bound`` to constrain every basis
+coefficient. ``MonotonePiecewiseLinear`` has unbounded internal decisions, but
+its declared output bounds and monotonicity are enforced by its
+parameterization.
 
 The builder classifies comparisons by their time binding: expressions at
 ``t`` are path constraints, expressions at ``0`` are initial point
