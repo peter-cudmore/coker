@@ -4,14 +4,18 @@ import pytest
 
 import numpy as np
 
-from coker import FunctionSpace, Scalar, VectorSpace
+from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.dynamics import (
     BoundVector,
-    DenseTensorVariable,
     BoundedVariable,
+    DenseTensorVariable,
     DynamicsSpec,
     MonotonePiecewiseLinear,
+    Perceptron,
+    RadialBasisFunction,
+    UnboundedVariable,
+    VariationalProblem,
     VariationalProblemBuilder,
 )
 from coker.dynamics.system import create_dynamics_from_spec
@@ -111,6 +115,10 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
         "p_1",
         "p_2",
     ]
+    assert all(
+        isinstance(parameter, UnboundedVariable)
+        for parameter in problem.parameters[:3]
+    )
 
 
 def test_builder_specializes_bound_vector_parameter():
@@ -309,3 +317,101 @@ def test_monotone_function_rejects_unimplemented_explicit_constraints():
             upper_bound=2.0,
             constraint_mode="explicit",
         )
+
+
+def test_perceptron_evaluates_vector_input():
+    declaration = Perceptron(2, guess=[0.5, -1.0, 0.25])
+    basis, initial = declaration.decision_declarations()
+
+    assert basis.dimension == 3
+    np.testing.assert_allclose(initial, [0.5, -1.0, 0.25])
+    assert declaration.evaluate(
+        initial, np.array([2.0, 1.0])
+    ) == pytest.approx(1.0 / (1.0 + np.exp(-0.25)))
+
+
+def test_radial_basis_function_evaluates_scalar_input():
+    declaration = RadialBasisFunction(
+        centers=[-1.0, 1.0],
+        width=0.5,
+        guess=[2.0, -1.0, 0.25],
+    )
+    _, initial = declaration.decision_declarations()
+
+    expected = (
+        0.25
+        + 2.0 * np.exp(-0.5 * ((0.0 + 1.0) / 0.5) ** 2)
+        - np.exp(-0.5 * ((0.0 - 1.0) / 0.5) ** 2)
+    )
+    assert declaration.evaluate(initial, 0.0) == pytest.approx(expected)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("casadi") is None, reason="CasADi not available"
+)
+@pytest.mark.parametrize(
+    ("declaration", "space", "basis", "argument", "expected"),
+    [
+        (
+            Perceptron(2),
+            VectorSpace("x", 2),
+            np.array([1.0, -1.0, 0.0]),
+            np.array([2.0, 1.0]),
+            1.0 / (1.0 + np.exp(-1.0)),
+        ),
+        (
+            RadialBasisFunction([0.0], 1.0),
+            Scalar("x"),
+            np.array([2.0, 0.5]),
+            0.0,
+            2.5,
+        ),
+    ],
+)
+def test_function_declarations_lower_to_casadi(
+    declaration, space, basis, argument, expected
+):
+    compiled = function(
+        [space],
+        lambda value: declaration.evaluate(basis, value),
+        backend="casadi",
+    )
+
+    actual = compiled(argument)
+
+    assert float(actual) == pytest.approx(expected)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("casadi") is None, reason="CasADi not available"
+)
+def test_variational_problem_specializes_radial_basis_parameter():
+    function_parameter = FunctionSpace(
+        "response", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(function_parameter,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (0.0, None),
+            dynamics=lambda time, _x, _z, _u, p: p[0](time),
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        ),
+        backend="casadi",
+    )
+    problem = VariationalProblem(
+        loss=lambda solution, parameters: (solution(1.0, parameters)[0] - 0.5)
+        ** 2,
+        system=system,
+        parameters=[RadialBasisFunction(centers=[0.0], width=1.0)],
+        t_final=1.0,
+        backend="casadi",
+    )
+
+    solution = problem()
+
+    assert solution.solve_info.success
+    assert solution.cost < 1e-4

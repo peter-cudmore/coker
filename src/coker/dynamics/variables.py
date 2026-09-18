@@ -1,5 +1,5 @@
 import abc
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Sequence, Union
 
 import numpy as np
@@ -19,6 +19,19 @@ class BoundedVariable(ParameterMixin):
     lower_bound: float
     upper_bound: float
     guess: float = 0
+
+    def degrees_of_freedom(self, *interval):
+        return 1
+
+
+@dataclass
+class UnboundedVariable(ParameterMixin):
+    """Scalar decision variable with a finite initial guess and no bounds."""
+
+    name: str
+    guess: float = 0
+    lower_bound: float = field(default=-np.inf, init=False)
+    upper_bound: float = field(default=np.inf, init=False)
 
     def degrees_of_freedom(self, *interval):
         return 1
@@ -170,7 +183,11 @@ ControlVariable = (
     ConstantControlVariable | PiecewiseConstantVariable | SpikeVariable
 )
 ParameterVariable = (
-    BoundedVariable | BoundVector | DenseTensorVariable | Constant
+    BoundedVariable
+    | UnboundedVariable
+    | BoundVector
+    | DenseTensorVariable
+    | Constant
 )
 Solution = (
     "DynamicalSystem" | Callable[[Scalar, ControlLaw, ValueType], Scalar]

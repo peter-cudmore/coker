@@ -170,6 +170,14 @@ class VariationalProblem:
         return decisions
 
     def __post_init__(self):
+        if isinstance(self.system.parameters, tuple):
+            from coker.dynamics.variational.function_binding import (
+                specialize_system_parameters,
+            )
+
+            self.system, self.parameters = specialize_system_parameters(
+                self.system, self.parameters or []
+            )
         self.path_constraints = _normalize_constraints(self.path_constraints)
         self.terminal_constraints = _normalize_constraints(
             self.terminal_constraints
@@ -184,11 +192,12 @@ class VariationalProblem:
         declaration_width = len(self.parameters or [])
         if self.system_parameter_map is not None:
             expected_shape = (system_width, declaration_width)
-            assert expected_shape == self.system_parameter_map.shape, (
-                "Parameter map is invalid. Expected an "
-                f"{expected_shape} matrix, but got "
-                f"{self.system_parameter_map.shape}."
-            )
+            if expected_shape != self.system_parameter_map.shape:
+                raise ValueError(
+                    "Parameter map is invalid. Expected an "
+                    f"{expected_shape} matrix, but got "
+                    f"{self.system_parameter_map.shape}."
+                )
         elif self.parameters is not None and system_width != declaration_width:
             # Heterogeneous spaces are bound by the builder before reaching
             # the backend; at this point a normal numeric vector is expected.

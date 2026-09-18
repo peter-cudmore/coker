@@ -19,7 +19,7 @@ from coker.dynamics.variables import (
     DenseTensorVariable,
     ParameterVariable,
 )
-from coker.dynamics.function_parameters import MonotonePiecewiseLinear
+from coker.dynamics.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variational.problem import (
     ConstraintSpec,
@@ -111,9 +111,9 @@ class VariationalProblemBuilder:
             zip(space, declarations)
         ):
             if isinstance(element, FunctionSpace):
-                if isinstance(declaration, MonotonePiecewiseLinear):
+                if isinstance(declaration, FunctionParameter):
                     continue
-                expected = "MonotonePiecewiseLinear"
+                expected = "FunctionParameter"
             elif isinstance(element, VectorSpace):
                 if isinstance(declaration, (BoundVector, DenseTensorVariable)):
                     continue

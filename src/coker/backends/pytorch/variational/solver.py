@@ -19,7 +19,7 @@ from coker.backends.lowered import (
     FunctionSignature,
 )
 from coker.backends.pytorch.dynamics import PytorchODESolverParameters
-from coker.dynamics.variables import BoundedVariable
+from coker.dynamics.variables import BoundedVariable, UnboundedVariable
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     generate_discritisation_operators,
@@ -121,9 +121,11 @@ class PytorchVariationalSolver(VariationalSolver):
         self._parameters = []
         seen = set()
         for declaration in problem.parameters or []:
-            if not isinstance(declaration, BoundedVariable):
+            if not isinstance(
+                declaration, (BoundedVariable, UnboundedVariable)
+            ):
                 raise NotImplementedError(
-                    "Only BoundedVariable parameters are supported by "
+                    "Only scalar decision parameters are supported by "
                     "PyTorch variational solving"
                 )
             if declaration.name in seen:
@@ -369,6 +371,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 f"Initial guess for parameter {parameter.name!r} "
                 "must be finite"
             )
+
         if (
             np.isfinite(parameter.lower_bound)
             and guess < parameter.lower_bound

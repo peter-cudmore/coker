@@ -29,6 +29,7 @@ from coker.dynamics import (
     ParameterVariable,
     PiecewiseConstantVariable,
     SpikeVariable,
+    UnboundedVariable,
     VariationalProblem,
     VariationalSolution,
     split_at_non_differentiable_points,
@@ -920,7 +921,9 @@ def _create_solver(
     parameter_offset = layout.parameter_slice.start
     path_offset = layout.horizon_size
     path_slice = slice(path_offset, path_offset + layout.path_size)
-    control_slice = slice(path_slice.stop, path_slice.stop + layout.control_size)
+    control_slice = slice(
+        path_slice.stop, path_slice.stop + layout.control_size
+    )
 
     def interpolate_path_guess(previous_path) -> ca.DM:
         knot_values = [
@@ -1360,7 +1363,7 @@ def construct_parameters(parameters: Optional[List[ParameterVariable]]):
     p0 = []
     output_map = {}
     for p in parameters:
-        if isinstance(p, BoundedVariable):
+        if isinstance(p, (BoundedVariable, UnboundedVariable)):
             try:
                 symbol = symbols[p.name]
                 params.append(symbol)
@@ -1373,14 +1376,10 @@ def construct_parameters(parameters: Optional[List[ParameterVariable]]):
             output_map[p.name] = len(symbols)
             params.append(symbol)
             symbols[p.name] = symbol
-            upper_bounds.append(
-                p.upper_bound if p.upper_bound is not None else ca.inf
-            )
+            upper_bounds.append(p.upper_bound)
             guess.append(p.guess)
             p0.append(p.guess)
-            lower_bounds.append(
-                p.lower_bound if p.lower_bound is not None else -ca.inf
-            )
+            lower_bounds.append(p.lower_bound)
         elif isinstance(p, (float, int)):
             params.append(ca.MX(p))
             p0.append(p)

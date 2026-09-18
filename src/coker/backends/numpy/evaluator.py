@@ -6,6 +6,7 @@ from coker.algebra import OP
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import (
     ConcatenateOP,
+    FunctionParameterOP,
     NormOP,
     ReshapeOP,
     SelectOP,
@@ -70,6 +71,9 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: np.reshape(x, shape=op.newshape),
     NormOP: lambda op, x: np.linalg.norm(x, ord=op.ord),
     SelectOP: lambda op, value: op.select(value),
+    FunctionParameterOP: lambda op, basis, argument: op.declaration.evaluate(
+        basis, argument
+    ),
 }
 
 
