@@ -6,7 +6,6 @@ import torch
 from coker.algebra import OP
 from coker.algebra.ops import (
     ConcatenateOP,
-    FunctionParameterOP,
     NormOP,
     ReshapeOP,
     SelectOP,
@@ -85,17 +84,6 @@ def _norm(op, value):
     return torch.linalg.norm(value, ord=op.ord)
 
 
-def _function_parameter(op, basis, argument):
-    from coker.dynamics.function_parameters import Perceptron
-
-    if isinstance(op.declaration, Perceptron):
-        flat_basis = basis.reshape(-1)
-        return torch.sigmoid(
-            torch.dot(flat_basis[:-1], argument.reshape(-1)) + flat_basis[-1]
-        )
-    return op.declaration.evaluate(basis, argument)
-
-
 impls = {
     OP.ADD: torch.add,
     OP.SUB: torch.subtract,
@@ -133,7 +121,6 @@ parameterised_impls = {
     ReshapeOP: lambda op, x: torch.reshape(x, shape=op.newshape),
     NormOP: _norm,
     SelectOP: lambda op, value: op.select(value),
-    FunctionParameterOP: _function_parameter,
 }
 
 

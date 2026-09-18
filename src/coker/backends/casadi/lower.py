@@ -10,7 +10,6 @@ from coker.algebra.graph import CallableReference, Tape, Tracer
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,
-    FunctionParameterOP,
     Noop,
     NormOP,
     ReshapeOP,
@@ -122,9 +121,6 @@ parameterised_impls = {
     NormOP: lambda op, x: norm(x, ord=op.ord),
     ReshapeOP: lambda op, x: reshape(x, *op.newshape),
     SelectOP: lambda op, value: op.select(value),
-    FunctionParameterOP: lambda op, basis, argument: op.declaration.evaluate(
-        basis, argument
-    ),
 }
 
 

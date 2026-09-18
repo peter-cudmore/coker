@@ -7,12 +7,9 @@ from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
 from coker.algebra.dimensions import FunctionSpace, VectorSpace
-from coker.algebra.function import function
+from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
-from coker.dynamics.function_parameters import (
-    FunctionParameter,
-    trace_function_parameter,
-)
+from coker.dynamics.function_parameters import FunctionParameter
 from coker.dynamics.variables import (
     BoundVector,
     BoundedVariable,
@@ -173,20 +170,26 @@ def specialize_system_parameters(
 
     numeric_parameters = VectorSpace("p", width)
 
-    def reconstruct_function_parameter(declaration, basis):
-        def evaluate(x):
-            return trace_function_parameter(declaration, basis, x)
-
-        return evaluate
+    parameterizations = tuple(
+        (
+            declaration.build_function(target, system.backend())
+            if isinstance(target, FunctionSpace)
+            else None
+        )
+        for target, declaration in zip(space, declarations)
+    )
 
     def reconstruct_parameters(parameters):
         values = []
-        for target, declaration, offset in zip(space, declarations, offsets):
+        for target, declaration, offset, parameterization in zip(
+            space, declarations, offsets, parameterizations
+        ):
             start, end = offset
-            if isinstance(target, FunctionSpace):
-                basis = parameters[start:end]
+            if parameterization is not None:
                 values.append(
-                    reconstruct_function_parameter(declaration, basis)
+                    BoundCallable(
+                        parameterization, target, (parameters[start:end],)
+                    )
                 )
             elif isinstance(target, VectorSpace):
                 values.append(

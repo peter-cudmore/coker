@@ -10,6 +10,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
+from coker.algebra.function import Function, function
 from coker.algebra.graph import if_then_else
 
 
@@ -35,18 +36,19 @@ class FunctionParameter(ABC):
     def evaluate(self, basis: Any, argument: Any) -> Any:
         """Evaluate the declared function from basis decisions."""
 
-
-def trace_function_parameter(
-    declaration: FunctionParameter, basis: Any, argument: Any
-) -> Any:
-    """Record a backend-dispatchable declaration evaluation when tracing."""
-    from coker.algebra.graph import Tracer
-    from coker.algebra.ops import FunctionParameterOP
-
-    emitter = basis if isinstance(basis, Tracer) else argument
-    if isinstance(emitter, Tracer):
-        return emitter._emit(FunctionParameterOP(declaration), basis, argument)
-    return declaration.evaluate(basis, argument)
+    def build_function(
+        self, target: FunctionSpace, backend: str | None
+    ) -> Function:
+        """Build a backend-native function of basis values and the argument."""
+        target = self.validate_target(target)
+        basis, *_ = self.decision_declarations()
+        return function(
+            [*target.arguments, basis],
+            lambda argument, basis_values: self.evaluate(
+                basis_values, argument
+            ),
+            backend=backend,
+        )
 
 
 def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
