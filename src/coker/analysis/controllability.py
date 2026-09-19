@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from itertools import combinations
-
 import sympy as sp
 
+from . import _rank
 from .model import AnalysisResult, AnalysisStatus
 from .symbolic import SymbolicSystem, UnsupportedSystemError, lower_system
-
-
-def _zero_matrix(rows: int) -> sp.ImmutableMatrix:
-    return sp.ImmutableMatrix.zeros(rows, 0)
 
 
 def _as_field(values) -> sp.ImmutableMatrix:
@@ -30,48 +25,11 @@ def _is_zero(expression: sp.Expr) -> bool:
     return sp.simplify(expression) == 0
 
 
-def _inconclusive(
-    reason: str,
-    *,
-    required_rank: int = 0,
-    matrix: sp.ImmutableMatrix | None = None,
-    generators: tuple[sp.ImmutableMatrix, ...] = (),
-) -> AnalysisResult:
-    if matrix is None:
-        matrix = _zero_matrix(required_rank)
-    rank = matrix.rank()
-    return AnalysisResult(
-        status=AnalysisStatus.INCONCLUSIVE,
-        rank=rank,
-        required_rank=required_rank,
-        matrix=matrix,
-        generators=generators,
-        generic_conditions=_rank_witnesses(matrix, rank),
-        reason=reason,
-    )
-
-
-def _rank_witnesses(
-    matrix: sp.ImmutableMatrix, rank: int
-) -> tuple[sp.Expr, ...]:
-    """Return a nonzero maximal minor which witnesses the generic rank."""
-    if rank == 0:
-        return ()
-
-    column_indices = tuple(range(matrix.cols))
-    for row_indices in combinations(range(matrix.rows), rank):
-        minor = sp.simplify(matrix.extract(row_indices, column_indices).det())
-        if not _is_zero(minor):
-            return (minor,)
-
-    raise RuntimeError("A rank-positive matrix must have a nonzero minor")
-
-
 def _matrix_from_fields(
     fields: tuple[sp.ImmutableMatrix, ...], state_dimension: int
 ) -> sp.ImmutableMatrix:
     if not fields:
-        return _zero_matrix(state_dimension)
+        return _rank.empty_matrix(state_dimension, 0, immutable=True)
     return sp.ImmutableMatrix.hstack(*fields)
 
 
@@ -150,25 +108,6 @@ def _lie_bracket(
     )
 
 
-def _result(
-    status: AnalysisStatus,
-    fields: tuple[sp.ImmutableMatrix, ...],
-    state_dimension: int,
-    reason: str | None = None,
-) -> AnalysisResult:
-    matrix = _matrix_from_fields(fields, state_dimension)
-    rank = matrix.rank()
-    return AnalysisResult(
-        status=status,
-        rank=rank,
-        required_rank=state_dimension,
-        matrix=matrix,
-        generators=fields,
-        generic_conditions=_rank_witnesses(matrix, rank),
-        reason=reason,
-    )
-
-
 def analyse_controllability(
     system, *, max_order: int | None = None
 ) -> AnalysisResult:
@@ -182,28 +121,32 @@ def analyse_controllability(
     try:
         symbolic = lower_system(system)
     except UnsupportedSystemError as error:
-        return _inconclusive(
-            str(error) or "The system cannot be represented symbolically."
+        return _rank.inconclusive(
+            str(error) or "The system cannot be represented symbolically.",
+            matrix=_rank.empty_matrix(0, 0, immutable=True),
         )
 
     state_dimension = len(symbolic.state)
     if not isinstance(max_order, int) or isinstance(max_order, bool):
         if max_order is not None:
-            return _inconclusive(
+            return _rank.inconclusive(
                 "max_order must be a non-negative integer or None.",
                 required_rank=state_dimension,
+                matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
             )
     elif max_order < 0:
-        return _inconclusive(
+        return _rank.inconclusive(
             "max_order must be a non-negative integer or None.",
             required_rank=state_dimension,
+            matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
         )
 
     affine_fields = _extract_control_affine_fields(symbolic)
     if affine_fields is None:
-        return _inconclusive(
+        return _rank.inconclusive(
             "Dynamics are not affine in the controls.",
             required_rank=state_dimension,
+            matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
         )
 
     drift, controls = affine_fields
@@ -221,17 +164,25 @@ def analyse_controllability(
     order = 0
     while True:
         if rank == state_dimension:
-            return _result(AnalysisStatus.ACCESSIBLE, fields, state_dimension)
-        if not frontier:
-            return _result(
-                AnalysisStatus.NOT_ACCESSIBLE, fields, state_dimension
-            )
-        if max_order is not None and order >= max_order:
-            return _result(
-                AnalysisStatus.INCONCLUSIVE,
+            return _rank.result(
+                AnalysisStatus.ACCESSIBLE,
+                _matrix_from_fields(fields, state_dimension),
                 fields,
                 state_dimension,
+            )
+        if not frontier:
+            return _rank.result(
+                AnalysisStatus.NOT_ACCESSIBLE,
+                _matrix_from_fields(fields, state_dimension),
+                fields,
+                state_dimension,
+            )
+        if max_order is not None and order >= max_order:
+            return _rank.inconclusive(
                 "Lie-bracket expansion reached max_order before closure.",
+                required_rank=state_dimension,
+                matrix=_matrix_from_fields(fields, state_dimension),
+                generators=fields,
             )
 
         next_frontier: tuple[sp.ImmutableMatrix, ...] = ()
@@ -245,8 +196,11 @@ def analyse_controllability(
                     next_frontier = (*next_frontier, bracket)
 
         if not next_frontier:
-            return _result(
-                AnalysisStatus.NOT_ACCESSIBLE, fields, state_dimension
+            return _rank.result(
+                AnalysisStatus.NOT_ACCESSIBLE,
+                _matrix_from_fields(fields, state_dimension),
+                fields,
+                state_dimension,
             )
         frontier = next_frontier
         order += 1

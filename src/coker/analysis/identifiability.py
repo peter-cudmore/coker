@@ -9,12 +9,9 @@ from __future__ import annotations
 
 import sympy as sp
 
+from . import _rank
 from .model import AnalysisResult, AnalysisStatus
 from .symbolic import SymbolicSystem, UnsupportedSystemError, lower_system
-
-
-def _empty_matrix(width: int) -> sp.Matrix:
-    return sp.zeros(0, width)
 
 
 def _gradient(
@@ -41,62 +38,6 @@ def _lie_derivative(
     )
 
 
-def _rank_witness(matrix: sp.Matrix, rank: int) -> tuple[sp.Expr, ...]:
-    """Return a nonzero maximal minor that witnesses ``matrix``'s rank."""
-    if rank == 0:
-        return ()
-
-    _reduced, column_indices = matrix.rref()
-    column_indices = list(column_indices)
-    selected_columns = matrix[:, column_indices]
-    _reduced_transpose, row_indices = selected_columns.T.rref()
-    row_indices = list(row_indices)
-    witness = sp.factor(matrix.extract(row_indices, column_indices).det())
-    if witness == 0:
-        raise ValueError("could not construct a nonzero generic rank witness")
-    return (witness,)
-
-
-def _result(
-    status: AnalysisStatus,
-    matrix: sp.Matrix,
-    generators: tuple[sp.Expr, ...],
-    required_rank: int,
-    *,
-    reason: str | None = None,
-) -> AnalysisResult:
-    rank = matrix.rank()
-    return AnalysisResult(
-        status=status,
-        rank=rank,
-        required_rank=required_rank,
-        matrix=matrix,
-        generators=generators,
-        generic_conditions=_rank_witness(matrix, rank),
-        reason=reason,
-    )
-
-
-def _inconclusive(
-    reason: str,
-    *,
-    required_rank: int = 0,
-    matrix: sp.Matrix | None = None,
-    generators: tuple[sp.Expr, ...] = (),
-) -> AnalysisResult:
-    matrix = _empty_matrix(required_rank) if matrix is None else matrix
-    rank = matrix.rank()
-    return AnalysisResult(
-        status=AnalysisStatus.INCONCLUSIVE,
-        rank=rank,
-        required_rank=required_rank,
-        matrix=matrix,
-        generators=generators,
-        generic_conditions=_rank_witness(matrix, rank),
-        reason=reason,
-    )
-
-
 def analyse_identifiability(
     system: object, *, max_order: int | None = None
 ) -> AnalysisResult:
@@ -114,14 +55,14 @@ def analyse_identifiability(
             else lower_system(system)
         )
     except UnsupportedSystemError as error:
-        return _inconclusive(
+        return _rank.inconclusive(
             str(error) or "system is unsupported for analysis"
         )
 
     coordinates = symbolic.state + symbolic.parameters
     required_rank = len(coordinates)
     if symbolic.controls:
-        return _inconclusive(
+        return _rank.inconclusive(
             "identifiability analysis does not support controlled systems",
             required_rank=required_rank,
         )
@@ -130,7 +71,7 @@ def analyse_identifiability(
         or isinstance(max_order, bool)
         or max_order < 0
     ):
-        return _inconclusive(
+        return _rank.inconclusive(
             "max_order must be a non-negative integer or None",
             required_rank=required_rank,
         )
@@ -141,28 +82,32 @@ def analyse_identifiability(
     rows = [
         _gradient(expression, coordinates) for expression in current_generators
     ]
-    matrix = sp.Matrix.vstack(*rows) if rows else _empty_matrix(required_rank)
+    matrix = (
+        sp.Matrix.vstack(*rows)
+        if rows
+        else _rank.empty_matrix(0, required_rank)
+    )
     previous_rank: int | None = None
     order = 0
 
     while True:
         rank = matrix.rank()
         if rank == required_rank:
-            return _result(
+            return _rank.result(
                 AnalysisStatus.IDENTIFIABLE,
                 matrix,
                 generators,
                 required_rank,
             )
         if previous_rank == rank:
-            return _result(
+            return _rank.result(
                 AnalysisStatus.NOT_IDENTIFIABLE,
                 matrix,
                 generators,
                 required_rank,
             )
         if max_order is not None and order >= max_order:
-            return _inconclusive(
+            return _rank.inconclusive(
                 f"maximum Lie-derivative order {max_order} reached before "
                 "the augmented observability rank stabilized",
                 required_rank=required_rank,

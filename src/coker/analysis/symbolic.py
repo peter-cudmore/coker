@@ -63,27 +63,31 @@ def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
     parameter_slots = len(declarations) if declarations else 1
 
     _reject_dae_or_quadrature(system)
-    _validate_function(system.dxdt, "dynamics")
-    _validate_function(system.y, "outputs")
+    for function, subject in (
+        (system.dxdt, "dynamics"),
+        (system.y, "outputs"),
+    ):
+        _validate_function(function, subject)
 
     dynamics_shapes = system.dxdt.input_shape()
     output_shapes = system.y.input_shape()
-    _validate_signature(
-        dynamics_shapes,
-        expected_size=4 + parameter_slots,
-        parameter_declarations=declarations,
-        control_dimension=control_dimension,
-        include_quadrature=False,
-        subject="dynamics",
-    )
-    _validate_signature(
-        output_shapes,
-        expected_size=5 + parameter_slots,
-        parameter_declarations=declarations,
-        control_dimension=control_dimension,
-        include_quadrature=True,
-        subject="outputs",
-    )
+    for shapes, expected_size, include_quadrature, subject in (
+        (
+            dynamics_shapes,
+            4 + parameter_slots,
+            False,
+            "dynamics",
+        ),
+        (output_shapes, 5 + parameter_slots, True, "outputs"),
+    ):
+        _validate_signature(
+            shapes,
+            expected_size=expected_size,
+            parameter_declarations=declarations,
+            control_dimension=control_dimension,
+            include_quadrature=include_quadrature,
+            subject=subject,
+        )
 
     state_dimension = _require_finite_dimension(dynamics_shapes[1], "state")
     output_state_dimension = _require_finite_dimension(
@@ -107,21 +111,13 @@ def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
     for index, shape in enumerate(system.y.output_shape()):
         _require_finite_dimension(shape, f"output {index}")
 
-    try:
-        backend = SympyBackend()
-        dynamics_args, raw_dynamics = backend.lower_to_symbolic(system.dxdt)
-        output_args, raw_outputs = backend.lower_to_symbolic(system.y)
-    except (NotImplementedError, TypeError, ValueError) as exc:
-        raise UnsupportedSystemError(
-            f"SymPy cannot lower this system: {exc}"
-        ) from exc
-
-    if len(dynamics_args) != len(dynamics_shapes) or len(output_args) != len(
-        output_shapes
-    ):
-        raise UnsupportedSystemError(
-            "lowered function arguments are inconsistent"
-        )
+    (
+        (dynamics_args, raw_dynamics),
+        (output_args, raw_outputs),
+    ) = _lower_functions(
+        (system.dxdt, dynamics_shapes),
+        (system.y, output_shapes),
+    )
 
     dynamics_time = _scalar_symbol(dynamics_args[0], "dynamics time")
     output_time = _scalar_symbol(output_args[0], "output time")
@@ -193,7 +189,6 @@ def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
     _reject_non_autonomous_or_implicit(outputs, dynamics_time, "outputs")
     _reject_nonsmooth(dynamics, "dynamics")
     _reject_nonsmooth(outputs, "outputs")
-    _reject_non_affine_controls(dynamics, controls)
 
     return SymbolicSystem(
         state=state,
@@ -262,6 +257,32 @@ def _reject_dae_or_quadrature(system: DynamicalSystem) -> None:
 def _validate_function(value: object, subject: str) -> None:
     if not isinstance(value, Function):
         raise UnsupportedSystemError(f"{subject} must be a Coker Function")
+
+
+def _lower_functions(
+    *functions: tuple[Function, Sequence[object]],
+) -> tuple[tuple[Sequence[object], object], ...]:
+    lowered: list[tuple[Sequence[object], object]] = []
+    try:
+        backend = SympyBackend()
+        for function, _shapes in functions:
+            arguments, values = backend.lower_to_symbolic(function)
+            lowered.append((arguments, values))
+    except (NotImplementedError, TypeError, ValueError) as exc:
+        raise UnsupportedSystemError(
+            f"SymPy cannot lower this system: {exc}"
+        ) from exc
+
+    if any(
+        len(arguments) != len(shapes)
+        for (arguments, _values), (_function, shapes) in zip(
+            lowered, functions
+        )
+    ):
+        raise UnsupportedSystemError(
+            "lowered function arguments are inconsistent"
+        )
+    return tuple(lowered)
 
 
 def _validate_signature(
@@ -355,10 +376,12 @@ def _scalar_symbol(value: object, subject: str) -> sp.Symbol:
 def _argument_symbols(
     value: object, dimension: Dimension, subject: str
 ) -> tuple[sp.Symbol, ...]:
-    values = _flatten(value)
-    if len(values) != dimension.flat() or not all(
-        isinstance(symbol, sp.Symbol) for symbol in values
-    ):
+    values = _values_for_dimension(
+        value,
+        dimension,
+        f"{subject} did not lower to the declared scalar symbols",
+    )
+    if not all(isinstance(symbol, sp.Symbol) for symbol in values):
         raise UnsupportedSystemError(
             f"{subject} did not lower to the declared scalar symbols"
         )
@@ -401,12 +424,11 @@ def _function_expressions(
         dimension = _require_finite_dimension(
             shape, f"{subject} output {index}"
         )
-        flattened = _flatten(value)
-        if len(flattened) != dimension.flat():
-            raise UnsupportedSystemError(
-                f"{subject} output {index} has an unsupported symbolic shape"
+        expressions.extend(
+            _expressions_for_dimension(
+                value, dimension, f"{subject} output {index}"
             )
-        expressions.extend(flattened)
+        )
     return tuple(expressions)
 
 
@@ -426,15 +448,23 @@ def _control_values(
         ) from exc
 
 
+def _values_for_dimension(
+    value: object, dimension: Dimension, invalid_shape_message: str
+) -> tuple[sp.Expr, ...]:
+    values = _flatten(value)
+    if len(values) != dimension.flat():
+        raise UnsupportedSystemError(invalid_shape_message)
+    return values
+
+
 def _expressions_for_dimension(
     value: object, dimension: Dimension, subject: str
 ) -> tuple[sp.Expr, ...]:
-    expressions = _flatten(value)
-    if len(expressions) != dimension.flat():
-        raise UnsupportedSystemError(
-            f"{subject} has an unsupported symbolic shape"
-        )
-    return expressions
+    return _values_for_dimension(
+        value,
+        dimension,
+        f"{subject} has an unsupported symbolic shape",
+    )
 
 
 def _control_symbols(
@@ -507,17 +537,6 @@ def _reject_nonsmooth(expressions: Iterable[sp.Expr], subject: str) -> None:
         raise UnsupportedSystemError(
             f"nonsmooth expressions in {subject} are not supported"
         )
-
-
-def _reject_non_affine_controls(
-    dynamics: Iterable[sp.Expr], controls: Iterable[sp.Symbol]
-) -> None:
-    for expression in dynamics:
-        for control in controls:
-            if sp.simplify(sp.diff(expression, control, 2)) != 0:
-                raise UnsupportedSystemError(
-                    "non-affine controls are not supported"
-                )
 
 
 def _flatten(value: object) -> tuple[sp.Expr, ...]:
