@@ -7,10 +7,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-try:
-    import torch
-except ImportError:
-    torch = None
 
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import BoundCallable, function
@@ -18,7 +14,6 @@ from coker.algebra.ops import Noop
 from coker.dynamics.function_parameters import (
     FittedFunction,
     FunctionParameter,
-    Perceptron,
 )
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variables import (
@@ -35,7 +30,9 @@ class ParameterValueLayout:
     declarations: tuple[object, ...]
     offsets: tuple[tuple[int, int], ...]
 
-    def reconstruct(self, values: object) -> Mapping[str, object]:
+    def reconstruct(
+        self, values: object, backend: object | None = None
+    ) -> Mapping[str, object]:
         result = {}
         for target, declaration, (start, end) in zip(
             self.targets, self.declarations, self.offsets
@@ -43,11 +40,28 @@ class ParameterValueLayout:
             basis = values[start:end]
             name = self._name(target, declaration)
             if isinstance(target, FunctionSpace):
-                result[name] = self._function(target, declaration, basis)
+                fitted = (
+                    backend.reconstruct_function_parameter(
+                        declaration, target, basis
+                    )
+                    if backend is not None
+                    else None
+                )
+                result[name] = (
+                    fitted
+                    if fitted is not None
+                    else self._function(
+                        target, declaration, self._numpy(basis, backend)
+                    )
+                )
             elif isinstance(target, VectorSpace):
-                result[name] = self._numpy(basis).reshape(declaration.shape)
+                result[name] = self._numpy(basis, backend).reshape(
+                    declaration.shape
+                )
             else:
-                result[name] = float(self._numpy(basis).reshape((-1,))[0])
+                result[name] = float(
+                    self._numpy(basis, backend).reshape((-1,))[0]
+                )
         return result
 
     @staticmethod
@@ -67,32 +81,19 @@ class ParameterValueLayout:
         return target.name
 
     @staticmethod
-    def _numpy(values: object) -> np.ndarray:
-        if torch is not None and isinstance(values, torch.Tensor):
-            return values.detach().cpu().numpy()
+    def _numpy(values: object, backend: object | None) -> np.ndarray:
+        if backend is not None:
+            values = backend.to_numpy_array(values)
         return np.asarray(values, dtype=float)
 
     @staticmethod
     def _function(
-        target: FunctionSpace, declaration: FunctionParameter, basis: object
+        target: FunctionSpace,
+        declaration: FunctionParameter,
+        basis: np.ndarray,
     ) -> FittedFunction:
-        if torch is not None and isinstance(basis, torch.Tensor):
-            if isinstance(declaration, Perceptron):
-
-                def evaluate(argument):
-                    return torch.sigmoid(
-                        torch.dot(basis[:-1], argument.reshape(-1)) + basis[-1]
-                    )
-
-            else:
-
-                def evaluate(argument):
-                    return declaration.evaluate(basis, argument)
-
-        else:
-
-            def evaluate(argument):
-                return declaration.evaluate(basis, argument)
+        def evaluate(argument):
+            return declaration.evaluate(basis, argument)
 
         return FittedFunction(declaration, target, evaluate, basis)
 

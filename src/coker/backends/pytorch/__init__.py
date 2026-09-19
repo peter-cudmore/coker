@@ -124,6 +124,27 @@ class PytorchBackend(Backend):
         """Lower a function to an eager ``torch.nn.Module``."""
         return self.lower(function).as_module()
 
+    def reconstruct_function_parameter(self, declaration, target, values):
+        """Build a PyTorch-native fitted function from solver decisions."""
+        from coker.dynamics.function_parameters import FittedFunction
+
+        basis = self.to_backend_array(values).reshape(
+            declaration.decision_declarations()[0].dimension
+        )
+        native = self.as_module(declaration.build_function(target, self.name))
+
+        class FittedModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.native = native
+                self.register_buffer("basis", basis)
+
+            def forward(self, argument):
+                return self.native(argument, self.basis)
+
+        function = FittedModule()
+        return FittedFunction(declaration, target, function, function.basis)
+
     def build_optimisation_problem(
         self,
         cost,

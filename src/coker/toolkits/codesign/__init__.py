@@ -141,8 +141,12 @@ class MathematicalProgram(SymbolicCallable):
         self, captured_values: Sequence[Any]
     ) -> dict[str, Any]:
         """Rebuild public decision values from private solver captures."""
+        from coker.backends import get_backend_by_name
         from coker.dynamics.function_parameters import FittedFunction
 
+        backend = get_backend_by_name(
+            self.backend or "numpy", set_current=False
+        )
         result = {}
         for metadata, value in zip(self._parameter_captures, captured_values):
             if isinstance(metadata.target, FunctionSpace):
@@ -150,10 +154,11 @@ class MathematicalProgram(SymbolicCallable):
                     raise RuntimeError(
                         "function parameter capture has no basis declaration"
                     )
-                if self.backend == "pytorch":
-                    result[metadata.name] = self._reconstruct_pytorch_function(
-                        metadata, value
-                    )
+                fitted = backend.reconstruct_function_parameter(
+                    metadata.declaration, metadata.target, value
+                )
+                if fitted is not None:
+                    result[metadata.name] = fitted
                     continue
                 basis = np.asarray(value).reshape(metadata.basis.dimension)
                 declaration = metadata.declaration
@@ -176,43 +181,6 @@ class MathematicalProgram(SymbolicCallable):
                     metadata.target.dimension
                 )
         return result
-
-    @staticmethod
-    def _reconstruct_pytorch_function(
-        metadata: _ParameterCapture, value: Any
-    ) -> Any:
-        """Preserve a PyTorch-native fitted callable and basis tensor."""
-        import torch
-
-        from coker.dynamics.function_parameters import FittedFunction
-
-        if metadata.basis is None:
-            raise RuntimeError(
-                "function parameter capture has no basis declaration"
-            )
-        basis = torch.as_tensor(value).reshape(metadata.basis.dimension)
-        native = (
-            metadata.declaration.build_function(metadata.target, "pytorch")
-            .lower()
-            .as_module()
-        )
-
-        class FittedModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.native = native
-                self.register_buffer("basis", basis)
-
-            def forward(self, argument: Any) -> Any:
-                return self.native(argument, self.basis)
-
-        function = FittedModule()
-        return FittedFunction(
-            specification=metadata.declaration,
-            space=metadata.target,
-            function=function,
-            parameters=function.basis,
-        )
 
     def _call_symbolic(self, *args):
         """Emit objective and output evaluations on the symbolic tape."""

@@ -556,7 +556,10 @@ class PytorchVariationalSolver(VariationalSolver):
         )
         system_parameter_values = self._system_parameters(values)
         public_parameters = (
-            self.problem.parameter_layout.reconstruct(system_parameter_values)
+            self.problem.parameter_layout.reconstruct(
+                system_parameter_values,
+                get_backend_by_name("pytorch", set_current=False),
+            )
             if self.problem.parameter_layout is not None
             else {
                 parameter.name: float(values[index].cpu())
