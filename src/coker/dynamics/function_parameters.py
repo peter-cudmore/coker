@@ -55,6 +55,17 @@ class FunctionParameter(ABC):
     def evaluate(self, basis: Any, argument: Any) -> Any:
         """Evaluate the declared function from basis decisions."""
 
+    def fit(self, target: FunctionSpace, basis: Any) -> FittedFunction:
+        """Construct a generic fitted function from concrete basis values."""
+        basis_space, *_ = self.decision_declarations()
+        parameters = np.asarray(basis).reshape(basis_space.dimension)
+        return FittedFunction(
+            self,
+            target,
+            lambda argument: self.evaluate(parameters, argument),
+            parameters,
+        )
+
     def build_function(
         self, target: FunctionSpace, backend: str | None
     ) -> Function:

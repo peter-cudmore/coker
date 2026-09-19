@@ -58,9 +58,9 @@ class Backend(metaclass=ABCMeta):
 
     def reconstruct_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
-    ) -> Any | None:
-        """Return a native fitted function or ``None`` for generic recovery."""
-        return None
+    ) -> Any:
+        """Reconstruct a generic fitted function from backend values."""
+        return declaration.fit(target, self.to_numpy_array(values))
 
     def create_variational_solver(
         self, problem: VariationalProblem

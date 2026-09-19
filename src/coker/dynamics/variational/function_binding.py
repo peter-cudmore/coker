@@ -11,10 +11,7 @@ import numpy as np
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
-from coker.dynamics.function_parameters import (
-    FittedFunction,
-    FunctionParameter,
-)
+from coker.dynamics.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variables import (
     BoundVector,
@@ -40,19 +37,12 @@ class ParameterValueLayout:
             basis = values[start:end]
             name = self._name(target, declaration)
             if isinstance(target, FunctionSpace):
-                fitted = (
+                result[name] = (
                     backend.reconstruct_function_parameter(
                         declaration, target, basis
                     )
                     if backend is not None
-                    else None
-                )
-                result[name] = (
-                    fitted
-                    if fitted is not None
-                    else self._function(
-                        target, declaration, self._numpy(basis, backend)
-                    )
+                    else declaration.fit(target, self._numpy(basis, None))
                 )
             elif isinstance(target, VectorSpace):
                 result[name] = self._numpy(basis, backend).reshape(
@@ -85,17 +75,6 @@ class ParameterValueLayout:
         if backend is not None:
             values = backend.to_numpy_array(values)
         return np.asarray(values, dtype=float)
-
-    @staticmethod
-    def _function(
-        target: FunctionSpace,
-        declaration: FunctionParameter,
-        basis: np.ndarray,
-    ) -> FittedFunction:
-        def evaluate(argument):
-            return declaration.evaluate(basis, argument)
-
-        return FittedFunction(declaration, target, evaluate, basis)
 
 
 def _basis_declarations(

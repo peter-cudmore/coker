@@ -142,7 +142,6 @@ class MathematicalProgram(SymbolicCallable):
     ) -> dict[str, Any]:
         """Rebuild public decision values from private solver captures."""
         from coker.backends import get_backend_by_name
-        from coker.dynamics.function_parameters import FittedFunction
 
         backend = get_backend_by_name(
             self.backend or "numpy", set_current=False
@@ -150,29 +149,8 @@ class MathematicalProgram(SymbolicCallable):
         result = {}
         for metadata, value in zip(self._parameter_captures, captured_values):
             if isinstance(metadata.target, FunctionSpace):
-                if metadata.basis is None:
-                    raise RuntimeError(
-                        "function parameter capture has no basis declaration"
-                    )
-                fitted = backend.reconstruct_function_parameter(
+                result[metadata.name] = backend.reconstruct_function_parameter(
                     metadata.declaration, metadata.target, value
-                )
-                if fitted is not None:
-                    result[metadata.name] = fitted
-                    continue
-                basis = np.asarray(value).reshape(metadata.basis.dimension)
-                declaration = metadata.declaration
-
-                def fitted_function(
-                    argument, declaration=declaration, basis=basis
-                ):
-                    return declaration.evaluate(basis, argument)
-
-                result[metadata.name] = FittedFunction(
-                    specification=declaration,
-                    space=metadata.target,
-                    function=fitted_function,
-                    parameters=basis,
                 )
             elif isinstance(metadata.target, Scalar):
                 result[metadata.name] = float(np.asarray(value).reshape(-1)[0])

@@ -20,6 +20,16 @@ from .ops import (
 )
 
 
+class _FittedModule(torch.nn.Module):
+    def __init__(self, native: torch.nn.Module, basis: torch.Tensor) -> None:
+        super().__init__()
+        self.native = native
+        self.register_buffer("basis", basis)
+
+    def forward(self, argument):
+        return self.native(argument, self.basis)
+
+
 class PytorchBackend(Backend):
     """Evaluate Coker expression graphs using PyTorch tensors."""
 
@@ -128,21 +138,10 @@ class PytorchBackend(Backend):
         """Build a PyTorch-native fitted function from solver decisions."""
         from coker.dynamics.function_parameters import FittedFunction
 
-        basis = self.to_backend_array(values).reshape(
-            declaration.decision_declarations()[0].dimension
-        )
+        basis_space, *_ = declaration.decision_declarations()
+        basis = self.to_backend_array(values).reshape(basis_space.dimension)
         native = self.as_module(declaration.build_function(target, self.name))
-
-        class FittedModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.native = native
-                self.register_buffer("basis", basis)
-
-            def forward(self, argument):
-                return self.native(argument, self.basis)
-
-        function = FittedModule()
+        function = _FittedModule(native, basis)
         return FittedFunction(declaration, target, function, function.basis)
 
     def build_optimisation_problem(
