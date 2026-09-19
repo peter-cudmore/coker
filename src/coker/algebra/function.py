@@ -148,6 +148,8 @@ class Function(SymbolicCallable):
         input_spaces: Sequence[Scalar | VectorSpace | FunctionSpace],
         output_specs: Sequence[FunctionOutputSpec],
         args: Sequence[Tracer],
+        *,
+        name: str | None = None,
     ) -> list[Tracer | None]:
         def result_output_dimension(
             shape: OutputShape,
@@ -184,6 +186,7 @@ class Function(SymbolicCallable):
             native,
             function_space,
             result_dimension,
+            name=name,
         )
         bundle = Tracer(
             tape,
@@ -222,6 +225,7 @@ class Function(SymbolicCallable):
             [spec.space for spec in self.signature.inputs],
             self.signature.outputs,
             args,
+            name=self.name,
         )
         return outputs[0] if self.is_single else tuple(outputs)
 
@@ -530,7 +534,13 @@ def create_function_from_native(
     with TraceContext(backend=backend) as tape:
         args = [tape.input(space) for space in input_spaces]
         outputs = Function._append_native_outputs(
-            tape, native, backend, input_spaces, signature.outputs, args
+            tape,
+            native,
+            backend,
+            input_spaces,
+            signature.outputs,
+            args,
+            name=name,
         )
 
     result = Function(

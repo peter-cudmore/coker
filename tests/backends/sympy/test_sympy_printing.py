@@ -2,6 +2,11 @@ import warnings
 
 import coker
 from coker.backends.backend import get_backend_by_name
+from coker.backends.lowered import (
+    FunctionInputSpec,
+    FunctionOutputSpec,
+    FunctionSignature,
+)
 import sympy as sp
 import numpy as np
 
@@ -19,6 +24,90 @@ def test_scalar_lowering():
     args, out = backend.lower_to_symbolic(f)
     assert args == [sp.Symbol("x"), sp.Symbol("p")]
     assert out == sp.Symbol("x") ** 2 + sp.Symbol("p")
+
+
+def test_function_parameter_lowering():
+    response = coker.FunctionSpace(
+        "response",
+        arguments=[coker.Scalar("state")],
+        output=[coker.Scalar("rate")],
+    )
+    function = coker.function(
+        [response, coker.Scalar("state")],
+        lambda parameter, state: parameter(state),
+        backend="sympy",
+    )
+
+    backend = get_backend_by_name("sympy")
+    args, output = backend.lower_to_symbolic(function)
+
+    assert args[0] == sp.Function("response")
+    assert args[1] == sp.Symbol("state")
+    assert output == sp.Function("response")(sp.Symbol("state"))
+
+
+def test_vector_function_parameter_lowering_preserves_arguments():
+    response = coker.FunctionSpace(
+        "response",
+        arguments=[
+            coker.Scalar("time"),
+            coker.VectorSpace("state", 2),
+            coker.Scalar("gain"),
+        ],
+        output=[coker.VectorSpace("rate", 2)],
+    )
+    function = coker.function(
+        [
+            response,
+            coker.Scalar("time"),
+            coker.VectorSpace("state", 2),
+            coker.Scalar("gain"),
+        ],
+        lambda parameter, time, state, gain: parameter(time, state, gain),
+        backend="sympy",
+    )
+
+    backend = get_backend_by_name("sympy")
+    args, output = backend.lower_to_symbolic(function)
+
+    time = sp.Symbol("time")
+    state = sp.Array([sp.Symbol("state_0"), sp.Symbol("state_1")])
+    gain = sp.Symbol("gain")
+    assert args[1:] == [time, state, gain]
+    state_argument = sp.ImmutableMatrix(
+        [sp.Symbol("state_0"), sp.Symbol("state_1")]
+    )
+    assert list(sp.ImmutableMatrix(output)) == [
+        sp.Function("response_0")(time, state_argument, gain),
+        sp.Function("response_1")(time, state_argument, gain),
+    ]
+
+
+def test_external_function_lowering_reuses_function_symbol():
+    backend = get_backend_by_name("sympy")
+    external = backend.import_function(
+        lambda _value: (_ for _ in ()).throw(
+            AssertionError("symbolic lowering must not execute the function")
+        ),
+        FunctionSignature(
+            inputs=(FunctionInputSpec("value", coker.Scalar("value")),),
+            outputs=(FunctionOutputSpec("result", coker.Scalar("result")),),
+        ),
+        name="external",
+    )
+    function = coker.function(
+        [coker.Scalar("x")],
+        lambda x: external(x) + external(x + 1),
+        backend="sympy",
+    )
+
+    args, output = backend.lower_to_symbolic(function)
+
+    x = sp.Symbol("x")
+    assert args == [x]
+    assert output == sp.Function("external")(x) + sp.Function("external")(
+        x + 1
+    )
 
 
 def test_vector_lowering():

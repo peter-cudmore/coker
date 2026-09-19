@@ -207,6 +207,7 @@ class _CallableArchiveEntry:
     callable_value: Callable
     function_space: FunctionSpace
     result_dimension: Dimension | FunctionSpace | ResultBundleDimension
+    name: str | None
 
 
 class CallableReference:
@@ -229,6 +230,11 @@ class CallableReference:
         self,
     ) -> Dimension | FunctionSpace | ResultBundleDimension:
         return self._entry.result_dimension
+
+    @property
+    def symbol_name(self) -> str:
+        """Return the stable name used for symbolic external calls."""
+        return self._entry.name or f"function_{self._archive_index}"
 
     def __call__(self, *args):
         return self._entry.callable_value(*args)
@@ -272,6 +278,8 @@ class Tape:
         result_dimension: (
             Dimension | FunctionSpace | ResultBundleDimension | None
         ) = None,
+        *,
+        name: str | None = None,
     ) -> CallableReference:
         if result_dimension is None:
             output_dimensions = function_space.output_dimensions()
@@ -282,7 +290,7 @@ class Tape:
                 )
             (result_dimension,) = output_dimensions
 
-        key = id(callable_value)
+        key = (id(callable_value), name)
         archive_index = self._inner._callable_hashmap.get(key)
         if archive_index is None:
             archive_index = len(self._inner._callable_archive)
@@ -292,6 +300,7 @@ class Tape:
                     callable_value,
                     function_space,
                     result_dimension,
+                    name,
                 )
             )
         return CallableReference(self, archive_index)

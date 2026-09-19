@@ -31,7 +31,9 @@ Backend capability matrix
      - Install with ``pip install "coker[casadi]"``.
      - Covered by ``tests/backends/casadi/`` and the variational solver tests.
    * - ``sympy``
-     - Symbolic inspection and expression printing.
+     - Symbolic inspection and expression printing. Function-space inputs and
+       external callable evaluations lower to named SymPy undefined functions,
+       preserving the callable identity across calls with distinct arguments.
      - Included in the base install.
      - Covered by ``tests/backends/sympy/test_sympy_printing.py``.
    * - ``coker``

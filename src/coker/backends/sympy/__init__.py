@@ -23,7 +23,8 @@ from coker.algebra.ops import (
     SelectOP,
     invoke_callable,
 )
-from coker.algebra.dimensions import Dimension
+from coker.algebra.dimensions import Dimension, FunctionSpace
+from coker.algebra.graph import CallableReference
 from coker.backends.sympy.shape import reshape
 
 MatrixType = (sp.Matrix, sp.ImmutableMatrix)
@@ -170,6 +171,23 @@ parameterised_impls = {
 }
 
 
+class _SymbolicVectorFunction:
+    """Represent a vector-valued undefined SymPy function."""
+
+    def __init__(self, name: str, output: Dimension) -> None:
+        self._name = name
+        self._output = output
+
+    def __call__(self, *arguments):
+        values = [
+            sp.Function(
+                f"{self._name}_{'_'.join(str(value) for value in index)}"
+            )(*arguments)
+            for index in self._output.index_iterator(row_major=True)
+        ]
+        return sp.Array(values, shape=self._output.shape)
+
+
 class SympyLoweredFunction(LoweredFunction):
     """SymPy evaluator-backed lowered execution handle."""
 
@@ -220,7 +238,7 @@ class SympyBackend(Backend):
             return array
 
         try:
-            if not array.is_constant():
+            if array.free_symbols or not array.is_constant():
                 return array
         except AttributeError:
             pass
@@ -372,7 +390,19 @@ class SympyBackend(Backend):
                 args.append(None)
                 continue
             dim = tape.dim[idx]
-            if dim.is_scalar():
+            if isinstance(dim, FunctionSpace):
+                (output,) = dim.output_dimensions()
+                if not isinstance(output, Dimension):
+                    raise NotImplementedError(
+                        "SymPy function parameters must return a finite "
+                        "scalar or vector value"
+                    )
+                sym = (
+                    sp.Function(name)
+                    if output.is_scalar()
+                    else _SymbolicVectorFunction(name, output)
+                )
+            elif dim.is_scalar():
                 sym = sp.Symbol(name)
             else:
                 shape = dim.shape
@@ -392,7 +422,14 @@ class SympyBackend(Backend):
                     )
             args.append(sym)
             workspace[idx] = sym
-        outputs = evaluate_inner(tape, args, function.output, self, workspace)
+        symbolic_backend = _SymbolicSympyBackend()
+        outputs = evaluate_inner(
+            tape,
+            args,
+            function.output,
+            symbolic_backend,
+            workspace,
+        )
         if function.is_single:
             return args, outputs[0]
         return args, outputs
@@ -403,6 +440,15 @@ class SympyBackend(Backend):
     def evaluate_integrals(*args):
 
         raise NotImplementedError("not supported on sympy backend")
+
+
+class _SymbolicSympyBackend(SympyBackend):
+    """Lower external calls to undefined SymPy functions."""
+
+    def call(self, op, *args):
+        if op == OP.EVALUATE and isinstance(args[0], CallableReference):
+            return sp.Function(args[0].symbol_name)(*args[1:])
+        return super().call(op, *args)
 
 
 register_backend("sympy", SympyBackend)
