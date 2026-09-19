@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from coker import Dimension, Scalar, VectorSpace, function
+from coker import Dimension, FunctionSpace, Scalar, VectorSpace, function
 from coker.toolkits.codesign import (
     MathematicalProgram,
     Minimise,
@@ -10,6 +10,8 @@ from coker.toolkits.codesign import (
     bounded,
     norm as codesign_norm,
 )
+from coker.dynamics import RadialBasisFunction
+from coker.dynamics.function_parameters import FittedFunction
 
 
 def quadratic(x, p, z):
@@ -100,6 +102,10 @@ def test_optimisation_zero_input_problem(variational_backend):
     assert np.allclose(x_val, x_expected, atol=1e-6)
     assert np.allclose(p_val, p_expected, atol=1e-6)
     assert 1 - 1e-5 < abs(z_val) < 1 + 1e-5
+    np.testing.assert_allclose(problem.parameters["x"], x_expected, atol=1e-6)
+    np.testing.assert_allclose(problem.parameters["p"], p_expected, atol=1e-6)
+    assert isinstance(problem.parameters["z"], float)
+    assert abs(problem.parameters["z"]) == pytest.approx(abs(z_val), abs=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
 
@@ -123,6 +129,38 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
     assert objective == pytest.approx(0.0, abs=1e-6)
     assert x_val.shape == (2,)
     assert np.allclose(x_val, np.array([3.0, -1.0]), atol=1e-6)
+    assert problem.solve_info is not None
+    assert problem.solve_info.success
+
+
+def test_mathematical_program_reconstructs_function_parameter(
+    variational_backend,
+):
+    rate = FunctionSpace(
+        "rate", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+    declaration = RadialBasisFunction([0.0], 1.0, name="response")
+    with ProblemBuilder() as builder:
+        response = builder.new_function_parameter(rate, declaration)
+        value = response(0.0)
+        builder.objective = Minimise((value - 0.5) ** 2)
+        builder.outputs = [value]
+        problem = builder.build(variational_backend)
+
+    result = problem()
+
+    assert len(result) == 2
+    objective, value = result
+    assert objective == pytest.approx(0.0, abs=1e-6)
+    assert value == pytest.approx(0.5, abs=1e-6)
+
+    fitted = problem.parameters["response"]
+    assert isinstance(fitted, FittedFunction)
+    assert fitted.specification is declaration
+    assert fitted.space is rate
+    assert callable(fitted.function)
+    assert fitted.parameters.shape == (2,)
+    assert fitted(0.0) == pytest.approx(value, abs=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
 

@@ -1,27 +1,154 @@
 """Function-valued parameter declarations for dynamical systems."""
 
 from __future__ import annotations
-from dataclasses import dataclass
-from numbers import Real
-from typing import Any, Sequence
-import numpy as np
-from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from numbers import Integral, Real
+from typing import Any, Callable, Sequence
+
+import numpy as np
+
+from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
+from coker.algebra.function import Function, function
 from coker.algebra.graph import if_then_else
 
 
-@dataclass(frozen=True)
-class MonotonePiecewiseLinear:
-    """Bounded scalar realization over fixed function-domain knots.
+class FittedFunction:
+    """A concrete function reconstructed from fitted parameter decisions."""
 
-    ``domain_knots`` are positions in the parameter function's scalar input
-    domain. They are independent of the variational time discretization.
+    def __init__(
+        self,
+        specification: FunctionParameter,
+        space: FunctionSpace,
+        function: Callable[..., Any],
+        parameters: Any,
+    ) -> None:
+        self.specification = specification
+        self.space = space
+        self.function = function
+        self.parameters = parameters
+
+    def __call__(self, *arguments: Any, **kwargs: Any) -> Any:
+        return self.function(*arguments, **kwargs)
+
+
+class FunctionParameter(ABC):
+    """Declare finite numeric decisions that realize a function parameter."""
+
+    name: str | None
+
+    @abstractmethod
+    def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate and return the compatible function parameter space."""
+
+    @abstractmethod
+    def decision_declarations(
+        self,
+    ) -> (
+        tuple[VectorSpace, np.ndarray]
+        | tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]
+    ):
+        """Return a basis space, initial values, and optional bounds."""
+
+    @abstractmethod
+    def evaluate(self, basis: Any, argument: Any) -> Any:
+        """Evaluate the declared function from basis decisions."""
+
+    def fit(self, target: FunctionSpace, basis: Any) -> FittedFunction:
+        """Construct a generic fitted function from concrete basis values."""
+        basis_space, *_ = self.decision_declarations()
+        parameters = np.asarray(basis).reshape(basis_space.dimension)
+        return FittedFunction(
+            self,
+            target,
+            lambda argument: self.evaluate(parameters, argument),
+            parameters,
+        )
+
+    def build_function(
+        self, target: FunctionSpace, backend: str | None
+    ) -> Function:
+        """Build a backend-native function of basis values and the argument."""
+        target = self.validate_target(target)
+        basis, *_ = self.decision_declarations()
+        return function(
+            [*target.arguments, basis],
+            lambda argument, basis_values: self.evaluate(
+                basis_values, argument
+            ),
+            backend=backend,
+        )
+
+
+def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
+    if not isinstance(target, FunctionSpace):
+        raise TypeError("target must be a FunctionSpace")
+    if len(target.arguments) != 1 or not isinstance(
+        target.arguments[0], Scalar
+    ):
+        raise ValueError("target must have exactly one scalar argument")
+    if (
+        target.output is None
+        or len(target.output) != 1
+        or not isinstance(target.output[0], Scalar)
+    ):
+        raise ValueError("target must have exactly one scalar output")
+    return target
+
+
+def _validate_basis_values(
+    guess: Sequence[Real] | None,
+    size: int,
+    lower_bound: Real | None,
+    upper_bound: Real | None,
+) -> tuple[tuple[float, ...], float | None, float | None]:
+    if (lower_bound is None) != (upper_bound is None):
+        raise ValueError("both bounds must be set or omitted")
+    if lower_bound is None:
+        lower = upper = None
+    else:
+        if not isinstance(lower_bound, Real) or not isinstance(
+            upper_bound, Real
+        ):
+            raise TypeError("bounds must be real scalars")
+        lower, upper = float(lower_bound), float(upper_bound)
+        if np.isnan(lower) or np.isnan(upper) or lower >= upper:
+            raise ValueError("lower_bound must be less than upper_bound")
+    if guess is None:
+        values = np.zeros(size)
+    else:
+        try:
+            values = np.asarray(guess, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("guess must be a numeric sequence") from exc
+        if values.ndim != 1 or values.size != size:
+            raise ValueError(f"guess must have exactly {size} values")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("guess must contain only finite values")
+    if lower is not None and (
+        np.any(values < lower) or np.any(values > upper)
+    ):
+        raise ValueError("guess must lie within the declared bounds")
+    return tuple(float(value) for value in values), lower, upper
+
+
+@dataclass(frozen=True)
+class MonotonePiecewiseLinear(FunctionParameter):
+    """Bounded monotone scalar realization over normalized-domain knots.
+
+    ``domain_knots`` should span ``[0, 1]`` and be strictly increasing. Each
+    unconstrained basis decision is exponentiated, then its positive increments
+    are cumulatively normalized into ``(lower_bound, upper_bound)``. Linear
+    interpolation therefore has positive slope on every knot interval; values
+    outside the knot range clamp to the corresponding endpoint.
     """
 
     domain_knots: Sequence[Real]
     lower_bound: Real
     upper_bound: Real
     guess: Sequence[Real] | None = None
+    name: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -49,18 +176,9 @@ class MonotonePiecewiseLinear:
             raise ValueError(
                 "lower_bound must be finite and less than upper_bound"
             )
-        if self.guess is None:
-            guess = None
-        else:
-            try:
-                arr = np.asarray(self.guess, dtype=float)
-            except (TypeError, ValueError) as exc:
-                raise TypeError("guess must be a numeric sequence") from exc
-            if arr.ndim != 1 or arr.size != domain_knots.size:
-                raise ValueError("guess must have one value per domain knot")
-            if not np.all(np.isfinite(arr)):
-                raise ValueError("guess must contain only finite values")
-            guess = tuple(float(v) for v in arr)
+        guess, _, _ = _validate_basis_values(
+            self.guess, domain_knots.size, None, None
+        )
         object.__setattr__(
             self,
             "domain_knots",
@@ -79,43 +197,10 @@ class MonotonePiecewiseLinear:
         return VectorSpace("theta", self.size)
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
-        if not isinstance(target, FunctionSpace):
-            raise TypeError("target must be a FunctionSpace")
-        if len(target.arguments) != 1 or not isinstance(
-            target.arguments[0], Scalar
-        ):
-            raise ValueError("target must have exactly one scalar argument")
-        if (
-            target.output is None
-            or len(target.output) != 1
-            or not isinstance(target.output[0], Scalar)
-        ):
-            raise ValueError("target must have exactly one scalar output")
-        return target
+        return _validate_scalar_target(target)
 
-    @property
-    def initial_values(self) -> np.ndarray:
-        if self.guess is not None:
-            return np.asarray(self.guess, dtype=float).copy()
-        return np.zeros(self.size)
-
-    @property
-    def lower_bounds(self) -> np.ndarray:
-        return np.full(self.size, -np.inf)
-
-    @property
-    def upper_bounds(self) -> np.ndarray:
-        return np.full(self.size, np.inf)
-
-    def decision_declarations(
-        self,
-    ) -> tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]:
-        return (
-            self.basis_space,
-            self.initial_values,
-            self.lower_bounds,
-            self.upper_bounds,
-        )
+    def decision_declarations(self) -> tuple[VectorSpace, np.ndarray]:
+        return self.basis_space, np.asarray(self.guess, dtype=float)
 
     def _values(self, theta: Any) -> list[Any]:
         weights = [np.exp(theta[i]) for i in range(self.size)] + [1.0, 1.0]
@@ -128,17 +213,168 @@ class MonotonePiecewiseLinear:
             values.append(self.lower_bound + span * cumulative / total)
         return values[: self.size]
 
-    def _evaluate(self, theta: Any, x: Any) -> Any:
-        values = self._values(theta)
+    def evaluate(self, basis: Any, argument: Any) -> Any:
+        values = self._values(basis)
         result = values[-1]
-        for i in range(self.size - 2, -1, -1):
-            slope = (values[i + 1] - values[i]) / (
-                self.domain_knots[i + 1] - self.domain_knots[i]
+        for index in range(self.size - 2, -1, -1):
+            slope = (values[index + 1] - values[index]) / (
+                self.domain_knots[index + 1] - self.domain_knots[index]
             )
-            segment = values[i] + slope * (x - self.domain_knots[i])
+            segment = values[index] + slope * (
+                argument - self.domain_knots[index]
+            )
             result = if_then_else(
-                x <= self.domain_knots[i],
-                values[i],
-                if_then_else(x <= self.domain_knots[i + 1], segment, result),
+                argument <= self.domain_knots[index],
+                values[index],
+                if_then_else(
+                    argument <= self.domain_knots[index + 1],
+                    segment,
+                    result,
+                ),
             )
-        return if_then_else(x <= self.domain_knots[0], values[0], result)
+        return if_then_else(
+            argument <= self.domain_knots[0], values[0], result
+        )
+
+
+@dataclass(frozen=True)
+class Perceptron(FunctionParameter):
+    """Logistic affine scalar output over a fixed-width vector input."""
+
+    input_size: int
+    lower_bound: Real | None = None
+    upper_bound: Real | None = None
+    guess: Sequence[Real] | None = None
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.input_size, bool)
+            or not isinstance(self.input_size, Integral)
+            or self.input_size < 1
+        ):
+            raise ValueError("input_size must be a positive integer")
+        size = int(self.input_size) + 1
+        guess, lower, upper = _validate_basis_values(
+            self.guess, size, self.lower_bound, self.upper_bound
+        )
+        object.__setattr__(self, "input_size", int(self.input_size))
+        object.__setattr__(self, "lower_bound", lower)
+        object.__setattr__(self, "upper_bound", upper)
+        object.__setattr__(self, "guess", guess)
+
+    def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        if not isinstance(target, FunctionSpace):
+            raise TypeError("target must be a FunctionSpace")
+        if len(target.arguments) != 1 or not isinstance(
+            target.arguments[0], VectorSpace
+        ):
+            raise ValueError("target must have exactly one vector argument")
+        if target.arguments[0].size != self.input_size:
+            raise ValueError(
+                f"target vector argument must have size {self.input_size}"
+            )
+        if (
+            target.output is None
+            or len(target.output) != 1
+            or not isinstance(target.output[0], Scalar)
+        ):
+            raise ValueError("target must have exactly one scalar output")
+        return target
+
+    def decision_declarations(
+        self,
+    ) -> (
+        tuple[VectorSpace, np.ndarray]
+        | tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]
+    ):
+        size = self.input_size + 1
+        result = (
+            VectorSpace("perceptron", size),
+            np.asarray(self.guess, dtype=float),
+        )
+        if self.lower_bound is None:
+            return result
+        return (
+            *result,
+            np.full(size, self.lower_bound),
+            np.full(size, self.upper_bound),
+        )
+
+    def evaluate(self, basis: Any, argument: Any) -> Any:
+        linear = basis[self.input_size]
+        for index in range(self.input_size):
+            linear += basis[index] * argument[index]
+        return 1.0 / (1.0 + np.exp(-linear))
+
+
+@dataclass(frozen=True)
+class RadialBasisFunction(FunctionParameter):
+    """Fixed-width scalar Gaussian basis expansion with fitted coefficients."""
+
+    centers: Sequence[Real]
+    width: Real
+    lower_bound: Real | None = None
+    upper_bound: Real | None = None
+    guess: Sequence[Real] | None = None
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            centers = np.asarray(self.centers, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(
+                "centers must be a one-dimensional numeric sequence"
+            ) from exc
+        if (
+            centers.ndim != 1
+            or centers.size == 0
+            or not np.all(np.isfinite(centers))
+        ):
+            raise ValueError("centers must be a non-empty finite vector")
+        if not isinstance(self.width, Real) or not np.isfinite(self.width):
+            raise TypeError("width must be a finite real scalar")
+        if self.width <= 0:
+            raise ValueError("width must be positive")
+        guess, lower, upper = _validate_basis_values(
+            self.guess,
+            centers.size + 1,
+            self.lower_bound,
+            self.upper_bound,
+        )
+        object.__setattr__(
+            self, "centers", tuple(float(center) for center in centers)
+        )
+        object.__setattr__(self, "width", float(self.width))
+        object.__setattr__(self, "lower_bound", lower)
+        object.__setattr__(self, "upper_bound", upper)
+        object.__setattr__(self, "guess", guess)
+
+    def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        return _validate_scalar_target(target)
+
+    def decision_declarations(
+        self,
+    ) -> (
+        tuple[VectorSpace, np.ndarray]
+        | tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]
+    ):
+        size = len(self.centers) + 1
+        result = (
+            VectorSpace("radial_basis", size),
+            np.asarray(self.guess, dtype=float),
+        )
+        if self.lower_bound is None:
+            return result
+        return (
+            *result,
+            np.full(size, self.lower_bound),
+            np.full(size, self.upper_bound),
+        )
+
+    def evaluate(self, basis: Any, argument: Any) -> Any:
+        value = basis[-1]
+        for index, center in enumerate(self.centers):
+            distance = (argument - center) / self.width
+            value += basis[index] * np.exp(-0.5 * distance * distance)
+        return value

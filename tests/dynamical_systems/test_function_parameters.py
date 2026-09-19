@@ -4,16 +4,22 @@ import pytest
 
 import numpy as np
 
-from coker import FunctionSpace, Scalar, VectorSpace
+from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.dynamics import (
     BoundVector,
-    DenseTensorVariable,
     BoundedVariable,
+    DenseTensorVariable,
     DynamicsSpec,
+    FittedFunction,
     MonotonePiecewiseLinear,
+    Perceptron,
+    RadialBasisFunction,
+    UnboundedVariable,
+    VariationalProblem,
     VariationalProblemBuilder,
 )
+from coker.dynamics.variational.function_binding import ParameterValueLayout
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.dynamics.variables import ConstantControlVariable
 from coker.toolkits.codesign import Minimise
@@ -86,8 +92,25 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
             quadratures=Noop(),
         )
     )
+    with pytest.raises(ValueError, match="function parameter name"):
+        VariationalProblemBuilder(
+            system,
+            t_final=1.0,
+            parameters=[
+                MonotonePiecewiseLinear(
+                    domain_knots=[-1.0, 0.0, 1.0],
+                    lower_bound=0.0,
+                    upper_bound=2.0,
+                ),
+                BoundedVariable("p_1", -1.0, 1.0),
+                BoundedVariable("p_2", -1.0, 1.0),
+            ],
+        )
     declaration = MonotonePiecewiseLinear(
-        domain_knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
+        domain_knots=[-1.0, 0.0, 1.0],
+        lower_bound=0.0,
+        upper_bound=2.0,
+        name="p_0",
     )
 
     with VariationalProblemBuilder(
@@ -111,6 +134,10 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
         "p_1",
         "p_2",
     ]
+    assert all(
+        isinstance(parameter, UnboundedVariable)
+        for parameter in problem.parameters[:3]
+    )
 
 
 def test_builder_specializes_bound_vector_parameter():
@@ -137,6 +164,7 @@ def test_builder_specializes_bound_vector_parameter():
                 domain_knots=[-1.0, 0.0, 1.0],
                 lower_bound=0.0,
                 upper_bound=2.0,
+                name="p_0",
             ),
             BoundVector(
                 "gain",
@@ -190,6 +218,44 @@ def test_builder_specializes_dense_tensor_parameter():
         "weights_2",
         "weights_3",
     ]
+
+
+def test_parameter_layout_reconstructs_public_values():
+    response = FunctionSpace(
+        "response", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+    response_declaration = RadialBasisFunction(
+        centers=[0.0], width=1.0, name="response"
+    )
+    layout = ParameterValueLayout(
+        targets=(
+            Scalar("offset"),
+            VectorSpace("gain", 2),
+            VectorSpace("weights", (2, 2)),
+            response,
+        ),
+        declarations=(
+            BoundedVariable("offset", -1.0, 1.0),
+            BoundVector("gain", [-1.0, -1.0], [1.0, 1.0], [0.0, 0.0]),
+            DenseTensorVariable("weights", np.zeros((2, 2))),
+            response_declaration,
+        ),
+        offsets=((0, 1), (1, 3), (3, 7), (7, 9)),
+    )
+
+    parameters = layout.reconstruct(np.arange(1.0, 10.0))
+
+    assert parameters["offset"] == 1.0
+    np.testing.assert_array_equal(parameters["gain"], [2.0, 3.0])
+    np.testing.assert_array_equal(
+        parameters["weights"], [[4.0, 5.0], [6.0, 7.0]]
+    )
+    fitted = parameters["response"]
+    assert isinstance(fitted, FittedFunction)
+    assert fitted.specification is response_declaration
+    assert fitted.space is response
+    np.testing.assert_array_equal(fitted.parameters, [8.0, 9.0])
+    assert fitted(0.0) == pytest.approx(17.0)
 
 
 def test_variational_lowers_output_loss_with_control_input(
@@ -256,11 +322,9 @@ def test_variational_fits_bound_vector_parameter(variational_backend):
         )
 
     solution = problem()
-    np.testing.assert_allclose(
-        solution.parameter_blocks["gain"],
-        [0.5],
-        atol=1e-2,
-    )
+    np.testing.assert_allclose(solution.parameters["gain"], [0.5], atol=1e-2)
+    assert not hasattr(solution, "parameter_blocks")
+    assert not hasattr(solution, "parameter_solutions")
 
 
 @pytest.mark.skipif(
@@ -283,7 +347,10 @@ def test_casadi_fits_monotone_function_parameter():
         )
     )
     declaration = MonotonePiecewiseLinear(
-        domain_knots=[-1.0, 0.0, 1.0], lower_bound=0.0, upper_bound=2.0
+        domain_knots=[-1.0, 0.0, 1.0],
+        lower_bound=0.0,
+        upper_bound=2.0,
+        name="p_0",
     )
     with VariationalProblemBuilder(
         system,
@@ -300,6 +367,15 @@ def test_casadi_fits_monotone_function_parameter():
     assert solution.solve_info.success
     assert solution.cost < 1e-4
 
+    f = solution.parameters["p_0"]
+
+    assert isinstance(f, FittedFunction)
+    assert f.specification is declaration
+    assert f.space is function_parameter
+    np.testing.assert_equal(f.parameters.shape, (declaration.size,))
+    assert callable(f.function)
+    assert isinstance(f(0.0), float)
+
 
 def test_monotone_function_rejects_unimplemented_explicit_constraints():
     with pytest.raises(TypeError, match="constraint_mode"):
@@ -309,3 +385,103 @@ def test_monotone_function_rejects_unimplemented_explicit_constraints():
             upper_bound=2.0,
             constraint_mode="explicit",
         )
+
+
+def test_perceptron_evaluates_vector_input():
+    declaration = Perceptron(2, guess=[0.5, -1.0, 0.25])
+    basis, initial = declaration.decision_declarations()
+
+    assert basis.dimension == 3
+    np.testing.assert_allclose(initial, [0.5, -1.0, 0.25])
+    assert declaration.evaluate(
+        initial, np.array([2.0, 1.0])
+    ) == pytest.approx(1.0 / (1.0 + np.exp(-0.25)))
+
+
+def test_radial_basis_function_evaluates_scalar_input():
+    declaration = RadialBasisFunction(
+        centers=[-1.0, 1.0],
+        width=0.5,
+        guess=[2.0, -1.0, 0.25],
+    )
+    _, initial = declaration.decision_declarations()
+
+    expected = (
+        0.25
+        + 2.0 * np.exp(-0.5 * ((0.0 + 1.0) / 0.5) ** 2)
+        - np.exp(-0.5 * ((0.0 - 1.0) / 0.5) ** 2)
+    )
+    assert declaration.evaluate(initial, 0.0) == pytest.approx(expected)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("casadi") is None, reason="CasADi not available"
+)
+@pytest.mark.parametrize(
+    ("declaration", "space", "basis", "argument", "expected"),
+    [
+        (
+            Perceptron(2),
+            VectorSpace("x", 2),
+            np.array([1.0, -1.0, 0.0]),
+            np.array([2.0, 1.0]),
+            1.0 / (1.0 + np.exp(-1.0)),
+        ),
+        (
+            RadialBasisFunction([0.0], 1.0),
+            Scalar("x"),
+            np.array([2.0, 0.5]),
+            0.0,
+            2.5,
+        ),
+    ],
+)
+def test_function_declarations_lower_to_casadi(
+    declaration, space, basis, argument, expected
+):
+    compiled = function(
+        [space],
+        lambda value: declaration.evaluate(basis, value),
+        backend="casadi",
+    )
+
+    actual = compiled(argument)
+
+    assert float(actual) == pytest.approx(expected)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("casadi") is None, reason="CasADi not available"
+)
+def test_variational_problem_specializes_radial_basis_parameter():
+    function_parameter = FunctionSpace(
+        "response", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(function_parameter,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (0.0, None),
+            dynamics=lambda time, _x, _z, _u, p: p[0](time),
+            constraints=Noop(),
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=Noop(),
+        ),
+        backend="casadi",
+    )
+    problem = VariationalProblem(
+        loss=lambda solution, parameters: (solution(1.0, parameters)[0] - 0.5)
+        ** 2,
+        system=system,
+        parameters=[
+            RadialBasisFunction(centers=[0.0], width=1.0, name="response")
+        ],
+        t_final=1.0,
+        backend="casadi",
+    )
+
+    solution = problem()
+
+    assert solution.solve_info.success
+    assert solution.cost < 1e-4

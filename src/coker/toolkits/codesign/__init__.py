@@ -10,7 +10,7 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.function import SymbolicCallable, function
+from coker.algebra.function import BoundCallable, SymbolicCallable, function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import OP
 from .optimisation import (
@@ -46,6 +46,17 @@ class Minimise:
         self.expression = expression
 
 
+@dataclasses.dataclass(frozen=True)
+class _ParameterCapture:
+    """Private metadata for reconstructing a solved decision."""
+
+    name: str
+    target: Scalar | VectorSpace | FunctionSpace
+    declaration: Any
+    capture: Tracer
+    basis: VectorSpace | None = None
+
+
 class MathematicalProgram(SymbolicCallable):
     """An optimisation module that maps parameters to an objective and outputs.
 
@@ -66,6 +77,21 @@ class MathematicalProgram(SymbolicCallable):
         self._impl = implementation
         self.backend = backend
         self.solve_info = None
+        self._parameter_captures: tuple[_ParameterCapture, ...] = ()
+        self.parameters: dict[str, Any] = {}
+
+    @classmethod
+    def _from_optimisation(
+        cls,
+        input_shape: Tuple[Dimension, ...],
+        output_shape: Tuple[Dimension, ...],
+        implementation: Callable,
+        backend: str,
+        captures: Sequence[_ParameterCapture],
+    ) -> "MathematicalProgram":
+        program = cls(input_shape, output_shape, implementation, backend)
+        program._parameter_captures = tuple(captures)
+        return program
 
     @property
     def result_shape(self) -> Tuple[Dimension, ...]:
@@ -94,13 +120,20 @@ class MathematicalProgram(SymbolicCallable):
             self.solve_info = getattr(self._impl, "last_solve_info", None)
         if not isinstance(result, (list, tuple)):
             result = [result]
-        if len(result) != len(self.result_shape):
+        expected_results = len(self.result_shape) + len(
+            self._parameter_captures
+        )
+        if len(result) != expected_results:
             raise ValueError(
                 f"Backend returned {len(result)} results for "
-                f"{len(self.result_shape)} requested objective and outputs"
+                f"{expected_results} requested objective, outputs, and "
+                "private parameter captures"
             )
 
-        objective, *outputs = result
+        public_result_count = len(self.result_shape)
+        objective, *outputs = result[:public_result_count]
+        captured_values = result[public_result_count:]
+        self.parameters = self._reconstruct_parameters(captured_values)
         objective_array = np.asarray(objective)
         if objective_array.size != 1:
             raise TypeError(
@@ -114,6 +147,29 @@ class MathematicalProgram(SymbolicCallable):
                 for output, dim in zip(outputs, self.output_shape)
             ),
         )
+
+    def _reconstruct_parameters(
+        self, captured_values: Sequence[Any]
+    ) -> dict[str, Any]:
+        """Rebuild public decision values from private solver captures."""
+        from coker.backends import get_backend_by_name
+
+        backend = get_backend_by_name(
+            self.backend or "numpy", set_current=False
+        )
+        result = {}
+        for metadata, value in zip(self._parameter_captures, captured_values):
+            if isinstance(metadata.target, FunctionSpace):
+                result[metadata.name] = backend.reconstruct_function_parameter(
+                    metadata.declaration, metadata.target, value
+                )
+            elif isinstance(metadata.target, Scalar):
+                result[metadata.name] = float(np.asarray(value).reshape(-1)[0])
+            else:
+                result[metadata.name] = np.asarray(value).reshape(
+                    metadata.target.dimension
+                )
+        return result
 
     def _call_symbolic(self, *args):
         """Emit objective and output evaluations on the symbolic tape."""
@@ -195,22 +251,64 @@ class ProblemBuilder:
         self.outputs = []
         self.initial_conditions = {}
         self.solver_options = solver_options
+        self._parameter_captures: list[_ParameterCapture] = []
 
-    def new_variable(self, name, shape=None, initial_value=None):
+    def _add_decision(self, name, shape=None, initial_value=None):
         assert self.tape is not None
         if shape is None:
-            v = self.tape.input(Scalar(name))
+            variable = self.tape.input(Scalar(name))
             initial_value = 0 if initial_value is None else initial_value
         else:
-            v = self.tape.input(VectorSpace(name, shape))
+            variable = self.tape.input(VectorSpace(name, shape))
             initial_value = (
                 np.zeros(shape=shape)
                 if initial_value is None
                 else initial_value
             )
+        self.initial_conditions[variable.index] = initial_value
+        return variable
 
-        self.initial_conditions[v.index] = initial_value
-        return v
+    def new_variable(self, name, shape=None, initial_value=None):
+        variable = self._add_decision(name, shape, initial_value)
+        space = variable.dim.to_space(name)
+        self._parameter_captures.append(
+            _ParameterCapture(name, space, space, variable)
+        )
+        return variable
+
+    def new_function_parameter(self, target, declaration):
+        """Add a finite function parameter as optimisation decisions."""
+        from coker.dynamics.function_parameters import FunctionParameter
+
+        if not isinstance(target, FunctionSpace):
+            raise TypeError("target must be a FunctionSpace")
+        if not isinstance(declaration, FunctionParameter):
+            raise TypeError("declaration must implement FunctionParameter")
+        target = declaration.validate_target(target)
+        values = declaration.decision_declarations()
+        basis, initial, *bounds = values
+        basis_values = self._add_decision(
+            declaration.name or target.name,
+            shape=(basis.size,),
+            initial_value=initial,
+        )
+        if bounds:
+            lower, upper = bounds
+            self.constraints.append(bounded(basis_values, lower, upper))
+        self._parameter_captures.append(
+            _ParameterCapture(
+                declaration.name or target.name,
+                target,
+                declaration,
+                basis_values,
+                basis,
+            )
+        )
+        return BoundCallable(
+            declaration.build_function(target, None),
+            target,
+            (basis_values,),
+        )
 
     @property
     def input_shape(self) -> Tuple[Dimension, ...]:
@@ -263,14 +361,22 @@ class ProblemBuilder:
             self.objective.expression,
             self.constraints,
             self.arguments,
-            [self.objective.expression, *self.outputs],
+            [
+                self.objective.expression,
+                *self.outputs,
+                *(capture.capture for capture in self._parameter_captures),
+            ],
             self._normalise_initial_conditions(),
             options=self.solver_options,
         )
         impl = backend_impl.make_optimisation_module(implementation)
 
-        return MathematicalProgram(
-            self.input_shape, self.output_shape, impl, backend=backend_name
+        return MathematicalProgram._from_optimisation(
+            self.input_shape,
+            self.output_shape,
+            impl,
+            backend_name,
+            self._parameter_captures,
         )
 
     def __enter__(self):

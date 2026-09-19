@@ -83,7 +83,8 @@ directly.
 
 .. code-block:: python
 
-   from coker.backends.casadi import CasadiNLPSolverOptions
+   from coker import FunctionSpace, Scalar, VectorSpace
+   from coker.dynamics import RadialBasisFunction
    from coker.toolkits.codesign import Minimise, ProblemBuilder
 
    with ProblemBuilder(arguments=[VectorSpace("target", 2)]) as builder:
@@ -99,6 +100,32 @@ directly.
 Use ``bounded(residual, lower, upper)`` when bounds are part of the model.
 Bounds may depend on runtime parameters; CasADi evaluates them as residual
 constraints at solve time.
+
+Function-valued decisions use ``new_function_parameter`` with a declared
+``FunctionSpace`` and finite ``FunctionParameter`` realization. The returned
+callable participates directly in the objective and constraints:
+
+.. code-block:: python
+
+   rate = FunctionSpace("rate", [Scalar("t")], [Scalar("rate")])
+   declaration = RadialBasisFunction([0.0], 1.0, name="response")
+   with ProblemBuilder() as builder:
+       response = builder.new_function_parameter(rate, declaration)
+       value = response(0.0)
+       builder.objective = Minimise((value - 0.5) ** 2)
+       builder.outputs = [value]
+       problem = builder.build("casadi")
+
+   objective, value = problem()
+   fitted_response = problem.parameters["response"]
+
+After a numeric solve, ``problem.parameters`` maps each named decision to its
+reconstructed value. Scalar decisions are floats and vector or tensor decisions
+are shaped NumPy arrays. Function-valued decisions are ``FittedFunction``
+instances: they retain the original declaration in ``specification``, the
+declared ``FunctionSpace`` in ``space``, their native callable in ``function``,
+and the fitted basis in ``parameters``. Their private solver captures never
+change the public ``(objective, *outputs)`` tuple.
 
 For bounded CasADi/IPOPT solves, configure CasADi's flat IPOPT options through
 the builder's ``solver_options``:

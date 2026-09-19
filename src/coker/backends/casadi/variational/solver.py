@@ -29,6 +29,7 @@ from coker.dynamics import (
     ParameterVariable,
     PiecewiseConstantVariable,
     SpikeVariable,
+    UnboundedVariable,
     VariationalProblem,
     VariationalSolution,
     split_at_non_differentiable_points,
@@ -146,12 +147,12 @@ class CasadiVariationalSolver(VariationalSolver):
 
     def _solve_once(
         self,
-        path_initial_guess=None,
+        previous_solution: Optional[VariationalSolution] = None,
         **fixed_parameters,
     ) -> VariationalSolution:
         """Solve one fixed transcription without adaptive mesh dispatch."""
         solver_arguments = self._map_arguments(
-            fixed_parameters, path_initial_guess
+            fixed_parameters, previous_solution
         )
         x0 = solver_arguments["x0"]
         solver_kwargs = {
@@ -162,7 +163,7 @@ class CasadiVariationalSolver(VariationalSolver):
         }
 
         if (
-            path_initial_guess is None
+            previous_solution is None
             and self._warm_start
             and self._last_primal is not None
         ):
@@ -243,21 +244,21 @@ class _TranscriptionFactory:
 
         self.proj_x = ca.hcat(
             [
-                ca.MX.eye(self.x_size),
-                ca.MX.zeros(self.x_size, self.z_size + self.q_size),
+                ca.DM.eye(self.x_size),
+                ca.DM.zeros(self.x_size, self.z_size + self.q_size),
             ]
         )
         self.proj_z = ca.hcat(
             [
-                ca.MX.zeros(self.z_size, self.x_size),
-                ca.MX.eye(self.z_size),
-                ca.MX.zeros(self.z_size, self.q_size),
+                ca.DM.zeros(self.z_size, self.x_size),
+                ca.DM.eye(self.z_size),
+                ca.DM.zeros(self.z_size, self.q_size),
             ]
         )
         self.proj_q = ca.hcat(
             [
-                ca.MX.zeros(self.q_size, self.x_size + self.z_size),
-                ca.MX.eye(self.q_size),
+                ca.DM.zeros(self.q_size, self.x_size + self.z_size),
+                ca.DM.eye(self.q_size),
             ]
         )
         self._projectors = tuple(
@@ -365,7 +366,11 @@ class _TranscriptionFactory:
         control = ca.MX.sym("defect_control", self.u_symbols.shape[0])
         parameters = ca.MX.sym("defect_parameters", self.proj_p.shape[0])
         (dynamics,) = self.evaluate_dynamics(
-            time, state, algebraic, control, parameters
+            time,
+            state,
+            algebraic,
+            lambda _time: control,
+            parameters,
         )
         return ca.Function(
             "defect_dynamics",
@@ -419,7 +424,7 @@ class _TranscriptionFactory:
         reference_nodes = self.get_defect_nodes(poly.degree)
         times = poly.interval[0] + (reference_nodes + 1.0) * poly.width
         path_values = np.asarray(poly.values, dtype=float).reshape(
-            poly.dimension, -1
+            poly.dimension, -1, order="F"
         )
         powers = np.power(
             reference_nodes,
@@ -437,13 +442,18 @@ class _TranscriptionFactory:
         )
         controls = (
             np.column_stack(
-                [solution.control_law(float(time)) for time in times]
+                [
+                    np.asarray(
+                        solution.control_law(float(time)), dtype=float
+                    ).reshape((-1,))
+                    for time in times
+                ]
             )
             if self.control_factory is not None
             else np.zeros((0, len(times)))
         )
         parameters = np.repeat(
-            np.asarray(solution.parameters, dtype=float).reshape((-1, 1)),
+            solution._parameter_vector.reshape((-1, 1)),
             len(times),
             axis=1,
         )
@@ -514,7 +524,9 @@ def _create_solver(
 
     equalities.append(factory.proj_x @ x0_symbol - x0_val)
     if factory.z_size > 0:
-        equalities.append(factory.proj_z @ z0_val)
+        equalities.append(factory.proj_z @ x0_symbol - z0_val)
+    if factory.q_size > 0:
+        equalities.append(factory.proj_q @ x0_symbol)
 
     equalities.extend(
         xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
@@ -553,8 +565,6 @@ def _create_solver(
             physical_t = duration * t
             x = factory.proj_x @ v
             z = factory.proj_z @ v
-            if factory.z_size > 0:
-                z += z0_val
             dx = factory.proj_x @ dv
             (dynamics_ij,) = factory.evaluate_dynamics(
                 physical_t,
@@ -626,8 +636,6 @@ def _create_solver(
             physical_t = duration * t
             x = factory.proj_x @ v
             z = factory.proj_z @ v
-            if factory.z_size > 0:
-                z += z0_val
             q = factory.proj_q @ v
             args = (
                 physical_t,
@@ -848,7 +856,7 @@ def _create_solver(
         poly_collection=poly_collection,
         projectors=projectors,
         proj_p=factory.proj_p,
-        parameter_solution_map=factory.p_output_map,
+        parameter_value_map=factory.p_output_map,
         decode_controls=factory.control_decoder,
     )
 
@@ -883,6 +891,15 @@ def _create_solver(
                     raw_decision_variables,
                     physical_variables,
                 ),
+                (
+                    ca.substitute(
+                        factory.horizon_symbol,
+                        raw_decision_variables,
+                        physical_variables,
+                    )
+                    if factory.free_horizon
+                    else ca.MX.zeros(0, 1)
+                ),
             ),
         }
         init_solver = ca.nlpsol(
@@ -902,6 +919,9 @@ def _create_solver(
     parameter_offset = layout.parameter_slice.start
     path_offset = layout.horizon_size
     path_slice = slice(path_offset, path_offset + layout.path_size)
+    control_slice = slice(
+        path_slice.stop, path_slice.stop + layout.control_size
+    )
 
     def interpolate_path_guess(previous_path) -> ca.DM:
         knot_values = [
@@ -911,9 +931,25 @@ def _create_solver(
         ]
         return ca.vertcat(*knot_values)
 
+    def compatible_control_guess(previous_solution) -> Optional[ca.DM]:
+        if factory.control_factory is None:
+            return None
+        previous_controls = previous_solution.control_solutions
+        if len(previous_controls) != len(factory.control_factory.sizes):
+            return None
+        values = []
+        for control, size in zip(
+            previous_controls, factory.control_factory.sizes
+        ):
+            value = np.asarray(control.value, dtype=float).reshape((-1,))
+            if value.size != size:
+                return None
+            values.append(ca.DM(value).reshape((size, 1)))
+        return ca.vertcat(*values)
+
     def map_arguments(
         fixed_parameters: Dict[str, ParameterVariable],
-        path_initial_guess=None,
+        previous_solution: Optional[VariationalSolution] = None,
     ) -> Dict[str, ca.DM]:
         unknown = sorted(
             set(fixed_parameters) - set(factory.parameter_indices)
@@ -925,6 +961,24 @@ def _create_solver(
         physical_lbx = ca.DM(physical_lower_bound_base)
         physical_ubx = ca.DM(physical_upper_bound_base)
         p_guess = ca.DM(factory.p_guess_base)
+
+        if previous_solution is not None:
+            physical_x0[path_slice] = interpolate_path_guess(
+                previous_solution.path
+            )
+            if factory.free_horizon:
+                physical_x0[layout.horizon_slice] = previous_solution.t_final
+            control_guess = compatible_control_guess(previous_solution)
+            if control_guess is not None:
+                physical_x0[control_slice] = control_guess
+            previous_values = previous_solution._solver_parameter_vector
+            if previous_values is not None:
+                for index in factory.parameter_indices.values():
+                    if index >= previous_values.size:
+                        continue
+                    value = previous_values[index]
+                    physical_x0[parameter_offset + index] = value
+                    p_guess[index] = value
 
         for name, value in fixed_parameters.items():
             index = factory.parameter_indices[name]
@@ -941,11 +995,6 @@ def _create_solver(
                 physical_ubx[decision_index] = scalar
                 physical_x0[decision_index] = scalar
 
-        if path_initial_guess is not None:
-            physical_x0[path_slice] = interpolate_path_guess(
-                path_initial_guess
-            )
-
         if variable_scaling is None:
             x0 = physical_x0
             lbx = physical_lbx
@@ -955,11 +1004,17 @@ def _create_solver(
             lbx, ubx = variable_scaling.encode_bounds(
                 physical_lbx, physical_ubx
             )
+        init_control_guess = physical_x0[control_slice]
+        init_horizon_guess = (
+            physical_x0[layout.horizon_slice]
+            if factory.free_horizon
+            else ca.DM.zeros(0, 1)
+        )
         init_lbg = ca.vertcat(
-            lbg, p_guess, ca.DM.zeros(factory.u_symbols.shape)
+            lbg, p_guess, init_control_guess, init_horizon_guess
         )
         init_ubg = ca.vertcat(
-            ubg, p_guess, ca.DM.zeros(factory.u_symbols.shape)
+            ubg, p_guess, init_control_guess, init_horizon_guess
         )
         return {
             "x0": x0,
@@ -1049,11 +1104,11 @@ def create_variational_solver(
     ) -> VariationalSolution:
         intervals = initial_intervals
         degrees = initial_degrees
-        previous_path = None
+        previous_solution = None
         for iteration in range(options.maximum_iterations + 1):
             current_solver = transcription_for(intervals, degrees)
             solution = current_solver._solve_once(
-                path_initial_guess=previous_path,
+                previous_solution=previous_solution,
                 **fixed_parameters,
             )
             errors = [
@@ -1062,7 +1117,11 @@ def create_variational_solver(
             ]
             maximum_error = max(errors, default=0.0)
             if maximum_error <= options.mesh_tolerance:
-                return solution
+                return replace(
+                    solution,
+                    adaptive_refinement_rounds=iteration,
+                    adaptive_maximum_defect=maximum_error,
+                )
             if iteration == options.maximum_iterations:
                 raise RuntimeError(
                     "CasADi adaptive refinement reached maximum_iterations "
@@ -1106,7 +1165,7 @@ def create_variational_solver(
                         problem.transcription_options.minimum_degree,
                     )
                 )
-            previous_path = solution.path
+            previous_solution = solution
             intervals, degrees = new_intervals, new_degrees
         raise RuntimeError(
             "CasADi adaptive refinement terminated unexpectedly"
@@ -1127,7 +1186,7 @@ class CasadiSolutionAssembler:
             Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
         ],
         proj_p: ca.DM,
-        parameter_solution_map: Callable[[ca.DM], Dict[str, float]],
+        parameter_value_map: Callable[[ca.DM], Dict[str, float]],
         decode_controls: Optional[Callable[[ca.DM], list]],
     ):
         self.problem = problem
@@ -1135,7 +1194,7 @@ class CasadiSolutionAssembler:
         self.poly_collection = poly_collection
         self.projectors = projectors
         self.proj_p = proj_p
-        self.parameter_solution_map = parameter_solution_map
+        self.parameter_value_map = parameter_value_map
         self.decode_controls = decode_controls
 
     def __call__(
@@ -1156,20 +1215,28 @@ class CasadiSolutionAssembler:
         system_parameters = np.array(
             self.proj_p @ ca.DM(parameter_vector)
         ).reshape((-1,))
+        solver_parameter_vector = np.asarray(
+            free_parameters, dtype=float
+        ).reshape((-1,))
+        public_parameters = (
+            self.problem.parameter_layout.reconstruct(system_parameters)
+            if self.problem.parameter_layout is not None
+            else self.parameter_value_map(free_parameters)
+        )
         control_solutions = (
             self.decode_controls(control_coefficients)
             if self.decode_controls is not None
             else None
         )
-        return VariationalSolution(
+        return VariationalSolution.from_solver(
             cost=loss,
             projectors=tuple(
                 projector.copy() if projector is not None else None
                 for projector in self.projectors
             ),
-            parameter_solutions=self.parameter_solution_map(free_parameters),
-            parameters=system_parameters,
-            parameter_block_layouts=self.problem.system.parameter_blocks,
+            parameters=public_parameters,
+            parameter_vector=system_parameters,
+            solver_parameter_vector=solver_parameter_vector,
             path=path,
             control_solutions=control_solutions,
             output=self.problem.system.y,
@@ -1304,7 +1371,7 @@ def construct_parameters(parameters: Optional[List[ParameterVariable]]):
     p0 = []
     output_map = {}
     for p in parameters:
-        if isinstance(p, BoundedVariable):
+        if isinstance(p, (BoundedVariable, UnboundedVariable)):
             try:
                 symbol = symbols[p.name]
                 params.append(symbol)
@@ -1317,14 +1384,10 @@ def construct_parameters(parameters: Optional[List[ParameterVariable]]):
             output_map[p.name] = len(symbols)
             params.append(symbol)
             symbols[p.name] = symbol
-            upper_bounds.append(
-                p.upper_bound if p.upper_bound is not None else ca.inf
-            )
+            upper_bounds.append(p.upper_bound)
             guess.append(p.guess)
             p0.append(p.guess)
-            lower_bounds.append(
-                p.lower_bound if p.lower_bound is not None else -ca.inf
-            )
+            lower_bounds.append(p.lower_bound)
         elif isinstance(p, (float, int)):
             params.append(ca.MX(p))
             p0.append(p)
@@ -1379,7 +1442,7 @@ class ControlFactory:
         self.offsets = offsets
 
     def guess(self, _):
-        return ca.DM.zeros(len(self.variables), 1)
+        return ca.DM.zeros(sum(self.sizes), 1)
 
     def symbols(self) -> ca.MX:
         return (
@@ -1414,10 +1477,10 @@ class ControlFactory:
         ]
 
 
-def _to_output_projector(proj: ca.MX) -> Optional[np.ndarray]:
+def _to_output_projector(proj: ca.DM) -> Optional[np.ndarray]:
     if proj.shape[0] == 0:
         return None
-    return np.array(proj.to_DM()).reshape(proj.shape)
+    return np.asarray(proj, dtype=float).reshape(proj.shape)
 
 
 class CallbackWrapper(ca.Callback):

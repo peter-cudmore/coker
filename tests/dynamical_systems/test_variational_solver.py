@@ -224,7 +224,7 @@ def test_fitting_constant(enable_scaling, monkeypatch):
 
     sol = problem()
     assert sol.cost < 1e-6
-    assert abs(sol.parameter_solutions["value"] - 2) < 1e-4
+    assert abs(sol.parameters["value"] - 2) < 1e-4
     assert sol.solve_info is not None
     assert sol.solve_info.success
 
@@ -290,7 +290,7 @@ def test_fitting_line():
     )
 
     sol = problem()
-    assert abs(sol.parameter_solutions["value"] - 2) < 1e-4
+    assert abs(sol.parameters["value"] - 2) < 1e-4
     assert sol.cost < 1e-6
 
 
@@ -340,7 +340,7 @@ def test_fitting_exp_initial_condition():
     )
 
     sol = problem()
-    assert abs(sol.parameter_solutions["value"] - param[0]) < 1e-4
+    assert abs(sol.parameters["value"] - param[0]) < 1e-4
     assert sol.cost < 1e-6
 
     for t in np.linspace(0, 1, 10):
@@ -397,7 +397,7 @@ def test_fitting_exp_eigenvalue():
     )
 
     sol = problem()
-    assert abs(sol.parameter_solutions["value"] - param[2]) < 1e-4
+    assert abs(sol.parameters["value"] - param[2]) < 1e-4
     assert sol.cost < 1e-6
 
     for t in np.linspace(0, 1, 10):
@@ -500,7 +500,7 @@ def test_fitting_line_with_constraints(variational_backend):
     )
 
     sol = problem()
-    assert sol.parameter_solutions["value"] <= 1.75 + 1e-4
+    assert sol.parameters["value"] <= 1.75 + 1e-4
 
 
 def test_fitting_line_with_constraints_and_regularisation(variational_backend):
@@ -553,8 +553,8 @@ def test_fitting_line_with_constraints_and_regularisation(variational_backend):
     )
 
     sol = problem()
-    assert sol.parameter_solutions["value"] <= 1.75 + 1e-4
-    assert 0 < sol.parameter_solutions["regularisation"] < 1
+    assert sol.parameters["value"] <= 1.75 + 1e-4
+    assert 0 < sol.parameters["regularisation"] < 1
 
 
 def test_variational_solver_raises_on_infeasible_problem(variational_backend):
@@ -652,8 +652,8 @@ def test_reentrant_solver(variational_backend):
 
     soln_0 = solver.solve()
     assert isinstance(soln_0, VariationalSolution)
-    assert abs(soln_0.parameter_solutions["value"] - param[0]) < 1e-4
-    assert abs(soln_0.parameter_solutions["p1"] - param[1]) < 1e-4
+    assert abs(soln_0.parameters["value"] - param[0]) < 1e-4
+    assert abs(soln_0.parameters["p1"] - param[1]) < 1e-4
 
     soln_constrained = solver.solve(
         p1=param[1],
@@ -662,7 +662,7 @@ def test_reentrant_solver(variational_backend):
         ),
     )
     assert isinstance(soln_constrained, VariationalSolution)
-    assert abs(soln_constrained.parameter_solutions["p1"] - param[1]) < 1e-9
+    assert abs(soln_constrained.parameters["p1"] - param[1]) < 1e-9
 
     with pytest.raises(KeyError):
         solver.solve(unknown_parameter=0.0)
@@ -792,7 +792,7 @@ def test_casadi_path_state_constraint_is_enforced(variational_backend):
     )
 
     solution = problem()
-    assert solution.parameter_solutions["x0"] <= 1.0 + 1e-4
+    assert solution.parameters["x0"] <= 1.0 + 1e-4
 
 
 def test_casadi_initial_point_constraint_is_enforced(variational_backend):
@@ -822,7 +822,7 @@ def test_casadi_initial_point_constraint_is_enforced(variational_backend):
         backend="casadi",
     )
     solution = problem()
-    assert solution.parameter_solutions["x0"] >= 1.0 - 1e-4
+    assert solution.parameters["x0"] >= 1.0 - 1e-4
 
 
 def test_free_horizon_keeps_horizon_and_parameter_offsets():
@@ -845,4 +845,4 @@ def test_free_horizon_keeps_horizon_and_parameter_offsets():
 
     solution = problem()
     assert 0.5 <= solution.t_final <= 2.0
-    assert 2.0 <= solution.parameter_solutions["p"] <= 3.0
+    assert 2.0 <= solution.parameters["p"] <= 3.0

@@ -12,10 +12,11 @@ from coker.dynamics import (
 
 
 class LossCheckingCallback:
-    def __init__(self, sample_times, solution, param):
+    def __init__(self, sample_times, solution, param, parameter_names):
         self.sample_times = sample_times
         self.solution = solution
         self.param = param
+        self.parameter_names = set(parameter_names)
         self.loss_differences = []
         self.losses = []
 
@@ -24,7 +25,7 @@ class LossCheckingCallback:
         assert solution.algebraic(0) is None
         assert solution.quadratures(0) is None
         assert solution.control_law(0) is None
-        assert solution.parameters.shape == self.param.shape
+        assert set(solution.parameters) == self.parameter_names
         assert solution.terminal_constraints().shape == (0,)
         assert solution.path_constraints(0.5).shape == (0,)
 
@@ -70,7 +71,7 @@ def test_variational_iteration_callback_loss_matches_payload(
             total_error += (solution(t_i, param) - f(t_i, p_inner)) ** 2
         return total_error
 
-    callback = LossCheckingCallback(sample_times, solution, param)
+    callback = LossCheckingCallback(sample_times, solution, param, {"offset"})
 
     problem = VariationalProblem(
         loss=loss,
@@ -121,7 +122,9 @@ def test_variational_iteration_callback_stepwise_payload_loss(
             total_error += (solution(t_i, param) - f(t_i, p_inner)) ** 2
         return total_error
 
-    callback = LossCheckingCallback(sample_times, solution, param)
+    callback = LossCheckingCallback(
+        sample_times, solution, param, {"initial", "rate"}
+    )
 
     problem = VariationalProblem(
         loss=loss,
@@ -146,7 +149,7 @@ def test_variational_iteration_callback_stepwise_payload_loss(
     solution_out = problem()
 
     assert solution_out.cost < 1e-6
-    assert abs(solution_out.parameter_solutions["initial"] - param[0]) < 1e-4
-    assert abs(solution_out.parameter_solutions["rate"] - param[1]) < 1e-4
+    assert abs(solution_out.parameters["initial"] - param[0]) < 1e-4
+    assert abs(solution_out.parameters["rate"] - param[1]) < 1e-4
     assert len(callback.losses) > 1
     assert max(callback.loss_differences) < 1e-9

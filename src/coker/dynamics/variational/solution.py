@@ -1,5 +1,6 @@
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -49,23 +50,78 @@ class VariationalSolution:
         Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
     ]
     control_solutions: List[ControlSolution]
-    parameter_solutions: Dict[str, float]
-    parameters: np.ndarray
+    parameters: Mapping[str, object]
     output: Callable[
         [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         np.ndarray,
     ]
-    parameter_block_layouts: dict[str, tuple[int, int, tuple[int, ...]]] = (
-        field(default_factory=dict)
-    )
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
+    adaptive_refinement_rounds: Optional[int] = None
+    adaptive_maximum_defect: Optional[float] = None
     path_constraint_exprs: List[InequalityExpression] = field(
         default_factory=list
     )
     terminal_constraint_exprs: List[InequalityExpression] = field(
         default_factory=list
     )
+    _parameter_vector: np.ndarray = field(
+        default_factory=lambda: np.zeros((0,)), init=False, repr=False
+    )
+    _solver_parameter_vector: np.ndarray | None = field(
+        default=None, init=False, repr=False
+    )
+
+    @classmethod
+    def from_solver(
+        cls,
+        cost: float,
+        path: InterpolatingPolyCollection,
+        projectors: Tuple[
+            Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
+        ],
+        control_solutions: List[ControlSolution],
+        parameters: Mapping[str, object],
+        output: Callable[
+            [
+                float,
+                np.ndarray,
+                np.ndarray,
+                np.ndarray,
+                np.ndarray,
+                np.ndarray,
+            ],
+            np.ndarray,
+        ],
+        parameter_vector: np.ndarray,
+        solver_parameter_vector: np.ndarray | None = None,
+        *,
+        t_final: float = 0.0,
+        solve_info: Optional[SolveInfo] = None,
+        path_constraint_exprs: List[InequalityExpression] | None = None,
+        terminal_constraint_exprs: List[InequalityExpression] | None = None,
+    ) -> "VariationalSolution":
+        solution = cls(
+            cost,
+            path,
+            projectors,
+            control_solutions,
+            parameters,
+            output,
+            t_final,
+            solve_info,
+            path_constraint_exprs=(
+                [] if path_constraint_exprs is None else path_constraint_exprs
+            ),
+            terminal_constraint_exprs=(
+                []
+                if terminal_constraint_exprs is None
+                else terminal_constraint_exprs
+            ),
+        )
+        solution._parameter_vector = parameter_vector
+        solution._solver_parameter_vector = solver_parameter_vector
+        return solution
 
     def path_constraints(self, t) -> np.ndarray:
         if not self.path_constraint_exprs:
@@ -75,7 +131,7 @@ class VariationalSolution:
             self.state(t),
             self.algebraic(t),
             self.control_law(t),
-            self.parameters,
+            self._parameter_vector,
             self.quadratures(t),
         )
         violations = [
@@ -93,7 +149,7 @@ class VariationalSolution:
             self.state(t),
             self.algebraic(t),
             self.control_law(t),
-            self.parameters,
+            self._parameter_vector,
             self.quadratures(t),
         )
         violations = [
@@ -134,18 +190,7 @@ class VariationalSolution:
         q = self.quadratures(t)
         u = self.control_law(t)
         z = self.algebraic(t)
-        return self.output(t, x, z, u, self.parameters, q)
-
-    @property
-    def parameter_blocks(self) -> dict[str, np.ndarray]:
-        return {
-            name: self.parameters[start:end].reshape(shape)
-            for name, (
-                start,
-                end,
-                shape,
-            ) in self.parameter_block_layouts.items()
-        }
+        return self.output(t, x, z, u, self._parameter_vector, q)
 
     def to_poly(self) -> InterpolatingPolyCollection:
 

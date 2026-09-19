@@ -18,9 +18,16 @@ from coker.dynamics.variables import (
     Solution,
     SpikeControlSolution,
     SpikeVariable,
+    UnboundedVariable,
     ValueType,
 )
-from coker.dynamics.function_parameters import MonotonePiecewiseLinear
+from coker.dynamics.function_parameters import (
+    FittedFunction,
+    FunctionParameter,
+    MonotonePiecewiseLinear,
+    Perceptron,
+    RadialBasisFunction,
+)
 from coker.dynamics.system import create_autonomous_ode, direct_sum
 from coker.interfaces import SolverParameters
 
@@ -64,7 +71,11 @@ __all__ = [
     "DenseTensorVariable",
     "InterpolatingPolyCollection",
     "LossFunction",
+    "FittedFunction",
+    "FunctionParameter",
     "MonotonePiecewiseLinear",
+    "Perceptron",
+    "RadialBasisFunction",
     "ParameterMixin",
     "ParameterVariable",
     "PiecewiseConstantVariable",
@@ -75,6 +86,7 @@ __all__ = [
     "SpikeControlSolution",
     "SpikeVariable",
     "TranscriptionOptions",
+    "UnboundedVariable",
     "ValueType",
     "VariationalProblem",
     "VariationalProblemBuilder",

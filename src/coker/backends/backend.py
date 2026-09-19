@@ -56,6 +56,12 @@ class Backend(metaclass=ABCMeta):
         """Wrap a backend solver for use as a numerical program module."""
         return implementation
 
+    def reconstruct_function_parameter(
+        self, declaration: Any, target: Any, values: ArrayLike
+    ) -> Any:
+        """Reconstruct a generic fitted function from backend values."""
+        return declaration.fit(target, self.to_numpy_array(values))
+
     def create_variational_solver(
         self, problem: VariationalProblem
     ) -> VariationalSolver:

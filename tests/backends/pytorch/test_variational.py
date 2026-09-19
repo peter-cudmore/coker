@@ -37,7 +37,7 @@ def make_problem(*, guess=0.0):
 def test_cuda_neural_ode_fit_and_solution():
     solution = make_problem().get_solver("pytorch")()
     assert solution.solve_info.success
-    assert abs(solution.parameter_solutions["rate"] - 0.7) < 2e-3
+    assert abs(solution.parameters["rate"] - 0.7) < 2e-3
     assert solution.cost < 1e-6
     assert abs(float(solution.state(1.0)[0]) - float(np.exp(0.7))) < 2e-3
 
@@ -45,7 +45,7 @@ def test_cuda_neural_ode_fit_and_solution():
 def test_cuda_fixed_and_unknown_parameter_validation():
     solver = make_problem().get_solver("pytorch")
     fixed = solver.solve(rate=0.7)
-    assert fixed.parameter_solutions["rate"] == pytest.approx(0.7)
+    assert fixed.parameters["rate"] == pytest.approx(0.7)
     assert fixed.cost < 1e-6
     with pytest.raises(ValueError, match="Unknown variational parameter"):
         solver.solve(other=0.0)
@@ -92,9 +92,7 @@ def test_cuda_integrates_registered_quadratures():
     solution = problem.get_solver("pytorch").solve()
 
     assert solution.solve_info.success
-    assert solution.parameter_solutions["rate"] == pytest.approx(
-        rate, abs=2e-3
-    )
+    assert solution.parameters["rate"] == pytest.approx(rate, abs=2e-3)
     assert solution.quadratures(1.0)[0] == pytest.approx(target, abs=2e-3)
 
 

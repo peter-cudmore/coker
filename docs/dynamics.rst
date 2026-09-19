@@ -15,11 +15,15 @@ The main public surface is re-exported from :mod:`coker.dynamics`:
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
 - :class:`coker.dynamics.BoundedVariable`
+- :class:`coker.dynamics.UnboundedVariable`
 - :class:`coker.dynamics.TranscriptionOptions`
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
 - :class:`coker.dynamics.BoundVector`
 - :class:`coker.dynamics.DenseTensorVariable`
+- :class:`coker.dynamics.FunctionParameter`
 - :class:`coker.dynamics.MonotonePiecewiseLinear`
+- :class:`coker.dynamics.Perceptron`
+- :class:`coker.dynamics.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -69,6 +73,48 @@ symbolic observed output directly in the objective:
        built = problem.build(
            Minimise((problem.output(problem.t_final)[0] - observed) ** 2)
        )
+
+Function-valued parameters
+--------------------------
+
+Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
+:class:`~coker.dynamics.FunctionParameter` realization at problem construction;
+Coker replaces it with the realization's scalar basis decisions before solving.
+The function space and realization must agree on argument and scalar-output
+shapes.
+
+``Perceptron`` requires one vector argument and a scalar output.
+``RadialBasisFunction`` and ``MonotonePiecewiseLinear`` require one scalar
+argument and a scalar output.
+
+For example, a scalar response over a two-component state can use a perceptron:
+
+.. code-block:: python
+
+   from coker import FunctionSpace, Scalar, VectorSpace
+   from coker.dynamics import Perceptron, VariationalProblemBuilder
+   from coker.toolkits.codesign import Minimise
+
+   response = FunctionSpace(
+       "response",
+       arguments=[VectorSpace("state", 2)],
+       output=[Scalar("rate")],
+   )
+   # The system must declare ``parameters=(response,)`` and call ``p[0](x)``.
+   with VariationalProblemBuilder(
+       system,
+       t_final=1.0,
+       parameters=[Perceptron(2, name="response")],
+   ) as problem:
+       built = problem.build(
+           Minimise((problem.output(problem.t_final)[0] - 0.5) ** 2)
+       )
+
+``Perceptron`` and ``RadialBasisFunction`` decisions are unbounded by default.
+Pass both ``lower_bound`` and ``upper_bound`` to constrain every basis
+coefficient. ``MonotonePiecewiseLinear`` has unbounded internal decisions, but
+its declared output bounds and monotonicity are enforced by its
+parameterization.
 
 The builder classifies comparisons by their time binding: expressions at
 ``t`` are path constraints, expressions at ``0`` are initial point
@@ -125,12 +171,16 @@ below that normalized width. ``maximum_degree`` must be no less than
 a single transcription solve.
 
 During one adaptive solve, the CasADi model setup is retained while only
-mesh-dependent NLPs are compiled. Refined meshes interpolate the preceding
-path as their initial state, and previously visited mesh signatures are reused
-by a bounded cache. These are implementation details: callers should treat
-adaptive solving as deterministic for a fixed problem, options, and parameter
-values, rather than rely on a cache lifetime across separately created
-problems.
+mesh-dependent NLPs are compiled. Each refined mesh interpolates the preceding
+path and seeds compatible controls, free parameters, and a free horizon from
+the preceding solution. Explicit parameters passed to ``solve`` override that
+carried parameter value. Successful adaptive solutions expose
+``adaptive_refinement_rounds`` (the number of mesh updates after the initial
+solve) and ``adaptive_maximum_defect`` (the final maximum scaled state defect).
+Previously visited mesh signatures are reused by a bounded cache. Cache reuse
+is an implementation detail: callers should treat adaptive solving as
+deterministic for a fixed problem, options, and parameter values, rather than
+rely on a cache lifetime across separately created problems.
 
 Heterogeneous and function-valued parameters
 --------------------------------------------
@@ -182,9 +232,10 @@ shape of its initial guess:
        t_final=1.0,
        parameters=[
            MonotonePiecewiseLinear(
-               domain_knots=[0.0, 1.0, 2.0],
+               domain_knots=[0.0, 0.5, 1.0],
                lower_bound=0.0,
                upper_bound=2.0,
+               name="response",
            ),
            BoundVector(
                "offset",
@@ -199,15 +250,18 @@ shape of its initial guess:
 Function-valued parameters currently require one scalar argument and one scalar
 output. ``MonotonePiecewiseLinear`` expands its monotonic basis into scalar
 solver decisions, then reconstructs a callable parameter for the original
-system. Vector blocks are similarly flattened for solving and are available in
-the returned solution through ``solution.parameter_blocks["offset"]`` with
-their declared shape restored.
+system. The returned ``solution.parameters`` mapping restores scalar decisions
+as ``float`` values and vector or dense tensor decisions as shaped NumPy
+arrays. Function decisions are ``FittedFunction`` objects, retaining their
+specification, space, callable, and fitted parameters.
 
-``domain_knots`` are breakpoints in the parameter function's argument domain,
-not transcription times. For ``gain_curve(speed)`` above, they are speed
-breakpoints. They only happen to be time values when the function parameter is
-explicitly a function of time. The current temporal transcription mesh is
-independent of them.
+``MonotonePiecewiseLinear.domain_knots`` should span the normalized integration
+domain from ``0`` to ``1``; use ``0`` and ``1`` as the endpoint knots and add
+interior knots where the fitted response needs more resolution. This is the
+solver's normalized integration coordinate, not physical time. A system whose
+parameter is expressed in physical time should pass its normalized time
+coordinate to the fitted function. The temporal transcription mesh is
+independent of the selected interior knots.
 
 Worked parameter-fitting example
 --------------------------------
@@ -259,7 +313,7 @@ unknown parameter is the constant state value of a one-dimensional system.
    )
 
    solution = problem()
-   print(solution.parameter_solutions["value"])
+   print(solution.parameters["value"])
    print(solution.solve_info.success)
 
 This is the same shape used throughout ``tests/dynamical_systems/``: build a

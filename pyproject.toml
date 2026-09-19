@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coker"
-version = "0.4.2"
+version = "0.4.3"
 requires-python = ">=3.10"
 authors = [
     {name = "Peter Cudmore", email = "drpetercudmore@gmail.com"}
@@ -37,7 +37,7 @@ sympy = "coker.backends.sympy:SympyBackend"
 
 [project.optional-dependencies]
 casadi = [
-    "casadi>=3.7.0,<4",
+    "casadi>=3.7.0,<3.8.0",
 ]
 jax = [
     "jax>=0.10,<0.11; python_version >= '3.11'",

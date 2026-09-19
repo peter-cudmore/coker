@@ -19,7 +19,7 @@ from coker.backends.lowered import (
     FunctionSignature,
 )
 from coker.backends.pytorch.dynamics import PytorchODESolverParameters
-from coker.dynamics.variables import BoundedVariable
+from coker.dynamics.variables import BoundedVariable, UnboundedVariable
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     generate_discritisation_operators,
@@ -121,9 +121,11 @@ class PytorchVariationalSolver(VariationalSolver):
         self._parameters = []
         seen = set()
         for declaration in problem.parameters or []:
-            if not isinstance(declaration, BoundedVariable):
+            if not isinstance(
+                declaration, (BoundedVariable, UnboundedVariable)
+            ):
                 raise NotImplementedError(
-                    "Only BoundedVariable parameters are supported by "
+                    "Only scalar decision parameters are supported by "
                     "PyTorch variational solving"
                 )
             if declaration.name in seen:
@@ -369,6 +371,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 f"Initial guess for parameter {parameter.name!r} "
                 "must be finite"
             )
+
         if (
             np.isfinite(parameter.lower_bound)
             and guess < parameter.lower_bound
@@ -551,18 +554,26 @@ class PytorchVariationalSolver(VariationalSolver):
             "converged",
             iteration_count=None,
         )
-        parameter_solutions = {
-            p.name: float(values[i].cpu())
-            for i, p in enumerate(self._parameters)
-        }
-        return VariationalSolution(
+        system_parameter_values = self._system_parameters(values)
+        public_parameters = (
+            self.problem.parameter_layout.reconstruct(
+                system_parameter_values,
+                get_backend_by_name("pytorch", set_current=False),
+            )
+            if self.problem.parameter_layout is not None
+            else {
+                parameter.name: float(values[index].cpu())
+                for index, parameter in enumerate(self._parameters)
+            }
+        )
+        return VariationalSolution.from_solver(
             cost=float(cost.detach().cpu()),
             path=InterpolatingPolyCollection([poly]),
             projectors=(state_projector, None, quadrature_projector),
             control_solutions=[],
-            parameter_solutions=parameter_solutions,
-            parameters=values.cpu().numpy(),
-            parameter_block_layouts=self.problem.system.parameter_blocks,
+            parameters=public_parameters,
+            parameter_vector=system_parameter_values.cpu().numpy(),
+            solver_parameter_vector=values.cpu().numpy(),
             output=self.problem.system.y,
             t_final=float(self.problem.t_final),
             solve_info=info,
