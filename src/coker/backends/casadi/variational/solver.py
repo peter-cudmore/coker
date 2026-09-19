@@ -1228,15 +1228,15 @@ class CasadiSolutionAssembler:
             if self.decode_controls is not None
             else None
         )
-        return VariationalSolution(
+        return VariationalSolution.from_solver(
             cost=loss,
             projectors=tuple(
                 projector.copy() if projector is not None else None
                 for projector in self.projectors
             ),
             parameters=public_parameters,
-            _parameter_vector=system_parameters,
-            _solver_parameter_vector=solver_parameter_vector,
+            parameter_vector=system_parameters,
+            solver_parameter_vector=solver_parameter_vector,
             path=path,
             control_solutions=control_solutions,
             output=self.problem.system.y,

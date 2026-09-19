@@ -566,14 +566,14 @@ class PytorchVariationalSolver(VariationalSolver):
                 for index, parameter in enumerate(self._parameters)
             }
         )
-        return VariationalSolution(
+        return VariationalSolution.from_solver(
             cost=float(cost.detach().cpu()),
             path=InterpolatingPolyCollection([poly]),
             projectors=(state_projector, None, quadrature_projector),
             control_solutions=[],
             parameters=public_parameters,
-            _parameter_vector=system_parameter_values.cpu().numpy(),
-            _solver_parameter_vector=values.cpu().numpy(),
+            parameter_vector=system_parameter_values.cpu().numpy(),
+            solver_parameter_vector=values.cpu().numpy(),
             output=self.problem.system.y,
             t_final=float(self.problem.t_final),
             solve_info=info,

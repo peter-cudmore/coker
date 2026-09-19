@@ -71,16 +71,27 @@ class MathematicalProgram(SymbolicCallable):
         output_shape: Tuple[Dimension, ...],
         implementation: Callable,
         backend: Optional[str] = None,
-        *,
-        parameter_captures: Sequence[_ParameterCapture] = (),
     ):
         self.input_shape = input_shape
         self.output_shape = output_shape
         self._impl = implementation
         self.backend = backend
         self.solve_info = None
-        self._parameter_captures = tuple(parameter_captures)
+        self._parameter_captures: tuple[_ParameterCapture, ...] = ()
         self.parameters: dict[str, Any] = {}
+
+    @classmethod
+    def _from_optimisation(
+        cls,
+        input_shape: Tuple[Dimension, ...],
+        output_shape: Tuple[Dimension, ...],
+        implementation: Callable,
+        backend: str,
+        captures: Sequence[_ParameterCapture],
+    ) -> "MathematicalProgram":
+        program = cls(input_shape, output_shape, implementation, backend)
+        program._parameter_captures = tuple(captures)
+        return program
 
     @property
     def result_shape(self) -> Tuple[Dimension, ...]:
@@ -242,33 +253,28 @@ class ProblemBuilder:
         self.solver_options = solver_options
         self._parameter_captures: list[_ParameterCapture] = []
 
-    def new_variable(
-        self,
-        name,
-        shape=None,
-        initial_value=None,
-        *,
-        _capture_parameter=True,
-    ):
+    def _add_decision(self, name, shape=None, initial_value=None):
         assert self.tape is not None
         if shape is None:
-            v = self.tape.input(Scalar(name))
+            variable = self.tape.input(Scalar(name))
             initial_value = 0 if initial_value is None else initial_value
         else:
-            v = self.tape.input(VectorSpace(name, shape))
+            variable = self.tape.input(VectorSpace(name, shape))
             initial_value = (
                 np.zeros(shape=shape)
                 if initial_value is None
                 else initial_value
             )
+        self.initial_conditions[variable.index] = initial_value
+        return variable
 
-        self.initial_conditions[v.index] = initial_value
-        if _capture_parameter:
-            space = v.dim.to_space(name)
-            self._parameter_captures.append(
-                _ParameterCapture(name, space, space, v)
-            )
-        return v
+    def new_variable(self, name, shape=None, initial_value=None):
+        variable = self._add_decision(name, shape, initial_value)
+        space = variable.dim.to_space(name)
+        self._parameter_captures.append(
+            _ParameterCapture(name, space, space, variable)
+        )
+        return variable
 
     def new_function_parameter(self, target, declaration):
         """Add a finite function parameter as optimisation decisions."""
@@ -281,11 +287,10 @@ class ProblemBuilder:
         target = declaration.validate_target(target)
         values = declaration.decision_declarations()
         basis, initial, *bounds = values
-        basis_values = self.new_variable(
+        basis_values = self._add_decision(
             declaration.name or target.name,
             shape=(basis.size,),
             initial_value=initial,
-            _capture_parameter=False,
         )
         if bounds:
             lower, upper = bounds
@@ -366,12 +371,12 @@ class ProblemBuilder:
         )
         impl = backend_impl.make_optimisation_module(implementation)
 
-        return MathematicalProgram(
+        return MathematicalProgram._from_optimisation(
             self.input_shape,
             self.output_shape,
             impl,
-            parameter_captures=self._parameter_captures,
-            backend=backend_name,
+            backend_name,
+            self._parameter_captures,
         )
 
     def __enter__(self):

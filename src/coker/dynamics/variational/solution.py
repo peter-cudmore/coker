@@ -51,14 +51,10 @@ class VariationalSolution:
     ]
     control_solutions: List[ControlSolution]
     parameters: Mapping[str, object]
-    _parameter_vector: np.ndarray = field(repr=False)
     output: Callable[
         [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         np.ndarray,
     ]
-    _solver_parameter_vector: np.ndarray | None = field(
-        default=None, repr=False
-    )
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
     adaptive_refinement_rounds: Optional[int] = None
@@ -69,6 +65,63 @@ class VariationalSolution:
     terminal_constraint_exprs: List[InequalityExpression] = field(
         default_factory=list
     )
+    _parameter_vector: np.ndarray = field(
+        default_factory=lambda: np.zeros((0,)), init=False, repr=False
+    )
+    _solver_parameter_vector: np.ndarray | None = field(
+        default=None, init=False, repr=False
+    )
+
+    @classmethod
+    def from_solver(
+        cls,
+        cost: float,
+        path: InterpolatingPolyCollection,
+        projectors: Tuple[
+            Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
+        ],
+        control_solutions: List[ControlSolution],
+        parameters: Mapping[str, object],
+        output: Callable[
+            [
+                float,
+                np.ndarray,
+                np.ndarray,
+                np.ndarray,
+                np.ndarray,
+                np.ndarray,
+            ],
+            np.ndarray,
+        ],
+        parameter_vector: np.ndarray,
+        solver_parameter_vector: np.ndarray | None = None,
+        *,
+        t_final: float = 0.0,
+        solve_info: Optional[SolveInfo] = None,
+        path_constraint_exprs: List[InequalityExpression] | None = None,
+        terminal_constraint_exprs: List[InequalityExpression] | None = None,
+    ) -> "VariationalSolution":
+        solution = cls(
+            cost,
+            path,
+            projectors,
+            control_solutions,
+            parameters,
+            output,
+            t_final,
+            solve_info,
+            path_constraint_exprs=(
+                [] if path_constraint_exprs is None else path_constraint_exprs
+            ),
+            terminal_constraint_exprs=(
+                []
+                if terminal_constraint_exprs is None
+                else terminal_constraint_exprs
+            ),
+        )
+        solution._parameter_vector = parameter_vector
+        solution._solver_parameter_vector = solver_parameter_vector
+        return solution
 
     def path_constraints(self, t) -> np.ndarray:
         if not self.path_constraint_exprs:
