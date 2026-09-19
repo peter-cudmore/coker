@@ -9,6 +9,7 @@
 - Function-valued variational parameters with monotone piecewise-linear, perceptron, and radial-basis realizations.
 - `UnboundedVariable` declarations for scalar decisions without user-supplied bounds.
 - SymPy symbolic lowering preserves named function parameters and external calls.
+- Symbolic local accessibility and structural identifiability analysis for supported ODE systems.
 
 ### Changed
 - Bump Coker to version 0.4.3.
