@@ -10,7 +10,7 @@
 - `UnboundedVariable` declarations for scalar decisions without user-supplied bounds.
 
 ### Changed
-- Bump Coker to version 0.4.2.
+- Bump Coker to version 0.4.3.
 - Collocation reference-operator caching is scoped to a transcription factory rather than process-global state.
 - CasADi transcription compilation reuses bounded cached mesh-specific solvers during parameter sweeps.
 - Existing `TranscriptionOptions` CasADi fields remain supported and are translated when no explicit backend policy is provided.
