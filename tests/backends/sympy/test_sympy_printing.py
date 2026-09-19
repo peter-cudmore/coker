@@ -46,6 +46,43 @@ def test_function_parameter_lowering():
     assert output == sp.Function("response")(sp.Symbol("state"))
 
 
+def test_vector_function_parameter_lowering_preserves_arguments():
+    response = coker.FunctionSpace(
+        "response",
+        arguments=[
+            coker.Scalar("time"),
+            coker.VectorSpace("state", 2),
+            coker.Scalar("gain"),
+        ],
+        output=[coker.VectorSpace("rate", 2)],
+    )
+    function = coker.function(
+        [
+            response,
+            coker.Scalar("time"),
+            coker.VectorSpace("state", 2),
+            coker.Scalar("gain"),
+        ],
+        lambda parameter, time, state, gain: parameter(time, state, gain),
+        backend="sympy",
+    )
+
+    backend = get_backend_by_name("sympy")
+    args, output = backend.lower_to_symbolic(function)
+
+    time = sp.Symbol("time")
+    state = sp.Array([sp.Symbol("state_0"), sp.Symbol("state_1")])
+    gain = sp.Symbol("gain")
+    assert args[1:] == [time, state, gain]
+    state_argument = sp.ImmutableMatrix(
+        [sp.Symbol("state_0"), sp.Symbol("state_1")]
+    )
+    assert list(sp.ImmutableMatrix(output)) == [
+        sp.Function("response_0")(time, state_argument, gain),
+        sp.Function("response_1")(time, state_argument, gain),
+    ]
+
+
 def test_external_function_lowering_reuses_function_symbol():
     backend = get_backend_by_name("sympy")
     external = backend.import_function(

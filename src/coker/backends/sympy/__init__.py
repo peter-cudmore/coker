@@ -171,6 +171,23 @@ parameterised_impls = {
 }
 
 
+class _SymbolicVectorFunction:
+    """Represent a vector-valued undefined SymPy function."""
+
+    def __init__(self, name: str, output: Dimension) -> None:
+        self._name = name
+        self._output = output
+
+    def __call__(self, *arguments):
+        values = [
+            sp.Function(
+                f"{self._name}_{'_'.join(str(value) for value in index)}"
+            )(*arguments)
+            for index in self._output.index_iterator(row_major=True)
+        ]
+        return sp.Array(values, shape=self._output.shape)
+
+
 class SympyLoweredFunction(LoweredFunction):
     """SymPy evaluator-backed lowered execution handle."""
 
@@ -221,7 +238,7 @@ class SympyBackend(Backend):
             return array
 
         try:
-            if not array.is_constant():
+            if array.free_symbols or not array.is_constant():
                 return array
         except AttributeError:
             pass
@@ -374,7 +391,17 @@ class SympyBackend(Backend):
                 continue
             dim = tape.dim[idx]
             if isinstance(dim, FunctionSpace):
-                sym = sp.Function(name)
+                (output,) = dim.output_dimensions()
+                if not isinstance(output, Dimension):
+                    raise NotImplementedError(
+                        "SymPy function parameters must return a finite "
+                        "scalar or vector value"
+                    )
+                sym = (
+                    sp.Function(name)
+                    if output.is_scalar()
+                    else _SymbolicVectorFunction(name, output)
+                )
             elif dim.is_scalar():
                 sym = sp.Symbol(name)
             else:
