@@ -209,6 +209,7 @@ class _CallableArchiveEntry:
     result_dimension: Dimension | FunctionSpace | ResultBundleDimension
     name: str | None
 
+
 class CallableReference:
     """A reference to a callable entry owned by a tape."""
 

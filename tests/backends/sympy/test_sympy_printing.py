@@ -25,6 +25,7 @@ def test_scalar_lowering():
     assert args == [sp.Symbol("x"), sp.Symbol("p")]
     assert out == sp.Symbol("x") ** 2 + sp.Symbol("p")
 
+
 def test_function_parameter_lowering():
     response = coker.FunctionSpace(
         "response",
@@ -67,7 +68,10 @@ def test_external_function_lowering_reuses_function_symbol():
 
     x = sp.Symbol("x")
     assert args == [x]
-    assert output == sp.Function("external")(x) + sp.Function("external")(x + 1)
+    assert output == sp.Function("external")(x) + sp.Function("external")(
+        x + 1
+    )
+
 
 def test_vector_lowering():
     A = np.array([[0, 1], [-1, 0]])

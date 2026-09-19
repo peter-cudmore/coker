@@ -209,8 +209,6 @@ class SympyLoweredFunction(LoweredFunction):
 
 
 class SympyBackend(Backend):
-    symbolic_external_calls = False
-
 
     def to_numpy_array(self, array):
 
@@ -282,12 +280,6 @@ class SympyBackend(Backend):
         return self.to_backend_array(result)
 
     def call(self, op, *args):
-        if (
-            self.symbolic_external_calls
-            and op == OP.EVALUATE
-            and isinstance(args[0], CallableReference)
-        ):
-            return sp.Function(args[0].symbol_name)(*args[1:])
         if op in impls:
             result = impls[op](*args)
             return result
@@ -403,8 +395,7 @@ class SympyBackend(Backend):
                     )
             args.append(sym)
             workspace[idx] = sym
-        symbolic_backend = SympyBackend()
-        symbolic_backend.symbolic_external_calls = True
+        symbolic_backend = _SymbolicSympyBackend()
         outputs = evaluate_inner(
             tape,
             args,
@@ -422,6 +413,15 @@ class SympyBackend(Backend):
     def evaluate_integrals(*args):
 
         raise NotImplementedError("not supported on sympy backend")
+
+
+class _SymbolicSympyBackend(SympyBackend):
+    """Lower external calls to undefined SymPy functions."""
+
+    def call(self, op, *args):
+        if op == OP.EVALUATE and isinstance(args[0], CallableReference):
+            return sp.Function(args[0].symbol_name)(*args[1:])
+        return super().call(op, *args)
 
 
 register_backend("sympy", SympyBackend)
