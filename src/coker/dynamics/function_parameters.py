@@ -135,7 +135,14 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class MonotonePiecewiseLinear(FunctionParameter):
-    """Bounded scalar realization over normalized-domain ``[0, 1]`` knots."""
+    """Bounded monotone scalar realization over normalized-domain knots.
+
+    ``domain_knots`` should span ``[0, 1]`` and be strictly increasing. Each
+    unconstrained basis decision is exponentiated, then its positive increments
+    are cumulatively normalized into ``(lower_bound, upper_bound)``. Linear
+    interpolation therefore has positive slope on every knot interval; values
+    outside the knot range clamp to the corresponding endpoint.
+    """
 
     domain_knots: Sequence[Real]
     lower_bound: Real
