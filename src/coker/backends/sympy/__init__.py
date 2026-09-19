@@ -24,6 +24,7 @@ from coker.algebra.ops import (
     invoke_callable,
 )
 from coker.algebra.dimensions import Dimension, FunctionSpace
+from coker.algebra.graph import CallableReference
 from coker.backends.sympy.shape import reshape
 
 MatrixType = (sp.Matrix, sp.ImmutableMatrix)
@@ -208,6 +209,8 @@ class SympyLoweredFunction(LoweredFunction):
 
 
 class SympyBackend(Backend):
+    symbolic_external_calls = False
+
 
     def to_numpy_array(self, array):
 
@@ -279,6 +282,12 @@ class SympyBackend(Backend):
         return self.to_backend_array(result)
 
     def call(self, op, *args):
+        if (
+            self.symbolic_external_calls
+            and op == OP.EVALUATE
+            and isinstance(args[0], CallableReference)
+        ):
+            return sp.Function(args[0].symbol_name)(*args[1:])
         if op in impls:
             result = impls[op](*args)
             return result
@@ -394,7 +403,15 @@ class SympyBackend(Backend):
                     )
             args.append(sym)
             workspace[idx] = sym
-        outputs = evaluate_inner(tape, args, function.output, self, workspace)
+        symbolic_backend = SympyBackend()
+        symbolic_backend.symbolic_external_calls = True
+        outputs = evaluate_inner(
+            tape,
+            args,
+            function.output,
+            symbolic_backend,
+            workspace,
+        )
         if function.is_single:
             return args, outputs[0]
         return args, outputs

@@ -2,6 +2,11 @@ import warnings
 
 import coker
 from coker.backends.backend import get_backend_by_name
+from coker.backends.lowered import (
+    FunctionInputSpec,
+    FunctionOutputSpec,
+    FunctionSignature,
+)
 import sympy as sp
 import numpy as np
 
@@ -39,6 +44,30 @@ def test_function_parameter_lowering():
     assert args[1] == sp.Symbol("state")
     assert output == sp.Function("response")(sp.Symbol("state"))
 
+
+def test_external_function_lowering_reuses_function_symbol():
+    backend = get_backend_by_name("sympy")
+    external = backend.import_function(
+        lambda _value: (_ for _ in ()).throw(
+            AssertionError("symbolic lowering must not execute the function")
+        ),
+        FunctionSignature(
+            inputs=(FunctionInputSpec("value", coker.Scalar("value")),),
+            outputs=(FunctionOutputSpec("result", coker.Scalar("result")),),
+        ),
+        name="external",
+    )
+    function = coker.function(
+        [coker.Scalar("x")],
+        lambda x: external(x) + external(x + 1),
+        backend="sympy",
+    )
+
+    args, output = backend.lower_to_symbolic(function)
+
+    x = sp.Symbol("x")
+    assert args == [x]
+    assert output == sp.Function("external")(x) + sp.Function("external")(x + 1)
 
 def test_vector_lowering():
     A = np.array([[0, 1], [-1, 0]])
