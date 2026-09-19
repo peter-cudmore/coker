@@ -8,6 +8,7 @@
 - Reuse of the previous path as the refined NLP initial guess.
 - Function-valued variational parameters with monotone piecewise-linear, perceptron, and radial-basis realizations.
 - `UnboundedVariable` declarations for scalar decisions without user-supplied bounds.
+- SymPy symbolic lowering preserves named function parameters and external calls.
 
 ### Changed
 - Bump Coker to version 0.4.3.
