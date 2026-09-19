@@ -135,7 +135,7 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class MonotonePiecewiseLinear(FunctionParameter):
-    """Bounded scalar realization over fixed function-domain knots."""
+    """Bounded scalar realization over normalized-domain ``[0, 1]`` knots."""
 
     domain_knots: Sequence[Real]
     lower_bound: Real

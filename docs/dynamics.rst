@@ -232,7 +232,7 @@ shape of its initial guess:
        t_final=1.0,
        parameters=[
            MonotonePiecewiseLinear(
-               domain_knots=[0.0, 1.0, 2.0],
+               domain_knots=[0.0, 0.5, 1.0],
                lower_bound=0.0,
                upper_bound=2.0,
                name="response",
@@ -255,11 +255,13 @@ as ``float`` values and vector or dense tensor decisions as shaped NumPy
 arrays. Function decisions are ``FittedFunction`` objects, retaining their
 specification, space, callable, and fitted parameters.
 
-``domain_knots`` are breakpoints in the parameter function's argument domain,
-not transcription times. For ``gain_curve(speed)`` above, they are speed
-breakpoints. They only happen to be time values when the function parameter is
-explicitly a function of time. The current temporal transcription mesh is
-independent of them.
+``MonotonePiecewiseLinear.domain_knots`` should span the normalized integration
+domain from ``0`` to ``1``; use ``0`` and ``1`` as the endpoint knots and add
+interior knots where the fitted response needs more resolution. This is the
+solver's normalized integration coordinate, not physical time. A system whose
+parameter is expressed in physical time should pass its normalized time
+coordinate to the fitted function. The temporal transcription mesh is
+independent of the selected interior knots.
 
 Worked parameter-fitting example
 --------------------------------
