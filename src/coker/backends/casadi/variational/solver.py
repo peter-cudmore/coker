@@ -453,7 +453,7 @@ class _TranscriptionFactory:
             else np.zeros((0, len(times)))
         )
         parameters = np.repeat(
-            np.asarray(solution.parameters, dtype=float).reshape((-1, 1)),
+            solution._parameter_vector.reshape((-1, 1)),
             len(times),
             axis=1,
         )
@@ -856,7 +856,7 @@ def _create_solver(
         poly_collection=poly_collection,
         projectors=projectors,
         proj_p=factory.proj_p,
-        parameter_solution_map=factory.p_output_map,
+        parameter_value_map=factory.p_output_map,
         decode_controls=factory.control_decoder,
     )
 
@@ -971,12 +971,14 @@ def _create_solver(
             control_guess = compatible_control_guess(previous_solution)
             if control_guess is not None:
                 physical_x0[control_slice] = control_guess
-            for name, index in factory.parameter_indices.items():
-                if name not in previous_solution.parameter_solutions:
-                    continue
-                value = previous_solution.parameter_solutions[name]
-                physical_x0[parameter_offset + index] = value
-                p_guess[index] = value
+            previous_values = previous_solution._solver_parameter_vector
+            if previous_values is not None:
+                for index in factory.parameter_indices.values():
+                    if index >= previous_values.size:
+                        continue
+                    value = previous_values[index]
+                    physical_x0[parameter_offset + index] = value
+                    p_guess[index] = value
 
         for name, value in fixed_parameters.items():
             index = factory.parameter_indices[name]
@@ -1184,7 +1186,7 @@ class CasadiSolutionAssembler:
             Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
         ],
         proj_p: ca.DM,
-        parameter_solution_map: Callable[[ca.DM], Dict[str, float]],
+        parameter_value_map: Callable[[ca.DM], Dict[str, float]],
         decode_controls: Optional[Callable[[ca.DM], list]],
     ):
         self.problem = problem
@@ -1192,7 +1194,7 @@ class CasadiSolutionAssembler:
         self.poly_collection = poly_collection
         self.projectors = projectors
         self.proj_p = proj_p
-        self.parameter_solution_map = parameter_solution_map
+        self.parameter_value_map = parameter_value_map
         self.decode_controls = decode_controls
 
     def __call__(
@@ -1213,6 +1215,14 @@ class CasadiSolutionAssembler:
         system_parameters = np.array(
             self.proj_p @ ca.DM(parameter_vector)
         ).reshape((-1,))
+        solver_parameter_vector = np.asarray(
+            free_parameters, dtype=float
+        ).reshape((-1,))
+        public_parameters = (
+            self.problem.parameter_layout.reconstruct(system_parameters)
+            if self.problem.parameter_layout is not None
+            else self.parameter_value_map(free_parameters)
+        )
         control_solutions = (
             self.decode_controls(control_coefficients)
             if self.decode_controls is not None
@@ -1224,10 +1234,9 @@ class CasadiSolutionAssembler:
                 projector.copy() if projector is not None else None
                 for projector in self.projectors
             ),
-            parameter_solutions=self.parameter_solution_map(free_parameters),
-            parameters=system_parameters,
-            parameter_block_layouts=self.problem.system.parameter_blocks,
-            parameter_layout=self.problem.parameter_layout,
+            parameters=public_parameters,
+            _parameter_vector=system_parameters,
+            _solver_parameter_vector=solver_parameter_vector,
             path=path,
             control_solutions=control_solutions,
             output=self.problem.system.y,

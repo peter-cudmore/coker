@@ -2,21 +2,31 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
-from coker.algebra.dimensions import FunctionSpace, VectorSpace
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
+from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
-from coker.dynamics.function_parameters import FunctionParameter
+from coker.dynamics.function_parameters import (
+    FittedFunction,
+    FunctionParameter,
+    Perceptron,
+)
+from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variables import (
     BoundVector,
     BoundedVariable,
     DenseTensorVariable,
     UnboundedVariable,
 )
-from coker.dynamics.model import DynamicalSystem
 
 
 @dataclass(frozen=True)
@@ -25,25 +35,66 @@ class ParameterValueLayout:
     declarations: tuple[object, ...]
     offsets: tuple[tuple[int, int], ...]
 
-    def reconstruct(self, values: np.ndarray) -> Mapping[str, object]:
+    def reconstruct(self, values: object) -> Mapping[str, object]:
         result = {}
         for target, declaration, (start, end) in zip(
             self.targets, self.declarations, self.offsets
         ):
-            basis = np.asarray(values[start:end], dtype=float)
+            basis = values[start:end]
+            name = self._name(target, declaration)
             if isinstance(target, FunctionSpace):
-                result[declaration.name] = self._function(declaration, basis)
+                result[name] = self._function(target, declaration, basis)
             elif isinstance(target, VectorSpace):
-                result[declaration.name] = basis.reshape(declaration.shape)
+                result[name] = self._numpy(basis).reshape(declaration.shape)
             else:
-                result[declaration.name] = float(basis[0])
+                result[name] = float(self._numpy(basis).reshape((-1,))[0])
         return result
 
     @staticmethod
+    def _name(target: object, declaration: object) -> str:
+        if isinstance(
+            declaration,
+            (
+                BoundedVariable,
+                BoundVector,
+                DenseTensorVariable,
+                FunctionParameter,
+                UnboundedVariable,
+            ),
+        ):
+            return declaration.name
+        assert isinstance(target, (Scalar, VectorSpace))
+        return target.name
+
+    @staticmethod
+    def _numpy(values: object) -> np.ndarray:
+        if torch is not None and isinstance(values, torch.Tensor):
+            return values.detach().cpu().numpy()
+        return np.asarray(values, dtype=float)
+
+    @staticmethod
     def _function(
-        declaration: FunctionParameter, basis: np.ndarray
-    ) -> Callable:
-        return lambda argument: declaration.evaluate(basis, argument)
+        target: FunctionSpace, declaration: FunctionParameter, basis: object
+    ) -> FittedFunction:
+        if torch is not None and isinstance(basis, torch.Tensor):
+            if isinstance(declaration, Perceptron):
+
+                def evaluate(argument):
+                    return torch.sigmoid(
+                        torch.dot(basis[:-1], argument.reshape(-1)) + basis[-1]
+                    )
+
+            else:
+
+                def evaluate(argument):
+                    return declaration.evaluate(basis, argument)
+
+        else:
+
+            def evaluate(argument):
+                return declaration.evaluate(basis, argument)
+
+        return FittedFunction(declaration, target, evaluate, basis)
 
 
 def _basis_declarations(
@@ -160,13 +211,6 @@ def specialize_system_parameters(
             offsets.append((width, width + 1))
             solver_declarations.append(declaration)
             width += 1
-    parameter_blocks = {
-        declaration.name: (start, end, declaration.shape)
-        for target, declaration, (start, end) in zip(
-            space, declarations, offsets
-        )
-        if isinstance(target, VectorSpace)
-    }
 
     numeric_parameters = VectorSpace("p", width)
 
@@ -241,7 +285,6 @@ def specialize_system_parameters(
             bind_dynamics(system.dqdt),
             bind_outputs(system.y),
             solver_parameters=system.solver_parameters,
-            parameter_blocks=parameter_blocks,
         ),
         solver_declarations,
         ParameterValueLayout(

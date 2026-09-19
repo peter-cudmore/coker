@@ -250,9 +250,10 @@ shape of its initial guess:
 Function-valued parameters currently require one scalar argument and one scalar
 output. ``MonotonePiecewiseLinear`` expands its monotonic basis into scalar
 solver decisions, then reconstructs a callable parameter for the original
-system. Vector blocks are similarly flattened for solving and are available in
-the returned solution through ``solution.parameter_blocks["offset"]`` with
-their declared shape restored.
+system. The returned ``solution.parameters`` mapping restores scalar decisions
+as ``float`` values and vector or dense tensor decisions as shaped NumPy
+arrays. Function decisions are ``FittedFunction`` objects, retaining their
+specification, space, callable, and fitted parameters.
 
 ``domain_knots`` are breakpoints in the parameter function's argument domain,
 not transcription times. For ``gain_curve(speed)`` above, they are speed
@@ -310,7 +311,7 @@ unknown parameter is the constant state value of a one-dimensional system.
    )
 
    solution = problem()
-   print(solution.parameter_solutions["value"])
+   print(solution.parameters["value"])
    print(solution.solve_info.success)
 
 This is the same shape used throughout ``tests/dynamical_systems/``: build a

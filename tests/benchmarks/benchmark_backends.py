@@ -247,8 +247,8 @@ def bench_variational():
             (
                 "casadi",
                 t,
-                f"a={sol.parameter_solutions['a']:.3f} (true {a_true}), "
-                f"c={sol.parameter_solutions['c']:.3f} (true {c_true})",
+                f"a={sol.parameters['a']:.3f} (true {a_true}), "
+                f"c={sol.parameters['c']:.3f} (true {c_true})",
             )
         )
     except Exception as e:

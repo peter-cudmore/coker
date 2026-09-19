@@ -89,8 +89,7 @@ def _free_horizon_control_problem():
     )
     system = create_control_system(
         x0=np.zeros((1,)),
-        xdot=lambda _t, x, _u, _parameters: 8.0
-        * (np.ones((1,)) - x),
+        xdot=lambda _t, x, _u, _parameters: 8.0 * (np.ones((1,)) - x),
         control=control_space,
         backend="numpy",
     )
@@ -118,8 +117,7 @@ def _free_horizon_control_problem():
     ) as builder:
         problem = builder.build(
             Minimise(
-                (builder.t_final - 1.25) ** 2
-                + (builder.input(0) - 0.5) ** 2
+                (builder.t_final - 1.25) ** 2 + (builder.input(0) - 0.5) ** 2
             )
         )
     return problem, builder
@@ -238,7 +236,7 @@ def test_adaptive_refinement_seeds_free_parameters_from_previous_solution(
     _assert_refined(solution)
 
     assert len(nlp_calls) > 1
-    assert solution.parameter_solutions["rate_offset"] == pytest.approx(0.75)
+    assert solution.parameters["rate_offset"] == pytest.approx(0.75)
     refined_initial_guess = np.asarray(nlp_calls[-1].calls[0]["x0"]).reshape(
         -1
     )

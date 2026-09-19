@@ -5,13 +5,32 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from numbers import Integral, Real
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, function
 from coker.algebra.graph import if_then_else
+
+
+class FittedFunction:
+    """A concrete function reconstructed from fitted parameter decisions."""
+
+    def __init__(
+        self,
+        specification: FunctionParameter,
+        space: FunctionSpace,
+        function: Callable[..., Any],
+        parameters: Any,
+    ) -> None:
+        self.specification = specification
+        self.space = space
+        self.function = function
+        self.parameters = parameters
+
+    def __call__(self, *arguments: Any, **kwargs: Any) -> Any:
+        return self.function(*arguments, **kwargs)
 
 
 class FunctionParameter(ABC):

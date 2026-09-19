@@ -1,12 +1,15 @@
 import numpy as np
 import torch
 
+import warnings
+
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.dynamics import (
     BoundVector,
     DynamicsSpec,
+    FittedFunction,
     Perceptron,
     RadialBasisFunction,
     VariationalProblemBuilder,
@@ -50,9 +53,8 @@ def test_pytorch_fits_bound_vector_parameter(monkeypatch):
         )
 
     solution = problem()
-    np.testing.assert_allclose(
-        solution.parameter_blocks["gain"], [0.5], atol=1e-2
-    )
+    np.testing.assert_allclose(solution.parameters["gain"], [0.5], atol=1e-2)
+    assert not hasattr(solution, "parameter_blocks")
 
 
 def test_pytorch_lowers_function_parameter_declarations():
@@ -179,7 +181,13 @@ def test_pytorch_solution_reconstructs_mapped_function_parameter(
         )
     )
 
-    np.testing.assert_allclose(
-        solution.parameter_values["response"](argument), expected
-    )
+    fitted = solution.parameters["response"]
+    assert isinstance(fitted, FittedFunction)
+    assert isinstance(fitted.parameters, torch.Tensor)
+    assert callable(fitted.function)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        actual = fitted(torch.as_tensor(argument, dtype=torch.float64))
+    assert isinstance(actual, torch.Tensor)
+    np.testing.assert_allclose(actual.detach().cpu().numpy(), expected)
     assert not np.isclose(expected, raw_value)

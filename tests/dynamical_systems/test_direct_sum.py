@@ -195,7 +195,7 @@ def test_direct_sum_reconstructs_function_parameter(variational_backend):
 
     solution = problem()
 
-    fitted_rate = solution.parameter_values["rate"]
+    fitted_rate = solution.parameters["rate"]
     assert callable(fitted_rate)
     assert np.isfinite(fitted_rate(0.25))
     assert np.isfinite(solution.quadratures(1.0)[0])
@@ -255,8 +255,8 @@ def test_casadi_direct_sum_function_parameter_dae():
 
     assert solution.solve_info.success
     assert solution.cost < 1e-4
-    assert solution.parameter_values["gain"] == pytest.approx(0.5, abs=1e-2)
-    fitted_rate = solution.parameter_values["rate"]
+    assert solution.parameters["gain"] == pytest.approx(0.5, abs=1e-2)
+    fitted_rate = solution.parameters["rate"]
     assert callable(fitted_rate)
     assert fitted_rate(0.25) == pytest.approx(0.25, abs=1e-2)
     np.testing.assert_allclose(solution.state(1.0), [0.5, 0.25], atol=1e-2)

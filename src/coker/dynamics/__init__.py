@@ -22,6 +22,7 @@ from coker.dynamics.variables import (
     ValueType,
 )
 from coker.dynamics.function_parameters import (
+    FittedFunction,
     FunctionParameter,
     MonotonePiecewiseLinear,
     Perceptron,
@@ -70,6 +71,7 @@ __all__ = [
     "DenseTensorVariable",
     "InterpolatingPolyCollection",
     "LossFunction",
+    "FittedFunction",
     "FunctionParameter",
     "MonotonePiecewiseLinear",
     "Perceptron",

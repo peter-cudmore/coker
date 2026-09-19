@@ -46,6 +46,17 @@ class Minimise:
         self.expression = expression
 
 
+@dataclasses.dataclass(frozen=True)
+class _ParameterCapture:
+    """Private metadata for reconstructing a solved decision."""
+
+    name: str
+    target: Scalar | VectorSpace | FunctionSpace
+    declaration: Any
+    capture: Tracer
+    basis: VectorSpace | None = None
+
+
 class MathematicalProgram(SymbolicCallable):
     """An optimisation module that maps parameters to an objective and outputs.
 
@@ -60,12 +71,16 @@ class MathematicalProgram(SymbolicCallable):
         output_shape: Tuple[Dimension, ...],
         implementation: Callable,
         backend: Optional[str] = None,
+        *,
+        parameter_captures: Sequence[_ParameterCapture] = (),
     ):
         self.input_shape = input_shape
         self.output_shape = output_shape
         self._impl = implementation
         self.backend = backend
         self.solve_info = None
+        self._parameter_captures = tuple(parameter_captures)
+        self.parameters: dict[str, Any] = {}
 
     @property
     def result_shape(self) -> Tuple[Dimension, ...]:
@@ -94,13 +109,20 @@ class MathematicalProgram(SymbolicCallable):
             self.solve_info = getattr(self._impl, "last_solve_info", None)
         if not isinstance(result, (list, tuple)):
             result = [result]
-        if len(result) != len(self.result_shape):
+        expected_results = len(self.result_shape) + len(
+            self._parameter_captures
+        )
+        if len(result) != expected_results:
             raise ValueError(
                 f"Backend returned {len(result)} results for "
-                f"{len(self.result_shape)} requested objective and outputs"
+                f"{expected_results} requested objective, outputs, and "
+                "private parameter captures"
             )
 
-        objective, *outputs = result
+        public_result_count = len(self.result_shape)
+        objective, *outputs = result[:public_result_count]
+        captured_values = result[public_result_count:]
+        self.parameters = self._reconstruct_parameters(captured_values)
         objective_array = np.asarray(objective)
         if objective_array.size != 1:
             raise TypeError(
@@ -113,6 +135,83 @@ class MathematicalProgram(SymbolicCallable):
                 np.reshape(np.asarray(output), dim.shape)
                 for output, dim in zip(outputs, self.output_shape)
             ),
+        )
+
+    def _reconstruct_parameters(
+        self, captured_values: Sequence[Any]
+    ) -> dict[str, Any]:
+        """Rebuild public decision values from private solver captures."""
+        from coker.dynamics.function_parameters import FittedFunction
+
+        result = {}
+        for metadata, value in zip(self._parameter_captures, captured_values):
+            if isinstance(metadata.target, FunctionSpace):
+                if metadata.basis is None:
+                    raise RuntimeError(
+                        "function parameter capture has no basis declaration"
+                    )
+                if self.backend == "pytorch":
+                    result[metadata.name] = self._reconstruct_pytorch_function(
+                        metadata, value
+                    )
+                    continue
+                basis = np.asarray(value).reshape(metadata.basis.dimension)
+                declaration = metadata.declaration
+
+                def fitted_function(
+                    argument, declaration=declaration, basis=basis
+                ):
+                    return declaration.evaluate(basis, argument)
+
+                result[metadata.name] = FittedFunction(
+                    specification=declaration,
+                    space=metadata.target,
+                    function=fitted_function,
+                    parameters=basis,
+                )
+            elif isinstance(metadata.target, Scalar):
+                result[metadata.name] = float(np.asarray(value).reshape(-1)[0])
+            else:
+                result[metadata.name] = np.asarray(value).reshape(
+                    metadata.target.dimension
+                )
+        return result
+
+    @staticmethod
+    def _reconstruct_pytorch_function(
+        metadata: _ParameterCapture, value: Any
+    ) -> Any:
+        """Preserve a PyTorch-native fitted callable and basis tensor."""
+        import torch
+
+        from coker.dynamics.function_parameters import FittedFunction
+
+        if metadata.basis is None:
+            raise RuntimeError(
+                "function parameter capture has no basis declaration"
+            )
+        basis = torch.as_tensor(value).reshape(metadata.basis.dimension)
+        native = (
+            metadata.declaration.build_function(metadata.target, "pytorch")
+            .lower()
+            .as_module()
+        )
+
+        class FittedModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.native = native
+                self.register_buffer("basis", basis)
+
+            def forward(self, argument: Any) -> Any:
+                return self.native(argument, self.basis)
+
+        function = FittedModule()
+        return FittedFunction(
+            specification=metadata.declaration,
+            space=metadata.target,
+            function=function,
+            parameters=function.basis,
         )
 
     def _call_symbolic(self, *args):
@@ -195,8 +294,16 @@ class ProblemBuilder:
         self.outputs = []
         self.initial_conditions = {}
         self.solver_options = solver_options
+        self._parameter_captures: list[_ParameterCapture] = []
 
-    def new_variable(self, name, shape=None, initial_value=None):
+    def new_variable(
+        self,
+        name,
+        shape=None,
+        initial_value=None,
+        *,
+        _capture_parameter=True,
+    ):
         assert self.tape is not None
         if shape is None:
             v = self.tape.input(Scalar(name))
@@ -210,6 +317,11 @@ class ProblemBuilder:
             )
 
         self.initial_conditions[v.index] = initial_value
+        if _capture_parameter:
+            space = v.dim.to_space(name)
+            self._parameter_captures.append(
+                _ParameterCapture(name, space, space, v)
+            )
         return v
 
     def new_function_parameter(self, target, declaration):
@@ -227,10 +339,20 @@ class ProblemBuilder:
             declaration.name or target.name,
             shape=(basis.size,),
             initial_value=initial,
+            _capture_parameter=False,
         )
         if bounds:
             lower, upper = bounds
             self.constraints.append(bounded(basis_values, lower, upper))
+        self._parameter_captures.append(
+            _ParameterCapture(
+                declaration.name or target.name,
+                target,
+                declaration,
+                basis_values,
+                basis,
+            )
+        )
         return BoundCallable(
             declaration.build_function(target, None),
             target,
@@ -288,14 +410,22 @@ class ProblemBuilder:
             self.objective.expression,
             self.constraints,
             self.arguments,
-            [self.objective.expression, *self.outputs],
+            [
+                self.objective.expression,
+                *self.outputs,
+                *(capture.capture for capture in self._parameter_captures),
+            ],
             self._normalise_initial_conditions(),
             options=self.solver_options,
         )
         impl = backend_impl.make_optimisation_module(implementation)
 
         return MathematicalProgram(
-            self.input_shape, self.output_shape, impl, backend=backend_name
+            self.input_shape,
+            self.output_shape,
+            impl,
+            parameter_captures=self._parameter_captures,
+            backend=backend_name,
         )
 
     def __enter__(self):

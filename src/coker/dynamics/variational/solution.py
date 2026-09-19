@@ -1,6 +1,6 @@
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from collections.abc import Mapping
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -50,16 +50,15 @@ class VariationalSolution:
         Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
     ]
     control_solutions: List[ControlSolution]
-    parameter_solutions: Dict[str, float]
-    parameters: np.ndarray
+    parameters: Mapping[str, object]
+    _parameter_vector: np.ndarray = field(repr=False)
     output: Callable[
         [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
         np.ndarray,
     ]
-    parameter_block_layouts: dict[str, tuple[int, int, tuple[int, ...]]] = (
-        field(default_factory=dict)
+    _solver_parameter_vector: np.ndarray | None = field(
+        default=None, repr=False
     )
-    parameter_layout: Optional[object] = None
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
     adaptive_refinement_rounds: Optional[int] = None
@@ -79,7 +78,7 @@ class VariationalSolution:
             self.state(t),
             self.algebraic(t),
             self.control_law(t),
-            self.parameters,
+            self._parameter_vector,
             self.quadratures(t),
         )
         violations = [
@@ -97,7 +96,7 @@ class VariationalSolution:
             self.state(t),
             self.algebraic(t),
             self.control_law(t),
-            self.parameters,
+            self._parameter_vector,
             self.quadratures(t),
         )
         violations = [
@@ -138,24 +137,7 @@ class VariationalSolution:
         q = self.quadratures(t)
         u = self.control_law(t)
         z = self.algebraic(t)
-        return self.output(t, x, z, u, self.parameters, q)
-
-    @property
-    def parameter_blocks(self) -> dict[str, np.ndarray]:
-        return {
-            name: self.parameters[start:end].reshape(shape)
-            for name, (
-                start,
-                end,
-                shape,
-            ) in self.parameter_block_layouts.items()
-        }
-
-    @property
-    def parameter_values(self) -> Mapping[str, object]:
-        if self.parameter_layout is None:
-            return self.parameter_solutions
-        return self.parameter_layout.reconstruct(self.parameters)
+        return self.output(t, x, z, u, self._parameter_vector, q)
 
     def to_poly(self) -> InterpolatingPolyCollection:
 

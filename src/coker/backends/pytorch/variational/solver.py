@@ -554,19 +554,23 @@ class PytorchVariationalSolver(VariationalSolver):
             "converged",
             iteration_count=None,
         )
-        parameter_solutions = {
-            p.name: float(values[i].cpu())
-            for i, p in enumerate(self._parameters)
-        }
+        system_parameter_values = self._system_parameters(values)
+        public_parameters = (
+            self.problem.parameter_layout.reconstruct(system_parameter_values)
+            if self.problem.parameter_layout is not None
+            else {
+                parameter.name: float(values[index].cpu())
+                for index, parameter in enumerate(self._parameters)
+            }
+        )
         return VariationalSolution(
             cost=float(cost.detach().cpu()),
             path=InterpolatingPolyCollection([poly]),
             projectors=(state_projector, None, quadrature_projector),
             control_solutions=[],
-            parameter_solutions=parameter_solutions,
-            parameters=self._system_parameters(values).cpu().numpy(),
-            parameter_block_layouts=self.problem.system.parameter_blocks,
-            parameter_layout=self.problem.parameter_layout,
+            parameters=public_parameters,
+            _parameter_vector=system_parameter_values.cpu().numpy(),
+            _solver_parameter_vector=values.cpu().numpy(),
             output=self.problem.system.y,
             t_final=float(self.problem.t_final),
             solve_info=info,

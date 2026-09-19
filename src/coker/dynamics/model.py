@@ -64,9 +64,6 @@ class DynamicalSystem:
     dqdt: Optional[Function]
     y: Function
     solver_parameters: Optional[object] = field(default=None)
-    parameter_blocks: dict[str, tuple[int, int, tuple[int, ...]]] = field(
-        default_factory=dict
-    )
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
         shapes = self.y.input_shape()
