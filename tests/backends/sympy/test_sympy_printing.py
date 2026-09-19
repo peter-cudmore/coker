@@ -20,6 +20,25 @@ def test_scalar_lowering():
     assert args == [sp.Symbol("x"), sp.Symbol("p")]
     assert out == sp.Symbol("x") ** 2 + sp.Symbol("p")
 
+def test_function_parameter_lowering():
+    response = coker.FunctionSpace(
+        "response",
+        arguments=[coker.Scalar("state")],
+        output=[coker.Scalar("rate")],
+    )
+    function = coker.function(
+        [response, coker.Scalar("state")],
+        lambda parameter, state: parameter(state),
+        backend="sympy",
+    )
+
+    backend = get_backend_by_name("sympy")
+    args, output = backend.lower_to_symbolic(function)
+
+    assert args[0] == sp.Function("response")
+    assert args[1] == sp.Symbol("state")
+    assert output == sp.Function("response")(sp.Symbol("state"))
+
 
 def test_vector_lowering():
     A = np.array([[0, 1], [-1, 0]])

@@ -23,7 +23,7 @@ from coker.algebra.ops import (
     SelectOP,
     invoke_callable,
 )
-from coker.algebra.dimensions import Dimension
+from coker.algebra.dimensions import Dimension, FunctionSpace
 from coker.backends.sympy.shape import reshape
 
 MatrixType = (sp.Matrix, sp.ImmutableMatrix)
@@ -372,7 +372,9 @@ class SympyBackend(Backend):
                 args.append(None)
                 continue
             dim = tape.dim[idx]
-            if dim.is_scalar():
+            if isinstance(dim, FunctionSpace):
+                sym = sp.Function(name)
+            elif dim.is_scalar():
                 sym = sp.Symbol(name)
             else:
                 shape = dim.shape
