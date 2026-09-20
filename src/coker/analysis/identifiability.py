@@ -1,15 +1,16 @@
-"""Generic local structural identifiability analysis.
-
-The augmented observability rank condition treats constant parameters as states
-with zero dynamics.  It is a local, generic result: a nonzero maximal minor
-witnesses the rank away from the zero set of that minor.
-"""
+"""Generic local structural identifiability analysis."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import sympy as sp
 
+from coker.algebra.ops import Noop
+from coker.dynamics.model import DynamicalSystem
+
 from . import _rank
+from .dae import SymbolicDAESystem, geometry, lower_dae_system
 from .model import AnalysisResult, AnalysisStatus
 from .symbolic import SymbolicSystem, UnsupportedSystemError, lower_system
 
@@ -38,21 +39,33 @@ def _lie_derivative(
     )
 
 
+def _add_dae_condition(
+    result: AnalysisResult, condition: sp.Expr
+) -> AnalysisResult:
+    return replace(
+        result, generic_conditions=(condition, *result.generic_conditions)
+    )
+
+
 def analyse_identifiability(
     system: object, *, max_order: int | None = None
 ) -> AnalysisResult:
-    """Analyse generic local identifiability by augmented observability.
-
-    Parameters are appended to the state and assigned zero dynamics.  The
-    gradients of every output Lie derivative are stacked until they attain
-    full augmented rank or their rank ceases to grow.  This initial method is
-    only defined for autonomous systems without controls.
-    """
+    """Analyse generic local identifiability by augmented observability."""
     try:
         symbolic = (
-            system
-            if isinstance(system, SymbolicSystem)
-            else lower_system(system)
+            lower_dae_system(system)
+            if isinstance(system, DynamicalSystem)
+            and not isinstance(system.g, Noop)
+            else (
+                system
+                if isinstance(system, SymbolicSystem)
+                else lower_system(system)
+            )
+        )
+        tangent = (
+            geometry(symbolic)
+            if isinstance(symbolic, SymbolicDAESystem)
+            else None
         )
     except UnsupportedSystemError as error:
         return _rank.inconclusive(
@@ -76,12 +89,29 @@ def analyse_identifiability(
             required_rank=required_rank,
         )
 
-    vector_field = symbolic.dynamics + (sp.S.Zero,) * len(symbolic.parameters)
+    if tangent:
+        algebraic_velocity = tangent.lift(sp.Matrix(symbolic.dynamics))
+        full_coordinates = (
+            symbolic.state + symbolic.algebraic + symbolic.parameters
+        )
+        vector_field = (
+            symbolic.dynamics
+            + tuple(algebraic_velocity)
+            + (sp.S.Zero,) * len(symbolic.parameters)
+        )
+        gradients = tangent.restrict_gradient
+    else:
+        full_coordinates = coordinates
+        vector_field = symbolic.dynamics + (sp.S.Zero,) * len(
+            symbolic.parameters
+        )
+
+        def gradients(expression: sp.Expr) -> sp.Matrix:
+            return _gradient(expression, coordinates)
+
     generators = symbolic.outputs
     current_generators = symbolic.outputs
-    rows = [
-        _gradient(expression, coordinates) for expression in current_generators
-    ]
+    rows = [gradients(expression) for expression in current_generators]
     matrix = (
         sp.Matrix.vstack(*rows)
         if rows
@@ -93,18 +123,25 @@ def analyse_identifiability(
     while True:
         rank = matrix.rank()
         if rank == required_rank:
-            return _rank.result(
-                AnalysisStatus.IDENTIFIABLE,
-                matrix,
-                generators,
-                required_rank,
+            outcome = _rank.result(
+                AnalysisStatus.IDENTIFIABLE, matrix, generators, required_rank
+            )
+            return (
+                _add_dae_condition(outcome, tangent.condition)
+                if tangent
+                else outcome
             )
         if previous_rank == rank:
-            return _rank.result(
+            outcome = _rank.result(
                 AnalysisStatus.NOT_IDENTIFIABLE,
                 matrix,
                 generators,
                 required_rank,
+            )
+            return (
+                _add_dae_condition(outcome, tangent.condition)
+                if tangent
+                else outcome
             )
         if max_order is not None and order >= max_order:
             return _rank.inconclusive(
@@ -114,16 +151,12 @@ def analyse_identifiability(
                 matrix=matrix,
                 generators=generators,
             )
-
         previous_rank = rank
         current_generators = tuple(
-            _lie_derivative(expression, coordinates, vector_field)
+            _lie_derivative(expression, full_coordinates, vector_field)
             for expression in current_generators
         )
         generators += current_generators
-        rows = [
-            _gradient(expression, coordinates)
-            for expression in current_generators
-        ]
+        rows = [gradients(expression) for expression in current_generators]
         matrix = sp.Matrix.vstack(matrix, *rows) if rows else matrix
         order += 1

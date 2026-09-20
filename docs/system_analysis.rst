@@ -1,11 +1,11 @@
 System analysis
 ===============
 
-:mod:`coker.analysis` performs symbolic rank tests on a supported ODE model.
-It is intended for structural questions during model development, before a
-numerical experiment or a controller is chosen.  The results describe *generic
-local* rank properties: they hold away from symbolic singular sets, and do not
-make global claims.
+:mod:`coker.analysis` performs symbolic rank tests on supported ODE and
+semi-explicit index-one DAE models.  It is intended for structural questions
+during model development, before a numerical experiment or a controller is
+chosen.  The results describe *generic local* rank properties: they hold away
+from symbolic singular sets, and do not make global claims.
 
 The two primary analyses are:
 
@@ -16,11 +16,13 @@ The two primary analyses are:
 
 Both functions accept a Coker system that can be lowered to the supported
 symbolic representation.  For direct symbolic use,
-:class:`coker.analysis.SymbolicSystem` stores the ordered state, parameter,
-control, dynamics, and output expressions.  Its fields contain SymPy symbols
-and expressions, so their ordering is part of the model definition.
-:func:`coker.analysis.lower_system` exposes the same lowering step for callers
-who need the symbolic system itself.
+:class:`coker.analysis.SymbolicSystem` stores an ODE's ordered state,
+parameter, control, dynamics, and output expressions.  For DAEs,
+:class:`coker.analysis.SymbolicDAESystem` also stores algebraic variables and
+constraint expressions.  Their fields contain SymPy symbols and expressions,
+so their ordering is part of the model definition.  The
+:func:`coker.analysis.lower_system` and
+:func:`coker.analysis.lower_dae_system` functions expose those lowering steps.
 
 Results and generic conditions
 ------------------------------
@@ -55,10 +57,10 @@ Local accessibility
 -------------------
 
 ``analyse_controllability(system, *, max_order=None)`` forms the symbolic
-accessibility rank test for an input-affine ODE.  A full state rank produces
-``ACCESSIBLE``; a demonstrated rank defect produces ``NOT_ACCESSIBLE``.  The
-name of this API is conventional, but its conclusion is **local
-accessibility**, not global controllability.
+accessibility rank test for an input-affine ODE or supported index-one DAE.  A
+full differential-state rank produces ``ACCESSIBLE``; a demonstrated rank
+defect produces ``NOT_ACCESSIBLE``.  The name of this API is conventional, but
+its conclusion is **local accessibility**, not global controllability.
 
 In particular, an ``ACCESSIBLE`` result does not prove reachability between
 arbitrary states, reachability in finite time, controllability subject to input
@@ -132,18 +134,23 @@ is generically structurally locally identifiable:
 Supported scope and inconclusive results
 -----------------------------------------
 
-The initial symbolic path supports explicit, smooth, autonomous ODEs with
-finite :class:`coker.Scalar` or one-dimensional finite
-:class:`coker.VectorSpace` state, parameters, controls, and outputs.  It
-requires dynamics without algebraic variables, constraints, or quadratures.
-Neither dynamics nor outputs may depend explicitly on time; time is not
-silently promoted to an extra state.  Controls in a system passed to the
-symbolic path must enter affinely.
+The symbolic path supports explicit, smooth, autonomous ODEs and semi-explicit
+index-one DAEs with finite :class:`coker.Scalar` or one-dimensional finite
+:class:`coker.VectorSpace` state, parameters, controls, and outputs.  A DAE
+must have the form ``xdot = f(x, z, u, p)``, ``0 = g(x, z, p)`` with equally
+many algebraic variables and constraints, and a generically nonsingular
+``dg/dz``.  Its constraints must not depend on controls.  Quadratures are not
+supported.  Neither dynamics, constraints, nor outputs may depend explicitly
+on time; time is not silently promoted to an extra state.
 
-The following are deliberately outside this initial scope:
+DAE tangent fields and restricted output gradients are computed through
+symbolic linear solves with ``dg/dz`` (and its transpose); the analysis never
+forms a symbolic Jacobian inverse.
 
-- differential-algebraic systems (DAEs), algebraic variables, constraints, or
-  quadratures;
+The following are deliberately outside this scope:
+
+- DAEs that are not semi-explicit index-one systems, control-dependent
+  constraints, or quadratures;
 - function-valued parameters;
 - non-affine controls;
 - controlled systems for identifiability analysis; and
@@ -152,9 +159,10 @@ The following are deliberately outside this initial scope:
 
 Rather than guessing or reducing an unsupported system to a different problem,
 the analysis functions return ``INCONCLUSIVE`` and populate ``reason``.  The
-lower-level :func:`coker.analysis.lower_system` instead raises
-:class:`coker.analysis.UnsupportedSystemError` when called directly on such a
-model, allowing applications to decide how to present that limitation.
+lower-level :func:`coker.analysis.lower_system` and
+:func:`coker.analysis.lower_dae_system` functions instead raise
+:class:`coker.analysis.UnsupportedSystemError`, allowing applications to
+decide how to present that limitation.
 
 ``max_order`` can cap the symbolic generator or output-derivative order used by
 an analysis.  A cap that prevents the rank procedure from reaching a conclusion

@@ -1,12 +1,18 @@
-"""Generic local accessibility analysis for control-affine ODEs."""
+"""Generic local accessibility analysis for control-affine systems."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import sympy as sp
 
+from coker.algebra.ops import Noop
+from coker.dynamics.model import DynamicalSystem
+
 from . import _rank
+from .dae import SymbolicDAESystem, geometry, lower_dae_system
 from .model import AnalysisResult, AnalysisStatus
-from .symbolic import SymbolicSystem, UnsupportedSystemError, lower_system
+from .symbolic import UnsupportedSystemError, lower_system
 
 
 def _as_field(values) -> sp.ImmutableMatrix:
@@ -15,9 +21,7 @@ def _as_field(values) -> sp.ImmutableMatrix:
 
 def _simplify_field(field: sp.MatrixBase) -> sp.ImmutableMatrix:
     return sp.ImmutableMatrix(
-        field.rows,
-        field.cols,
-        [sp.simplify(entry) for entry in field],
+        field.rows, field.cols, [sp.simplify(entry) for entry in field]
     )
 
 
@@ -25,42 +29,26 @@ def _is_zero(expression: sp.Expr) -> bool:
     return sp.simplify(expression) == 0
 
 
-def _matrix_from_fields(
-    fields: tuple[sp.ImmutableMatrix, ...], state_dimension: int
-) -> sp.ImmutableMatrix:
+def _matrix_from_fields(fields, state_dimension: int) -> sp.ImmutableMatrix:
     if not fields:
         return _rank.empty_matrix(state_dimension, 0, immutable=True)
     return sp.ImmutableMatrix.hstack(*fields)
 
 
-def _append_if_independent(
-    fields: tuple[sp.ImmutableMatrix, ...],
-    rank: int,
-    candidate: sp.ImmutableMatrix,
-    state_dimension: int,
-) -> tuple[tuple[sp.ImmutableMatrix, ...], int, bool]:
-    """Append ``candidate`` exactly when it raises the generic field rank."""
+def _append_if_independent(fields, rank: int, candidate, state_dimension: int):
     candidate = _simplify_field(candidate)
-    matrix = _matrix_from_fields((*fields, candidate), state_dimension)
-    candidate_rank = matrix.rank()
+    candidate_rank = _matrix_from_fields(
+        (*fields, candidate), state_dimension
+    ).rank()
     if candidate_rank <= rank:
         return fields, rank, False
     return (*fields, candidate), candidate_rank, True
 
 
-def _extract_control_affine_fields(
-    system: SymbolicSystem,
-) -> tuple[sp.ImmutableMatrix, tuple[sp.ImmutableMatrix, ...]] | None:
-    """Split dynamics into its drift and input vector fields.
-
-    Returning ``None`` means that the dynamics are not affine in every
-    control.  The first- and second-derivative checks also reject a control
-    coefficient which depends on another control.
-    """
+def _extract_control_affine_fields(system):
     controls = system.controls
     dynamics = system.dynamics
     zero_controls = {control: sp.S.Zero for control in controls}
-
     try:
         control_fields = tuple(
             _as_field(
@@ -69,11 +57,12 @@ def _extract_control_affine_fields(
             for control in controls
         )
         for field in control_fields:
-            for component in field:
-                for control in controls:
-                    if not _is_zero(sp.diff(component, control)):
-                        return None
-
+            if any(
+                not _is_zero(sp.diff(component, control))
+                for component in field
+                for control in controls
+            ):
+                return None
         drift = _as_field(
             tuple(
                 sp.simplify(component.subs(zero_controls))
@@ -89,18 +78,12 @@ def _extract_control_affine_fields(
                 return None
     except (NotImplementedError, TypeError, ValueError):
         return None
-
     return _simplify_field(drift), tuple(
         _simplify_field(field) for field in control_fields
     )
 
 
-def _lie_bracket(
-    left: sp.ImmutableMatrix,
-    right: sp.ImmutableMatrix,
-    state: tuple[sp.Symbol, ...],
-) -> sp.ImmutableMatrix:
-    """Compute ``[left, right] = D(right) left - D(left) right``."""
+def _lie_bracket(left, right, state) -> sp.ImmutableMatrix:
     state_vector = sp.ImmutableMatrix(state)
     return _simplify_field(
         right.jacobian(state_vector) * left
@@ -108,18 +91,45 @@ def _lie_bracket(
     )
 
 
+def _dae_bracket(
+    left, right, symbolic: SymbolicDAESystem, tangent
+) -> sp.ImmutableMatrix:
+    """Bracket fields using intrinsic constraint-manifold derivatives."""
+    left_z = tangent.lift(left)
+    right_z = tangent.lift(right)
+    coordinates = sp.ImmutableMatrix((*symbolic.state, *symbolic.algebraic))
+    left_full = sp.ImmutableMatrix.vstack(left, left_z)
+    right_full = sp.ImmutableMatrix.vstack(right, right_z)
+    return _simplify_field(
+        right.jacobian(coordinates) * left_full
+        - left.jacobian(coordinates) * right_full
+    )
+
+
+def _add_dae_condition(
+    result: AnalysisResult, condition: sp.Expr
+) -> AnalysisResult:
+    return replace(
+        result, generic_conditions=(condition, *result.generic_conditions)
+    )
+
+
 def analyse_controllability(
     system, *, max_order: int | None = None
 ) -> AnalysisResult:
-    """Analyse generic local accessibility through the Lie algebra rank test.
-
-    This establishes only generic local accessibility.  It deliberately does
-    not make a global controllability claim.  ``max_order`` bounds the Lie
-    bracket depth; control fields seed the distribution and the drift
-    participates in the recursive brackets.
-    """
+    """Establish generic local accessibility through Lie-algebra rank."""
     try:
-        symbolic = lower_system(system)
+        symbolic = (
+            lower_dae_system(system)
+            if isinstance(system, DynamicalSystem)
+            and not isinstance(system.g, Noop)
+            else lower_system(system)
+        )
+        tangent = (
+            geometry(symbolic)
+            if isinstance(symbolic, SymbolicDAESystem)
+            else None
+        )
     except UnsupportedSystemError as error:
         return _rank.inconclusive(
             str(error) or "The system cannot be represented symbolically.",
@@ -148,12 +158,11 @@ def analyse_controllability(
             required_rank=state_dimension,
             matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
         )
-
     drift, controls = affine_fields
     base_fields = (drift, *controls)
-    fields: tuple[sp.ImmutableMatrix, ...] = ()
+    fields = ()
     rank = 0
-    frontier: tuple[sp.ImmutableMatrix, ...] = ()
+    frontier = ()
     for field in controls:
         fields, rank, added = _append_if_independent(
             fields, rank, field, state_dimension
@@ -163,44 +172,56 @@ def analyse_controllability(
 
     order = 0
     while True:
+        matrix = _matrix_from_fields(fields, state_dimension)
         if rank == state_dimension:
-            return _rank.result(
-                AnalysisStatus.ACCESSIBLE,
-                _matrix_from_fields(fields, state_dimension),
-                fields,
-                state_dimension,
+            outcome = _rank.result(
+                AnalysisStatus.ACCESSIBLE, matrix, fields, state_dimension
+            )
+            return (
+                _add_dae_condition(outcome, tangent.condition)
+                if tangent
+                else outcome
             )
         if not frontier:
-            return _rank.result(
-                AnalysisStatus.NOT_ACCESSIBLE,
-                _matrix_from_fields(fields, state_dimension),
-                fields,
-                state_dimension,
+            outcome = _rank.result(
+                AnalysisStatus.NOT_ACCESSIBLE, matrix, fields, state_dimension
+            )
+            return (
+                _add_dae_condition(outcome, tangent.condition)
+                if tangent
+                else outcome
             )
         if max_order is not None and order >= max_order:
             return _rank.inconclusive(
                 "Lie-bracket expansion reached max_order before closure.",
                 required_rank=state_dimension,
-                matrix=_matrix_from_fields(fields, state_dimension),
+                matrix=matrix,
                 generators=fields,
             )
-
-        next_frontier: tuple[sp.ImmutableMatrix, ...] = ()
+        next_frontier = ()
         for field in frontier:
             for base_field in base_fields:
-                bracket = _lie_bracket(field, base_field, symbolic.state)
+                bracket = (
+                    _dae_bracket(field, base_field, symbolic, tangent)
+                    if tangent
+                    else _lie_bracket(field, base_field, symbolic.state)
+                )
                 fields, rank, added = _append_if_independent(
                     fields, rank, bracket, state_dimension
                 )
                 if added:
                     next_frontier = (*next_frontier, bracket)
-
         if not next_frontier:
-            return _rank.result(
+            outcome = _rank.result(
                 AnalysisStatus.NOT_ACCESSIBLE,
                 _matrix_from_fields(fields, state_dimension),
                 fields,
                 state_dimension,
+            )
+            return (
+                _add_dae_condition(outcome, tangent.condition)
+                if tangent
+                else outcome
             )
         frontier = next_frontier
         order += 1
