@@ -12,7 +12,7 @@ from coker.algebra.ops import Noop
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variables import BoundedVariable, UnboundedVariable
 
-from . import _rank
+from . import model as _rank
 from .dae import SymbolicDAESystem, geometry, lower_dae_system
 from .model import AnalysisResult, AnalysisStatus
 from .symbolic import SymbolicSystem, UnsupportedSystemError, lower_system

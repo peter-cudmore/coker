@@ -9,7 +9,7 @@ import sympy as sp
 from coker.algebra.ops import Noop
 from coker.dynamics.model import DynamicalSystem
 
-from . import _rank
+from . import model as _rank
 from .dae import SymbolicDAESystem, geometry, lower_dae_system
 from .model import AnalysisResult, AnalysisStatus
 from .symbolic import UnsupportedSystemError, lower_system
