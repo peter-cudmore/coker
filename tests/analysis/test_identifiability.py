@@ -4,6 +4,7 @@ import sympy as sp
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.dynamics import (
     AnalysisStatus,
+    UnboundedVariable,
     analyse_identifiability,
     create_autonomous_ode,
 )
@@ -53,6 +54,28 @@ def test_identifiability_rejects_product_parameterisation():
         status=AnalysisStatus.NOT_IDENTIFIABLE,
         rank=2,
         required_rank=3,
+    )
+
+
+def test_identifiability_treats_constant_parameter_as_known():
+    system = create_autonomous_ode(
+        x0=np.array([1.0]),
+        xdot=lambda state, parameters: -(parameters[0] * parameters[1])
+        * state,
+        parameters=VectorSpace("rate", 2),
+        backend="sympy",
+    )
+
+    result = analyse_identifiability(
+        system,
+        parameters=(UnboundedVariable("rate_0"), 2.0),
+    )
+
+    _assert_rank_result(
+        result,
+        status=AnalysisStatus.IDENTIFIABLE,
+        rank=2,
+        required_rank=2,
     )
 
 

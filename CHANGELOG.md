@@ -13,6 +13,7 @@
 
 ### Changed
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
+- Let identifiability analysis classify each flattened scalar parameter as an optimisation variable or a known numeric constant.
 - Bump Coker to version 0.4.3.
 - Collocation reference-operator caching is scoped to a transcription factory rather than process-global state.
 - CasADi transcription compilation reuses bounded cached mesh-specific solvers during parameter sweeps.

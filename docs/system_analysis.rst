@@ -94,8 +94,9 @@ A double integrator can be described directly with SymPy expressions:
 Structural local identifiability
 --------------------------------
 
-``analyse_identifiability(system, *, max_order=None)`` tests whether the
-parameters are structurally locally distinguishable from the model outputs.
+``analyse_identifiability(system, *, parameters=None, max_order=None)`` tests
+whether the parameters are structurally locally distinguishable from the model
+outputs.
 It is a symbolic property of the exact model and observations.  An
 ``IDENTIFIABLE`` result is not a claim that a numerical fit will recover a
 parameter accurately: practical numerical estimability also depends on data,
@@ -130,6 +131,27 @@ is generically structurally locally identifiable:
    result = analyse_identifiability(growth_model)
    assert result.status is AnalysisStatus.IDENTIFIABLE
    assert result.rank == result.required_rank
+
+The optional ``parameters`` sequence uses the same variable-or-constant roles
+as variational optimisation.  Supply a :class:`coker.dynamics.BoundedVariable`
+or :class:`coker.dynamics.UnboundedVariable` for each parameter to estimate,
+and a numeric constant for each known parameter.  Declarations are positional
+in the flattened symbolic parameter order.  Fixed constants are substituted
+before the observability calculation, so they neither contribute an
+identifiability coordinate nor alter its required rank:
+
+.. code-block:: python
+
+   from coker.dynamics import UnboundedVariable, analyse_identifiability
+
+   result = analyse_identifiability(
+       system,
+       parameters=(UnboundedVariable("rate_0"), 2.0),
+   )
+
+This example tests whether ``rate_0`` is identifiable when the second rate is
+known to equal ``2.0``.  This scalar declaration interface applies equally to
+ODEs and supported DAEs.
 
 Supported scope and inconclusive results
 -----------------------------------------

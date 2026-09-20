@@ -65,3 +65,27 @@ def test_identifiability_handles_index_one_dae_constraint_manifold():
     assert result.status is AnalysisStatus.IDENTIFIABLE
     assert result.rank == result.required_rank == 2
     assert result.generic_conditions
+
+
+def test_identifiability_treats_dae_constant_parameter_as_known():
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=VectorSpace("rate", 1),
+            algebraic=VectorSpace("z", 1),
+            initial_conditions=lambda _z, _u, _p: (
+                np.ones(1),
+                np.ones(1),
+            ),
+            dynamics=lambda _t, x, _z, _u, p: -p[0] * x,
+            constraints=lambda _t, x, z, _u, _p: z - x,
+            outputs=lambda _t, _x, z, _u, _p, _q: z,
+            quadratures=Noop(),
+        ),
+        backend="sympy",
+    )
+
+    result = analyse_identifiability(system, parameters=(2.0,))
+
+    assert result.status is AnalysisStatus.IDENTIFIABLE
+    assert result.rank == result.required_rank == 1
