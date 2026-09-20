@@ -43,26 +43,15 @@ class SymbolicSystem:
     outputs: tuple[sp.Expr, ...]
 
 
-@dataclass(frozen=True)
-class _ValidatedSystem:
-    """Validated shapes and declarations needed by symbolic lowering."""
-
-    system: DynamicalSystem
-    declarations: tuple[Scalar | VectorSpace, ...]
-    control_dimension: Dimension | None
-    state_dimension: Dimension
-    dynamics_shapes: Sequence[object]
-    output_shapes: Sequence[object]
-
-
 def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
     """Validate and lower a supported autonomous ODE."""
     if isinstance(system, SymbolicSystem):
         return system
-    return _lower_validated_system(_validate_system(system))
+    _validate_system(system)
+    return _lower_system(system)
 
 
-def _validate_system(system: DynamicalSystem) -> _ValidatedSystem:
+def _validate_system(system: DynamicalSystem) -> None:
     """Validate model structure before any SymPy expressions are built."""
     if not isinstance(system, DynamicalSystem):
         raise UnsupportedSystemError(
@@ -112,24 +101,15 @@ def _validate_system(system: DynamicalSystem) -> _ValidatedSystem:
         )
     for index, shape in enumerate(system.y.output_shape()):
         _require_finite_dimension(shape, f"output {index}")
-    return _ValidatedSystem(
-        system,
-        declarations,
-        control_dimension,
-        state_dimension,
-        dynamics_shapes,
-        output_shapes,
-    )
 
 
-def _lower_validated_system(validated: _ValidatedSystem) -> SymbolicSystem:
+def _lower_system(system: DynamicalSystem) -> SymbolicSystem:
     """Lower a structurally validated autonomous ODE to SymPy."""
-    system = validated.system
-    declarations = validated.declarations
-    control_dimension = validated.control_dimension
-    state_dimension = validated.state_dimension
-    dynamics_shapes = validated.dynamics_shapes
-    output_shapes = validated.output_shapes
+    declarations = _parameter_declarations(system.parameters)
+    control_dimension = _control_dimension(system.inputs)
+    dynamics_shapes = system.dxdt.input_shape()
+    output_shapes = system.y.input_shape()
+    state_dimension = _require_finite_dimension(dynamics_shapes[1], "state")
     parameter_slots = len(declarations) if declarations else 1
     (
         (dynamics_args, raw_dynamics),
