@@ -1,7 +1,7 @@
 import numpy as np
 
 from coker import FunctionSpace, Scalar, SymbolicVector, VectorSpace
-from coker.analysis import AnalysisStatus, analyse_controllability
+from coker.dynamics import AnalysisStatus, analyse_controllability
 from coker.dynamics.system import create_control_system
 
 

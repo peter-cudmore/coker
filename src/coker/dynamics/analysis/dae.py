@@ -9,6 +9,10 @@ import sympy as sp
 from coker.algebra.function import Function
 from coker.algebra.ops import Noop
 from coker.backends.sympy import SympyBackend
+from coker.backends.sympy.analysis import (
+    ConstraintGeometry,
+    constraint_geometry,
+)
 from coker.dynamics.model import DynamicalSystem
 
 from .symbolic import (
@@ -42,42 +46,17 @@ class SymbolicDAESystem:
     outputs: tuple[sp.Expr, ...]
 
 
-@dataclass(frozen=True)
-class DAEGeometry:
-    """Constraint-manifold derivatives for one index-one DAE."""
-
-    system: SymbolicDAESystem
-    constraint_jacobian: sp.Matrix
-    state_jacobian: sp.Matrix
-    parameter_jacobian: sp.Matrix
-    condition: sp.Expr
-
-    def lift(self, field: sp.Matrix) -> sp.Matrix:
-        """Solve for the algebraic component tangent to the constraint."""
-        return -self.constraint_jacobian.LUsolve(self.state_jacobian * field)
-
-    def restrict_gradient(self, expression: sp.Expr) -> sp.Matrix:
-        """Differentiate in independent ``(x, p)`` coordinates."""
-        system = self.system
-        gradient_x = sp.Matrix(
-            1,
-            len(system.state),
-            [sp.diff(expression, value) for value in system.state],
+def geometry(system: SymbolicDAESystem) -> ConstraintGeometry:
+    """Build index-one tangent operations for a DAE constraint manifold."""
+    try:
+        return constraint_geometry(
+            system.state,
+            system.algebraic,
+            system.parameters,
+            system.constraints,
         )
-        gradient_z = sp.Matrix(
-            1,
-            len(system.algebraic),
-            [sp.diff(expression, value) for value in system.algebraic],
-        )
-        gradient_p = sp.Matrix(
-            1,
-            len(system.parameters),
-            [sp.diff(expression, value) for value in system.parameters],
-        )
-        adjoint = self.constraint_jacobian.T.LUsolve(gradient_z.T).T
-        return (gradient_x - adjoint * self.state_jacobian).row_join(
-            gradient_p - adjoint * self.parameter_jacobian
-        )
+    except ValueError as error:
+        raise UnsupportedSystemError(str(error)) from error
 
 
 def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
@@ -251,31 +230,4 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
 
     return SymbolicDAESystem(
         state, algebraic, parameters, controls, dynamics, constraints, outputs
-    )
-
-
-def geometry(system: SymbolicDAESystem) -> DAEGeometry:
-    """Build index-one tangent projections and their nonsingularity witness."""
-    constraints = sp.Matrix(system.constraints)
-    algebraic = sp.Matrix(system.algebraic)
-    state = sp.Matrix(system.state)
-    parameters = sp.Matrix(system.parameters)
-    jacobian = constraints.jacobian(algebraic)
-    determinant = sp.factor(jacobian.det())
-    if sp.simplify(determinant) == 0:
-        raise UnsupportedSystemError(
-            "DAE algebraic Jacobian is generically singular"
-        )
-    state_jacobian = constraints.jacobian(state)
-    parameter_jacobian = (
-        constraints.jacobian(parameters)
-        if system.parameters
-        else sp.zeros(len(system.algebraic), 0)
-    )
-    return DAEGeometry(
-        system,
-        jacobian,
-        state_jacobian,
-        parameter_jacobian,
-        determinant,
     )

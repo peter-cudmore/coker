@@ -2,8 +2,11 @@ import numpy as np
 import sympy as sp
 
 from coker import FunctionSpace, Scalar, VectorSpace
-from coker.analysis import AnalysisStatus, analyse_identifiability
-from coker.dynamics import create_autonomous_ode
+from coker.dynamics import (
+    AnalysisStatus,
+    analyse_identifiability,
+    create_autonomous_ode,
+)
 from coker.dynamics.system import create_control_system
 
 

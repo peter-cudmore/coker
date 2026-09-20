@@ -2,12 +2,12 @@ import numpy as np
 
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.ops import Noop
-from coker.analysis import (
+from coker.dynamics import (
     AnalysisStatus,
+    DynamicsSpec,
     analyse_controllability,
     analyse_identifiability,
 )
-from coker.dynamics import DynamicsSpec
 from coker.dynamics.system import create_dynamics_from_spec
 
 

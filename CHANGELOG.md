@@ -12,6 +12,7 @@
 - Symbolic local accessibility and structural identifiability analysis for supported ODE and semi-explicit index-one DAE systems.
 
 ### Changed
+- Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
 - Bump Coker to version 0.4.3.
 - Collocation reference-operator caching is scoped to a transcription factory rather than process-global state.
 - CasADi transcription compilation reuses bounded cached mesh-specific solvers during parameter sweeps.

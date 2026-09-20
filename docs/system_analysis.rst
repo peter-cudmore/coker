@@ -1,7 +1,7 @@
 System analysis
 ===============
 
-:mod:`coker.analysis` performs symbolic rank tests on supported ODE and
+:mod:`coker.dynamics` performs symbolic rank tests on supported ODE and
 semi-explicit index-one DAE models.  It is intended for structural questions
 during model development, before a numerical experiment or a controller is
 chosen.  The results describe *generic local* rank properties: they hold away
@@ -9,34 +9,34 @@ from symbolic singular sets, and do not make global claims.
 
 The two primary analyses are:
 
-- :func:`coker.analysis.analyse_controllability`, which tests generic local
+- :func:`coker.dynamics.analyse_controllability`, which tests generic local
   accessibility of the state; and
-- :func:`coker.analysis.analyse_identifiability`, which tests structural local
+- :func:`coker.dynamics.analyse_identifiability`, which tests structural local
   identifiability of model parameters from the declared outputs.
 
 Both functions accept a Coker system that can be lowered to the supported
 symbolic representation.  For direct symbolic use,
-:class:`coker.analysis.SymbolicSystem` stores an ODE's ordered state,
+:class:`coker.dynamics.SymbolicSystem` stores an ODE's ordered state,
 parameter, control, dynamics, and output expressions.  For DAEs,
-:class:`coker.analysis.SymbolicDAESystem` also stores algebraic variables and
+:class:`coker.dynamics.SymbolicDAESystem` also stores algebraic variables and
 constraint expressions.  Their fields contain SymPy symbols and expressions,
 so their ordering is part of the model definition.  The
-:func:`coker.analysis.lower_system` and
-:func:`coker.analysis.lower_dae_system` functions expose those lowering steps.
+:func:`coker.dynamics.lower_system` and
+:func:`coker.dynamics.lower_dae_system` functions expose those lowering steps.
 
 Results and generic conditions
 ------------------------------
 
-Both functions return an :class:`coker.analysis.AnalysisResult`:
+Both functions return an :class:`coker.dynamics.AnalysisResult`:
 
 .. code-block:: python
 
-   from coker.analysis import analyse_controllability
+   from coker.dynamics import analyse_controllability
 
    result = analyse_controllability(system)
    print(result.status, result.rank, result.required_rank)
 
-``status`` is an :class:`coker.analysis.AnalysisStatus` value.  Accessibility
+``status`` is an :class:`coker.dynamics.AnalysisStatus` value.  Accessibility
 uses ``ACCESSIBLE`` and ``NOT_ACCESSIBLE``; identifiability uses
 ``IDENTIFIABLE`` and ``NOT_IDENTIFIABLE``.  Either analysis may instead return
 ``INCONCLUSIVE``.
@@ -72,7 +72,7 @@ A double integrator can be described directly with SymPy expressions:
 .. code-block:: python
 
    import sympy as sp
-   from coker.analysis import (
+   from coker.dynamics import (
        AnalysisStatus,
        SymbolicSystem,
        analyse_controllability,
@@ -112,7 +112,7 @@ is generically structurally locally identifiable:
 .. code-block:: python
 
    import sympy as sp
-   from coker.analysis import (
+   from coker.dynamics import (
        AnalysisStatus,
        SymbolicSystem,
        analyse_identifiability,
@@ -159,9 +159,9 @@ The following are deliberately outside this scope:
 
 Rather than guessing or reducing an unsupported system to a different problem,
 the analysis functions return ``INCONCLUSIVE`` and populate ``reason``.  The
-lower-level :func:`coker.analysis.lower_system` and
-:func:`coker.analysis.lower_dae_system` functions instead raise
-:class:`coker.analysis.UnsupportedSystemError`, allowing applications to
+lower-level :func:`coker.dynamics.lower_system` and
+:func:`coker.dynamics.lower_dae_system` functions instead raise
+:class:`coker.dynamics.UnsupportedSystemError`, allowing applications to
 decide how to present that limitation.
 
 ``max_order`` can cap the symbolic generator or output-derivative order used by

@@ -28,6 +28,17 @@ from coker.dynamics.function_parameters import (
     Perceptron,
     RadialBasisFunction,
 )
+from coker.dynamics.analysis import (
+    AnalysisResult,
+    AnalysisStatus,
+    SymbolicDAESystem,
+    SymbolicSystem,
+    UnsupportedSystemError,
+    analyse_controllability,
+    analyse_identifiability,
+    lower_dae_system,
+    lower_system,
+)
 from coker.dynamics.system import create_autonomous_ode, direct_sum
 from coker.interfaces import SolverParameters
 
@@ -56,9 +67,11 @@ from coker.dynamics.variational.solution import VariationalSolution
 from coker.toolkits.codesign.optimisation import SolveFailure, SolveInfo
 
 __all__ = [
+    "AnalysisResult",
+    "AnalysisStatus",
     "BoundedVariable",
-    "Constant",
     "BoundVector",
+    "Constant",
     "ConstantControlSolution",
     "ConstantControlVariable",
     "ConstraintSpec",
@@ -67,8 +80,11 @@ __all__ = [
     "ControlVariable",
     "DynamicalSystem",
     "DynamicsSpec",
-    "InterpolatingPoly",
+    "SymbolicDAESystem",
+    "SymbolicSystem",
+    "UnsupportedSystemError",
     "DenseTensorVariable",
+    "InterpolatingPoly",
     "InterpolatingPolyCollection",
     "LossFunction",
     "FittedFunction",
@@ -94,6 +110,8 @@ __all__ = [
     "VariationalIterationCallback",
     "SolveFailure",
     "SolveInfo",
+    "analyse_controllability",
+    "analyse_identifiability",
     "create_autonomous_ode",
     "direct_sum",
     "evaluate_legendre_polynomial",
@@ -102,4 +120,6 @@ __all__ = [
     "legendre_coefficient",
     "lgr_points",
     "split_at_non_differentiable_points",
+    "lower_dae_system",
+    "lower_system",
 ]
