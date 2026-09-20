@@ -36,7 +36,6 @@ def _matrix_from_fields(fields, state_dimension: int) -> sp.ImmutableMatrix:
 
 
 def _append_if_independent(fields, rank: int, candidate, state_dimension: int):
-    candidate = _simplify_field(candidate)
     candidate_rank = _matrix_from_fields(
         (*fields, candidate), state_dimension
     ).rank()
@@ -64,10 +63,7 @@ def _extract_control_affine_fields(system):
             ):
                 return None
         drift = _as_field(
-            tuple(
-                sp.simplify(component.subs(zero_controls))
-                for component in dynamics
-            )
+            tuple(component.subs(zero_controls) for component in dynamics)
         )
         for index, component in enumerate(dynamics):
             reconstructed = drift[index] + sum(
@@ -92,14 +88,16 @@ def _lie_bracket(left, right, state) -> sp.ImmutableMatrix:
 
 
 def _dae_bracket(
-    left, right, symbolic: SymbolicDAESystem, tangent
+    left,
+    left_algebraic,
+    right,
+    right_algebraic,
+    symbolic: SymbolicDAESystem,
 ) -> sp.ImmutableMatrix:
     """Bracket fields using intrinsic constraint-manifold derivatives."""
-    left_z = tangent.lift(left)
-    right_z = tangent.lift(right)
     coordinates = sp.ImmutableMatrix((*symbolic.state, *symbolic.algebraic))
-    left_full = sp.ImmutableMatrix.vstack(left, left_z)
-    right_full = sp.ImmutableMatrix.vstack(right, right_z)
+    left_full = sp.ImmutableMatrix.vstack(left, left_algebraic)
+    right_full = sp.ImmutableMatrix.vstack(right, right_algebraic)
     return _simplify_field(
         right.jacobian(coordinates) * left_full
         - left.jacobian(coordinates) * right_full
@@ -160,6 +158,11 @@ def analyse_controllability(
         )
     drift, controls = affine_fields
     base_fields = (drift, *controls)
+    algebraic_fields = (
+        {field: tangent.lift(field) for field in base_fields}
+        if tangent
+        else {}
+    )
     fields = ()
     rank = 0
     frontier = ()
@@ -175,7 +178,11 @@ def analyse_controllability(
         matrix = _matrix_from_fields(fields, state_dimension)
         if rank == state_dimension:
             outcome = _rank.result(
-                AnalysisStatus.ACCESSIBLE, matrix, fields, state_dimension
+                AnalysisStatus.ACCESSIBLE,
+                matrix,
+                fields,
+                state_dimension,
+                matrix_rank=rank,
             )
             return (
                 _add_dae_condition(outcome, tangent.condition)
@@ -184,7 +191,11 @@ def analyse_controllability(
             )
         if not frontier:
             outcome = _rank.result(
-                AnalysisStatus.NOT_ACCESSIBLE, matrix, fields, state_dimension
+                AnalysisStatus.NOT_ACCESSIBLE,
+                matrix,
+                fields,
+                state_dimension,
+                matrix_rank=rank,
             )
             return (
                 _add_dae_condition(outcome, tangent.condition)
@@ -202,7 +213,13 @@ def analyse_controllability(
         for field in frontier:
             for base_field in base_fields:
                 bracket = (
-                    _dae_bracket(field, base_field, symbolic, tangent)
+                    _dae_bracket(
+                        field,
+                        algebraic_fields[field],
+                        base_field,
+                        algebraic_fields[base_field],
+                        symbolic,
+                    )
                     if tangent
                     else _lie_bracket(field, base_field, symbolic.state)
                 )
@@ -211,12 +228,15 @@ def analyse_controllability(
                 )
                 if added:
                     next_frontier = (*next_frontier, bracket)
+                    if tangent:
+                        algebraic_fields[bracket] = tangent.lift(bracket)
         if not next_frontier:
             outcome = _rank.result(
                 AnalysisStatus.NOT_ACCESSIBLE,
                 _matrix_from_fields(fields, state_dimension),
                 fields,
                 state_dimension,
+                matrix_rank=rank,
             )
             return (
                 _add_dae_condition(outcome, tangent.condition)

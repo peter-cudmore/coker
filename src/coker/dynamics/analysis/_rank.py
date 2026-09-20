@@ -16,9 +16,10 @@ def result(
     required_rank: int,
     *,
     reason: str | None = None,
+    matrix_rank: int | None = None,
 ) -> AnalysisResult:
     """Construct a symbolic rank-analysis result with a generic witness."""
-    rank = matrix.rank()
+    rank = matrix.rank() if matrix_rank is None else matrix_rank
     return AnalysisResult(
         status=status,
         rank=rank,

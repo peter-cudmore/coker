@@ -76,6 +76,8 @@ def _apply_parameter_roles(
                 "each scalar parameter must be a BoundedVariable, "
                 "UnboundedVariable, or numeric constant"
             )
+    if not replacements:
+        return symbolic
 
     fields = {
         "parameters": tuple(fitted),
@@ -179,7 +181,11 @@ def analyse_identifiability(
         rank = matrix.rank()
         if rank == required_rank:
             outcome = _rank.result(
-                AnalysisStatus.IDENTIFIABLE, matrix, generators, required_rank
+                AnalysisStatus.IDENTIFIABLE,
+                matrix,
+                generators,
+                required_rank,
+                matrix_rank=rank,
             )
             return (
                 _add_dae_condition(outcome, tangent.condition)
@@ -192,6 +198,7 @@ def analyse_identifiability(
                 matrix,
                 generators,
                 required_rank,
+                matrix_rank=rank,
             )
             return (
                 _add_dae_condition(outcome, tangent.condition)
