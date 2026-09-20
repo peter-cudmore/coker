@@ -11,6 +11,7 @@ __all__ = (
     "AnalysisResult",
     "AnalysisStatus",
     "SymbolicDAESystem",
+    "SymbolicSystem",
     "UnsupportedSystemError",
     "analyse_controllability",
     "analyse_identifiability",
