@@ -2,31 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import sympy as sp
+
+from coker.backends.sympy.analysis import (
+    compute_lie_bracket,
+    extract_control_affine_fields,
+)
 
 from coker.algebra.ops import Noop
 from coker.dynamics.model import DynamicalSystem
 
 from . import model as _rank
 from .dae import SymbolicDAESystem, geometry, lower_dae_system
-from .model import AnalysisResult, AnalysisStatus
+from .model import AnalysisStatus, ControllabilityResult
 from .symbolic import UnsupportedSystemError, lower_system
-
-
-def _as_field(values) -> sp.ImmutableMatrix:
-    return sp.ImmutableMatrix(len(values), 1, values)
-
-
-def _simplify_field(field: sp.MatrixBase) -> sp.ImmutableMatrix:
-    return sp.ImmutableMatrix(
-        field.rows, field.cols, [sp.simplify(entry) for entry in field]
-    )
-
-
-def _is_zero(expression: sp.Expr) -> bool:
-    return sp.simplify(expression) == 0
 
 
 def _matrix_from_fields(fields, state_dimension: int) -> sp.ImmutableMatrix:
@@ -44,49 +33,6 @@ def _append_if_independent(fields, rank: int, candidate, state_dimension: int):
     return (*fields, candidate), candidate_rank, True
 
 
-def _extract_control_affine_fields(system):
-    controls = system.controls
-    dynamics = system.dynamics
-    zero_controls = {control: sp.S.Zero for control in controls}
-    try:
-        control_fields = tuple(
-            _as_field(
-                tuple(sp.diff(component, control) for component in dynamics)
-            )
-            for control in controls
-        )
-        for field in control_fields:
-            if any(
-                not _is_zero(sp.diff(component, control))
-                for component in field
-                for control in controls
-            ):
-                return None
-        drift = _as_field(
-            tuple(component.subs(zero_controls) for component in dynamics)
-        )
-        for index, component in enumerate(dynamics):
-            reconstructed = drift[index] + sum(
-                field[index] * control
-                for field, control in zip(control_fields, controls)
-            )
-            if not _is_zero(component - reconstructed):
-                return None
-    except (NotImplementedError, TypeError, ValueError):
-        return None
-    return _simplify_field(drift), tuple(
-        _simplify_field(field) for field in control_fields
-    )
-
-
-def _lie_bracket(left, right, state) -> sp.ImmutableMatrix:
-    state_vector = sp.ImmutableMatrix(state)
-    return _simplify_field(
-        right.jacobian(state_vector) * left
-        - left.jacobian(state_vector) * right
-    )
-
-
 def _dae_bracket(
     left,
     left_algebraic,
@@ -95,26 +41,17 @@ def _dae_bracket(
     symbolic: SymbolicDAESystem,
 ) -> sp.ImmutableMatrix:
     """Bracket fields using intrinsic constraint-manifold derivatives."""
-    coordinates = sp.ImmutableMatrix((*symbolic.state, *symbolic.algebraic))
-    left_full = sp.ImmutableMatrix.vstack(left, left_algebraic)
-    right_full = sp.ImmutableMatrix.vstack(right, right_algebraic)
-    return _simplify_field(
-        right.jacobian(coordinates) * left_full
-        - left.jacobian(coordinates) * right_full
+    bracket = compute_lie_bracket(
+        sp.ImmutableMatrix.vstack(left, left_algebraic),
+        sp.ImmutableMatrix.vstack(right, right_algebraic),
+        (*symbolic.state, *symbolic.algebraic),
     )
-
-
-def _add_dae_condition(
-    result: AnalysisResult, condition: sp.Expr
-) -> AnalysisResult:
-    return replace(
-        result, generic_conditions=(condition, *result.generic_conditions)
-    )
+    return sp.ImmutableMatrix(bracket[: left.rows, :])
 
 
 def analyse_controllability(
     system, *, max_order: int | None = None
-) -> AnalysisResult:
+) -> ControllabilityResult:
     """Establish generic local accessibility through Lie-algebra rank."""
     try:
         symbolic = (
@@ -129,7 +66,8 @@ def analyse_controllability(
             else None
         )
     except UnsupportedSystemError as error:
-        return _rank.inconclusive(
+        return _rank.create_inconclusive(
+            ControllabilityResult,
             str(error) or "The system cannot be represented symbolically.",
             matrix=_rank.empty_matrix(0, 0, immutable=True),
         )
@@ -137,21 +75,26 @@ def analyse_controllability(
     state_dimension = len(symbolic.state)
     if not isinstance(max_order, int) or isinstance(max_order, bool):
         if max_order is not None:
-            return _rank.inconclusive(
+            return _rank.create_inconclusive(
+                ControllabilityResult,
                 "max_order must be a non-negative integer or None.",
                 required_rank=state_dimension,
                 matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
             )
     elif max_order < 0:
-        return _rank.inconclusive(
+        return _rank.create_inconclusive(
+            ControllabilityResult,
             "max_order must be a non-negative integer or None.",
             required_rank=state_dimension,
             matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
         )
 
-    affine_fields = _extract_control_affine_fields(symbolic)
+    affine_fields = extract_control_affine_fields(
+        symbolic.dynamics, symbolic.controls
+    )
     if affine_fields is None:
-        return _rank.inconclusive(
+        return _rank.create_inconclusive(
+            ControllabilityResult,
             "Dynamics are not affine in the controls.",
             required_rank=state_dimension,
             matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
@@ -177,33 +120,36 @@ def analyse_controllability(
     while True:
         matrix = _matrix_from_fields(fields, state_dimension)
         if rank == state_dimension:
-            outcome = _rank.result(
-                AnalysisStatus.ACCESSIBLE,
+            outcome = _rank.create_result(
+                ControllabilityResult,
+                AnalysisStatus.TRUE,
                 matrix,
                 fields,
                 state_dimension,
                 matrix_rank=rank,
             )
             return (
-                _add_dae_condition(outcome, tangent.condition)
+                _rank.add_condition(outcome, tangent.condition)
                 if tangent
                 else outcome
             )
         if not frontier:
-            outcome = _rank.result(
-                AnalysisStatus.NOT_ACCESSIBLE,
+            outcome = _rank.create_result(
+                ControllabilityResult,
+                AnalysisStatus.FALSE,
                 matrix,
                 fields,
                 state_dimension,
                 matrix_rank=rank,
             )
             return (
-                _add_dae_condition(outcome, tangent.condition)
+                _rank.add_condition(outcome, tangent.condition)
                 if tangent
                 else outcome
             )
         if max_order is not None and order >= max_order:
-            return _rank.inconclusive(
+            return _rank.create_inconclusive(
+                ControllabilityResult,
                 "Lie-bracket expansion reached max_order before closure.",
                 required_rank=state_dimension,
                 matrix=matrix,
@@ -221,7 +167,7 @@ def analyse_controllability(
                         symbolic,
                     )
                     if tangent
-                    else _lie_bracket(field, base_field, symbolic.state)
+                    else compute_lie_bracket(field, base_field, symbolic.state)
                 )
                 fields, rank, added = _append_if_independent(
                     fields, rank, bracket, state_dimension
@@ -231,15 +177,16 @@ def analyse_controllability(
                     if tangent:
                         algebraic_fields[bracket] = tangent.lift(bracket)
         if not next_frontier:
-            outcome = _rank.result(
-                AnalysisStatus.NOT_ACCESSIBLE,
+            outcome = _rank.create_result(
+                ControllabilityResult,
+                AnalysisStatus.FALSE,
                 _matrix_from_fields(fields, state_dimension),
                 fields,
                 state_dimension,
                 matrix_rank=rank,
             )
             return (
-                _add_dae_condition(outcome, tangent.condition)
+                _rank.add_condition(outcome, tangent.condition)
                 if tangent
                 else outcome
             )

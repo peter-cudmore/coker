@@ -37,9 +37,9 @@ def test_controllability_handles_index_one_dae_constraint_manifold():
 
     result = analyse_controllability(system)
 
-    assert result.status is AnalysisStatus.ACCESSIBLE
+    assert result.status is AnalysisStatus.TRUE
     assert result.rank == result.required_rank == 1
-    assert result.generic_conditions
+    assert result.rank_conditions
 
 
 def test_identifiability_handles_index_one_dae_constraint_manifold():
@@ -62,9 +62,9 @@ def test_identifiability_handles_index_one_dae_constraint_manifold():
 
     result = analyse_identifiability(system)
 
-    assert result.status is AnalysisStatus.IDENTIFIABLE
+    assert result.status is AnalysisStatus.TRUE
     assert result.rank == result.required_rank == 2
-    assert result.generic_conditions
+    assert result.rank_conditions
 
 
 def test_identifiability_treats_dae_constant_parameter_as_known():
@@ -87,5 +87,5 @@ def test_identifiability_treats_dae_constant_parameter_as_known():
 
     result = analyse_identifiability(system, parameters=(2.0,))
 
-    assert result.status is AnalysisStatus.IDENTIFIABLE
+    assert result.status is AnalysisStatus.TRUE
     assert result.rank == result.required_rank == 1

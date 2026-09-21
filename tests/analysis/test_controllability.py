@@ -1,7 +1,11 @@
 import numpy as np
 
 from coker import FunctionSpace, Scalar, SymbolicVector, VectorSpace
-from coker.dynamics import AnalysisStatus, analyse_controllability
+from coker.dynamics import (
+    AnalysisStatus,
+    ControllabilityResult,
+    analyse_controllability,
+)
 from coker.dynamics.system import create_control_system
 
 
@@ -24,12 +28,13 @@ def _bracket_generated_system():
 
 def test_controllability_uses_lie_brackets_beyond_control_field_rank():
     result = analyse_controllability(_bracket_generated_system())
+    assert isinstance(result, ControllabilityResult)
 
-    assert result.status is AnalysisStatus.ACCESSIBLE
+    assert result.status is AnalysisStatus.TRUE
     assert result.rank == 2
     assert result.required_rank == 2
-    assert result.generic_conditions
-    assert all(condition != 0 for condition in result.generic_conditions)
+    assert result.rank_conditions
+    assert all(condition != 0 for condition in result.rank_conditions)
 
 
 def test_controllability_reports_rank_deficient_control_system():
@@ -42,7 +47,7 @@ def test_controllability_reports_rank_deficient_control_system():
 
     result = analyse_controllability(system)
 
-    assert result.status is AnalysisStatus.NOT_ACCESSIBLE
+    assert result.status is AnalysisStatus.FALSE
     assert result.rank == 1
     assert result.required_rank == 2
 

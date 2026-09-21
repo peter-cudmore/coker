@@ -48,63 +48,6 @@ def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
     if isinstance(system, SymbolicSystem):
         return system
     _validate_system(system)
-    return _lower_system(system)
-
-
-def _validate_system(system: DynamicalSystem) -> None:
-    """Validate model structure before any SymPy expressions are built."""
-    if not isinstance(system, DynamicalSystem):
-        raise UnsupportedSystemError(
-            "system analysis requires a DynamicalSystem or SymbolicSystem"
-        )
-    declarations = _parameter_declarations(system.parameters)
-    control_dimension = _control_dimension(system.inputs)
-    parameter_slots = len(declarations) if declarations else 1
-    _reject_dae_or_quadrature(system)
-    for function, subject in (
-        (system.dxdt, "dynamics"),
-        (system.y, "outputs"),
-    ):
-        _validate_function(function, subject)
-
-    dynamics_shapes = system.dxdt.input_shape()
-    output_shapes = system.y.input_shape()
-    for shapes, expected_size, include_quadrature, subject in (
-        (dynamics_shapes, 4 + parameter_slots, False, "dynamics"),
-        (output_shapes, 5 + parameter_slots, True, "outputs"),
-    ):
-        _validate_signature(
-            shapes,
-            expected_size=expected_size,
-            parameter_declarations=declarations,
-            control_dimension=control_dimension,
-            include_quadrature=include_quadrature,
-            subject=subject,
-        )
-    state_dimension = _require_finite_dimension(dynamics_shapes[1], "state")
-    if (
-        _require_finite_dimension(output_shapes[1], "output state")
-        != state_dimension
-    ):
-        raise UnsupportedSystemError(
-            "output state shape does not match the dynamics state shape"
-        )
-    dynamics_output_shapes = system.dxdt.output_shape()
-    if len(dynamics_output_shapes) != 1:
-        raise UnsupportedSystemError("dynamics must have exactly one output")
-    if (
-        _require_finite_dimension(dynamics_output_shapes[0], "dynamics output")
-        != state_dimension
-    ):
-        raise UnsupportedSystemError(
-            "dynamics output shape does not match the state shape"
-        )
-    for index, shape in enumerate(system.y.output_shape()):
-        _require_finite_dimension(shape, f"output {index}")
-
-
-def _lower_system(system: DynamicalSystem) -> SymbolicSystem:
-    """Lower a structurally validated autonomous ODE to SymPy."""
     declarations = _parameter_declarations(system.parameters)
     control_dimension = _control_dimension(system.inputs)
     dynamics_shapes = system.dxdt.input_shape()
@@ -197,6 +140,62 @@ def _lower_system(system: DynamicalSystem) -> SymbolicSystem:
         dynamics=dynamics,
         outputs=outputs,
     )
+
+
+def _validate_system(system: DynamicalSystem) -> None:
+    """Validate model structure before any SymPy expressions are built."""
+    if not isinstance(system, DynamicalSystem):
+        raise UnsupportedSystemError(
+            "system analysis requires a DynamicalSystem or SymbolicSystem"
+        )
+    declarations = _parameter_declarations(system.parameters)
+    control_dimension = _control_dimension(system.inputs)
+    parameter_slots = len(declarations) if declarations else 1
+    _reject_dae_or_quadrature(system)
+    for function, subject in (
+        (system.dxdt, "dynamics"),
+        (system.y, "outputs"),
+    ):
+        _validate_function(function, subject)
+
+    dynamics_shapes = system.dxdt.input_shape()
+    output_shapes = system.y.input_shape()
+    for shapes, expected_size, include_quadrature, subject in (
+        (dynamics_shapes, 4 + parameter_slots, False, "dynamics"),
+        (output_shapes, 5 + parameter_slots, True, "outputs"),
+    ):
+        _validate_signature(
+            shapes,
+            expected_size=expected_size,
+            parameter_declarations=declarations,
+            control_dimension=control_dimension,
+            include_quadrature=include_quadrature,
+            subject=subject,
+        )
+    state_dimension = _require_finite_dimension(dynamics_shapes[1], "state")
+    if (
+        _require_finite_dimension(output_shapes[1], "output state")
+        != state_dimension
+    ):
+        raise UnsupportedSystemError(
+            "output state shape does not match the dynamics state shape"
+        )
+    dynamics_output_shapes = system.dxdt.output_shape()
+    if len(dynamics_output_shapes) != 1:
+        raise UnsupportedSystemError("dynamics must have exactly one output")
+    if (
+        _require_finite_dimension(dynamics_output_shapes[0], "dynamics output")
+        != state_dimension
+    ):
+        raise UnsupportedSystemError(
+            "dynamics output shape does not match the state shape"
+        )
+    for index, shape in enumerate(system.y.output_shape()):
+        _require_finite_dimension(shape, f"output {index}")
+
+
+def _lower_system(system: DynamicalSystem) -> SymbolicSystem:
+    """Lower a structurally validated autonomous ODE to SymPy."""
 
 
 def _parameter_declarations(

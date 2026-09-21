@@ -18,7 +18,6 @@ multiple execution backends.
 
    backends
    dynamics
-   system_analysis
    toolkits
    examples
 
