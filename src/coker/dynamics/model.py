@@ -13,14 +13,6 @@ from coker.algebra.ops import Noop
 from coker.dynamics.function_parameters import FittedFunction
 
 
-def _matches_function_signature(
-    inputs, outputs, declaration: FunctionSpace
-) -> bool:
-    return tuple(inputs) == tuple(declaration.input_dimensions()) and tuple(
-        outputs
-    ) == tuple(declaration.output_dimensions())
-
-
 ParameterDeclaration: TypeAlias = Scalar | VectorSpace | FunctionSpace
 DynamicsParameters: TypeAlias = (
     ParameterDeclaration
@@ -101,22 +93,14 @@ class DynamicalSystem:
                     f"Function-valued parameter {index} uses backend "
                     f"{value.backend!r}, expected {self.backend()!r}"
                 )
-            if not _matches_function_signature(
-                value.input_shape(), value.output_shape(), declaration
-            ):
+            if value not in declaration:
                 raise ValueError(
                     f"Function-valued parameter {index} does not match "
                     f"declared FunctionSpace {declaration.name!r}"
                 )
             return value
 
-        if isinstance(
-            value, FittedFunction
-        ) and not _matches_function_signature(
-            value.space.input_dimensions(),
-            value.space.output_dimensions(),
-            declaration,
-        ):
+        if isinstance(value, FittedFunction) and value not in declaration:
             raise ValueError(
                 f"Function-valued parameter {index} does not match declared "
                 f"FunctionSpace {declaration.name!r}"
@@ -129,9 +113,7 @@ class DynamicalSystem:
         prepared = function(
             declaration.arguments, value, backend=self.backend()
         )
-        if not _matches_function_signature(
-            prepared.input_shape(), prepared.output_shape(), declaration
-        ):
+        if prepared not in declaration:
             raise ValueError(
                 f"Function-valued parameter {index} does not match declared "
                 f"FunctionSpace {declaration.name!r}"

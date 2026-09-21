@@ -5,6 +5,7 @@ import pytest
 import numpy as np
 
 from coker import FunctionSpace, Scalar, VectorSpace, function
+from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
 from coker.dynamics import (
     BoundVector,
@@ -70,6 +71,31 @@ def test_system_accepts_a_function_valued_positional_parameter():
         ),
         np.array([9.0]),
     )
+
+
+def test_function_space_contains_matching_functions():
+    space = FunctionSpace(
+        "rate", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+    matching = function([Scalar("t")], lambda time: time, backend="numpy")
+    incompatible = function(
+        [VectorSpace("time", 2)], lambda time: time[0], backend="numpy"
+    )
+    fitted = RadialBasisFunction(centers=[0.0], width=1.0).fit(
+        space, [0.0, 1.0]
+    )
+
+    assert matching in space
+    assert fitted in space
+    assert incompatible not in space
+    assert object() not in space
+
+
+def test_function_space_contains_bound_callable():
+    space = FunctionSpace("constant", arguments=[], output=[Scalar("rate")])
+    bound = BoundCallable(function([], lambda: 1.0), space, ())
+
+    assert bound in space
 
 
 def test_builder_specializes_function_parameter_to_numeric_decisions():
