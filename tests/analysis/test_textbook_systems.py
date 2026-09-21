@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from coker import FunctionSpace, Scalar, SymbolicVector, VectorSpace
+from coker import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.ops import Noop
 from coker.dynamics import (
     AnalysisStatus,
@@ -37,8 +37,8 @@ def test_controllability_handles_brockett_integrator():
     system = create_control_system(
         x0=np.zeros(3),
         control=_control_space(2),
-        xdot=lambda _t, x, u, _p: SymbolicVector.from_list(
-            [u[0], u[1], x[1] * u[0]]
+        xdot=lambda _t, x, u, _p: np.asarray(
+            [u[0], u[1], x[1] * u[0]], dtype=object
         ),
         backend="numpy",
     )
@@ -60,21 +60,23 @@ def test_controllability_handles_rc_ladder_dae():
                 np.zeros(3),
             ),
             dynamics=lambda time, _x, current, control, _p: (
-                SymbolicVector.from_list(
+                np.asarray(
                     [
                         current[0] + control(time)[0],
                         current[1],
                         current[2],
-                    ]
+                    ],
+                    dtype=object,
                 )
             ),
             constraints=lambda _t, voltage, current, _u, _p: (
-                SymbolicVector.from_list(
+                np.asarray(
                     [
                         current[0] + 2 * voltage[0] - voltage[1],
                         current[1] - voltage[0] + 2 * voltage[1] - voltage[2],
                         current[2] - voltage[1] + 2 * voltage[2],
-                    ]
+                    ],
+                    dtype=object,
                 )
             ),
             outputs=lambda _t, voltage, _z, _u, _p, _q: voltage,
@@ -92,16 +94,17 @@ def test_identifiability_handles_measured_sir_epidemic_model():
     """Infections and removals identify SIR transmission and recovery rates."""
     system = create_autonomous_ode(
         x0=np.ones(3),
-        xdot=lambda state, rates: SymbolicVector.from_list(
+        xdot=lambda state, rates: np.asarray(
             [
                 -rates[0] * state[0] * state[1],
                 rates[0] * state[0] * state[1] - rates[1] * state[1],
                 rates[1] * state[1],
-            ]
+            ],
+            dtype=object,
         ),
         parameters=VectorSpace("rate", 2),
-        output=lambda state, _rates: SymbolicVector.from_list(
-            [state[1], state[2]]
+        output=lambda state, _rates: np.asarray(
+            [state[1], state[2]], dtype=object
         ),
         backend="sympy",
     )
@@ -124,7 +127,7 @@ def test_identifiability_handles_three_compartment_dae():
             ),
             dynamics=lambda _t, _x, flux, _u, _p: flux,
             constraints=lambda _t, amount, flux, _u, rates: (
-                SymbolicVector.from_list(
+                np.asarray(
                     [
                         flux[0] + rates[0] * amount[0] - rates[1] * amount[1],
                         flux[1]
@@ -132,7 +135,8 @@ def test_identifiability_handles_three_compartment_dae():
                         + (rates[1] + rates[2]) * amount[1]
                         - rates[3] * amount[2],
                         flux[2] - rates[2] * amount[1] + rates[3] * amount[2],
-                    ]
+                    ],
+                    dtype=object,
                 )
             ),
             outputs=lambda _t, amount, _z, _u, _p, _q: amount,
