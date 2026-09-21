@@ -82,6 +82,13 @@ class DynamicalSystem:
     def backend(self):
         return self.dxdt.backend
 
+    def _prepare_backend_value(self, backend, value):
+        return (
+            value
+            if value is None or callable(value)
+            else backend.to_backend_array(value)
+        )
+
     def _prepare_direct_parameter(
         self, declaration: ParameterDeclaration, value, index: int
     ) -> object:
@@ -166,13 +173,18 @@ class DynamicalSystem:
         from coker.backends import get_backend_by_name
 
         t, u, parameter_arguments = self._map_arguments(*args)
+        backend = get_backend_by_name(self.dxdt.backend)
+        u = self._prepare_backend_value(backend, u)
+        parameter_arguments = tuple(
+            self._prepare_backend_value(backend, parameter)
+            for parameter in parameter_arguments
+        )
         x0, z0 = self.x0(0, u, *parameter_arguments)
 
         if self.dqdt is not Noop():
             raise NotImplementedError
         q0 = None
 
-        backend = get_backend_by_name(self.dxdt.backend)
         x, z, q = backend.evaluate_integrals(
             [self.dxdt, self.g, self.dqdt],
             [x0, z0, q0],

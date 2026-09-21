@@ -39,7 +39,7 @@ def evaluate_integrals(
     backend = get_backend_by_name("pytorch", set_current=False)
     dxdt, constraint, dqdt = functions
     x0, z0, q0 = initial_conditions
-    u, *function_parameters = inputs
+    u, *parameters = inputs
     has_quadrature = dqdt is not Noop()
 
     if constraint is not Noop():
@@ -72,17 +72,7 @@ def evaluate_integrals(
         if q0.ndim == 0:
             q0 = q0.reshape(1)
 
-    u = None if u is None else backend.to_backend_array(u)
-    function_parameters = tuple(
-        (
-            parameter
-            if parameter is None or callable(parameter)
-            else backend.to_backend_array(parameter)
-        )
-        for parameter in function_parameters
-    )
-
-    parameters = (
+    solver_settings = (
         solver_parameters
         if isinstance(solver_parameters, PytorchODESolverParameters)
         else PytorchODESolverParameters()
@@ -105,22 +95,22 @@ def evaluate_integrals(
 
     def rhs(time, state):
         x = state[:x_size].reshape_as(x0)
-        dx = dxdt(time, x, None, u, *function_parameters).reshape(-1)
+        dx = dxdt(time, x, None, u, *parameters).reshape(-1)
         if not has_quadrature:
             return dx
-        dq = dqdt(time, x, None, u, *function_parameters).reshape(-1)
+        dq = dqdt(time, x, None, u, *parameters).reshape(-1)
         return torch.cat((dx, dq))
 
     solution = odeint(
         rhs,
         initial_state,
         times,
-        method=parameters.method,
-        rtol=parameters.rtol,
-        atol=parameters.atol,
+        method=solver_settings.method,
+        rtol=solver_settings.rtol,
+        atol=solver_settings.atol,
         options=(
-            dict(parameters.options)
-            if parameters.options is not None
+            dict(solver_settings.options)
+            if solver_settings.options is not None
             else None
         ),
     )

@@ -325,14 +325,6 @@ class CasadiBackend(Backend):
             t_eval = end_point
 
         u, *parameters = inputs
-        parameters = [
-            (
-                parameter
-                if parameter is None or callable(parameter)
-                else self.to_backend_array(parameter)
-            )
-            for parameter in parameters
-        ]
         t = ca.MX.sym("t")
         x = ca.MX.sym("x", x0.shape)
         z = ca.MX.sym("z", z0.shape)
