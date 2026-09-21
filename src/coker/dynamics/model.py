@@ -86,6 +86,12 @@ class DynamicalSystem:
                     "A trajectory evaluation requires an input value"
                 )
             u = values.pop(0)
+        elif (
+            isinstance(self.parameters, tuple)
+            and len(values) == len(self.parameters) + 1
+            and values[0] is Noop()
+        ):
+            u = values.pop(0)
         elif not isinstance(self.parameters, tuple) and len(values) == 2:
             u = values.pop(0)
         else:
