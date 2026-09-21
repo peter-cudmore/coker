@@ -349,3 +349,12 @@ Next places to read
 - ``tests/dynamical_systems/test_variational_solver_callback.py`` for iteration
   callback usage.
 - :doc:`backends` for backend-selection advice.
+
+
+System analysis
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   dynamics/system_analysis
