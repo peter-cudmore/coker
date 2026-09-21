@@ -485,3 +485,47 @@ def test_variational_problem_specializes_radial_basis_parameter():
 
     assert solution.solve_info.success
     assert solution.cost < 1e-4
+
+
+@pytest.mark.parametrize(
+    "integration_backend",
+    [
+        "numpy",
+        pytest.param(
+            "casadi",
+            marks=pytest.mark.skipif(
+                importlib.util.find_spec("casadi") is None,
+                reason="CasADi not available",
+            ),
+        ),
+    ],
+)
+def test_system_integrates_function_valued_parameter(integration_backend):
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("t")],
+        output=[Scalar("rate")],
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(Scalar("offset"), rate),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
+            dynamics=lambda time, _state, _z, _u, parameters: parameters[0]
+            + parameters[1](time),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend=integration_backend,
+    )
+
+    timeline = np.array([0.0, 0.5, 1.0])
+    trajectory = system(timeline, 2.0, lambda time: 1.0 + time)
+
+    np.testing.assert_allclose(
+        trajectory.reshape(-1),
+        3 * timeline + timeline**2 / 2,
+        rtol=1e-5,
+    )

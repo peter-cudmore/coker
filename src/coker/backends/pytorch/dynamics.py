@@ -39,7 +39,7 @@ def evaluate_integrals(
     backend = get_backend_by_name("pytorch", set_current=False)
     dxdt, constraint, dqdt = functions
     x0, z0, q0 = initial_conditions
-    u, p = inputs
+    u, *function_parameters = inputs
     has_quadrature = dqdt is not Noop()
 
     if constraint is not Noop():
@@ -73,7 +73,14 @@ def evaluate_integrals(
             q0 = q0.reshape(1)
 
     u = None if u is None else backend.to_backend_array(u)
-    p = None if p is None else backend.to_backend_array(p)
+    function_parameters = tuple(
+        (
+            parameter
+            if parameter is None or callable(parameter)
+            else backend.to_backend_array(parameter)
+        )
+        for parameter in function_parameters
+    )
 
     parameters = (
         solver_parameters
@@ -98,10 +105,10 @@ def evaluate_integrals(
 
     def rhs(time, state):
         x = state[:x_size].reshape_as(x0)
-        dx = dxdt(time, x, None, u, p).reshape(-1)
+        dx = dxdt(time, x, None, u, *function_parameters).reshape(-1)
         if not has_quadrature:
             return dx
-        dq = dqdt(time, x, None, u, p).reshape(-1)
+        dq = dqdt(time, x, None, u, *function_parameters).reshape(-1)
         return torch.cat((dx, dq))
 
     solution = odeint(

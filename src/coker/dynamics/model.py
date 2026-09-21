@@ -73,75 +73,83 @@ class DynamicalSystem:
         return self.dxdt.backend
 
     def _map_arguments(self, *args):
-        arg_stack = list(reversed(args))
-        t = arg_stack.pop()
-        try:
-            u = (
-                arg_stack.pop()
-                if self.inputs is not Noop() or len(args) == 3
-                else None
-            )
-            p = (
-                arg_stack.pop()
-                if self.parameters is not None or len(args) == 3
-                else None
-            )
-        except IndexError as ex:
+        values = list(args)
+        if not values:
             raise ValueError(
-                "Invalid number of arguments: expected 2 - 3, "
-                f"received: {len(args)}"
-            ) from ex
+                "A trajectory evaluation requires a time argument"
+            )
+        t = values.pop(0)
 
+        if self.inputs is not Noop():
+            if not values:
+                raise ValueError(
+                    "A trajectory evaluation requires an input value"
+                )
+            u = values.pop(0)
+        elif not isinstance(self.parameters, tuple) and len(values) == 2:
+            u = values.pop(0)
+        else:
+            u = None
+
+        if isinstance(self.parameters, tuple):
+            p = tuple(values)
+            if len(p) != len(self.parameters):
+                raise ValueError(
+                    "Trajectory parameter count does not match the system "
+                    f"declaration: expected {len(self.parameters)}, got {len(p)}"
+                )
+        elif self.parameters is None:
+            if values:
+                raise ValueError(
+                    "Trajectory evaluation received unexpected parameters"
+                )
+            p = None
+        else:
+            if len(values) != 1:
+                raise ValueError(
+                    "Trajectory evaluation requires one packed parameter value"
+                )
+            p = values[0]
         return t, u, p
 
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
         t, u, p = self._map_arguments(*args)
-
-        x0, z0 = self.x0(0, u, p)
-
-        # solve ODE
-        # x' = dxdt(...)
-        # 0  = g(...)
-        # to get x,z over the interval
+        parameter_arguments = p if isinstance(self.parameters, tuple) else (p,)
+        x0, z0 = self.x0(0, u, *parameter_arguments)
 
         if self.dqdt is not Noop():
-            # zeros, the same size a q
             raise NotImplementedError
-        else:
-            q0 = None
+        q0 = None
 
         backend = get_backend_by_name(self.dxdt.backend)
         x, z, q = backend.evaluate_integrals(
             [self.dxdt, self.g, self.dqdt],
             [x0, z0, q0],
             t,
-            [u, p],
+            [u, *parameter_arguments],
             solver_parameters=self.solver_parameters,
         )
 
         if isinstance(t, (float, int)):
-            return self.y(t, x, z, u, p, q)
+            return self.y(t, x, z, u, *parameter_arguments, q)
 
-        def map_args(i):
-            x_i = x[:, i]
-            z_i = z[:, i] if z is not None else None
-            q_i = q[:, i] if q is not None else None
-            return x_i, z_i, u, p, q_i
+        def map_args(index):
+            x_i = x[:, index]
+            z_i = z[:, index] if z is not None else None
+            q_i = q[:, index] if q is not None else None
+            return x_i, z_i, u, *parameter_arguments, q_i
 
         if self.y.output_shape()[0].is_scalar() or self.y.output_shape()[
             0
         ].dim == (1,):
-            y = np.concatenate(
-                [self.y(t_i, *map_args(i)) for i, t_i in enumerate(t)]
+            return np.concatenate(
+                [self.y(t_i, *map_args(index)) for index, t_i in enumerate(t)]
             )
-        else:
-            y = np.vstack(
-                [self.y(t_i, *map_args(i)) for i, t_i in enumerate(t)]
-            )
-
-        return y
+        return np.vstack(
+            [self.y(t_i, *map_args(index)) for index, t_i in enumerate(t)]
+        )
 
     def output_as_function_space(self) -> FunctionSpace:
         t, _x, _z, u, *parameter_shapes, _q = self.y.input_shape()
