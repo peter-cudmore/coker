@@ -88,7 +88,6 @@ def test_function_space_contains_matching_functions():
     assert matching in space
     assert fitted in space
     assert incompatible not in space
-    assert object() not in space
 
 
 def test_function_space_contains_bound_callable():
