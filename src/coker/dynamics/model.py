@@ -13,44 +13,12 @@ from coker.algebra.ops import Noop
 from coker.dynamics.function_parameters import FittedFunction
 
 
-def _same_function_shape(
-    actual: Dimension | FunctionSpace | None,
-    expected: Dimension | FunctionSpace | None,
-) -> bool:
-    if isinstance(actual, Dimension) or isinstance(expected, Dimension):
-        return (
-            isinstance(actual, Dimension)
-            and isinstance(expected, Dimension)
-            and actual == expected
-        )
-    if isinstance(actual, FunctionSpace) and isinstance(
-        expected, FunctionSpace
-    ):
-        return _matches_function_signature(
-            actual.input_dimensions(),
-            actual.output_dimensions(),
-            expected,
-        )
-    return actual is expected
-
-
 def _matches_function_signature(
-    actual_inputs, actual_outputs, declaration: FunctionSpace
+    inputs, outputs, declaration: FunctionSpace
 ) -> bool:
-    expected_inputs = tuple(declaration.input_dimensions())
-    expected_outputs = tuple(declaration.output_dimensions())
-    return (
-        len(actual_inputs) == len(expected_inputs)
-        and len(actual_outputs) == len(expected_outputs)
-        and all(
-            _same_function_shape(actual, expected)
-            for actual, expected in zip(actual_inputs, expected_inputs)
-        )
-        and all(
-            _same_function_shape(actual, expected)
-            for actual, expected in zip(actual_outputs, expected_outputs)
-        )
-    )
+    return tuple(inputs) == tuple(declaration.input_dimensions()) and tuple(
+        outputs
+    ) == tuple(declaration.output_dimensions())
 
 
 ParameterDeclaration: TypeAlias = Scalar | VectorSpace | FunctionSpace
@@ -114,33 +82,33 @@ class DynamicalSystem:
     def backend(self):
         return self.dxdt.backend
 
-    @staticmethod
-    def _matches_function_space(
-        value: Function, declaration: FunctionSpace
-    ) -> bool:
-        return _matches_function_signature(
-            value.input_shape(), value.output_shape(), declaration
-        )
-
     def _prepare_direct_parameter(
         self, declaration: ParameterDeclaration, value, index: int
-    ):
+    ) -> object:
         if not isinstance(declaration, FunctionSpace):
             return value
 
-        if isinstance(value, FittedFunction) and not (
-            _matches_function_signature(
-                value.space.input_dimensions(),
-                value.space.output_dimensions(),
-                declaration,
-            )
-        ):
-            raise ValueError(
-                f"Function-valued parameter {index} does not match declared "
-                f"FunctionSpace {declaration.name!r}"
-            )
-        if isinstance(value, Function) and not self._matches_function_space(
-            value, declaration
+        if isinstance(value, Function):
+            if value.backend != self.backend():
+                raise ValueError(
+                    f"Function-valued parameter {index} uses backend "
+                    f"{value.backend!r}, expected {self.backend()!r}"
+                )
+            if not _matches_function_signature(
+                value.input_shape(), value.output_shape(), declaration
+            ):
+                raise ValueError(
+                    f"Function-valued parameter {index} does not match "
+                    f"declared FunctionSpace {declaration.name!r}"
+                )
+            return value
+
+        if isinstance(
+            value, FittedFunction
+        ) and not _matches_function_signature(
+            value.space.input_dimensions(),
+            value.space.output_dimensions(),
+            declaration,
         ):
             raise ValueError(
                 f"Function-valued parameter {index} does not match declared "
@@ -148,73 +116,56 @@ class DynamicalSystem:
             )
         if not callable(value):
             raise TypeError(
-                f"Function-valued parameter {index} must be a callable, "
-                "Coker Function, or FittedFunction"
+                f"Function-valued parameter {index} must be callable"
             )
+
         prepared = function(
             declaration.arguments, value, backend=self.backend()
         )
-
-        if not self._matches_function_space(prepared, declaration):
+        if not _matches_function_signature(
+            prepared.input_shape(), prepared.output_shape(), declaration
+        ):
             raise ValueError(
                 f"Function-valued parameter {index} does not match declared "
                 f"FunctionSpace {declaration.name!r}"
             )
         return prepared
 
-    def _prepare_direct_parameters(self, value):
-        if isinstance(self.parameters, tuple):
-            return tuple(
-                self._prepare_direct_parameter(declaration, parameter, index)
-                for index, (declaration, parameter) in enumerate(
-                    zip(self.parameters, value)
-                )
+    def _map_arguments(
+        self, *args
+    ) -> tuple[object, object, tuple[object, ...]]:
+        declarations = (
+            ()
+            if self.parameters is None
+            else (
+                self.parameters
+                if isinstance(self.parameters, tuple)
+                else (self.parameters,)
             )
-        if self.parameters is None:
-            return None
-        return self._prepare_direct_parameter(self.parameters, value, 0)
-
-    def _map_arguments(self, *args):
-        if not args:
-            raise ValueError(
-                "A trajectory evaluation requires a time argument"
-            )
-
-        has_inputs = self.inputs is not Noop()
-        parameter_count = (
-            len(self.parameters)
-            if isinstance(self.parameters, tuple)
-            else int(self.parameters is not None)
         )
-        expected_count = 1 + int(has_inputs) + parameter_count
+        has_inputs = self.inputs is not Noop()
+        expected_count = 1 + int(has_inputs) + len(declarations)
         if len(args) != expected_count:
             raise ValueError(
                 "Trajectory argument count does not match the system "
                 f"declaration: expected {expected_count}, got {len(args)}"
             )
 
-        t = args[0]
-        next_argument = 1
-        if has_inputs:
-            u = args[next_argument]
-            next_argument += 1
-        else:
-            u = None
-
-        values = args[next_argument:]
-        if isinstance(self.parameters, tuple):
-            p = tuple(values)
-        elif self.parameters is None:
-            p = None
-        else:
-            (p,) = values
-        return t, u, self._prepare_direct_parameters(p)
+        time = args[0]
+        input_value = args[1] if has_inputs else None
+        parameter_start = 1 + int(has_inputs)
+        parameters = tuple(
+            self._prepare_direct_parameter(declaration, value, index)
+            for index, (declaration, value) in enumerate(
+                zip(declarations, args[parameter_start:])
+            )
+        )
+        return time, input_value, parameters if declarations else (None,)
 
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
-        t, u, p = self._map_arguments(*args)
-        parameter_arguments = p if isinstance(self.parameters, tuple) else (p,)
+        t, u, parameter_arguments = self._map_arguments(*args)
         x0, z0 = self.x0(0, u, *parameter_arguments)
 
         if self.dqdt is not Noop():
