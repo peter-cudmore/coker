@@ -37,9 +37,7 @@ def test_controllability_handles_brockett_integrator():
     system = create_control_system(
         x0=np.zeros(3),
         control=_control_space(2),
-        xdot=lambda _t, x, u, _p: np.asarray(
-            [u[0], u[1], x[1] * u[0]], dtype=object
-        ),
+        xdot=lambda _t, x, u, _p: np.asarray([u[0], u[1], x[1] * u[0]]),
         backend="numpy",
     )
 
@@ -65,8 +63,7 @@ def test_controllability_handles_rc_ladder_dae():
                         current[0] + control(time)[0],
                         current[1],
                         current[2],
-                    ],
-                    dtype=object,
+                    ]
                 )
             ),
             constraints=lambda _t, voltage, current, _u, _p: (
@@ -75,8 +72,7 @@ def test_controllability_handles_rc_ladder_dae():
                         current[0] + 2 * voltage[0] - voltage[1],
                         current[1] - voltage[0] + 2 * voltage[1] - voltage[2],
                         current[2] - voltage[1] + 2 * voltage[2],
-                    ],
-                    dtype=object,
+                    ]
                 )
             ),
             outputs=lambda _t, voltage, _z, _u, _p, _q: voltage,
@@ -99,13 +95,10 @@ def test_identifiability_handles_measured_sir_epidemic_model():
                 -rates[0] * state[0] * state[1],
                 rates[0] * state[0] * state[1] - rates[1] * state[1],
                 rates[1] * state[1],
-            ],
-            dtype=object,
+            ]
         ),
         parameters=VectorSpace("rate", 2),
-        output=lambda state, _rates: np.asarray(
-            [state[1], state[2]], dtype=object
-        ),
+        output=lambda state, _rates: np.asarray([state[1], state[2]]),
         backend="sympy",
     )
 
@@ -135,8 +128,7 @@ def test_identifiability_handles_three_compartment_dae():
                         + (rates[1] + rates[2]) * amount[1]
                         - rates[3] * amount[2],
                         flux[2] - rates[2] * amount[1] + rates[3] * amount[2],
-                    ],
-                    dtype=object,
+                    ]
                 )
             ),
             outputs=lambda _t, amount, _z, _u, _p, _q: amount,
