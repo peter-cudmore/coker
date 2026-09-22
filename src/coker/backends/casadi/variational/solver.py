@@ -71,6 +71,7 @@ def _resolve_options(problem: VariationalProblem) -> CasadiVariationalOptions:
 def noop(*_args):
     return None
 
+
 def _accepts_small_search_direction(
     solve_info,
     result: Dict[str, ca.DM],
@@ -205,9 +206,7 @@ class CasadiVariationalSolver(VariationalSolver):
                 result,
                 solver_arguments["lbg"],
                 solver_arguments["ubg"],
-                tolerance=(
-                    self._acceptable_constraint_violation
-                ),
+                tolerance=(self._acceptable_constraint_violation),
             ):
                 solve_info = replace(solve_info, success=True)
             else:
@@ -247,7 +246,8 @@ class _TranscriptionFactory:
         self.tolerance = problem.transcription_options.absolute_tolerance
         self.segment_defect_tolerance = (
             problem.transcription_options.segment_defect_tolerance
-            if problem.transcription_options.segment_defect_tolerance is not None
+            if problem.transcription_options.segment_defect_tolerance
+            is not None
             else self.tolerance
         )
         self.derivative_defect_tolerance = (
@@ -532,6 +532,7 @@ def _create_solver(
         if value is not None:
             equality_values.append(value)
             equality_tolerances.append(tolerance)
+
     (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
     x_end = list(poly_collection.interval_ends())[:-1]
 
@@ -546,9 +547,7 @@ def _create_solver(
 
     append_equality(factory.proj_x @ x0_symbol - x0_val, factory.tolerance)
     if factory.z_size > 0:
-        append_equality(
-            factory.proj_z @ x0_symbol - z0_val, factory.tolerance
-        )
+        append_equality(factory.proj_z @ x0_symbol - z0_val, factory.tolerance)
     if factory.q_size > 0:
         append_equality(factory.proj_q @ x0_symbol, factory.tolerance)
 
@@ -649,9 +648,7 @@ def _create_solver(
         d_x = ca.hcat(interval_dynamics)
         weights = ca.DM(poly.weights[0, :-1])
         append_equality(
-            factory.proj_x @ v_end
-            - factory.proj_x @ v_start
-            - d_x @ weights,
+            factory.proj_x @ v_end - factory.proj_x @ v_start - d_x @ weights,
             factory.segment_defect_tolerance,
         )
         if factory.q_size > 0:
@@ -758,9 +755,7 @@ def _create_solver(
         -tolerance * ca.DM.ones(value.shape[0], 1)
         for value, tolerance in zip(equality_values, equality_tolerances)
     ]
-    equality_uppers = [
-        -lower for lower in equality_lowers
-    ]
+    equality_uppers = [-lower for lower in equality_lowers]
     ubg = ca.vertcat(*equality_uppers, *g_constraint_uppers)
     lbg = ca.vertcat(*equality_lowers, *g_constraint_lowers)
 
@@ -856,9 +851,7 @@ def _create_solver(
             lbg,
             ubg,
         )
-        inverse_constraint_scaling = ca.diag(
-            ca.DM(1.0 / constraint_scaling)
-        )
+        inverse_constraint_scaling = ca.diag(ca.DM(1.0 / constraint_scaling))
         normalized_g = inverse_constraint_scaling @ normalized_g
         lbg = inverse_constraint_scaling @ lbg
         ubg = inverse_constraint_scaling @ ubg
