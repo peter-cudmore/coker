@@ -39,6 +39,7 @@ from coker.toolkits.codesign.optimisation import (
     solve_info_from_casadi_stats,
 )
 from coker.backends.casadi.variational.variable_scaling import (
+    _derive_constraint_scaling,
     _derive_variable_scaling,
 )
 
@@ -70,14 +71,13 @@ def _resolve_options(problem: VariationalProblem) -> CasadiVariationalOptions:
 def noop(*_args):
     return None
 
-
 def _accepts_small_search_direction(
     solve_info,
     result: Dict[str, ca.DM],
     lower_bounds: ca.DM,
     upper_bounds: ca.DM,
     *,
-    tolerance: float,
+    tolerance: ca.DM | float,
     min_tolerance: float = 1e-5,
 ) -> bool:
     if solve_info.return_status != "Search_Direction_Becomes_Too_Small":
@@ -89,8 +89,12 @@ def _accepts_small_search_direction(
     if residual.numel() == 0:
         return True
     violation = ca.fmax(lower_bounds - residual, residual - upper_bounds)
-    max_violation = float(ca.mmax(ca.fmax(violation, 0)))
-    return max_violation <= max(tolerance, min_tolerance)
+    allowed_violation = (
+        tolerance
+        if isinstance(tolerance, ca.DM)
+        else ca.DM(max(tolerance, min_tolerance))
+    )
+    return float(ca.mmax(ca.fmax(violation - allowed_violation, 0))) == 0.0
 
 
 def _derive_objective_scale(nominal_cost: object, tolerance: object) -> float:
@@ -120,6 +124,7 @@ class CasadiVariationalSolver(VariationalSolver):
         initialiser: Optional[ca.Function] = None,
         warm_start: bool = False,
         unscale_objective: Callable[[float], float] = float,
+        acceptable_constraint_violation: ca.DM = ca.DM(),
     ):
         self.problem = problem
         self._parameters = parameters
@@ -129,8 +134,8 @@ class CasadiVariationalSolver(VariationalSolver):
         self._initialiser = initialiser
         self._warm_start = warm_start
         self._unscale_objective = unscale_objective
+        self._acceptable_constraint_violation = acceptable_constraint_violation
         self._last_primal: Optional[ca.DM] = None
-        self._last_lam_x: Optional[ca.DM] = None
         self._last_lam_g: Optional[ca.DM] = None
         self._adaptive_solve: Optional[
             Callable[[Dict[str, float]], VariationalSolution]
@@ -201,7 +206,7 @@ class CasadiVariationalSolver(VariationalSolver):
                 solver_arguments["lbg"],
                 solver_arguments["ubg"],
                 tolerance=(
-                    self.problem.transcription_options.absolute_tolerance
+                    self._acceptable_constraint_violation
                 ),
             ):
                 solve_info = replace(solve_info, success=True)
@@ -240,6 +245,17 @@ class _TranscriptionFactory:
         self.has_state_quadrature = bool(q_dim)
         self.path_size = self.x_size + self.z_size + self.q_size
         self.tolerance = problem.transcription_options.absolute_tolerance
+        self.segment_defect_tolerance = (
+            problem.transcription_options.segment_defect_tolerance
+            if problem.transcription_options.segment_defect_tolerance is not None
+            else self.tolerance
+        )
+        self.derivative_defect_tolerance = (
+            problem.transcription_options.derivative_defect_tolerance
+            if problem.transcription_options.derivative_defect_tolerance
+            is not None
+            else self.tolerance
+        )
         self.free_horizon = problem.horizon_decision is not None
 
         self.proj_x = ca.hcat(
@@ -509,7 +525,13 @@ def _create_solver(
         factory.p_symbols,
     )
 
-    equalities = []
+    equality_values = []
+    equality_tolerances = []
+
+    def append_equality(value, tolerance):
+        if value is not None:
+            equality_values.append(value)
+            equality_tolerances.append(tolerance)
     (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
     x_end = list(poly_collection.interval_ends())[:-1]
 
@@ -522,15 +544,16 @@ def _create_solver(
         [t0, factory.control_eval, factory.proj_p @ factory.p],
     )
 
-    equalities.append(factory.proj_x @ x0_symbol - x0_val)
+    append_equality(factory.proj_x @ x0_symbol - x0_val, factory.tolerance)
     if factory.z_size > 0:
-        equalities.append(factory.proj_z @ x0_symbol - z0_val)
+        append_equality(
+            factory.proj_z @ x0_symbol - z0_val, factory.tolerance
+        )
     if factory.q_size > 0:
-        equalities.append(factory.proj_q @ x0_symbol)
+        append_equality(factory.proj_q @ x0_symbol, factory.tolerance)
 
-    equalities.extend(
-        xs_i - xe_i for ((_, xs_i), (_, xe_i)) in zip(x_start, x_end)
-    )
+    for (_, xs_i), (_, xe_i) in zip(x_start, x_end):
+        append_equality(xs_i - xe_i, factory.tolerance)
 
     def append_constraint(constraint, args):
         (value,) = factory.casadi.evaluate(constraint.residual, args)
@@ -575,7 +598,10 @@ def _create_solver(
             )
             scale = duration
             interval_dynamics.append(scale * dynamics_ij)
-            equalities.append(dx - scale * dynamics_ij)
+            append_equality(
+                dx - scale * dynamics_ij,
+                factory.derivative_defect_tolerance,
+            )
 
             if factory.q_size > 0:
                 dq = factory.proj_q @ dv
@@ -602,7 +628,10 @@ def _create_solver(
                     )
                 )
                 quadrature_ij = scale * ca.vertcat(*quadrature_values)
-                equalities.append(dq - quadrature_ij)
+                append_equality(
+                    dq - quadrature_ij,
+                    factory.derivative_defect_tolerance,
+                )
                 interval_quadratures.append(quadrature_ij)
 
             if factory.z_size > 0:
@@ -613,21 +642,25 @@ def _create_solver(
                     factory.control_eval(t),
                     factory.proj_p @ factory.p,
                 )
-                equalities.append(alg)
+                append_equality(alg, factory.tolerance)
 
         _, v_start = poly.start_point()
         _, v_end = poly.end_point()
         d_x = ca.hcat(interval_dynamics)
         weights = ca.DM(poly.weights[0, :-1])
-        equalities.append(
-            factory.proj_x @ v_end - factory.proj_x @ v_start - d_x @ weights
+        append_equality(
+            factory.proj_x @ v_end
+            - factory.proj_x @ v_start
+            - d_x @ weights,
+            factory.segment_defect_tolerance,
         )
         if factory.q_size > 0:
             d_q = ca.hcat(interval_quadratures)
-            equalities.append(
+            append_equality(
                 factory.proj_q @ v_end
                 - factory.proj_q @ v_start
-                - d_q @ weights
+                - d_q @ weights,
+                factory.segment_defect_tolerance,
             )
 
     # Path constraints apply at interval endpoints and collocation knots.
@@ -720,17 +753,16 @@ def _create_solver(
             [solution_proxy, factory.control_factory, factory.p],
         )
 
-    equality_values = [e for e in equalities if e is not None]
     g = ca.vertcat(*equality_values, *g_constraints)
-    equality_size = sum(e.shape[0] for e in equality_values)
-    ubg = ca.vertcat(
-        factory.tolerance * ca.DM.ones(equality_size, 1),
-        *g_constraint_uppers,
-    )
-    lbg = ca.vertcat(
-        -factory.tolerance * ca.DM.ones(equality_size, 1),
-        *g_constraint_lowers,
-    )
+    equality_lowers = [
+        -tolerance * ca.DM.ones(value.shape[0], 1)
+        for value, tolerance in zip(equality_values, equality_tolerances)
+    ]
+    equality_uppers = [
+        -lower for lower in equality_lowers
+    ]
+    ubg = ca.vertcat(*equality_uppers, *g_constraint_uppers)
+    lbg = ca.vertcat(*equality_lowers, *g_constraint_lowers)
 
     t_end, v_end = poly_collection.polys[-1].end_point()
     x_end_val = factory.proj_x @ v_end
@@ -783,6 +815,9 @@ def _create_solver(
     normalized_cost = cost
     normalized_g = g
     objective_scale = 1.0
+    acceptable_constraint_violation = ca.DM.ones(
+        normalized_g.shape[0], 1
+    ) * max(factory.tolerance, 1e-5)
     variable_scaling = None
 
     if factory.options.enable_scaling:
@@ -813,6 +848,22 @@ def _create_solver(
         decision_variables = normalized_variables
         lower_bound_base, upper_bound_base = variable_scaling.encode_bounds(
             physical_lower_bound_base, physical_upper_bound_base
+        )
+        constraint_scaling = _derive_constraint_scaling(
+            normalized_g,
+            decision_variables,
+            variable_scaling.encode(physical_decision_variables_0),
+            lbg,
+            ubg,
+        )
+        inverse_constraint_scaling = ca.diag(
+            ca.DM(1.0 / constraint_scaling)
+        )
+        normalized_g = inverse_constraint_scaling @ normalized_g
+        lbg = inverse_constraint_scaling @ lbg
+        ubg = inverse_constraint_scaling @ ubg
+        acceptable_constraint_violation = (
+            inverse_constraint_scaling @ acceptable_constraint_violation
         )
 
     def unscale_objective(value: float) -> float:
@@ -1029,6 +1080,7 @@ def _create_solver(
     solver = CasadiVariationalSolver(
         problem=problem,
         parameters=factory.parameter_names,
+        acceptable_constraint_violation=acceptable_constraint_violation,
         map_arguments=map_arguments,
         solver=nlp_solver,
         assemble_solution=assemble_solution,

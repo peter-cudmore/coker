@@ -40,6 +40,58 @@ def test_legacy_casadi_options_are_forwarded():
     assert options.interation_callback is callback
 
 
+def test_transcription_defect_tolerances_are_independently_configurable():
+    system = create_autonomous_ode(
+        x0=np.array([0.0]),
+        xdot=lambda x, _parameters: x,
+        backend="casadi",
+    )
+    problem = VariationalProblem(
+        loss=lambda solution, _parameters: solution(1.0) ** 2,
+        system=system,
+        t_final=1.0,
+        transcription_options=TranscriptionOptions(
+            minimum_n_intervals=1,
+            minimum_degree=2,
+            absolute_tolerance=1e-2,
+            segment_defect_tolerance=0.0,
+            enable_scaling=False,
+            derivative_defect_tolerance=3e-4,
+        ),
+        backend="casadi",
+    )
+
+    bounds = problem.get_solver("casadi")._map_arguments({}, None)["lbg"]
+
+    assert np.any(np.isclose(bounds.full(), -1e-2))
+    assert np.any(np.isclose(bounds.full(), -3e-4))
+    assert np.any(np.isclose(bounds.full(), 0.0))
+
+
+
+
+def test_transcription_defect_tolerances_accept_zero():
+    system = create_autonomous_ode(
+        x0=np.array([0.0]),
+        xdot=lambda x, _parameters: 0.0 * x,
+        backend="casadi",
+    )
+    problem = VariationalProblem(
+        loss=lambda solution, _parameters: solution(1.0) ** 2,
+        system=system,
+        t_final=1.0,
+        transcription_options=TranscriptionOptions(
+            minimum_n_intervals=1,
+            minimum_degree=2,
+            segment_defect_tolerance=0.0,
+            derivative_defect_tolerance=0.0,
+        ),
+        backend="casadi",
+    )
+
+    solution = problem.get_solver("casadi").solve()
+
+    assert solution.solve_info.success
 def _boundary_layer_problem(*, options: CasadiVariationalOptions):
     """Build a deliberately under-resolved, stable fast-mode trajectory."""
     system = create_autonomous_ode(

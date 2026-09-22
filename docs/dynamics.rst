@@ -170,6 +170,13 @@ below that normalized width. ``maximum_degree`` must be no less than
 ``minimum_degree``. Leave ``refinement_enabled`` at its default ``False`` for
 a single transcription solve.
 
+``absolute_tolerance`` bounds initial-condition, continuity, and algebraic
+residuals. Set ``segment_defect_tolerance`` and
+``derivative_defect_tolerance`` independently to bound the integrated
+per-segment defects and the collocation derivative defects. Both default to
+``None`` and therefore inherit ``absolute_tolerance``; either may be ``0.0``
+to require an exact NLP equality.
+
 During one adaptive solve, the CasADi model setup is retained while only
 mesh-dependent NLPs are compiled. Each refined mesh interpolates the preceding
 path and seeds compatible controls, free parameters, and a free horizon from

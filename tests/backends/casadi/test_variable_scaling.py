@@ -1,9 +1,15 @@
+from types import SimpleNamespace
+
 import casadi as ca
 import numpy as np
 import pytest
 
+from coker.backends.casadi.variational.solver import (
+    _accepts_small_search_direction,
+)
 from coker.backends.casadi.variational.variable_scaling import (
     _VariableScaling,
+    _derive_constraint_scaling,
     _derive_variable_scaling,
 )
 
@@ -61,3 +67,35 @@ def test_rejects_invalid_inputs(lower, guess, upper):
 def test_rejects_wrong_vector_lengths():
     with pytest.raises(ValueError):
         _derive_variable_scaling([0.0, 0.0], [0.0], [1.0, 1.0])
+
+def test_constraint_scaling_normalizes_row_sensitivities_and_bounds():
+    decision = ca.MX.sym("decision", 2)
+    residual = ca.vertcat(1e6 * decision[0], 1e-6 * decision[1])
+    lower = np.array([-1e3, -2e-9])
+    upper = np.array([1e3, 2e-9])
+
+    scaling = _derive_constraint_scaling(
+        residual,
+        decision,
+        np.array([0.0, 0.0]),
+        lower,
+        upper,
+    )
+
+    np.testing.assert_allclose(scaling, [1e6, 1e-6])
+    np.testing.assert_allclose(lower / scaling, [-1e-3, -2e-3])
+    np.testing.assert_allclose(upper / scaling, [1e-3, 2e-3])
+
+
+def test_small_search_direction_uses_per_row_scaled_tolerance():
+    solve_info = SimpleNamespace(
+        return_status="Search_Direction_Becomes_Too_Small"
+    )
+
+    assert not _accepts_small_search_direction(
+        solve_info,
+        {"f": ca.DM(0.0), "g": ca.DM([1e-6])},
+        ca.DM([0.0]),
+        ca.DM([0.0]),
+        tolerance=ca.DM([1e-7]),
+    )
