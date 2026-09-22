@@ -324,17 +324,16 @@ class CasadiBackend(Backend):
         else:
             t_eval = end_point
 
-        u, p = inputs
-        p = self.to_backend_array(p)
+        u, *parameters = inputs
         t = ca.MX.sym("t")
         x = ca.MX.sym("x", x0.shape)
         z = ca.MX.sym("z", z0.shape)
 
-        dx_sym = dxdt(t, x, z, u, p)
+        dx_sym = dxdt(t, x, z, u, *parameters)
 
         if has_quadrature:
             q = ca.MX.sym("q", q0.shape)
-            dq_sym = dqdt(t, x, z, u, p)
+            dq_sym = dqdt(t, x, z, u, *parameters)
             txq = ca.vertcat(t, x, q)
             txq0 = ca.vertcat(ca.DM(0), x0, q0)
             xq_to_x_q = ca.Function("txq_to_x_q", [txq], [x, q])
@@ -354,7 +353,7 @@ class CasadiBackend(Backend):
         }
         if is_dae:
             dae["z"] = z
-            dae["alg"] = g(t, x, z, u, p)
+            dae["alg"] = g(t, x, z, u, *parameters)
             initial_conditions["z0"] = z0
 
         solver = ca.integrator("solver", "idas", dae, 0, t_eval, {})

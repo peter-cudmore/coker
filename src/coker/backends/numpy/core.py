@@ -137,7 +137,7 @@ class NumpyBackend(Backend):
 
         dxdt, constraint, dqdt = functions
         x0, z0, q0 = initial_conditions
-        u, p = inputs
+        u, *parameters = inputs
 
         if constraint is not Noop():
             raise NotImplementedError(
@@ -161,14 +161,17 @@ class NumpyBackend(Backend):
             y0 = x0
 
             def f(t, x):
-                return dxdt(t, x, None, u, p)
+                return dxdt(t, x, None, u, *parameters)
 
         else:
             y0 = (np.concatenate([x0, q0]),)
 
             def f(t, x):
                 return np.concatenate(
-                    [dxdt(t, x, None, u, p), dqdt(t, x, None, u, p)]
+                    [
+                        dxdt(t, x, None, u, *parameters),
+                        dqdt(t, x, None, u, *parameters),
+                    ]
                 )
 
         if isinstance(solver_parameters, NumpySolverParameters):

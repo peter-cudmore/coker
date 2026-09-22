@@ -4,6 +4,7 @@ import dataclasses
 from functools import reduce
 from operator import mul
 from typing import List, Optional, Tuple, Union
+from coker.interfaces import FunctionSignatureValue
 
 
 @dataclasses.dataclass
@@ -211,6 +212,14 @@ class FunctionSpace:
             )
             for out in self.output
         ]
+
+    def __contains__(self, value) -> bool:
+        """Return whether a Coker function has this input/output signature."""
+        if not isinstance(value, FunctionSignatureValue):
+            return False
+        return tuple(value.input_shape()) == tuple(
+            self.input_dimensions()
+        ) and tuple(value.output_shape()) == tuple(self.output_dimensions())
 
     def is_scalar(self):
         output_dimensions = self.output_dimensions()

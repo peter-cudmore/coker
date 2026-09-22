@@ -5,6 +5,7 @@ import pytest
 import numpy as np
 
 from coker import FunctionSpace, Scalar, VectorSpace, function
+from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
 from coker.dynamics import (
     BoundVector,
@@ -70,6 +71,30 @@ def test_system_accepts_a_function_valued_positional_parameter():
         ),
         np.array([9.0]),
     )
+
+
+def test_function_space_contains_matching_functions():
+    space = FunctionSpace(
+        "rate", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+    matching = function([Scalar("t")], lambda time: time, backend="numpy")
+    incompatible = function(
+        [VectorSpace("time", 2)], lambda time: time[0], backend="numpy"
+    )
+    fitted = RadialBasisFunction(centers=[0.0], width=1.0).fit(
+        space, [0.0, 1.0]
+    )
+
+    assert matching in space
+    assert fitted in space
+    assert incompatible not in space
+
+
+def test_function_space_contains_bound_callable():
+    space = FunctionSpace("constant", arguments=[], output=[Scalar("rate")])
+    bound = BoundCallable(function([], lambda: 1.0), space, ())
+
+    assert bound in space
 
 
 def test_builder_specializes_function_parameter_to_numeric_decisions():
@@ -485,3 +510,155 @@ def test_variational_problem_specializes_radial_basis_parameter():
 
     assert solution.solve_info.success
     assert solution.cost < 1e-4
+
+
+def _function_parameter_system(rate: FunctionSpace, backend: str):
+    return create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(Scalar("offset"), rate),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
+            dynamics=lambda time, _state, _z, _u, parameters: parameters[0]
+            + parameters[1](time),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend=backend,
+    )
+
+
+@pytest.mark.parametrize(
+    "integration_backend",
+    [
+        "numpy",
+        pytest.param(
+            "casadi",
+            marks=pytest.mark.skipif(
+                importlib.util.find_spec("casadi") is None,
+                reason="CasADi not available",
+            ),
+        ),
+        pytest.param(
+            "pytorch",
+            marks=pytest.mark.skipif(
+                importlib.util.find_spec("torchdiffeq") is None,
+                reason="torchdiffeq not available",
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("source", ("callable", "function", "fitted"))
+def test_system_integrates_function_valued_parameter(
+    integration_backend, source
+):
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("t")],
+        output=[Scalar("rate")],
+    )
+    system = _function_parameter_system(rate, integration_backend)
+
+    def affine_rate(time):
+        return 1.0 + time
+
+    def affine_integral(time):
+        return 3 * time + time**2 / 2
+
+    def constant_integral(time):
+        return 3 * time
+
+    if source == "callable":
+        rate_value = affine_rate
+        integral = affine_integral
+    elif source == "function":
+        rate_value = function(
+            [Scalar("time")],
+            affine_rate,
+            backend=integration_backend,
+        )
+        integral = affine_integral
+    else:
+        rate_value = RadialBasisFunction(centers=[0.0], width=1.0).fit(
+            rate, [0.0, 1.0]
+        )
+        integral = constant_integral
+
+    timeline = np.array([0.0, 0.5, 1.0])
+    trajectory = system(timeline, 2.0, rate_value)
+
+    np.testing.assert_allclose(
+        trajectory.reshape(-1), integral(timeline), rtol=1e-5
+    )
+    np.testing.assert_allclose(
+        system(1.0, 2.0, rate_value), integral(1.0), rtol=1e-5
+    )
+
+
+def test_input_system_integrates_heterogeneous_parameters():
+    input_signal = FunctionSpace(
+        "input",
+        arguments=[Scalar("t")],
+        output=[Scalar("u")],
+    )
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("t")],
+        output=[Scalar("rate")],
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=input_signal,
+            parameters=(Scalar("gain"), rate),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([0.0]), None),
+            dynamics=lambda time, _state, _z, input_value, parameters: (
+                parameters[0] * input_value(time) + parameters[1](time)
+            ),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend="numpy",
+    )
+
+    timeline = np.array([0.0, 0.5, 1.0])
+    trajectory = system(timeline, lambda _time: 2.0, 3.0, lambda time: time)
+
+    np.testing.assert_allclose(
+        trajectory.reshape(-1), 6 * timeline + timeline**2 / 2, rtol=1e-5
+    )
+
+
+def test_direct_function_parameters_reject_undeclared_input_sentinel():
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("t")],
+        output=[Scalar("rate")],
+    )
+    system = _function_parameter_system(rate, "numpy")
+
+    with pytest.raises(ValueError, match=r"expected 3, got 4"):
+        system(1.0, Noop(), 2.0, lambda _time: 1.0)
+
+
+def test_direct_function_parameters_validate_the_declared_space():
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("t")],
+        output=[Scalar("rate")],
+    )
+    system = _function_parameter_system(rate, "numpy")
+    incompatible_rate = function(
+        [VectorSpace("time", 2)],
+        lambda time: time[0],
+        backend="numpy",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Function-valued parameter 1 does not match declared "
+        r"FunctionSpace 'rate'",
+    ):
+        system(1.0, 2.0, incompatible_rate)

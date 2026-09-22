@@ -24,3 +24,4 @@
 ### Fixed
 - Preserve configured adaptive transcription interval counts.
 - Preserve legacy CasADi `TranscriptionOptions` compatibility.
+- Direct trajectory evaluation supports heterogeneous scalar, vector, and function-valued parameters.

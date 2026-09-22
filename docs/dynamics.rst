@@ -187,32 +187,48 @@ Heterogeneous and function-valued parameters
 
 ``DynamicsSpec.parameters`` may be one declaration or a positional tuple of
 ``Scalar``, ``VectorSpace``, and ``FunctionSpace`` declarations. A dynamics
-callback receives that same positional layout as one final ``p`` tuple:
+callback receives that same positional layout as one final ``p`` tuple.
 
+Direct trajectory evaluation retains that declaration order. For a system
+without declared inputs, call ``system(time, *parameters)``. For a system with
+declared inputs, call ``system(time, input_value, *parameters)``. Do not add an
+input placeholder to the no-input form.
+
+For example, first declare the function-valued slot:
 
 .. code-block:: python
 
+   import numpy as np
+
    from coker import FunctionSpace, Scalar, VectorSpace
-   from coker.algebra.ops import Noop
-   from coker.dynamics import DynamicsSpec, create_dynamics_from_spec
 
    gain_curve = FunctionSpace(
        "gain_curve",
-       arguments=[Scalar("speed")],
+       arguments=[Scalar("time")],
        output=[Scalar("gain")],
    )
-   system = create_dynamics_from_spec(
-       DynamicsSpec(
-           inputs=Noop(),
-           parameters=(gain_curve, VectorSpace("offset", 2)),
-           algebraic=None,
-           initial_conditions=lambda _z, _u, _p: (0.0, None),
-           dynamics=lambda _t, x, _z, _u, p: p[0](x[0]) + p[1][0],
-           constraints=Noop(),
-           outputs=lambda _t, x, _z, _u, _p, _q: x,
-           quadratures=Noop(),
-       )
-   )
+   # ``system`` was declared with:
+   # parameters=(Scalar("offset"), VectorSpace("bias", 2), gain_curve)
+
+   time = np.array([0.0, 0.5, 1.0])
+   offset = 2.0
+   bias = np.array([0.25, -0.25])
+   gain_curve_value = lambda time: 1.0 + time
+
+   trajectory = system(time, offset, bias, gain_curve_value)
+
+For an otherwise equivalent system with a declared input, put its input value
+immediately after time:
+
+.. code-block:: python
+
+   trajectory = system(time, input_value, offset, bias, gain_curve_value)
+
+Values for a declared ``FunctionSpace`` parameter may be ordinary Python
+callables, :class:`coker.Function` objects, or
+:class:`~coker.dynamics.FittedFunction` objects. Coker normalizes and validates
+these values once before integration, so callers do not provide backend-native
+or lowered handles. No ``Noop`` placeholder is used for direct evaluation.
 
 The variational builder receives one declaration for each positional parameter.
 Use ``BoundVector`` for a bounded vector decision block, and

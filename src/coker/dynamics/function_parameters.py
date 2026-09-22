@@ -12,9 +12,10 @@ import numpy as np
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, function
 from coker.algebra.graph import if_then_else
+from coker.interfaces import FunctionSignatureValue
 
 
-class FittedFunction:
+class FittedFunction(FunctionSignatureValue):
     """A concrete function reconstructed from fitted parameter decisions."""
 
     def __init__(
@@ -31,6 +32,12 @@ class FittedFunction:
 
     def __call__(self, *arguments: Any, **kwargs: Any) -> Any:
         return self.function(*arguments, **kwargs)
+
+    def input_shape(self):
+        return tuple(self.space.input_dimensions())
+
+    def output_shape(self):
+        return tuple(self.space.output_dimensions())
 
 
 class FunctionParameter(ABC):

@@ -8,8 +8,10 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.function import Function
+from coker.algebra.function import Function, function
 from coker.algebra.ops import Noop
+from coker.dynamics.function_parameters import FittedFunction
+
 
 ParameterDeclaration: TypeAlias = Scalar | VectorSpace | FunctionSpace
 DynamicsParameters: TypeAlias = (
@@ -72,76 +74,125 @@ class DynamicalSystem:
     def backend(self):
         return self.dxdt.backend
 
-    def _map_arguments(self, *args):
-        arg_stack = list(reversed(args))
-        t = arg_stack.pop()
-        try:
-            u = (
-                arg_stack.pop()
-                if self.inputs is not Noop() or len(args) == 3
-                else None
-            )
-            p = (
-                arg_stack.pop()
-                if self.parameters is not None or len(args) == 3
-                else None
-            )
-        except IndexError as ex:
-            raise ValueError(
-                "Invalid number of arguments: expected 2 - 3, "
-                f"received: {len(args)}"
-            ) from ex
+    def _prepare_backend_value(self, backend, value):
+        return (
+            value
+            if value is None or callable(value)
+            else backend.to_backend_array(value)
+        )
 
-        return t, u, p
+    def _prepare_direct_parameter(
+        self, declaration: ParameterDeclaration, value, index: int
+    ) -> object:
+        if not isinstance(declaration, FunctionSpace):
+            return value
+
+        if isinstance(value, Function):
+            if value.backend != self.backend():
+                raise ValueError(
+                    f"Function-valued parameter {index} uses backend "
+                    f"{value.backend!r}, expected {self.backend()!r}"
+                )
+            if value not in declaration:
+                raise ValueError(
+                    f"Function-valued parameter {index} does not match "
+                    f"declared FunctionSpace {declaration.name!r}"
+                )
+            return value
+
+        if isinstance(value, FittedFunction) and value not in declaration:
+            raise ValueError(
+                f"Function-valued parameter {index} does not match declared "
+                f"FunctionSpace {declaration.name!r}"
+            )
+        if not callable(value):
+            raise TypeError(
+                f"Function-valued parameter {index} must be callable"
+            )
+
+        prepared = function(
+            declaration.arguments, value, backend=self.backend()
+        )
+        if prepared not in declaration:
+            raise ValueError(
+                f"Function-valued parameter {index} does not match declared "
+                f"FunctionSpace {declaration.name!r}"
+            )
+        return prepared
+
+    def _map_arguments(
+        self, *args
+    ) -> tuple[object, object, tuple[object, ...]]:
+        declarations = (
+            ()
+            if self.parameters is None
+            else (
+                self.parameters
+                if isinstance(self.parameters, tuple)
+                else (self.parameters,)
+            )
+        )
+        has_inputs = self.inputs is not Noop()
+        expected_count = 1 + int(has_inputs) + len(declarations)
+        if len(args) != expected_count:
+            raise ValueError(
+                "Trajectory argument count does not match the system "
+                f"declaration: expected {expected_count}, got {len(args)}"
+            )
+
+        time = args[0]
+        input_value = args[1] if has_inputs else None
+        parameter_start = 1 + int(has_inputs)
+        parameters = tuple(
+            self._prepare_direct_parameter(declaration, value, index)
+            for index, (declaration, value) in enumerate(
+                zip(declarations, args[parameter_start:])
+            )
+        )
+        return time, input_value, parameters if declarations else (None,)
 
     def __call__(self, *args):
         from coker.backends import get_backend_by_name
 
-        t, u, p = self._map_arguments(*args)
-
-        x0, z0 = self.x0(0, u, p)
-
-        # solve ODE
-        # x' = dxdt(...)
-        # 0  = g(...)
-        # to get x,z over the interval
+        t, u, parameter_arguments = self._map_arguments(*args)
+        backend = get_backend_by_name(self.dxdt.backend)
+        u = self._prepare_backend_value(backend, u)
+        parameter_arguments = tuple(
+            self._prepare_backend_value(backend, parameter)
+            for parameter in parameter_arguments
+        )
+        x0, z0 = self.x0(0, u, *parameter_arguments)
 
         if self.dqdt is not Noop():
-            # zeros, the same size a q
             raise NotImplementedError
-        else:
-            q0 = None
+        q0 = None
 
-        backend = get_backend_by_name(self.dxdt.backend)
         x, z, q = backend.evaluate_integrals(
             [self.dxdt, self.g, self.dqdt],
             [x0, z0, q0],
             t,
-            [u, p],
+            [u, *parameter_arguments],
             solver_parameters=self.solver_parameters,
         )
 
         if isinstance(t, (float, int)):
-            return self.y(t, x, z, u, p, q)
+            return self.y(t, x, z, u, *parameter_arguments, q)
 
-        def map_args(i):
-            x_i = x[:, i]
-            z_i = z[:, i] if z is not None else None
-            q_i = q[:, i] if q is not None else None
-            return x_i, z_i, u, p, q_i
+        def map_args(index):
+            x_i = x[:, index]
+            z_i = z[:, index] if z is not None else None
+            q_i = q[:, index] if q is not None else None
+            return x_i, z_i, u, *parameter_arguments, q_i
 
         if self.y.output_shape()[0].is_scalar() or self.y.output_shape()[
             0
         ].dim == (1,):
-            y = np.concatenate(
-                [self.y(t_i, *map_args(i)) for i, t_i in enumerate(t)]
+            return np.concatenate(
+                [self.y(t_i, *map_args(index)) for index, t_i in enumerate(t)]
             )
-        else:
-            y = np.vstack(
-                [self.y(t_i, *map_args(i)) for i, t_i in enumerate(t)]
-            )
-
-        return y
+        return np.vstack(
+            [self.y(t_i, *map_args(index)) for index, t_i in enumerate(t)]
+        )
 
     def output_as_function_space(self) -> FunctionSpace:
         t, _x, _z, u, *parameter_shapes, _q = self.y.input_shape()

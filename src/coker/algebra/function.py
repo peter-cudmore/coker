@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 
-from coker.interfaces import SymbolicCallable
+from coker.interfaces import FunctionSignatureValue, SymbolicCallable
 import numpy as np
 
 from coker.algebra.dimensions import (
@@ -37,7 +37,7 @@ from coker.backends.lowered import (
 )
 
 
-class Function(SymbolicCallable):
+class Function(SymbolicCallable, FunctionSignatureValue):
     """A compiled Coker function.
 
     Created by :func:`function`.  Holds the traced computation graph and
@@ -399,7 +399,7 @@ class Function(SymbolicCallable):
         return InequalityExpression(self, other, ones * np.inf, is_equal=False)
 
 
-class BoundCallable(SymbolicCallable):
+class BoundCallable(SymbolicCallable, FunctionSignatureValue):
     """A public callable view over a target with explicit bound arguments."""
 
     def __init__(
@@ -433,6 +433,12 @@ class BoundCallable(SymbolicCallable):
 
     def lower(self, options=None) -> LoweredFunction:
         return self.target.lower(options)
+
+    def input_shape(self):
+        return tuple(self.public_space.input_dimensions())
+
+    def output_shape(self):
+        return tuple(self.public_space.output_dimensions())
 
 
 class InequalityExpression:
