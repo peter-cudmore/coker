@@ -74,14 +74,41 @@ class FunctionParameter(ABC):
     ) -> FittedFunction:
         """Construct a fitted function from structured concrete values."""
         target = self.validate_target(target)
-        values = _normalise_concrete_values(
-            parameters, self.list_concrete_parameters()
-        )
+        declarations = self.list_concrete_parameters()
+        if not isinstance(parameters, (tuple, list)):
+            raise TypeError(
+                "function parameter values must be a structured sequence"
+            )
+        if len(parameters) != len(declarations):
+            raise ValueError("function parameter values have the wrong arity")
+        values: list[Any] = []
+        for value, declaration in zip(parameters, declarations):
+            if isinstance(declaration, (BoundVector, DenseTensorVariable)):
+                value = np.asarray(value, dtype=float)
+                if value.shape != declaration.shape:
+                    raise ValueError(
+                        f"function parameter {declaration.name!r} has shape "
+                        f"{value.shape}, expected {declaration.shape}"
+                    )
+            elif isinstance(declaration, (BoundedVariable, UnboundedVariable)):
+                value = np.asarray(value, dtype=float)
+                if value.size != 1:
+                    raise ValueError(
+                        f"function parameter {declaration.name!r} must be "
+                        "scalar"
+                    )
+                value = float(value.reshape(-1)[0])
+            else:
+                raise TypeError(
+                    "function parameter declarations must be scalar or dense "
+                    "variables"
+                )
+            values.append(value)
         return FittedFunction(
             self,
             target,
             lambda argument: self.evaluate(values, argument),
-            values,
+            tuple(values),
         )
 
     def build_function(
@@ -121,41 +148,6 @@ def _concrete_parameter_space(
     raise TypeError(
         "function parameter declarations must be scalar or dense variables"
     )
-
-
-def _normalise_concrete_values(
-    values: Sequence[Any], declarations: Sequence[ParameterVariable]
-) -> tuple[Any, ...]:
-    if not isinstance(values, (tuple, list)):
-        raise TypeError(
-            "function parameter values must be a structured sequence"
-        )
-    if len(values) != len(declarations):
-        raise ValueError("function parameter values have the wrong arity")
-
-    normalised: list[Any] = []
-    for value, declaration in zip(values, declarations):
-        if isinstance(declaration, (BoundVector, DenseTensorVariable)):
-            array = np.asarray(value, dtype=float)
-            if array.shape != declaration.shape:
-                raise ValueError(
-                    f"function parameter {declaration.name!r} has shape "
-                    f"{array.shape}, expected {declaration.shape}"
-                )
-            normalised.append(array)
-        elif isinstance(declaration, (BoundedVariable, UnboundedVariable)):
-            array = np.asarray(value, dtype=float)
-            if array.size != 1:
-                raise ValueError(
-                    f"function parameter {declaration.name!r} must be scalar"
-                )
-            normalised.append(float(array.reshape(-1)[0]))
-        else:
-            raise TypeError(
-                "function parameter declarations must be scalar or dense "
-                "variables"
-            )
-    return tuple(normalised)
 
 
 def _vector_width(space: VectorSpace, description: str) -> int:
@@ -593,10 +585,6 @@ class ClosureParameter(FunctionParameter):
         backend: str = "numpy",
     ) -> ClosureParameter:
         """Trace an implementation whose concrete blocks precede its inputs."""
-        if not callable(implementation):
-            raise TypeError("implementation must be callable")
-        if not parameters:
-            raise ValueError("parameters must not be empty")
         function_name = name or f"bound_{implementation.__name__}"
         return ClosureParameter(
             function(
