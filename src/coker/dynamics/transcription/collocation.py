@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from functools import reduce
 from operator import mul
@@ -163,6 +164,67 @@ def generate_discritisation_operators(
 ]:
     """Generate uncached discretisation operators for one interval."""
     return _build_reference_operators(n).scale_to_interval(interval)
+
+
+def _predict_refined_degree(
+    *, error: float, tolerance: float, degree: int
+) -> int:
+    """Predict the p-refined degree using the Patterson--Hager--Rao rule."""
+    if not math.isfinite(error) or error <= 0:
+        raise ValueError("error must be finite and positive")
+    if not math.isfinite(tolerance) or tolerance <= 0:
+        raise ValueError("tolerance must be finite and positive")
+    if degree <= 1:
+        raise ValueError("degree must be greater than one")
+    if error <= tolerance:
+        return degree
+    increment = math.ceil(
+        (math.log(error) - math.log(tolerance)) / math.log(degree)
+    )
+    return degree + increment
+
+
+def _split_refined_interval(
+    *,
+    interval: Tuple[float, float],
+    predicted_degree: int,
+    maximum_degree: int,
+    minimum_degree: int,
+    minimum_interval_duration: float,
+) -> Tuple[Tuple[Tuple[float, float], ...], Tuple[int, ...]]:
+    """Select a p-refined interval or the required GPOPS h-refinement."""
+    start, stop = interval
+    if not math.isfinite(start) or not math.isfinite(stop) or start >= stop:
+        raise ValueError("interval must have finite increasing bounds")
+    if predicted_degree < 1:
+        raise ValueError("predicted_degree must be positive")
+    if maximum_degree < 1:
+        raise ValueError("maximum_degree must be positive")
+    if minimum_degree < 1:
+        raise ValueError("minimum_degree must be positive")
+    if (
+        not math.isfinite(minimum_interval_duration)
+        or minimum_interval_duration <= 0
+    ):
+        raise ValueError(
+            "minimum_interval_duration must be finite and positive"
+        )
+    if predicted_degree <= maximum_degree:
+        return (interval,), (predicted_degree,)
+
+    count = max(2, math.ceil(predicted_degree / minimum_degree))
+    duration = (stop - start) / count
+    if duration < minimum_interval_duration:
+        raise RuntimeError(
+            "CasADi adaptive refinement cannot split interval "
+            f"[{start}, {stop}] below minimum_interval_duration"
+        )
+    boundaries = [start + duration * index for index in range(count)]
+    boundaries.append(stop)
+    return (
+        tuple(zip(boundaries[:-1], boundaries[1:])),
+        (minimum_degree,) * count,
+    )
 
 
 class InterpolatingPoly:

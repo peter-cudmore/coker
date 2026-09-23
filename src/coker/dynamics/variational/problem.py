@@ -66,8 +66,9 @@ class TranscriptionOptions:
             interval.
         absolute_tolerance: Default permitted absolute residual for
             transcription equality constraints.
-        segment_defect_tolerance: Override for integral segment defects.
-            ``None`` uses ``absolute_tolerance``; zero enforces equality.
+        segment_defect_tolerance: Reference tolerance retained with physical
+            post-solve segment-defect diagnostics. ``None`` uses
+            ``absolute_tolerance``; it does not add NLP constraints.
         derivative_defect_tolerance: Override for collocation derivative
             defects. ``None`` uses ``absolute_tolerance``; zero enforces
             equality.

@@ -9,6 +9,8 @@ import casadi as ca
 import numpy as np
 from coker.dynamics.transcription.collocation import (
     _build_reference_operators,
+    _predict_refined_degree,
+    _split_refined_interval,
     lgr_points,
 )
 
@@ -34,6 +36,7 @@ from coker.dynamics import (
     VariationalSolution,
     split_at_non_differentiable_points,
 )
+from coker.dynamics.variational.solution import SegmentDefectDiagnostic
 from coker.toolkits.codesign.optimisation import (
     SolveFailure,
     solve_info_from_casadi_stats,
@@ -488,6 +491,100 @@ class _TranscriptionFactory:
             np.max(np.abs(state_derivatives - model_dynamics) / scale)
         )
 
+    def measure_interval_segment_defect(
+        self, poly, solution: VariationalSolution
+    ) -> SegmentDefectDiagnostic:
+        """Measure one collocation segment residual in physical units."""
+        state_rates = []
+        quadrature_rates = []
+        for time, value, _derivative in poly.knot_points():
+            control = solution.control_law(float(time))
+            state = value[: self.x_size]
+            algebraic = value[self.x_size : self.x_size + self.z_size]
+            quadrature = value[self.x_size + self.z_size :]
+            physical_time = float(time) * solution.t_final
+            (dynamics,) = self.evaluate_dynamics(
+                physical_time,
+                state,
+                algebraic,
+                control,
+                solution._parameter_vector,
+            )
+            state_rates.append(
+                np.asarray(dynamics, dtype=float).reshape((-1,))
+            )
+            if self.q_size == 0:
+                continue
+            rates = []
+            if self.has_state_quadrature:
+                (base_rate,) = self.evaluate_quadrature(
+                    physical_time,
+                    state,
+                    algebraic,
+                    control,
+                    solution._parameter_vector,
+                )
+                rates.append(np.asarray(base_rate, dtype=float).reshape((-1,)))
+            rates.extend(
+                np.asarray(rate, dtype=float).reshape((-1,))
+                for rate in self.evaluate_registered_quadratures(
+                    (
+                        physical_time,
+                        state,
+                        algebraic,
+                        control,
+                        solution._parameter_vector,
+                        quadrature,
+                    )
+                )
+            )
+            quadrature_rates.append(np.concatenate(rates))
+
+        weights = np.asarray(poly.weights, dtype=float).reshape((-1,))[:-1]
+        _, start_value = poly.start_point()
+        _, end_value = poly.end_point()
+        state_residual = (
+            np.asarray(end_value[: self.x_size], dtype=float).reshape((-1,))
+            - np.asarray(start_value[: self.x_size], dtype=float).reshape(
+                (-1,)
+            )
+            - solution.t_final * np.column_stack(state_rates) @ weights
+        )
+        if self.q_size == 0:
+            quadrature_residual = np.zeros((0,), dtype=float)
+        else:
+            quadrature_residual = (
+                np.asarray(
+                    end_value[self.x_size + self.z_size :], dtype=float
+                ).reshape((-1,))
+                - np.asarray(
+                    start_value[self.x_size + self.z_size :], dtype=float
+                ).reshape((-1,))
+                - solution.t_final
+                * np.column_stack(quadrature_rates)
+                @ weights
+            )
+        normalized_interval = tuple(float(t) for t in poly.interval)
+        return SegmentDefectDiagnostic(
+            normalized_interval=normalized_interval,
+            physical_interval=tuple(
+                solution.t_final * time for time in normalized_interval
+            ),
+            degree=poly.degree,
+            tolerance=self.segment_defect_tolerance,
+            state_residual=state_residual,
+            quadrature_residual=quadrature_residual,
+        )
+
+    def measure_segment_defects(
+        self, solution: VariationalSolution
+    ) -> Tuple[SegmentDefectDiagnostic, ...]:
+        """Return physical segment diagnostics for every solved interval."""
+        return tuple(
+            self.measure_interval_segment_defect(poly, solution)
+            for poly in solution.path.polys
+        )
+
 
 def _create_solver(
     factory: _TranscriptionFactory,
@@ -505,6 +602,13 @@ def _create_solver(
         intervals=intervals,
         degrees=list(degrees),
         factory=factory,
+        shared_value_indices=tuple(range(factory.x_size))
+        + tuple(
+            range(
+                factory.x_size + factory.z_size,
+                factory.path_size,
+            )
+        ),
     )
     horizon = problem.horizon_decision
     layout = DecisionLayout(
@@ -533,9 +637,7 @@ def _create_solver(
             equality_values.append(value)
             equality_tolerances.append(tolerance)
 
-    (t0, x0_symbol), *x_start = list(poly_collection.interval_starts())
-    x_end = list(poly_collection.interval_ends())[:-1]
-
+    t0, x0_symbol = next(poly_collection.interval_starts())
     x0_guess, z0_guess = factory.casadi.evaluate(
         problem.system.x0,
         [t0, factory.u_guess, factory.proj_p @ factory.p0_guess],
@@ -550,9 +652,6 @@ def _create_solver(
         append_equality(factory.proj_z @ x0_symbol - z0_val, factory.tolerance)
     if factory.q_size > 0:
         append_equality(factory.proj_q @ x0_symbol, factory.tolerance)
-
-    for (_, xs_i), (_, xe_i) in zip(x_start, x_end):
-        append_equality(xs_i - xe_i, factory.tolerance)
 
     def append_constraint(constraint, args):
         (value,) = factory.casadi.evaluate(constraint.residual, args)
@@ -581,8 +680,6 @@ def _create_solver(
         append_constraint(constraint, initial_args)
 
     for poly in poly_collection.polys:
-        interval_dynamics = []
-        interval_quadratures = []
         for t, v, dv in poly.knot_points():
             physical_t = duration * t
             x = factory.proj_x @ v
@@ -596,7 +693,6 @@ def _create_solver(
                 factory.proj_p @ factory.p,
             )
             scale = duration
-            interval_dynamics.append(scale * dynamics_ij)
             append_equality(
                 dx - scale * dynamics_ij,
                 factory.derivative_defect_tolerance,
@@ -631,7 +727,6 @@ def _create_solver(
                     dq - quadrature_ij,
                     factory.derivative_defect_tolerance,
                 )
-                interval_quadratures.append(quadrature_ij)
 
             if factory.z_size > 0:
                 (alg,) = factory.evaluate_algebraic(
@@ -642,23 +737,6 @@ def _create_solver(
                     factory.proj_p @ factory.p,
                 )
                 append_equality(alg, factory.tolerance)
-
-        _, v_start = poly.start_point()
-        _, v_end = poly.end_point()
-        d_x = ca.hcat(interval_dynamics)
-        weights = ca.DM(poly.weights[0, :-1])
-        append_equality(
-            factory.proj_x @ v_end - factory.proj_x @ v_start - d_x @ weights,
-            factory.segment_defect_tolerance,
-        )
-        if factory.q_size > 0:
-            d_q = ca.hcat(interval_quadratures)
-            append_equality(
-                factory.proj_q @ v_end
-                - factory.proj_q @ v_start
-                - d_q @ weights,
-                factory.segment_defect_tolerance,
-            )
 
     # Path constraints apply at interval endpoints and collocation knots.
     for poly in poly_collection.polys:
@@ -798,8 +876,7 @@ def _create_solver(
         (z0_guess if z0_guess is not None else ca.DM.zeros(factory.z_size, 1)),
         ca.DM.zeros(factory.q_size, 1),
     )
-    n_reps = int(path_symbols.shape[0] / state_guess.shape[0])
-    path_guess = ca.repmat(state_guess, n_reps)
+    path_guess = poly_collection.constant_guess(state_guess)
     raw_decision_variables = decision_variables
     physical_decision_variables_0 = layout.guess(
         path_guess, factory.u_guess, factory.p_guess_base
@@ -896,6 +973,7 @@ def _create_solver(
     )
     assemble_solution = CasadiSolutionAssembler(
         problem=problem,
+        factory=factory,
         output_function=f_out,
         poly_collection=poly_collection,
         projectors=projectors,
@@ -968,12 +1046,7 @@ def _create_solver(
     )
 
     def interpolate_path_guess(previous_path) -> ca.DM:
-        knot_values = [
-            ca.DM(previous_path(float(t))).reshape((factory.path_size, 1))
-            for poly in poly_collection.polys
-            for t in poly.knot_times()
-        ]
-        return ca.vertcat(*knot_values)
+        return poly_collection.collect_guess(previous_path)
 
     def compatible_control_guess(previous_solution) -> Optional[ca.DM]:
         if factory.control_factory is None:
@@ -1098,6 +1171,14 @@ def create_variational_solver(
         raise ValueError(
             "maximum_degree must be at least transcription minimum_degree"
         )
+    if (
+        options.refinement_enabled
+        and problem.transcription_options.minimum_degree <= 1
+    ):
+        raise ValueError(
+            "transcription minimum_degree must be greater than one "
+            "for adaptive refinement"
+        )
 
     factory = _TranscriptionFactory(problem)
     initial_intervals = split_at_non_differentiable_points(
@@ -1183,33 +1264,24 @@ def create_variational_solver(
                     new_intervals.append((start, stop))
                     new_degrees.append(degree)
                     continue
-                predicted = degree + max(
-                    1,
-                    int(
-                        math.ceil(
-                            math.log(
-                                max(error, 1e-300) / options.mesh_tolerance
-                            )
-                        )
+                predicted = _predict_refined_degree(
+                    error=error,
+                    tolerance=options.mesh_tolerance,
+                    degree=degree,
+                )
+                refined_intervals, refined_degrees = _split_refined_interval(
+                    interval=(start, stop),
+                    predicted_degree=predicted,
+                    maximum_degree=options.maximum_degree,
+                    minimum_degree=(
+                        problem.transcription_options.minimum_degree
+                    ),
+                    minimum_interval_duration=(
+                        options.minimum_interval_duration
                     ),
                 )
-                if predicted <= options.maximum_degree:
-                    new_intervals.append((start, stop))
-                    new_degrees.append(predicted)
-                    continue
-                midpoint = (start + stop) / 2.0
-                if stop - start <= 2.0 * options.minimum_interval_duration:
-                    raise RuntimeError(
-                        "CasADi adaptive refinement cannot split interval "
-                        f"[{start}, {stop}] below minimum_interval_duration"
-                    )
-                new_intervals.extend(((start, midpoint), (midpoint, stop)))
-                new_degrees.extend(
-                    (
-                        problem.transcription_options.minimum_degree,
-                        problem.transcription_options.minimum_degree,
-                    )
-                )
+                new_intervals.extend(refined_intervals)
+                new_degrees.extend(refined_degrees)
             previous_solution = solution
             intervals, degrees = new_intervals, new_degrees
         raise RuntimeError(
@@ -1225,6 +1297,7 @@ class CasadiSolutionAssembler:
         self,
         *,
         problem: VariationalProblem,
+        factory: _TranscriptionFactory,
         output_function: ca.Function,
         poly_collection: "SymbolicPolyCollection",
         projectors: Tuple[
@@ -1235,6 +1308,7 @@ class CasadiSolutionAssembler:
         decode_controls: Optional[Callable[[ca.DM], list]],
     ):
         self.problem = problem
+        self.factory = factory
         self.output_function = output_function
         self.poly_collection = poly_collection
         self.projectors = projectors
@@ -1273,7 +1347,7 @@ class CasadiSolutionAssembler:
             if self.decode_controls is not None
             else None
         )
-        return VariationalSolution.from_solver(
+        solution = VariationalSolution.from_solver(
             cost=loss,
             projectors=tuple(
                 projector.copy() if projector is not None else None
@@ -1290,6 +1364,10 @@ class CasadiSolutionAssembler:
             path_constraint_exprs=self.problem.path_constraints,
             terminal_constraint_exprs=self.problem.terminal_constraints,
         )
+        solution.segment_defects = self.factory.measure_segment_defects(
+            solution
+        )
+        return solution
 
 
 class SymbolicPoly(InterpolatingPoly):
@@ -1300,9 +1378,14 @@ class SymbolicPoly(InterpolatingPoly):
         interval,
         degree,
         factory: Optional[_TranscriptionFactory] = None,
+        values: Optional[ca.MX] = None,
+        decision_values: Optional[ca.MX] = None,
     ):
         size = (degree + 1) * dimension
-        values = ca.MX.sym(name, size)
+        values = ca.MX.sym(name, size) if values is None else values
+        self._decision_values = (
+            values if decision_values is None else decision_values
+        )
         super().__init__(
             dimension,
             interval,
@@ -1316,7 +1399,7 @@ class SymbolicPoly(InterpolatingPoly):
         )
 
     def symbols(self):
-        return self.values
+        return self._decision_values
 
     def __call__(self, t):
         s = self._map_to_reference_coordinate(t)
@@ -1338,9 +1421,6 @@ class SymbolicPoly(InterpolatingPoly):
 
 
 class SymbolicPolyCollection(InterpolatingPolyCollection):
-    def symbols(self):
-        return ca.vertcat(*[p.values for p in self.polys])
-
     def __init__(
         self,
         name,
@@ -1348,41 +1428,153 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
         intervals,
         degrees,
         factory: Optional[_TranscriptionFactory] = None,
+        shared_value_indices: Optional[Tuple[int, ...]] = None,
     ):
         assert len(intervals) == len(degrees)
-        polys = [
-            SymbolicPoly(
-                f"{name}_{i}",
-                dimension,
-                interval,
-                degree,
-                factory=factory,
+        self._dimension = dimension
+        self.shared_value_indices = tuple(
+            range(dimension)
+            if shared_value_indices is None
+            else shared_value_indices
+        )
+        if len(set(self.shared_value_indices)) != len(
+            self.shared_value_indices
+        ) or any(
+            index < 0 or index >= dimension
+            for index in self.shared_value_indices
+        ):
+            raise ValueError(
+                "shared_value_indices must be unique component indices"
             )
-            for i, (interval, degree) in enumerate(zip(intervals, degrees))
-        ]
+        self._unshared_value_indices = tuple(
+            index
+            for index in range(dimension)
+            if index not in self.shared_value_indices
+        )
+        polys = []
+        for i, (interval, degree) in enumerate(zip(intervals, degrees)):
+            if i == 0:
+                values = ca.MX.sym(f"{name}_{i}", (degree + 1) * dimension)
+                decision_values = values
+            else:
+                unshared_start = (
+                    ca.MX.sym(
+                        f"{name}_{i}_start",
+                        len(self._unshared_value_indices),
+                    )
+                    if self._unshared_value_indices
+                    else ca.MX.zeros(0, 1)
+                )
+                boundary_values = self._boundary_values(
+                    polys[-1].end_point()[1],
+                    unshared_start,
+                )
+                tail_values = ca.MX.sym(f"{name}_{i}_tail", degree * dimension)
+                values = ca.vertcat(boundary_values, tail_values)
+                decision_values = ca.vertcat(unshared_start, tail_values)
+            polys.append(
+                SymbolicPoly(
+                    f"{name}_{i}",
+                    dimension,
+                    interval,
+                    degree,
+                    factory=factory,
+                    values=values,
+                    decision_values=decision_values,
+                )
+            )
         super().__init__(polys)
+        self._symbols = ca.vertcat(*[poly.symbols() for poly in polys])
+        self._symbol_size = int(self._symbols.shape[0])
+
+    def _boundary_values(
+        self, previous_end: ca.MX, unshared_values: ca.MX
+    ) -> ca.MX:
+        unshared_offset = 0
+        values = []
+        for index in range(self._dimension):
+            if index in self.shared_value_indices:
+                values.append(previous_end[index])
+            else:
+                values.append(unshared_values[unshared_offset])
+                unshared_offset += 1
+        return ca.vertcat(*values) if values else ca.MX.zeros(0, 1)
+
+    def symbols(self):
+        return self._symbols
+
+    def size(self):
+        return self._symbol_size
+
+    def _unshared_values(self, values: ca.DM) -> ca.DM:
+        if not self._unshared_value_indices:
+            return ca.MX.zeros(0, 1)
+        return ca.vertcat(
+            *[values[index] for index in self._unshared_value_indices]
+        )
+
+    def constant_guess(self, value: ca.DM) -> ca.DM:
+        """Repeat one path value in the compact decision storage."""
+        pieces = [
+            ca.repmat(value, self.polys[0].degree + 1),
+        ]
+        for poly in self.polys[1:]:
+            if self._unshared_value_indices:
+                pieces.append(self._unshared_values(value))
+            pieces.append(ca.repmat(value, poly.degree))
+        return ca.vertcat(*pieces)
+
+    def collect_guess(self, path: InterpolatingPolyCollection) -> ca.DM:
+        """Sample a fixed path into the compact decision storage."""
+        pieces = []
+        for index, poly in enumerate(self.polys):
+            values = [
+                ca.DM(path(float(time))).reshape((poly.dimension, 1))
+                for time in poly.knot_times()
+            ]
+            if index == 0:
+                pieces.extend(values)
+                continue
+            if self._unshared_value_indices:
+                pieces.append(self._unshared_values(values[0]))
+            pieces.extend(values[1:])
+        return ca.vertcat(*pieces)
 
     def to_fixed(self, array):
-        size = sum(p.size() for p in self.polys)
         np_array = np.array(array)
-        assert np_array.shape == (size, 1)
+        assert np_array.shape == (self._symbol_size, 1)
 
-        slices = []
+        polys = []
+        fixed_values = []
         offset = 0
-        for p in self.polys:
-            slices.append(slice(offset, offset + p.size()))
-            offset += p.size()
-
-        polys = [
-            InterpolatingPoly(
-                p.dimension,
-                p.interval,
-                p.degree,
-                np_array[slc],
-                reference_operators=p._reference_operators,
+        for index, poly in enumerate(self.polys):
+            decision_size = int(poly.symbols().shape[0])
+            decision_values = np_array[offset : offset + decision_size]
+            offset += decision_size
+            if index == 0:
+                values = decision_values
+            else:
+                start = np.empty((poly.dimension, 1), dtype=np_array.dtype)
+                previous_end = fixed_values[-1][-poly.dimension :]
+                start[list(self.shared_value_indices)] = previous_end[
+                    list(self.shared_value_indices)
+                ]
+                unshared_size = len(self._unshared_value_indices)
+                start[list(self._unshared_value_indices)] = decision_values[
+                    :unshared_size
+                ]
+                values = np.vstack((start, decision_values[unshared_size:]))
+            assert values.shape == (poly.size(), 1)
+            fixed_values.append(values)
+            polys.append(
+                InterpolatingPoly(
+                    poly.dimension,
+                    poly.interval,
+                    poly.degree,
+                    values,
+                    reference_operators=poly._reference_operators,
+                )
             )
-            for (p, slc) in zip(self.polys, slices)
-        ]
         return InterpolatingPolyCollection(polys)
 
     def __call__(self, t):

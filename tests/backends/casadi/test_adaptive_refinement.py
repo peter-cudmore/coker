@@ -40,6 +40,11 @@ def test_legacy_casadi_options_are_forwarded():
     assert options.interation_callback is callback
 
 
+def test_adaptive_options_reject_nonfinite_tolerance():
+    with pytest.raises(ValueError, match="mesh_tolerance must be finite"):
+        CasadiVariationalOptions(mesh_tolerance=float("nan"))
+
+
 def test_transcription_defect_tolerances_are_independently_configurable():
     system = create_autonomous_ode(
         x0=np.array([0.0]),
@@ -65,13 +70,13 @@ def test_transcription_defect_tolerances_are_independently_configurable():
 
     assert np.any(np.isclose(bounds.full(), -1e-2))
     assert np.any(np.isclose(bounds.full(), -3e-4))
-    assert np.any(np.isclose(bounds.full(), 0.0))
+    assert not np.any(np.isclose(bounds.full(), 0.0))
 
 
-def test_transcription_defect_tolerances_accept_zero():
+def test_zero_defect_tolerances_omit_redundant_segment_rows():
     system = create_autonomous_ode(
-        x0=np.array([0.0]),
-        xdot=lambda x, _parameters: 0.0 * x,
+        x0=np.array([1.0]),
+        xdot=lambda x, _parameters: x,
         backend="casadi",
     )
     problem = VariationalProblem(
@@ -79,17 +84,64 @@ def test_transcription_defect_tolerances_accept_zero():
         system=system,
         t_final=1.0,
         transcription_options=TranscriptionOptions(
-            minimum_n_intervals=1,
+            minimum_n_intervals=2,
             minimum_degree=2,
+            absolute_tolerance=1e-2,
             segment_defect_tolerance=0.0,
             derivative_defect_tolerance=0.0,
+            enable_scaling=False,
         ),
         backend="casadi",
     )
 
-    solution = problem.get_solver("casadi").solve()
+    solver = problem.get_solver("casadi")
+    bounds = solver._map_arguments({}, None)["lbg"].full().ravel()
+
+    # One initial-state row and two derivative rows per interval; neither
+    # segment-defect nor continuity rows are part of the NLP.
+    assert bounds.shape == (5,)
+    np.testing.assert_allclose(bounds[0], -1e-2)
+    np.testing.assert_allclose(bounds[1:], 0.0)
+
+    solution = solver.solve()
 
     assert solution.solve_info.success
+    assert len(solution.segment_defects) == 2
+    assert all(
+        np.isfinite(diagnostic.state_residual).all()
+        and diagnostic.tolerance == 0.0
+        for diagnostic in solution.segment_defects
+    )
+    assert all(
+        diagnostic.physical_interval[0] < diagnostic.physical_interval[1]
+        for diagnostic in solution.segment_defects
+    )
+
+
+def test_gpops_refinement_predicts_degree_then_multi_splits():
+    from coker.dynamics.transcription.collocation import (
+        _predict_refined_degree,
+        _split_refined_interval,
+    )
+
+    predicted = _predict_refined_degree(error=0.4, tolerance=0.1, degree=3)
+
+    assert predicted == 5
+    intervals, degrees = _split_refined_interval(
+        interval=(0.0, 0.9),
+        predicted_degree=predicted,
+        maximum_degree=4,
+        minimum_degree=2,
+        minimum_interval_duration=1e-8,
+    )
+    np.testing.assert_allclose(
+        intervals,
+        ((0.0, 0.3), (0.3, 0.6), (0.6, 0.9)),
+    )
+    assert degrees == (2, 2, 2)
+
+    with pytest.raises(ValueError, match="degree must be greater than one"):
+        _predict_refined_degree(error=0.4, tolerance=0.1, degree=1)
 
 
 def _boundary_layer_problem(*, options: CasadiVariationalOptions):
@@ -148,8 +200,7 @@ def test_casadi_adaptive_refinement_resolves_fast_mode():
 def test_casadi_adaptive_refinement_measures_multistate_defect():
     system = create_autonomous_ode(
         x0=np.zeros((2,)),
-        xdot=lambda x, _parameters: np.array([8.0, 2.0])
-        * (np.ones((2,)) - x),
+        xdot=lambda x, _parameters: np.array([8.0, 2.0]) * (np.ones((2,)) - x),
         backend="casadi",
     )
     problem = VariationalProblem(

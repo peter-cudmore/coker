@@ -48,15 +48,16 @@ def test_poly_collection_scalar():
         collocation_degree,
     )
     x = poly_collection.symbols()
-    assert x.shape == (10, 1)
+    assert x.shape == (9, 1)
 
     t_start, x_starts = zip(*list(poly_collection.interval_starts()))
     assert t_start == (0, 1)
-    assert x_starts == (x[0], x[5])
+    assert x_starts == (x[0], x[4])
 
     t_end, x_ends = zip(*list(poly_collection.interval_ends()))
     assert t_end == (1, 2)
-    assert x_ends == (x[4], x[9])
+    assert x_ends == (x[4], x[8])
+    assert ca.is_equal(x_ends[0], x_starts[1], 2)
 
     t, x, dx = zip(*list(poly_collection.knot_points())[:5])
 
@@ -80,18 +81,22 @@ def test_poly_collection_vector():
         collocation_degree,
     )
     x = poly_collection.symbols()
-    assert x.shape == (30, 1)
-    assert poly_collection.size() == 30
+    assert x.shape == (27, 1)
+    assert poly_collection.size() == 27
     t_start, x_starts = zip(*list(poly_collection.interval_starts()))
     assert t_start == (0, 1)
 
     assert all(x_starts[0][i] == x[i] for i in range(3))
-    assert all(x_starts[1][i] == x[i + 15] for i in range(3))
+    assert all(x_starts[1][i] == x[12 + i] for i in range(3))
 
     t_end, x_ends = zip(*list(poly_collection.interval_ends()))
     assert t_end == (1, 2)
     assert all(x_ends[0][i] == x[12 + i] for i in range(3))
-    assert all(x_ends[1][i] == x[27 + i] for i in range(3))
+    assert all(x_ends[1][i] == x[24 + i] for i in range(3))
+    assert all(
+        ca.is_equal(x_ends[0][index], x_starts[1][index], 2)
+        for index in range(dimension)
+    )
 
     t, x, dx = zip(*list(poly_collection.knot_points())[:5])
 
