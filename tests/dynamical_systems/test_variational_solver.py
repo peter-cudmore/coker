@@ -1,8 +1,3 @@
-from types import SimpleNamespace
-
-
-import casadi as ca
-
 import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace, function
@@ -14,10 +9,7 @@ from coker.dynamics import (
     VariationalSolution,
 )
 from coker.toolkits.codesign import SolveFailure
-from coker.backends.casadi.variational.solver import (
-    ControlFactory,
-    _accepts_small_search_direction,
-)
+from coker.backends.casadi.variational.solver import ControlFactory
 from coker.dynamics.variables import ConstantControlVariable
 
 
@@ -59,21 +51,6 @@ def test_homogenous_integrator(variational_backend):
 
     for t in np.linspace(0, 1, 10):
         assert np.isclose(solution(t), system(t), atol=1e-3)
-
-
-def test_accepts_feasible_small_search_direction():
-    result = {"f": ca.DM(1.0), "g": ca.DM([0.5])}
-    solve_info = SimpleNamespace(
-        return_status="Search_Direction_Becomes_Too_Small"
-    )
-
-    assert _accepts_small_search_direction(
-        solve_info,
-        result,
-        ca.DM([0.0]),
-        ca.DM([1.0]),
-        tolerance=1e-12,
-    )
 
 
 def test_control_factory_builds_symbols_and_zero_guess():

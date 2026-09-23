@@ -1,12 +1,7 @@
-from types import SimpleNamespace
-
 import casadi as ca
 import numpy as np
 import pytest
 
-from coker.backends.casadi.variational.solver import (
-    _accepts_small_search_direction,
-)
 from coker.backends.casadi.variational.variable_scaling import (
     _VariableScaling,
     _derive_constraint_scaling,
@@ -86,17 +81,3 @@ def test_constraint_scaling_normalizes_row_sensitivities_and_bounds():
     np.testing.assert_allclose(scaling, [1e6, 1e-6])
     np.testing.assert_allclose(lower / scaling, [-1e-3, -2e-3])
     np.testing.assert_allclose(upper / scaling, [1e-3, 2e-3])
-
-
-def test_small_search_direction_uses_per_row_scaled_tolerance():
-    solve_info = SimpleNamespace(
-        return_status="Search_Direction_Becomes_Too_Small"
-    )
-
-    assert not _accepts_small_search_direction(
-        solve_info,
-        {"f": ca.DM(0.0), "g": ca.DM([1e-6])},
-        ca.DM([0.0]),
-        ca.DM([0.0]),
-        tolerance=ca.DM([1e-7]),
-    )

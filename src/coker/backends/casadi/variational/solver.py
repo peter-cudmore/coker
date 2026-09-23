@@ -75,32 +75,6 @@ def noop(*_args):
     return None
 
 
-def _accepts_small_search_direction(
-    solve_info,
-    result: Dict[str, ca.DM],
-    lower_bounds: ca.DM,
-    upper_bounds: ca.DM,
-    *,
-    tolerance: ca.DM | float,
-    min_tolerance: float = 1e-5,
-) -> bool:
-    if solve_info.return_status != "Search_Direction_Becomes_Too_Small":
-        return False
-    objective = float(result["f"])
-    if not np.isfinite(objective):
-        return False
-    residual = result["g"]
-    if residual.numel() == 0:
-        return True
-    violation = ca.fmax(lower_bounds - residual, residual - upper_bounds)
-    allowed_violation = (
-        tolerance
-        if isinstance(tolerance, ca.DM)
-        else ca.DM(max(tolerance, min_tolerance))
-    )
-    return float(ca.mmax(ca.fmax(violation - allowed_violation, 0))) == 0.0
-
-
 def _derive_objective_scale(nominal_cost: object, tolerance: object) -> float:
     """Return a finite scale that never amplifies a sub-unit objective."""
     try:
@@ -128,7 +102,6 @@ class CasadiVariationalSolver(VariationalSolver):
         initialiser: Optional[ca.Function] = None,
         warm_start: bool = False,
         unscale_objective: Callable[[float], float] = float,
-        acceptable_constraint_violation: ca.DM = ca.DM(),
     ):
         self.problem = problem
         self._parameters = parameters
@@ -138,7 +111,6 @@ class CasadiVariationalSolver(VariationalSolver):
         self._initialiser = initialiser
         self._warm_start = warm_start
         self._unscale_objective = unscale_objective
-        self._acceptable_constraint_violation = acceptable_constraint_violation
         self._last_primal: Optional[ca.DM] = None
         self._last_lam_g: Optional[ca.DM] = None
         self._adaptive_solve: Optional[
@@ -204,20 +176,11 @@ class CasadiVariationalSolver(VariationalSolver):
         )
         solve_info = solve_info_from_casadi_stats(self._solver.stats())
         if not solve_info.success:
-            if _accepts_small_search_direction(
+            raise SolveFailure(
+                "CasADi variational solve failed with status "
+                f"{solve_info.return_status}",
                 solve_info,
-                result,
-                solver_arguments["lbg"],
-                solver_arguments["ubg"],
-                tolerance=(self._acceptable_constraint_violation),
-            ):
-                solve_info = replace(solve_info, success=True)
-            else:
-                raise SolveFailure(
-                    "CasADi variational solve failed with status "
-                    f"{solve_info.return_status}",
-                    solve_info,
-                )
+            )
         if self._warm_start:
             self._last_primal = result["x"]
             self._last_lam_x = result["lam_x"]
@@ -878,9 +841,6 @@ def _create_solver(
     normalized_cost = cost
     normalized_g = g
     objective_scale = 1.0
-    acceptable_constraint_violation = ca.DM.ones(
-        normalized_g.shape[0], 1
-    ) * max(factory.tolerance, 1e-5)
     variable_scaling = None
 
     if factory.options.enable_scaling:
@@ -923,9 +883,6 @@ def _create_solver(
         normalized_g = inverse_constraint_scaling @ normalized_g
         lbg = inverse_constraint_scaling @ lbg
         ubg = inverse_constraint_scaling @ ubg
-        acceptable_constraint_violation = (
-            inverse_constraint_scaling @ acceptable_constraint_violation
-        )
 
     def unscale_objective(value: float) -> float:
         return value * objective_scale
@@ -1137,7 +1094,6 @@ def _create_solver(
     solver = CasadiVariationalSolver(
         problem=problem,
         parameters=factory.parameter_names,
-        acceptable_constraint_violation=acceptable_constraint_violation,
         map_arguments=map_arguments,
         solver=nlp_solver,
         assemble_solution=assemble_solution,
