@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass, field
 from numbers import Integral, Real
 from typing import Any, Callable, Sequence
 
@@ -258,20 +258,16 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class MonotonePiecewiseLinear(FunctionParameter):
-    """Bounded monotone scalar realization over normalized-domain knots.
-
-    ``domain_knots`` should span ``[0, 1]`` and be strictly increasing. Each
-    unconstrained basis decision is exponentiated, then its positive increments
-    are cumulatively normalized into ``(lower_bound, upper_bound)``. Linear
-    interpolation therefore has positive slope on every knot interval; values
-    outside the knot range clamp to the corresponding endpoint.
-    """
+    """Bounded monotone scalar realization over normalized-domain knots."""
 
     domain_knots: Sequence[Real]
     lower_bound: Real
     upper_bound: Real
     guess: Sequence[Real] | None = None
     name: str | None = None
+    parameters: tuple[ParameterVariable, ...] = field(
+        init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         try:
@@ -310,6 +306,16 @@ class MonotonePiecewiseLinear(FunctionParameter):
         object.__setattr__(self, "lower_bound", lower)
         object.__setattr__(self, "upper_bound", upper)
         object.__setattr__(self, "guess", guess)
+        object.__setattr__(
+            self,
+            "parameters",
+            (
+                DenseTensorVariable(
+                    _concrete_parameter_name(self.name, "monotone", "theta"),
+                    np.asarray(guess, dtype=float),
+                ),
+            ),
+        )
 
     @property
     def size(self) -> int:
@@ -319,12 +325,7 @@ class MonotonePiecewiseLinear(FunctionParameter):
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        return (
-            DenseTensorVariable(
-                _concrete_parameter_name(self.name, "monotone", "theta"),
-                np.asarray(self.guess, dtype=float),
-            ),
-        )
+        return self.parameters
 
     def _values(self, theta: Any) -> list[Any]:
         weights = [np.exp(theta[i]) for i in range(self.size)] + [1.0, 1.0]
@@ -364,17 +365,14 @@ class MonotonePiecewiseLinear(FunctionParameter):
 
 @dataclass(frozen=True)
 class DenseLayer(FunctionParameter):
-    """Affine vector layer followed by a Coker activation function.
-
-    The activation maps a hidden vector of width ``m`` to an output vector of
-    width ``k``. The layer accepts width ``n`` inputs and evaluates
-    ``activation(weights @ x + bias)`` with weights of shape ``(m, n)`` and a
-    bias of shape ``(m,)``.
-    """
+    """Affine vector layer followed by a Coker activation function."""
 
     input_size: int
     activation: Function | BoundCallable
     name: str | None = None
+    parameters: tuple[ParameterVariable, ...] = field(
+        init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -385,6 +383,22 @@ class DenseLayer(FunctionParameter):
             raise ValueError("input_size must be a positive integer")
         _activation_widths(self.activation)
         object.__setattr__(self, "input_size", int(self.input_size))
+        object.__setattr__(
+            self,
+            "parameters",
+            (
+                DenseTensorVariable(
+                    _concrete_parameter_name(
+                        self.name, "dense_layer", "weights"
+                    ),
+                    np.zeros((self.hidden_size, self.input_size)),
+                ),
+                DenseTensorVariable(
+                    _concrete_parameter_name(self.name, "dense_layer", "bias"),
+                    np.zeros(self.hidden_size),
+                ),
+            ),
+        )
 
     @property
     def hidden_size(self) -> int:
@@ -424,16 +438,7 @@ class DenseLayer(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        return (
-            DenseTensorVariable(
-                _concrete_parameter_name(self.name, "dense_layer", "weights"),
-                np.zeros((self.hidden_size, self.input_size)),
-            ),
-            DenseTensorVariable(
-                _concrete_parameter_name(self.name, "dense_layer", "bias"),
-                np.zeros(self.hidden_size),
-            ),
-        )
+        return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         weights, bias = parameters
@@ -446,12 +451,20 @@ class RadialBasisFunction(FunctionParameter):
 
     centers: Sequence[Real]
     width: Real
-    lower_bound: Real | None = None
-    upper_bound: Real | None = None
-    guess: Sequence[Real] | None = None
+    lower_bound: InitVar[Real | None] = None
+    upper_bound: InitVar[Real | None] = None
+    guess: InitVar[Sequence[Real] | None] = None
     name: str | None = None
+    parameters: tuple[ParameterVariable, ...] = field(
+        init=False, repr=False, compare=False
+    )
 
-    def __post_init__(self) -> None:
+    def __post_init__(
+        self,
+        lower_bound: Real | None,
+        upper_bound: Real | None,
+        guess: Sequence[Real] | None,
+    ) -> None:
         try:
             centers = np.asarray(self.centers, dtype=float)
         except (TypeError, ValueError) as exc:
@@ -469,38 +482,37 @@ class RadialBasisFunction(FunctionParameter):
         if self.width <= 0:
             raise ValueError("width must be positive")
         guess, lower, upper = _validate_basis_values(
-            self.guess,
+            guess,
             centers.size + 1,
-            self.lower_bound,
-            self.upper_bound,
+            lower_bound,
+            upper_bound,
         )
         object.__setattr__(
             self, "centers", tuple(float(center) for center in centers)
         )
         object.__setattr__(self, "width", float(self.width))
-        object.__setattr__(self, "lower_bound", lower)
-        object.__setattr__(self, "upper_bound", upper)
-        object.__setattr__(self, "guess", guess)
+        name = _concrete_parameter_name(
+            self.name, "radial_basis", "coefficients"
+        )
+        parameter: ParameterVariable
+        if lower is None:
+            parameter = DenseTensorVariable(
+                name, np.asarray(guess, dtype=float)
+            )
+        else:
+            parameter = BoundVector(
+                name,
+                np.full(centers.size + 1, lower),
+                np.full(centers.size + 1, upper),
+                np.asarray(guess, dtype=float),
+            )
+        object.__setattr__(self, "parameters", (parameter,))
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        size = len(self.centers) + 1
-        name = _concrete_parameter_name(
-            self.name, "radial_basis", "coefficients"
-        )
-        guess = np.asarray(self.guess, dtype=float)
-        if self.lower_bound is None:
-            return (DenseTensorVariable(name, guess),)
-        return (
-            BoundVector(
-                name,
-                np.full(size, self.lower_bound),
-                np.full(size, self.upper_bound),
-                guess,
-            ),
-        )
+        return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         (basis,) = parameters

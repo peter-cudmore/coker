@@ -163,6 +163,7 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
         name="p_0",
     )
     (theta,) = declaration.list_concrete_parameters()
+    assert declaration.list_concrete_parameters()[0] is theta
     assert theta.name == "p_0_theta"
     assert isinstance(theta, DenseTensorVariable)
     with VariationalProblemBuilder(
@@ -452,6 +453,9 @@ def test_dense_layer_declares_and_evaluates_vector_parameters():
     )
     declaration = DenseLayer(2, activation, name="response")
     weights, bias = declaration.list_concrete_parameters()
+    assert declaration.list_concrete_parameters() == (weights, bias)
+    assert declaration.list_concrete_parameters()[0] is weights
+    assert declaration.list_concrete_parameters()[1] is bias
 
     assert isinstance(weights, DenseTensorVariable)
     assert isinstance(bias, DenseTensorVariable)
@@ -516,6 +520,7 @@ def test_radial_basis_function_evaluates_scalar_input():
         name="response",
     )
     (coefficients,) = declaration.list_concrete_parameters()
+    assert declaration.list_concrete_parameters()[0] is coefficients
 
     assert coefficients.name == "response_coefficients"
     expected = (
