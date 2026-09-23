@@ -167,9 +167,9 @@ def generate_discritisation_operators(
 
 
 def _predict_refined_degree(
-    *, error: float, tolerance: float, degree: int
+    error: float, tolerance: float, degree: int
 ) -> int:
-    """Predict the p-refined degree using the Patterson--Hager--Rao rule."""
+    """Predict the p-refined degree from the local error estimate."""
     if not math.isfinite(error) or error <= 0:
         raise ValueError("error must be finite and positive")
     if not math.isfinite(tolerance) or tolerance <= 0:
@@ -185,14 +185,13 @@ def _predict_refined_degree(
 
 
 def _split_refined_interval(
-    *,
     interval: Tuple[float, float],
     predicted_degree: int,
     maximum_degree: int,
     minimum_degree: int,
     minimum_interval_duration: float,
 ) -> Tuple[Tuple[Tuple[float, float], ...], Tuple[int, ...]]:
-    """Select a p-refined interval or the required GPOPS h-refinement."""
+    """Select local degree refinement or a multi-interval split."""
     start, stop = interval
     if not math.isfinite(start) or not math.isfinite(stop) or start >= stop:
         raise ValueError("interval must have finite increasing bounds")

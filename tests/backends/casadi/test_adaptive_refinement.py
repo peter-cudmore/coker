@@ -118,21 +118,17 @@ def test_zero_defect_tolerances_omit_redundant_segment_rows():
     )
 
 
-def test_gpops_refinement_predicts_degree_then_multi_splits():
+def test_refinement_predicts_degree_then_multi_splits():
     from coker.dynamics.transcription.collocation import (
         _predict_refined_degree,
         _split_refined_interval,
     )
 
-    predicted = _predict_refined_degree(error=0.4, tolerance=0.1, degree=3)
+    predicted = _predict_refined_degree(0.4, 0.1, 3)
 
     assert predicted == 5
     intervals, degrees = _split_refined_interval(
-        interval=(0.0, 0.9),
-        predicted_degree=predicted,
-        maximum_degree=4,
-        minimum_degree=2,
-        minimum_interval_duration=1e-8,
+        (0.0, 0.9), predicted, 4, 2, 1e-8
     )
     np.testing.assert_allclose(
         intervals,
@@ -141,7 +137,7 @@ def test_gpops_refinement_predicts_degree_then_multi_splits():
     assert degrees == (2, 2, 2)
 
     with pytest.raises(ValueError, match="degree must be greater than one"):
-        _predict_refined_degree(error=0.4, tolerance=0.1, degree=1)
+        _predict_refined_degree(0.4, 0.1, 1)
 
 
 def _boundary_layer_problem(*, options: CasadiVariationalOptions):

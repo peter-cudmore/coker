@@ -576,15 +576,6 @@ class _TranscriptionFactory:
             quadrature_residual=quadrature_residual,
         )
 
-    def measure_segment_defects(
-        self, solution: VariationalSolution
-    ) -> Tuple[SegmentDefectDiagnostic, ...]:
-        """Return physical segment diagnostics for every solved interval."""
-        return tuple(
-            self.measure_interval_segment_defect(poly, solution)
-            for poly in solution.path.polys
-        )
-
 
 def _create_solver(
     factory: _TranscriptionFactory,
@@ -1265,20 +1256,14 @@ def create_variational_solver(
                     new_degrees.append(degree)
                     continue
                 predicted = _predict_refined_degree(
-                    error=error,
-                    tolerance=options.mesh_tolerance,
-                    degree=degree,
+                    error, options.mesh_tolerance, degree
                 )
                 refined_intervals, refined_degrees = _split_refined_interval(
-                    interval=(start, stop),
-                    predicted_degree=predicted,
-                    maximum_degree=options.maximum_degree,
-                    minimum_degree=(
-                        problem.transcription_options.minimum_degree
-                    ),
-                    minimum_interval_duration=(
-                        options.minimum_interval_duration
-                    ),
+                    (start, stop),
+                    predicted,
+                    options.maximum_degree,
+                    problem.transcription_options.minimum_degree,
+                    options.minimum_interval_duration,
                 )
                 new_intervals.extend(refined_intervals)
                 new_degrees.extend(refined_degrees)
@@ -1364,8 +1349,9 @@ class CasadiSolutionAssembler:
             path_constraint_exprs=self.problem.path_constraints,
             terminal_constraint_exprs=self.problem.terminal_constraints,
         )
-        solution.segment_defects = self.factory.measure_segment_defects(
-            solution
+        solution.segment_defects = tuple(
+            self.factory.measure_interval_segment_defect(poly, solution)
+            for poly in solution.path.polys
         )
         return solution
 
