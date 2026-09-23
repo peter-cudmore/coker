@@ -10,6 +10,7 @@ from coker.algebra.ops import Noop
 from coker.dynamics import (
     BoundVector,
     BoundedVariable,
+    ClosureParameter,
     DenseTensorVariable,
     DynamicsSpec,
     FittedFunction,
@@ -95,6 +96,30 @@ def test_function_space_contains_bound_callable():
     bound = BoundCallable(function([], lambda: 1.0), space, ())
 
     assert bound in space
+
+
+def test_closure_parameter_binds_declared_scalar_decisions():
+    closure = ClosureParameter.bind_callable(
+        lambda gain, offset, value: gain * value + offset,
+        [
+            UnboundedVariable("gain", 0.0),
+            UnboundedVariable("offset", 0.0),
+        ],
+        [Scalar("value")],
+        name="affine",
+    )
+    target = FunctionSpace(
+        "forcing", arguments=[Scalar("time")], output=[Scalar("rate")]
+    )
+
+    fitted = closure.fit(target, (2.0, -1.0))
+
+    assert closure.name == "affine"
+    assert closure.list_concrete_parameters() == (
+        UnboundedVariable("gain", 0.0),
+        UnboundedVariable("offset", 0.0),
+    )
+    assert fitted(3.0) == 5.0
 
 
 def test_builder_specializes_function_parameter_to_numeric_decisions():
@@ -400,9 +425,7 @@ def test_casadi_fits_monotone_function_parameter():
     assert f.specification is declaration
     assert f.space is function_parameter
     assert len(f.parameters) == 1
-    np.testing.assert_equal(
-        f.parameters[0].shape, (declaration.size,)
-    )
+    np.testing.assert_equal(f.parameters[0].shape, (declaration.size,))
     assert callable(f.function)
     assert isinstance(f(0.0), float)
 

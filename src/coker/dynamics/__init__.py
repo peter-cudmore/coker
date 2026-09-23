@@ -22,10 +22,11 @@ from coker.dynamics.variables import (
     ValueType,
 )
 from coker.dynamics.function_parameters import (
+    ClosureParameter,
+    DenseLayer,
     FittedFunction,
     FunctionParameter,
     MonotonePiecewiseLinear,
-    DenseLayer,
     RadialBasisFunction,
 )
 from coker.dynamics.analysis import (
@@ -83,6 +84,7 @@ __all__ = [
     "ControlSolution",
     "ControlVariable",
     "DynamicalSystem",
+    "ClosureParameter",
     "DynamicsSpec",
     "SymbolicDAESystem",
     "SymbolicSystem",

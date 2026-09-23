@@ -21,6 +21,7 @@ The main public surface is re-exported from :mod:`coker.dynamics`:
 - :class:`coker.dynamics.BoundVector`
 - :class:`coker.dynamics.DenseTensorVariable`
 - :class:`coker.dynamics.FunctionParameter`
+- :class:`coker.dynamics.ClosureParameter`
 - :class:`coker.dynamics.MonotonePiecewiseLinear`
 - :class:`coker.dynamics.DenseLayer`
 - :class:`coker.dynamics.RadialBasisFunction`
@@ -89,6 +90,11 @@ to name their concrete parameter blocks.
 vector input and one vector output; its activation is a Coker function from the
 hidden vector to the output vector. ``RadialBasisFunction`` and
 ``MonotonePiecewiseLinear`` require one scalar argument and one scalar output.
+
+``ClosureParameter`` binds explicitly declared scalar or dense parameter blocks
+to a Coker function. Its function receives those blocks first, then the target
+function arguments. Use ``ClosureParameter.bind_callable`` to trace a Python
+implementation with that calling convention.
 
 For example, a one-component vector response over a two-component state can use
 a dense layer with an identity activation:
