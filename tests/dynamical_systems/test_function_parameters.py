@@ -140,8 +140,6 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
     (theta,) = declaration.list_concrete_parameters()
     assert theta.name == "p_0_theta"
     assert isinstance(theta, DenseTensorVariable)
-
-
     with VariationalProblemBuilder(
         system,
         t_final=1.0,
@@ -469,8 +467,6 @@ def test_dense_layer_declares_and_evaluates_vector_parameters():
         ),
         expected,
     )
-
-
     with pytest.raises(ValueError, match="output must have width 2"):
         declaration.validate_target(
             FunctionSpace(

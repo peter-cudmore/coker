@@ -150,8 +150,6 @@ class PytorchBackend(Backend):
         from coker.dynamics.function_parameters import FittedFunction
         from coker.dynamics.variables import (
             BoundedVariable,
-            BoundVector,
-            DenseTensorVariable,
             UnboundedVariable,
         )
 

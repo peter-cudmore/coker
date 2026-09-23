@@ -68,6 +68,7 @@ def test_rejects_wrong_vector_lengths():
     with pytest.raises(ValueError):
         _derive_variable_scaling([0.0, 0.0], [0.0], [1.0, 1.0])
 
+
 def test_constraint_scaling_normalizes_row_sensitivities_and_bounds():
     decision = ca.MX.sym("decision", 2)
     residual = ca.vertcat(1e6 * decision[0], 1e-6 * decision[1])

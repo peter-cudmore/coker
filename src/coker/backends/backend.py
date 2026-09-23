@@ -64,8 +64,6 @@ class Backend(metaclass=ABCMeta):
         """Reconstruct a generic fitted function from solver decisions."""
         from coker.dynamics.variables import (
             BoundedVariable,
-            BoundVector,
-            DenseTensorVariable,
             UnboundedVariable,
         )
 

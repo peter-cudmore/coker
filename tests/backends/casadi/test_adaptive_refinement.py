@@ -68,8 +68,6 @@ def test_transcription_defect_tolerances_are_independently_configurable():
     assert np.any(np.isclose(bounds.full(), 0.0))
 
 
-
-
 def test_transcription_defect_tolerances_accept_zero():
     system = create_autonomous_ode(
         x0=np.array([0.0]),
@@ -92,6 +90,8 @@ def test_transcription_defect_tolerances_accept_zero():
     solution = problem.get_solver("casadi").solve()
 
     assert solution.solve_info.success
+
+
 def _boundary_layer_problem(*, options: CasadiVariationalOptions):
     """Build a deliberately under-resolved, stable fast-mode trajectory."""
     system = create_autonomous_ode(

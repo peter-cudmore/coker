@@ -1,5 +1,5 @@
 import abc
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Sequence, Union
 
 import numpy as np
