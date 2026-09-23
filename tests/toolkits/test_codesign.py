@@ -21,8 +21,8 @@ def quadratic(x, p, z):
 
 def test_mathematical_program_composes_symbolically_and_compiles():
     program = MathematicalProgram(
-        input_shape=(Dimension(None),),
-        output_shape=(Dimension(None),),
+        input_shape=(Dimension.scalar(),),
+        output_shape=(Dimension.scalar(),),
         implementation=lambda x: (x**2, x + 1),
     )
 
@@ -49,8 +49,8 @@ def test_symbolic_program_results_share_one_invocation():
         return x**2, x + 1, x + 2
 
     program = MathematicalProgram(
-        input_shape=(Dimension(None),),
-        output_shape=(Dimension(None), Dimension(None)),
+        input_shape=(Dimension.scalar(),),
+        output_shape=(Dimension.scalar(), Dimension.scalar()),
         implementation=implementation,
     )
     composed = function(
@@ -88,7 +88,7 @@ def test_optimisation_zero_input_problem(variational_backend):
     assert problem.output_shape == (
         Dimension((3,)),
         Dimension((2,)),
-        Dimension(None),
+        Dimension.scalar(),
     )
 
     soln = problem()

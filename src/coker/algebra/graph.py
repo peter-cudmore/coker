@@ -61,7 +61,7 @@ def get_projection(dimension: Dimension, slc: slice):
 
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
-        return Dimension(None)
+        return Dimension.scalar()
     if isinstance(arg, CallableReference):
         return arg.function_space
     try:
@@ -474,7 +474,7 @@ class Tape:
             self.dim.append(dimension)
             size = dimension.flat()
         elif isinstance(v, Scalar):
-            self.dim.append(Dimension(None))
+            self.dim.append(Dimension.scalar())
             size = 1
         elif isinstance(v, FunctionSpace):
             self.dim.append(v)

@@ -341,7 +341,7 @@ def _validate_signature(
 
 def _dimension_from_declaration(value: Scalar | VectorSpace) -> Dimension:
     return (
-        Dimension(None)
+        Dimension.scalar()
         if isinstance(value, Scalar)
         else Dimension(value.dimension)
     )

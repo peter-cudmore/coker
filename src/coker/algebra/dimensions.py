@@ -193,7 +193,7 @@ class FunctionSpace:
                 arg
                 if isinstance(arg, FunctionSpace)
                 else (
-                    Dimension(None)
+                    Dimension.scalar()
                     if isinstance(arg, Scalar)
                     else Dimension(arg.dimension)
                 )
@@ -209,7 +209,7 @@ class FunctionSpace:
                 out
                 if isinstance(out, FunctionSpace)
                 else (
-                    Dimension(None)
+                    Dimension.scalar()
                     if isinstance(out, Scalar)
                     else Dimension(out.dimension)
                 )

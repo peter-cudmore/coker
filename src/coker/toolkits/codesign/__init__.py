@@ -95,7 +95,7 @@ class MathematicalProgram(SymbolicCallable):
     @property
     def result_shape(self) -> Tuple[Dimension, ...]:
         """Return the objective-first shapes produced by this program."""
-        return (Dimension(None), *self.output_shape)
+        return (Dimension.scalar(), *self.output_shape)
 
     def _validate_arguments(self, args) -> None:
         if len(args) != len(self.input_shape):
