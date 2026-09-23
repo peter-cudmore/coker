@@ -27,16 +27,12 @@ class _ConstantFunctionParameter(FunctionParameter):
     def validate_target(self, target):
         return target
 
-    def decision_declarations(self):
-        return (
-            VectorSpace("constant", 1),
-            np.array([self.guess]),
-            -np.ones(1),
-            np.ones(1),
-        )
+    def list_concrete_parameters(self):
+        return (BoundedVariable("constant", -1.0, 1.0, self.guess),)
 
-    def evaluate(self, basis, _argument):
-        return basis[0]
+    def evaluate(self, parameters, _argument):
+        (value,) = parameters
+        return value
 
 
 def test_direct_sum_scalar(variational_backend):

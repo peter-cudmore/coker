@@ -22,7 +22,7 @@ The main public surface is re-exported from :mod:`coker.dynamics`:
 - :class:`coker.dynamics.DenseTensorVariable`
 - :class:`coker.dynamics.FunctionParameter`
 - :class:`coker.dynamics.MonotonePiecewiseLinear`
-- :class:`coker.dynamics.Perceptron`
+- :class:`coker.dynamics.DenseLayer`
 - :class:`coker.dynamics.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
@@ -79,42 +79,50 @@ Function-valued parameters
 
 Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
 :class:`~coker.dynamics.FunctionParameter` realization at problem construction;
-Coker replaces it with the realization's scalar basis decisions before solving.
-The function space and realization must agree on argument and scalar-output
-shapes.
+Coker replaces its concrete parameter blocks with scalar solver decisions before
+solving. The function space and realization must agree on their argument and
+output shapes.
+Solver-bound function parameters require a non-empty ``name``; Coker uses it
+to name their concrete parameter blocks.
 
-``Perceptron`` requires one vector argument and a scalar output.
-``RadialBasisFunction`` and ``MonotonePiecewiseLinear`` require one scalar
-argument and a scalar output.
+``DenseLayer`` realizes ``activation(weights @ x + bias)``. Its target has one
+vector input and one vector output; its activation is a Coker function from the
+hidden vector to the output vector. ``RadialBasisFunction`` and
+``MonotonePiecewiseLinear`` require one scalar argument and one scalar output.
 
-For example, a scalar response over a two-component state can use a perceptron:
+For example, a one-component vector response over a two-component state can use
+a dense layer with an identity activation:
 
 .. code-block:: python
 
-   from coker import FunctionSpace, Scalar, VectorSpace
-   from coker.dynamics import Perceptron, VariationalProblemBuilder
+   from coker import FunctionSpace, VectorSpace, function
+   from coker.dynamics import DenseLayer, VariationalProblemBuilder
    from coker.toolkits.codesign import Minimise
 
+   activation = function(
+       [VectorSpace("hidden", 1)],
+       lambda hidden: hidden,
+   )
    response = FunctionSpace(
        "response",
        arguments=[VectorSpace("state", 2)],
-       output=[Scalar("rate")],
+       output=[VectorSpace("rate", 1)],
    )
    # The system must declare ``parameters=(response,)`` and call ``p[0](x)``.
    with VariationalProblemBuilder(
        system,
        t_final=1.0,
-       parameters=[Perceptron(2, name="response")],
+       parameters=[DenseLayer(2, activation, name="response")],
    ) as problem:
        built = problem.build(
            Minimise((problem.output(problem.t_final)[0] - 0.5) ** 2)
        )
 
-``Perceptron`` and ``RadialBasisFunction`` decisions are unbounded by default.
-Pass both ``lower_bound`` and ``upper_bound`` to constrain every basis
-coefficient. ``MonotonePiecewiseLinear`` has unbounded internal decisions, but
-its declared output bounds and monotonicity are enforced by its
-parameterization.
+``DenseLayer`` weights and biases, and ``RadialBasisFunction`` coefficients,
+are unbounded by default. Pass both ``lower_bound`` and ``upper_bound`` to
+``RadialBasisFunction`` to constrain every coefficient.
+``MonotonePiecewiseLinear`` has unbounded internal decisions, but its declared
+output bounds and monotonicity are enforced by its parameterization.
 
 The builder classifies comparisons by their time binding: expressions at
 ``t`` are path constraints, expressions at ``0`` are initial point
@@ -270,13 +278,15 @@ shape of its initial guess:
    ) as builder:
        problem = builder.build(Minimise(builder.output(builder.t_final)[0] ** 2))
 
-Function-valued parameters currently require one scalar argument and one scalar
-output. ``MonotonePiecewiseLinear`` expands its monotonic basis into scalar
-solver decisions, then reconstructs a callable parameter for the original
-system. The returned ``solution.parameters`` mapping restores scalar decisions
-as ``float`` values and vector or dense tensor decisions as shaped NumPy
-arrays. Function decisions are ``FittedFunction`` objects, retaining their
-specification, space, callable, and fitted parameters.
+Function-valued parameters use named concrete parameter blocks.
+``DenseLayer`` expands its weights and bias, while
+``MonotonePiecewiseLinear`` and ``RadialBasisFunction`` each expand one vector
+block. The solver flattens those blocks into scalar decisions, then restores
+their original shapes when rebuilding a callable parameter. The returned
+``solution.parameters`` mapping restores scalar decisions as ``float`` values
+and vector or dense tensor decisions as shaped NumPy arrays. Function decisions
+are ``FittedFunction`` objects, retaining their specification, space, callable,
+and structured fitted parameters.
 
 ``MonotonePiecewiseLinear.domain_knots`` should span the normalized integration
 domain from ``0`` to ``1``; use ``0`` and ``1`` as the endpoint knots and add

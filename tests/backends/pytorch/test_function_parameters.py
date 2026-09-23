@@ -3,19 +3,25 @@ import torch
 
 import warnings
 
-from coker import FunctionSpace, Scalar, VectorSpace, function
+from coker import FunctionSpace, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.dynamics import (
     BoundVector,
+    DenseLayer,
     DynamicsSpec,
     FittedFunction,
-    Perceptron,
     RadialBasisFunction,
     VariationalProblemBuilder,
 )
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.toolkits.codesign import Minimise
+
+
+def _identity_activation(backend, width=1):
+    return function(
+        [VectorSpace("hidden", width)], lambda hidden: hidden, backend=backend
+    )
 
 
 def test_pytorch_fits_bound_vector_parameter(monkeypatch):
@@ -58,16 +64,18 @@ def test_pytorch_fits_bound_vector_parameter(monkeypatch):
 
 
 def test_pytorch_lowers_function_parameter_declarations():
-    perceptron = Perceptron(2)
+    dense_layer = DenseLayer(2, _identity_activation("pytorch"))
     radial_basis = RadialBasisFunction([0.0], 1.0)
     vector_function = function(
         [VectorSpace("x", 2)],
-        lambda x: perceptron.evaluate([1.0, -1.0, 0.0], x),
+        lambda x: dense_layer.evaluate(
+            (np.array([[1.0, -1.0]]), np.array([0.0])), x
+        ),
         backend="pytorch",
     )
     scalar_function = function(
         [VectorSpace("x", 1)],
-        lambda x: radial_basis.evaluate([2.0, 0.5], x[0]),
+        lambda x: radial_basis.evaluate((np.array([2.0, 0.5]),), x[0]),
         backend="pytorch",
     )
 
@@ -75,22 +83,21 @@ def test_pytorch_lowers_function_parameter_declarations():
     scalar = torch.tensor([0.0], dtype=torch.float64)
 
     assert torch.allclose(
-        vector_function(vector),
-        torch.tensor(1.0 / (1.0 + np.exp(-1.0)), dtype=torch.float64),
+        vector_function(vector), torch.tensor([1.0], dtype=torch.float64)
     )
     assert torch.allclose(
         scalar_function(scalar), torch.tensor(2.5, dtype=torch.float64)
     )
 
 
-def test_pytorch_variational_solver_lowers_perceptron_parameter(monkeypatch):
+def test_pytorch_variational_solver_lowers_dense_layer_parameter(monkeypatch):
     backend = get_backend_by_name("pytorch", set_current=False)
     monkeypatch.setattr(backend, "device", torch.device("cpu"))
     monkeypatch.setattr(backend, "dtype", torch.float64)
     function_parameter = FunctionSpace(
         "response",
         arguments=[VectorSpace("state", 2)],
-        output=[Scalar("rate")],
+        output=[VectorSpace("rate", 2)],
     )
     system = create_dynamics_from_spec(
         DynamicsSpec(
@@ -98,7 +105,7 @@ def test_pytorch_variational_solver_lowers_perceptron_parameter(monkeypatch):
             parameters=(function_parameter,),
             algebraic=None,
             initial_conditions=lambda _z, _u, _p: (np.zeros(2), None),
-            dynamics=lambda _t, state, _z, _u, p: np.ones(2) * p[0](state),
+            dynamics=lambda _t, state, _z, _u, p: p[0](state),
             constraints=Noop(),
             outputs=lambda _t, state, _z, _u, _p, _q: state,
             quadratures=Noop(),
@@ -108,7 +115,11 @@ def test_pytorch_variational_solver_lowers_perceptron_parameter(monkeypatch):
     with VariationalProblemBuilder(
         system,
         t_final=1.0,
-        parameters=[Perceptron(2, name="response")],
+        parameters=[
+            DenseLayer(
+                2, _identity_activation("pytorch", 2), name="response"
+            )
+        ],
         backend="pytorch",
     ) as builder:
         problem = builder.build(
@@ -129,7 +140,7 @@ def test_pytorch_solution_reconstructs_mapped_function_parameter(
     function_parameter = FunctionSpace(
         "response",
         arguments=[VectorSpace("state", 2)],
-        output=[Scalar("rate")],
+        output=[VectorSpace("rate", 1)],
     )
     system = create_dynamics_from_spec(
         DynamicsSpec(
@@ -148,7 +159,11 @@ def test_pytorch_solution_reconstructs_mapped_function_parameter(
     with VariationalProblemBuilder(
         system,
         t_final=1.0,
-        parameters=[Perceptron(2, name="response")],
+        parameters=[
+            DenseLayer(
+                2, _identity_activation("pytorch"), name="response"
+            )
+        ],
         system_parameter_map=parameter_map,
         backend="pytorch",
     ) as builder:
@@ -160,34 +175,30 @@ def test_pytorch_solution_reconstructs_mapped_function_parameter(
 
     argument = np.array([0.7, -0.4])
     mapped_basis = parameter_map @ raw_basis
-    expected = 1.0 / (
-        1.0
-        + np.exp(
-            -(
-                mapped_basis[0] * argument[0]
-                + mapped_basis[1] * argument[1]
-                + mapped_basis[2]
-            )
-        )
+    expected = np.array(
+        [
+            mapped_basis[0] * argument[0]
+            + mapped_basis[1] * argument[1]
+            + mapped_basis[2]
+        ]
     )
-    raw_value = 1.0 / (
-        1.0
-        + np.exp(
-            -(
-                raw_basis[0] * argument[0]
-                + raw_basis[1] * argument[1]
-                + raw_basis[2]
-            )
-        )
+    raw_value = (
+        raw_basis[0] * argument[0]
+        + raw_basis[1] * argument[1]
+        + raw_basis[2]
     )
 
     fitted = solution.parameters["response"]
     assert isinstance(fitted, FittedFunction)
-    assert isinstance(fitted.parameters, torch.Tensor)
+    assert isinstance(fitted.parameters, tuple)
+    assert [parameter.shape for parameter in fitted.parameters] == [
+        (1, 2),
+        (1,),
+    ]
     assert callable(fitted.function)
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
         actual = fitted(torch.as_tensor(argument, dtype=torch.float64))
     assert isinstance(actual, torch.Tensor)
     np.testing.assert_allclose(actual.detach().cpu().numpy(), expected)
-    assert not np.isclose(expected, raw_value)
+    assert not np.isclose(expected[0], raw_value)

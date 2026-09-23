@@ -14,7 +14,7 @@ from coker.dynamics import (
     DynamicsSpec,
     FittedFunction,
     MonotonePiecewiseLinear,
-    Perceptron,
+    DenseLayer,
     RadialBasisFunction,
     UnboundedVariable,
     VariationalProblem,
@@ -82,7 +82,7 @@ def test_function_space_contains_matching_functions():
         [VectorSpace("time", 2)], lambda time: time[0], backend="numpy"
     )
     fitted = RadialBasisFunction(centers=[0.0], width=1.0).fit(
-        space, [0.0, 1.0]
+        space, ([0.0, 1.0],)
     )
 
     assert matching in space
@@ -137,6 +137,10 @@ def test_builder_specializes_function_parameter_to_numeric_decisions():
         upper_bound=2.0,
         name="p_0",
     )
+    (theta,) = declaration.list_concrete_parameters()
+    assert theta.name == "p_0_theta"
+    assert isinstance(theta, DenseTensorVariable)
+
 
     with VariationalProblemBuilder(
         system,
@@ -279,7 +283,7 @@ def test_parameter_layout_reconstructs_public_values():
     assert isinstance(fitted, FittedFunction)
     assert fitted.specification is response_declaration
     assert fitted.space is response
-    np.testing.assert_array_equal(fitted.parameters, [8.0, 9.0])
+    np.testing.assert_array_equal(fitted.parameters[0], [8.0, 9.0])
     assert fitted(0.0) == pytest.approx(17.0)
 
 
@@ -397,7 +401,10 @@ def test_casadi_fits_monotone_function_parameter():
     assert isinstance(f, FittedFunction)
     assert f.specification is declaration
     assert f.space is function_parameter
-    np.testing.assert_equal(f.parameters.shape, (declaration.size,))
+    assert len(f.parameters) == 1
+    np.testing.assert_equal(
+        f.parameters[0].shape, (declaration.size,)
+    )
     assert callable(f.function)
     assert isinstance(f(0.0), float)
 
@@ -412,15 +419,74 @@ def test_monotone_function_rejects_unimplemented_explicit_constraints():
         )
 
 
-def test_perceptron_evaluates_vector_input():
-    declaration = Perceptron(2, guess=[0.5, -1.0, 0.25])
-    basis, initial = declaration.decision_declarations()
+def test_dense_layer_declares_and_evaluates_vector_parameters():
+    activation = function(
+        [VectorSpace("hidden", 2)],
+        lambda hidden: hidden,
+    )
+    target = FunctionSpace(
+        "response",
+        arguments=[VectorSpace("state", 2)],
+        output=[VectorSpace("rate", 2)],
+    )
+    declaration = DenseLayer(2, activation, name="response")
+    weights, bias = declaration.list_concrete_parameters()
 
-    assert basis.dimension == 3
-    np.testing.assert_allclose(initial, [0.5, -1.0, 0.25])
-    assert declaration.evaluate(
-        initial, np.array([2.0, 1.0])
-    ) == pytest.approx(1.0 / (1.0 + np.exp(-0.25)))
+    assert isinstance(weights, DenseTensorVariable)
+    assert isinstance(bias, DenseTensorVariable)
+    assert weights.name == "response_weights"
+    assert weights.shape == (2, 2)
+    assert bias.name == "response_bias"
+    assert bias.shape == (2,)
+    assert declaration.validate_target(target) is target
+
+    parameters = (
+        np.array([[1.0, -1.0], [0.5, 0.25]]),
+        np.array([0.0, 0.25]),
+    )
+    expected = np.array([1.0, 1.5])
+    np.testing.assert_allclose(
+        declaration.evaluate(parameters, np.array([2.0, 1.0])), expected
+    )
+    np.testing.assert_allclose(
+        declaration.build_function(target, "numpy")(
+            np.array([2.0, 1.0]), *parameters
+        ),
+        expected,
+    )
+    bound_activation = BoundCallable(
+        activation,
+        FunctionSpace(
+            "activation",
+            arguments=[VectorSpace("hidden", 2)],
+            output=[VectorSpace("rate", 2)],
+        ),
+        (),
+    )
+    np.testing.assert_allclose(
+        DenseLayer(2, bound_activation).evaluate(
+            parameters, np.array([2.0, 1.0])
+        ),
+        expected,
+    )
+
+
+    with pytest.raises(ValueError, match="output must have width 2"):
+        declaration.validate_target(
+            FunctionSpace(
+                "response",
+                arguments=[VectorSpace("state", 2)],
+                output=[VectorSpace("rate", 1)],
+            )
+        )
+    with pytest.raises(ValueError, match="argument must have width 2"):
+        declaration.validate_target(
+            FunctionSpace(
+                "response",
+                arguments=[VectorSpace("state", 1)],
+                output=[VectorSpace("rate", 2)],
+            )
+        )
 
 
 def test_radial_basis_function_evaluates_scalar_input():
@@ -428,15 +494,19 @@ def test_radial_basis_function_evaluates_scalar_input():
         centers=[-1.0, 1.0],
         width=0.5,
         guess=[2.0, -1.0, 0.25],
+        name="response",
     )
-    _, initial = declaration.decision_declarations()
+    (coefficients,) = declaration.list_concrete_parameters()
 
+    assert coefficients.name == "response_coefficients"
     expected = (
         0.25
         + 2.0 * np.exp(-0.5 * ((0.0 + 1.0) / 0.5) ** 2)
         - np.exp(-0.5 * ((0.0 - 1.0) / 0.5) ** 2)
     )
-    assert declaration.evaluate(initial, 0.0) == pytest.approx(expected)
+    assert declaration.evaluate((coefficients.guess,), 0.0) == pytest.approx(
+        expected
+    )
 
 
 @pytest.mark.skipif(
@@ -446,16 +516,22 @@ def test_radial_basis_function_evaluates_scalar_input():
     ("declaration", "space", "basis", "argument", "expected"),
     [
         (
-            Perceptron(2),
+            DenseLayer(
+                2,
+                function(
+                    [VectorSpace("hidden", 1)],
+                    lambda hidden: hidden,
+                ),
+            ),
             VectorSpace("x", 2),
-            np.array([1.0, -1.0, 0.0]),
+            (np.array([[1.0, -1.0]]), np.array([0.0])),
             np.array([2.0, 1.0]),
-            1.0 / (1.0 + np.exp(-1.0)),
+            np.array([1.0]),
         ),
         (
             RadialBasisFunction([0.0], 1.0),
             Scalar("x"),
-            np.array([2.0, 0.5]),
+            (np.array([2.0, 0.5]),),
             0.0,
             2.5,
         ),
@@ -472,7 +548,9 @@ def test_function_declarations_lower_to_casadi(
 
     actual = compiled(argument)
 
-    assert float(actual) == pytest.approx(expected)
+    np.testing.assert_allclose(
+        np.asarray(actual).reshape(-1), np.asarray(expected).reshape(-1)
+    )
 
 
 @pytest.mark.skipif(
@@ -581,7 +659,7 @@ def test_system_integrates_function_valued_parameter(
         integral = affine_integral
     else:
         rate_value = RadialBasisFunction(centers=[0.0], width=1.0).fit(
-            rate, [0.0, 1.0]
+            rate, ([0.0, 1.0],)
         )
         integral = constant_integral
 

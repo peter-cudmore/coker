@@ -54,7 +54,6 @@ class _ParameterCapture:
     target: Scalar | VectorSpace | FunctionSpace
     declaration: Any
     capture: Tracer
-    basis: VectorSpace | None = None
 
 
 class MathematicalProgram(SymbolicCallable):
@@ -279,35 +278,59 @@ class ProblemBuilder:
     def new_function_parameter(self, target, declaration):
         """Add a finite function parameter as optimisation decisions."""
         from coker.dynamics.function_parameters import FunctionParameter
+        from coker.dynamics.variables import (
+            BoundedVariable,
+            BoundVector,
+            DenseTensorVariable,
+            UnboundedVariable,
+        )
 
         if not isinstance(target, FunctionSpace):
             raise TypeError("target must be a FunctionSpace")
         if not isinstance(declaration, FunctionParameter):
             raise TypeError("declaration must implement FunctionParameter")
-        target = declaration.validate_target(target)
-        values = declaration.decision_declarations()
-        basis, initial, *bounds = values
-        basis_values = self._add_decision(
-            declaration.name or target.name,
-            shape=(basis.size,),
-            initial_value=initial,
-        )
-        if bounds:
-            lower, upper = bounds
-            self.constraints.append(bounded(basis_values, lower, upper))
-        self._parameter_captures.append(
-            _ParameterCapture(
-                declaration.name or target.name,
-                target,
-                declaration,
-                basis_values,
-                basis,
+        if not isinstance(declaration.name, str) or not declaration.name:
+            raise ValueError(
+                "function parameter name must be a non-empty string"
             )
+        target = declaration.validate_target(target)
+        concrete_declarations = declaration.list_concrete_parameters()
+        concrete_values = []
+        for concrete in concrete_declarations:
+            if not isinstance(concrete.name, str) or not concrete.name:
+                raise ValueError(
+                    "concrete parameter declaration name must be non-empty"
+                )
+            if isinstance(concrete, (BoundedVariable, UnboundedVariable)):
+                value = self._add_decision(
+                    concrete.name, initial_value=concrete.guess
+                )
+            elif isinstance(concrete, (BoundVector, DenseTensorVariable)):
+                value = self._add_decision(
+                    concrete.name,
+                    shape=concrete.shape,
+                    initial_value=concrete.guess,
+                )
+            else:
+                raise TypeError(
+                    "function parameter concrete declarations must be scalar, "
+                    "vector, or dense tensor variables"
+                )
+            if isinstance(concrete, (BoundedVariable, BoundVector)):
+                self.constraints.append(
+                    bounded(value, concrete.lower_bound, concrete.upper_bound)
+                )
+            concrete_values.append(value)
+        capture = np.concatenate(
+            [np.reshape(value, (-1,)) for value in concrete_values]
+        )
+        self._parameter_captures.append(
+            _ParameterCapture(declaration.name, target, declaration, capture)
         )
         return BoundCallable(
             declaration.build_function(target, None),
             target,
-            (basis_values,),
+            tuple(concrete_values),
         )
 
     @property

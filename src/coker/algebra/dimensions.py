@@ -140,6 +140,10 @@ class Dimension:
             return (1,)
         return self.dim
 
+    @staticmethod
+    def scalar():
+        return Dimension(None)
+
 
 @dataclasses.dataclass(frozen=True)
 class ResultBundleDimension:
@@ -224,6 +228,15 @@ class FunctionSpace:
     def is_scalar(self):
         output_dimensions = self.output_dimensions()
         return len(output_dimensions) == 1 and output_dimensions[0].is_scalar()
+
+    @staticmethod
+    def create_scalar_space(name: str, continuity_index=None):
+        return FunctionSpace(
+            name=name,
+            arguments=[Dimension.scalar()],
+            output=[Dimension.scalar()],
+            continuity_index=continuity_index,
+        )
 
 
 @dataclasses.dataclass(frozen=True)

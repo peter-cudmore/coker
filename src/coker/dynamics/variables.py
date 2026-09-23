@@ -30,11 +30,17 @@ class UnboundedVariable(ParameterMixin):
 
     name: str
     guess: float = 0
-    lower_bound: float = field(default=-np.inf, init=False)
-    upper_bound: float = field(default=np.inf, init=False)
 
     def degrees_of_freedom(self, *interval):
         return 1
+
+    @property
+    def upper_bound(self):
+        return np.inf
+
+    @property
+    def lower_bound(self):
+        return -np.inf
 
 
 @dataclass

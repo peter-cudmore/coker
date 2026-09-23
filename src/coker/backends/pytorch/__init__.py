@@ -21,13 +21,24 @@ from .ops import (
 
 
 class _FittedModule(torch.nn.Module):
-    def __init__(self, native: torch.nn.Module, basis: torch.Tensor) -> None:
+    def __init__(
+        self,
+        native: torch.nn.Module,
+        concrete_values: tuple[torch.Tensor, ...],
+    ) -> None:
         super().__init__()
         self.native = native
-        self.register_buffer("basis", basis)
+        self._concrete_value_names = tuple(
+            f"_concrete_value_{index}" for index in range(len(concrete_values))
+        )
+        for name, value in zip(self._concrete_value_names, concrete_values):
+            self.register_buffer(name, value)
 
     def forward(self, argument):
-        return self.native(argument, self.basis)
+        return self.native(
+            argument,
+            *(getattr(self, name) for name in self._concrete_value_names),
+        )
 
 
 class PytorchBackend(Backend):
@@ -137,12 +148,33 @@ class PytorchBackend(Backend):
     def reconstruct_function_parameter(self, declaration, target, values):
         """Build a PyTorch-native fitted function from solver decisions."""
         from coker.dynamics.function_parameters import FittedFunction
+        from coker.dynamics.variables import (
+            BoundedVariable,
+            BoundVector,
+            DenseTensorVariable,
+            UnboundedVariable,
+        )
 
-        basis_space, *_ = declaration.decision_declarations()
-        basis = self.to_backend_array(values).reshape(basis_space.dimension)
+        flat_values = self.to_backend_array(values).reshape(-1)
+        concrete_values = []
+        offset = 0
+        for concrete in declaration.list_concrete_parameters():
+            size = (
+                1
+                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
+                else concrete.size
+            )
+            block = flat_values[offset : offset + size]
+            concrete_values.append(
+                block[0]
+                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
+                else block.reshape(concrete.shape)
+            )
+            offset += size
+        parameters = tuple(concrete_values)
         native = self.as_module(declaration.build_function(target, self.name))
-        function = _FittedModule(native, basis)
-        return FittedFunction(declaration, target, function, function.basis)
+        function = _FittedModule(native, parameters)
+        return FittedFunction(declaration, target, function, parameters)
 
     def build_optimisation_problem(
         self,

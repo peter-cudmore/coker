@@ -25,7 +25,7 @@ from coker.dynamics.function_parameters import (
     FittedFunction,
     FunctionParameter,
     MonotonePiecewiseLinear,
-    Perceptron,
+    DenseLayer,
     RadialBasisFunction,
 )
 from coker.dynamics.analysis import (
@@ -96,7 +96,7 @@ __all__ = [
     "FittedFunction",
     "FunctionParameter",
     "MonotonePiecewiseLinear",
-    "Perceptron",
+    "DenseLayer",
     "RadialBasisFunction",
     "ParameterMixin",
     "ParameterVariable",

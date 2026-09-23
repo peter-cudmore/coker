@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable, Sequence
 from importlib.metadata import entry_points
@@ -59,8 +61,42 @@ class Backend(metaclass=ABCMeta):
     def reconstruct_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
-        """Reconstruct a generic fitted function from backend values."""
-        return declaration.fit(target, self.to_numpy_array(values))
+        """Reconstruct a generic fitted function from solver decisions."""
+        from coker.dynamics.variables import (
+            BoundedVariable,
+            BoundVector,
+            DenseTensorVariable,
+            UnboundedVariable,
+        )
+
+        flat_values = np.asarray(
+            self.to_numpy_array(values), dtype=float
+        ).reshape(-1)
+        parameters = []
+        offset = 0
+        for concrete in declaration.list_concrete_parameters():
+            size = (
+                1
+                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
+                else concrete.size
+            )
+            block = flat_values[offset : offset + size]
+            if block.size != size:
+                raise ValueError(
+                    "solver decisions do not match function parameter "
+                    "declarations"
+                )
+            parameters.append(
+                float(block[0])
+                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
+                else block.reshape(concrete.shape)
+            )
+            offset += size
+        if offset != flat_values.size:
+            raise ValueError(
+                "solver decisions do not match function parameter declarations"
+            )
+        return declaration.fit(target, tuple(parameters))
 
     def create_variational_solver(
         self, problem: VariationalProblem

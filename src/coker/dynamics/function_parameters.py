@@ -9,9 +9,21 @@ from typing import Any, Callable, Sequence
 
 import numpy as np
 
-from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
-from coker.algebra.function import Function, function
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+)
+from coker.algebra.function import BoundCallable, Function, function
 from coker.algebra.graph import if_then_else
+from coker.dynamics.variables import (
+    BoundVector,
+    BoundedVariable,
+    DenseTensorVariable,
+    ParameterVariable,
+    UnboundedVariable,
+)
 from coker.interfaces import FunctionSignatureValue
 
 
@@ -41,7 +53,7 @@ class FittedFunction(FunctionSignatureValue):
 
 
 class FunctionParameter(ABC):
-    """Declare finite numeric decisions that realize a function parameter."""
+    """Declare concrete parameter blocks that realize a function parameter."""
 
     name: str | None
 
@@ -50,42 +62,146 @@ class FunctionParameter(ABC):
         """Validate and return the compatible function parameter space."""
 
     @abstractmethod
-    def decision_declarations(
-        self,
-    ) -> (
-        tuple[VectorSpace, np.ndarray]
-        | tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]
-    ):
-        """Return a basis space, initial values, and optional bounds."""
+    def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return the named parameter blocks used to realize this function."""
 
     @abstractmethod
-    def evaluate(self, basis: Any, argument: Any) -> Any:
-        """Evaluate the declared function from basis decisions."""
+    def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Evaluate the declared function from structured parameter values."""
 
-    def fit(self, target: FunctionSpace, basis: Any) -> FittedFunction:
-        """Construct a generic fitted function from concrete basis values."""
-        basis_space, *_ = self.decision_declarations()
-        parameters = np.asarray(basis).reshape(basis_space.dimension)
+    def fit(
+        self, target: FunctionSpace, parameters: Sequence[Any]
+    ) -> FittedFunction:
+        """Construct a fitted function from structured concrete values."""
+        target = self.validate_target(target)
+        values = _normalise_concrete_values(
+            parameters, self.list_concrete_parameters()
+        )
         return FittedFunction(
             self,
             target,
-            lambda argument: self.evaluate(parameters, argument),
-            parameters,
+            lambda argument: self.evaluate(values, argument),
+            values,
         )
 
     def build_function(
         self, target: FunctionSpace, backend: str | None
     ) -> Function:
-        """Build a backend-native function of basis values and the argument."""
+        """Build a function of the target argument and concrete blocks."""
         target = self.validate_target(target)
-        basis, *_ = self.decision_declarations()
+        declarations = self.list_concrete_parameters()
+        parameter_spaces = [
+            _concrete_parameter_space(declaration)
+            for declaration in declarations
+        ]
+        argument_count = len(target.arguments)
         return function(
-            [*target.arguments, basis],
-            lambda argument, basis_values: self.evaluate(
-                basis_values, argument
+            [*target.arguments, *parameter_spaces],
+            lambda *arguments: self.evaluate(
+                tuple(arguments[argument_count:]), arguments[0]
             ),
             backend=backend,
         )
+
+
+def _concrete_parameter_name(
+    name: str | None, fallback: str, suffix: str
+) -> str:
+    prefix = name if isinstance(name, str) and name else fallback
+    return f"{prefix}_{suffix}"
+
+
+def _concrete_parameter_space(
+    declaration: ParameterVariable,
+) -> Scalar | VectorSpace:
+    if isinstance(declaration, (BoundedVariable, UnboundedVariable)):
+        return Scalar(declaration.name)
+    if isinstance(declaration, (BoundVector, DenseTensorVariable)):
+        return VectorSpace(declaration.name, declaration.shape)
+    raise TypeError(
+        "function parameter declarations must be scalar or dense variables"
+    )
+
+
+def _normalise_concrete_values(
+    values: Sequence[Any], declarations: Sequence[ParameterVariable]
+) -> tuple[Any, ...]:
+    if not isinstance(values, (tuple, list)):
+        raise TypeError(
+            "function parameter values must be a structured sequence"
+        )
+    if len(values) != len(declarations):
+        raise ValueError("function parameter values have the wrong arity")
+
+    normalised: list[Any] = []
+    for value, declaration in zip(values, declarations):
+        if isinstance(declaration, (BoundVector, DenseTensorVariable)):
+            array = np.asarray(value, dtype=float)
+            if array.shape != declaration.shape:
+                raise ValueError(
+                    f"function parameter {declaration.name!r} has shape "
+                    f"{array.shape}, expected {declaration.shape}"
+                )
+            normalised.append(array)
+        elif isinstance(declaration, (BoundedVariable, UnboundedVariable)):
+            array = np.asarray(value, dtype=float)
+            if array.size != 1:
+                raise ValueError(
+                    f"function parameter {declaration.name!r} must be scalar"
+                )
+            normalised.append(float(array.reshape(-1)[0]))
+        else:
+            raise TypeError(
+                "function parameter declarations must be scalar or dense "
+                "variables"
+            )
+    return tuple(normalised)
+
+
+def _vector_width(space: VectorSpace, description: str) -> int:
+    dimension = space.dimension
+    if isinstance(dimension, Integral) and not isinstance(dimension, bool):
+        width = int(dimension)
+    elif (
+        isinstance(dimension, tuple)
+        and len(dimension) == 1
+        and isinstance(dimension[0], Integral)
+        and not isinstance(dimension[0], bool)
+    ):
+        width = int(dimension[0])
+    else:
+        raise ValueError(
+            f"{description} must be a one-dimensional VectorSpace"
+        )
+    if width < 1:
+        raise ValueError(f"{description} must have positive width")
+    return width
+
+
+def _activation_widths(
+    activation: Function | BoundCallable,
+) -> tuple[int, int]:
+    if not isinstance(activation, (Function, BoundCallable)):
+        raise TypeError("activation must be a Coker Function or BoundCallable")
+    inputs = (
+        activation.input_spaces()
+        if isinstance(activation, Function)
+        else activation.public_space.arguments
+    )
+    if len(inputs) != 1 or not isinstance(inputs[0], VectorSpace):
+        raise ValueError("activation must have exactly one vector argument")
+    input_width = _vector_width(inputs[0], "activation argument")
+    outputs = activation.output_shape()
+    if (
+        len(outputs) != 1
+        or not isinstance(outputs[0], Dimension)
+        or not outputs[0].is_vector()
+    ):
+        raise ValueError("activation must have exactly one vector output")
+    output_shape = outputs[0].shape
+    if len(output_shape) != 1 or output_shape[0] < 1:
+        raise ValueError("activation output must have positive width")
+    return input_width, output_shape[0]
 
 
 def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
@@ -199,15 +315,16 @@ class MonotonePiecewiseLinear(FunctionParameter):
     def size(self) -> int:
         return len(self.domain_knots)
 
-    @property
-    def basis_space(self) -> VectorSpace:
-        return VectorSpace("theta", self.size)
-
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
         return _validate_scalar_target(target)
 
-    def decision_declarations(self) -> tuple[VectorSpace, np.ndarray]:
-        return self.basis_space, np.asarray(self.guess, dtype=float)
+    def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        return (
+            DenseTensorVariable(
+                _concrete_parameter_name(self.name, "monotone", "theta"),
+                np.asarray(self.guess, dtype=float),
+            ),
+        )
 
     def _values(self, theta: Any) -> list[Any]:
         weights = [np.exp(theta[i]) for i in range(self.size)] + [1.0, 1.0]
@@ -220,7 +337,8 @@ class MonotonePiecewiseLinear(FunctionParameter):
             values.append(self.lower_bound + span * cumulative / total)
         return values[: self.size]
 
-    def evaluate(self, basis: Any, argument: Any) -> Any:
+    def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        (basis,) = parameters
         values = self._values(basis)
         result = values[-1]
         for index in range(self.size - 2, -1, -1):
@@ -245,13 +363,17 @@ class MonotonePiecewiseLinear(FunctionParameter):
 
 
 @dataclass(frozen=True)
-class Perceptron(FunctionParameter):
-    """Logistic affine scalar output over a fixed-width vector input."""
+class DenseLayer(FunctionParameter):
+    """Affine vector layer followed by a Coker activation function.
+
+    The activation maps a hidden vector of width ``m`` to an output vector of
+    width ``k``. The layer accepts width ``n`` inputs and evaluates
+    ``activation(weights @ x + bias)`` with weights of shape ``(m, n)`` and a
+    bias of shape ``(m,)``.
+    """
 
     input_size: int
-    lower_bound: Real | None = None
-    upper_bound: Real | None = None
-    guess: Sequence[Real] | None = None
+    activation: Function | BoundCallable
     name: str | None = None
 
     def __post_init__(self) -> None:
@@ -261,14 +383,16 @@ class Perceptron(FunctionParameter):
             or self.input_size < 1
         ):
             raise ValueError("input_size must be a positive integer")
-        size = int(self.input_size) + 1
-        guess, lower, upper = _validate_basis_values(
-            self.guess, size, self.lower_bound, self.upper_bound
-        )
+        _activation_widths(self.activation)
         object.__setattr__(self, "input_size", int(self.input_size))
-        object.__setattr__(self, "lower_bound", lower)
-        object.__setattr__(self, "upper_bound", upper)
-        object.__setattr__(self, "guess", guess)
+
+    @property
+    def hidden_size(self) -> int:
+        return _activation_widths(self.activation)[0]
+
+    @property
+    def output_size(self) -> int:
+        return _activation_widths(self.activation)[1]
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
         if not isinstance(target, FunctionSpace):
@@ -277,42 +401,43 @@ class Perceptron(FunctionParameter):
             target.arguments[0], VectorSpace
         ):
             raise ValueError("target must have exactly one vector argument")
-        if target.arguments[0].size != self.input_size:
+        if (
+            _vector_width(target.arguments[0], "target argument")
+            != self.input_size
+        ):
             raise ValueError(
-                f"target vector argument must have size {self.input_size}"
+                f"target vector argument must have width {self.input_size}"
             )
         if (
             target.output is None
             or len(target.output) != 1
-            or not isinstance(target.output[0], Scalar)
+            or not isinstance(target.output[0], VectorSpace)
         ):
-            raise ValueError("target must have exactly one scalar output")
+            raise ValueError("target must have exactly one vector output")
+        if (
+            _vector_width(target.output[0], "target output")
+            != self.output_size
+        ):
+            raise ValueError(
+                f"target vector output must have width {self.output_size}"
+            )
         return target
 
-    def decision_declarations(
-        self,
-    ) -> (
-        tuple[VectorSpace, np.ndarray]
-        | tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]
-    ):
-        size = self.input_size + 1
-        result = (
-            VectorSpace("perceptron", size),
-            np.asarray(self.guess, dtype=float),
-        )
-        if self.lower_bound is None:
-            return result
+    def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
         return (
-            *result,
-            np.full(size, self.lower_bound),
-            np.full(size, self.upper_bound),
+            DenseTensorVariable(
+                _concrete_parameter_name(self.name, "dense_layer", "weights"),
+                np.zeros((self.hidden_size, self.input_size)),
+            ),
+            DenseTensorVariable(
+                _concrete_parameter_name(self.name, "dense_layer", "bias"),
+                np.zeros(self.hidden_size),
+            ),
         )
 
-    def evaluate(self, basis: Any, argument: Any) -> Any:
-        linear = basis[self.input_size]
-        for index in range(self.input_size):
-            linear += basis[index] * argument[index]
-        return 1.0 / (1.0 + np.exp(-linear))
+    def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        weights, bias = parameters
+        return self.activation(weights @ argument + bias)
 
 
 @dataclass(frozen=True)
@@ -360,26 +485,25 @@ class RadialBasisFunction(FunctionParameter):
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
         return _validate_scalar_target(target)
 
-    def decision_declarations(
-        self,
-    ) -> (
-        tuple[VectorSpace, np.ndarray]
-        | tuple[VectorSpace, np.ndarray, np.ndarray, np.ndarray]
-    ):
+    def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
         size = len(self.centers) + 1
-        result = (
-            VectorSpace("radial_basis", size),
-            np.asarray(self.guess, dtype=float),
+        name = _concrete_parameter_name(
+            self.name, "radial_basis", "coefficients"
         )
+        guess = np.asarray(self.guess, dtype=float)
         if self.lower_bound is None:
-            return result
+            return (DenseTensorVariable(name, guess),)
         return (
-            *result,
-            np.full(size, self.lower_bound),
-            np.full(size, self.upper_bound),
+            BoundVector(
+                name,
+                np.full(size, self.lower_bound),
+                np.full(size, self.upper_bound),
+                guess,
+            ),
         )
 
-    def evaluate(self, basis: Any, argument: Any) -> Any:
+    def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        (basis,) = parameters
         value = basis[-1]
         for index, center in enumerate(self.centers):
             distance = (argument - center) / self.width
