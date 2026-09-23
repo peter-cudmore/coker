@@ -230,7 +230,7 @@ class FunctionSpace:
         return len(output_dimensions) == 1 and output_dimensions[0].is_scalar()
 
     @staticmethod
-    def create_scalar_space(name: str, continuity_index=None):
+    def create_scalar_function_space(name: str, continuity_index=None):
         return FunctionSpace(
             name=name,
             arguments=[Dimension.scalar()],
