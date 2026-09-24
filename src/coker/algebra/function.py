@@ -15,6 +15,7 @@ from coker.algebra.dimensions import (
     VectorSpace,
 )
 from coker.algebra.graph import (
+    CallableReference,
     DanglingTracerError,
     Tape,
     TraceContext,
@@ -229,6 +230,34 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         )
         return outputs[0] if self.is_single else tuple(outputs)
 
+    def _contains_native_callable(self) -> bool:
+        for node in self.tape.nodes:
+            if isinstance(node, Tracer):
+                continue
+            _op, *arguments = node
+            if any(
+                isinstance(argument, CallableReference)
+                for argument in arguments
+            ):
+                return True
+        return False
+
+    def _call_pytorch_in_trace(
+        self, args: Sequence[Tracer], outer_tape: Tape
+    ) -> Tracer | tuple[Tracer | None, ...]:
+        backend = get_backend_by_name("pytorch", set_current=False)
+        native = backend.as_module(self)
+        outputs = self._append_native_outputs(
+            outer_tape,
+            native,
+            self.backend,
+            [spec.space for spec in self.signature.inputs],
+            self.signature.outputs,
+            args,
+            name=self.name,
+        )
+        return outputs[0] if self.is_single else tuple(outputs)
+
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:
             return Noop()
@@ -318,8 +347,15 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         ]
 
         if any(isinstance(a, Tracer) for a in args):
+            outer_tape = TraceContext.get_local_tape()
+            if (
+                self.backend == "pytorch"
+                and outer_tape is not None
+                and outer_tape.backend == "pytorch"
+                and self._contains_native_callable()
+            ):
+                return self._call_pytorch_in_trace(args, outer_tape)
             if self._native_callable is not None:
-                outer_tape = TraceContext.get_local_tape()
                 if outer_tape is None:
                     outer_tape = next(
                         a.tape for a in args if isinstance(a, Tracer)

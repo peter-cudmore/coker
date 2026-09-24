@@ -182,6 +182,48 @@ def test_pytorch_variational_solver_lowers_dense_layer_parameter(monkeypatch):
     assert solution.cost < 1e-4
 
 
+def test_pytorch_solver_reconstructs_dense_relu_function_parameter(
+    monkeypatch,
+):
+    backend = get_backend_by_name("pytorch", set_current=False)
+    monkeypatch.setattr(backend, "device", torch.device("cpu"))
+    monkeypatch.setattr(backend, "dtype", torch.float64)
+    response = FunctionSpace(
+        "response",
+        arguments=[Scalar("inflow")],
+        output=[Scalar("rate")],
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(response,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (0.0, None),
+            dynamics=lambda _t, state, _z, _u, p: p[0](state[0]),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend="pytorch",
+    )
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        parameters=[
+            DenseLayer(1, _relu_scalar_activation(backend), name="response")
+        ],
+        backend="pytorch",
+    ) as builder:
+        problem = builder.build(Minimise(builder.output(builder.t_final)[0]))
+
+    solver = problem.get_solver()
+    solution = solver.solve(**dict(zip(solver.parameters, (1.1796, -0.3112))))
+
+    fitted = solution.parameters["response"]
+    assert isinstance(fitted, FittedFunction)
+    assert fitted(torch.tensor(0.0, dtype=torch.float64)).item() == 0.0
+
+
 def test_pytorch_solution_reconstructs_mapped_function_parameter(
     monkeypatch,
 ):
