@@ -9,7 +9,7 @@ from coker.dynamics import (
     VariationalSolution,
 )
 from coker.toolkits.codesign import SolveFailure
-from coker.backends.casadi.variational.solver import ControlFactory
+from coker.backends.casadi.variational.bindings import ControlFactory
 from coker.dynamics.variables import ConstantControlVariable
 
 
@@ -152,7 +152,7 @@ def test_fitting_constant(enable_scaling, monkeypatch):
             "_derive_objective_scale",
         ):
             monkeypatch.setattr(
-                f"coker.backends.casadi.variational.solver.{helper}",
+                f"coker.backends.casadi.variational.transcription.{helper}",
                 lambda *_args: pytest.fail("scaling was enabled"),
             )
 

@@ -42,7 +42,7 @@ from coker.backends.casadi.lowered import CasadiLoweredFunction
 from coker.backends.casadi.variational.options import (  # noqa: F401
     CasadiVariationalOptions,
 )
-from coker.backends.casadi.variational.solver import (
+from coker.backends.casadi.variational.transcription import (
     create_variational_solver,
 )
 from coker.dynamics import VariationalProblem

@@ -3,11 +3,11 @@ import pytest
 
 try:
 
-    from coker.backends.casadi.variational.solver import (
-        InterpolatingPolyCollection,
-        SymbolicPolyCollection,
+    from coker.backends.casadi.variational.symbolic_path import (
         SymbolicPoly,
+        SymbolicPolyCollection,
     )
+    from coker.dynamics import InterpolatingPolyCollection
     import casadi as ca
 
     casadi_available = True

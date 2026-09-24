@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.backends.casadi import CasadiVariationalOptions
-from coker.backends.casadi.variational import solver as solver_module
+from coker.backends.casadi.variational import transcription as solver_module
 from coker.dynamics import (
     BoundedVariable,
     ConstantControlVariable,
