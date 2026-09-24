@@ -8,7 +8,12 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from coker.algebra.dimensions import FunctionSpace, VectorSpace
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+)
 from coker.algebra.function import BoundCallable, Function
 from coker.parameters import (
     DenseTensorVariable,
@@ -16,14 +21,94 @@ from coker.parameters import (
     UnboundedVariable,
 )
 
-from .base import (
-    FunctionParameter,
-    _activation_widths,
-    _concrete_parameter_name,
-    _is_scalar_activation,
-    _validate_scalar_target,
-    _vector_width,
-)
+from .base import FunctionParameter
+
+
+def _concrete_parameter_name(
+    name: str | None, fallback: str, suffix: str
+) -> str:
+    prefix = name if isinstance(name, str) and name else fallback
+    return f"{prefix}_{suffix}"
+
+
+def _vector_width(space: VectorSpace, description: str) -> int:
+    dimension = space.dimension
+    if isinstance(dimension, Integral) and not isinstance(dimension, bool):
+        width = int(dimension)
+    elif (
+        isinstance(dimension, tuple)
+        and len(dimension) == 1
+        and isinstance(dimension[0], Integral)
+        and not isinstance(dimension[0], bool)
+    ):
+        width = int(dimension[0])
+    else:
+        raise ValueError(
+            f"{description} must be a one-dimensional VectorSpace"
+        )
+    if width < 1:
+        raise ValueError(f"{description} must have positive width")
+    return width
+
+
+def _activation_widths(
+    activation: Function | BoundCallable,
+) -> tuple[int, int]:
+    if not isinstance(activation, (Function, BoundCallable)):
+        raise TypeError("activation must be a Coker Function or BoundCallable")
+    inputs = (
+        activation.input_spaces()
+        if isinstance(activation, Function)
+        else activation.public_space.arguments
+    )
+    if len(inputs) != 1 or not isinstance(inputs[0], VectorSpace):
+        raise ValueError("activation must have exactly one vector argument")
+    input_width = _vector_width(inputs[0], "activation argument")
+    outputs = activation.output_shape()
+    if (
+        len(outputs) != 1
+        or not isinstance(outputs[0], Dimension)
+        or not outputs[0].is_vector()
+    ):
+        raise ValueError("activation must have exactly one vector output")
+    output_shape = outputs[0].shape
+    if len(output_shape) != 1 or output_shape[0] < 1:
+        raise ValueError("activation output must have positive width")
+    return input_width, output_shape[0]
+
+
+def _is_scalar_activation(activation: Function | BoundCallable) -> bool:
+    if not isinstance(activation, (Function, BoundCallable)):
+        raise TypeError("activation must be a Coker Function or BoundCallable")
+    inputs = (
+        activation.input_spaces()
+        if isinstance(activation, Function)
+        else activation.public_space.arguments
+    )
+    outputs = activation.output_shape()
+    return (
+        len(inputs) == 1
+        and isinstance(inputs[0], Scalar)
+        and len(outputs) == 1
+        and isinstance(outputs[0], Dimension)
+        and outputs[0].is_scalar()
+    )
+
+
+def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
+    if not isinstance(target, FunctionSpace):
+        raise TypeError("target must be a FunctionSpace")
+    if len(target.arguments) != 1 or not isinstance(
+        target.arguments[0], Scalar
+    ):
+        raise ValueError("target must have exactly one scalar argument")
+    if (
+        target.output is None
+        or len(target.output) != 1
+        or not isinstance(target.output[0], Scalar)
+    ):
+        raise ValueError("target must have exactly one scalar output")
+    return target
 
 
 @dataclass(frozen=True)
