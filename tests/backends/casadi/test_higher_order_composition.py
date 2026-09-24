@@ -286,6 +286,7 @@ def test_casadi_inner_with_functionspace_closure_over_outer_variable():
     result = outer(2.0, 3.0)
     assert abs(result - 8.0) < 1e-9, f"Expected 8.0, got {result}"
 
+
 def test_casadi_inner_conditional_preserves_symbolic_branch():
     """Composed conditionals must remain symbolic in the enclosing graph."""
     inner = function(

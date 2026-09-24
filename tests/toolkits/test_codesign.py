@@ -181,7 +181,7 @@ def test_mathematical_program_reconstructs_function_parameter(
 def test_mathematical_program_fits_monotone_piecewise_linear_cubic(
     variational_backend,
 ):
-    """A piecewise-linear fit matches cubic knots but not the cubic between them."""
+    """Piecewise-linear fitting differs between its matching cubic knots."""
     knots = np.linspace(0.0, 2.0, 17)
     targets = knots**3
     response_space = FunctionSpace(
