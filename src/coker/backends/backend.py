@@ -20,6 +20,31 @@ from coker.interfaces import SolverParameters
 ArrayLike = Any
 
 
+def _split_function_parameter_values(declaration: Any, flat_values: Any):
+    """Split flat backend values into the declaration's concrete blocks."""
+    from coker.dynamics.variables import BoundedVariable, UnboundedVariable
+
+    parameters = []
+    offset = 0
+    for concrete in declaration.list_concrete_parameters():
+        is_scalar = isinstance(concrete, (BoundedVariable, UnboundedVariable))
+        size = 1 if is_scalar else concrete.size
+        block = flat_values[offset : offset + size]
+        if block.shape[0] != size:
+            raise ValueError(
+                "solver decisions do not match function parameter declarations"
+            )
+        parameters.append(
+            block[0] if is_scalar else block.reshape(concrete.shape)
+        )
+        offset += size
+    if offset != flat_values.shape[0]:
+        raise ValueError(
+            "solver decisions do not match function parameter declarations"
+        )
+    return tuple(parameters)
+
+
 class Backend(metaclass=ABCMeta):
     name: str
 
@@ -58,37 +83,6 @@ class Backend(metaclass=ABCMeta):
         """Wrap a backend solver for use as a numerical program module."""
         return implementation
 
-    @staticmethod
-    def _split_function_parameter_values(declaration: Any, flat_values: Any):
-        """Split flat backend values into the declaration's concrete blocks."""
-        from coker.dynamics.variables import (
-            BoundedVariable,
-            UnboundedVariable,
-        )
-
-        parameters = []
-        offset = 0
-        for concrete in declaration.list_concrete_parameters():
-            is_scalar = isinstance(
-                concrete, (BoundedVariable, UnboundedVariable)
-            )
-            size = 1 if is_scalar else concrete.size
-            block = flat_values[offset : offset + size]
-            if block.shape[0] != size:
-                raise ValueError(
-                    "solver decisions do not match function parameter "
-                    "declarations"
-                )
-            parameters.append(
-                block[0] if is_scalar else block.reshape(concrete.shape)
-            )
-            offset += size
-        if offset != flat_values.shape[0]:
-            raise ValueError(
-                "solver decisions do not match function parameter declarations"
-            )
-        return tuple(parameters)
-
     @abstractmethod
     def fit_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
@@ -103,9 +97,7 @@ class Backend(metaclass=ABCMeta):
         flat_values = np.asarray(
             self.to_numpy_array(values), dtype=float
         ).reshape(-1)
-        parameters = self._split_function_parameter_values(
-            declaration, flat_values
-        )
+        parameters = _split_function_parameter_values(declaration, flat_values)
         return FittedFunction(
             declaration,
             declaration.validate_target(target),

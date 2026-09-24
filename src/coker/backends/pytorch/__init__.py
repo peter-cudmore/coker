@@ -6,7 +6,12 @@ import torch
 from coker.algebra import Dimension
 from coker.algebra.function import Function, create_function_from_native
 from coker.backends.evaluator import GenericEvaluator
-from coker.backends.backend import ArrayLike, Backend, register_backend
+from coker.backends.backend import (
+    ArrayLike,
+    Backend,
+    _split_function_parameter_values,
+    register_backend,
+)
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from .dynamics import PytorchODESolverParameters, evaluate_integrals
@@ -150,9 +155,7 @@ class PytorchBackend(Backend):
         from coker.dynamics.function_parameters import FittedFunction
 
         flat_values = self.to_backend_array(values).reshape(-1)
-        parameters = self._split_function_parameter_values(
-            declaration, flat_values
-        )
+        parameters = _split_function_parameter_values(declaration, flat_values)
         native = self.as_module(declaration.build_function(target, self.name))
         function = _FittedModule(native, parameters)
         return FittedFunction(declaration, target, function, parameters)
