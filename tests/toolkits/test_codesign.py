@@ -209,6 +209,9 @@ def test_mathematical_program_fits_monotone_piecewise_linear_cubic(
 
     objective, _ = problem()
     fitted = problem.parameters["response"]
+    knot_values = np.asarray([fitted(knot) for knot in knots], dtype=float)
+    np.testing.assert_allclose(knot_values, targets, atol=1e-3)
+
     evaluation_points = np.linspace(0.0, 2.0, 101)
     fitted_values = np.asarray(
         [fitted(point) for point in evaluation_points],
