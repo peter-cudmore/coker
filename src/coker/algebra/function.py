@@ -247,13 +247,17 @@ class Function(SymbolicCallable, FunctionSignatureValue):
     ) -> Tracer | tuple[Tracer | None, ...]:
         backend = get_backend_by_name("pytorch", set_current=False)
         native = backend.as_module(self)
+        native_arguments = tuple(
+            None if isinstance(argument, Noop) else argument
+            for argument in args
+        )
         outputs = self._append_native_outputs(
             outer_tape,
             native,
             self.backend,
             [spec.space for spec in self.signature.inputs],
             self.signature.outputs,
-            args,
+            native_arguments,
             name=self.name,
         )
         return outputs[0] if self.is_single else tuple(outputs)
