@@ -37,7 +37,7 @@ class _FittedModule(torch.nn.Module):
     def forward(self, argument):
         return self.native(
             argument,
-            *(getattr(self, name) for name in self._concrete_value_names),
+            *(self.get_buffer(name) for name in self._concrete_value_names),
         )
 
 
