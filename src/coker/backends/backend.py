@@ -58,43 +58,48 @@ class Backend(metaclass=ABCMeta):
         """Wrap a backend solver for use as a numerical program module."""
         return implementation
 
-    def reconstruct_function_parameter(
-        self, declaration: Any, target: Any, values: ArrayLike
-    ) -> Any:
-        """Reconstruct a generic fitted function from solver decisions."""
+    @staticmethod
+    def _split_function_parameter_values(declaration: Any, flat_values: Any):
+        """Split flat backend values into the declaration's concrete blocks."""
         from coker.dynamics.variables import (
             BoundedVariable,
             UnboundedVariable,
         )
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
         parameters = []
         offset = 0
         for concrete in declaration.list_concrete_parameters():
-            size = (
-                1
-                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
-                else concrete.size
+            is_scalar = isinstance(
+                concrete, (BoundedVariable, UnboundedVariable)
             )
+            size = 1 if is_scalar else concrete.size
             block = flat_values[offset : offset + size]
-            if block.size != size:
+            if block.shape[0] != size:
                 raise ValueError(
                     "solver decisions do not match function parameter "
                     "declarations"
                 )
             parameters.append(
-                float(block[0])
-                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
-                else block.reshape(concrete.shape)
+                block[0] if is_scalar else block.reshape(concrete.shape)
             )
             offset += size
-        if offset != flat_values.size:
+        if offset != flat_values.shape[0]:
             raise ValueError(
                 "solver decisions do not match function parameter declarations"
             )
-        return declaration.fit(target, tuple(parameters))
+        return tuple(parameters)
+
+    def reconstruct_function_parameter(
+        self, declaration: Any, target: Any, values: ArrayLike
+    ) -> Any:
+        """Reconstruct a generic fitted function from solver decisions."""
+        flat_values = np.asarray(
+            self.to_numpy_array(values), dtype=float
+        ).reshape(-1)
+        return declaration.fit(
+            target,
+            self._split_function_parameter_values(declaration, flat_values),
+        )
 
     def create_variational_solver(
         self, problem: VariationalProblem
