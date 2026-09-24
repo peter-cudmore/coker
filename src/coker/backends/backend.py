@@ -62,39 +62,11 @@ class Backend(metaclass=ABCMeta):
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
         """Reconstruct a generic fitted function from solver decisions."""
-        from coker.dynamics.variables import (
-            BoundedVariable,
-            UnboundedVariable,
-        )
-
         flat_values = np.asarray(
             self.to_numpy_array(values), dtype=float
         ).reshape(-1)
-        parameters = []
-        offset = 0
-        for concrete in declaration.list_concrete_parameters():
-            size = (
-                1
-                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
-                else concrete.size
-            )
-            block = flat_values[offset : offset + size]
-            if block.size != size:
-                raise ValueError(
-                    "solver decisions do not match function parameter "
-                    "declarations"
-                )
-            parameters.append(
-                float(block[0])
-                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
-                else block.reshape(concrete.shape)
-            )
-            offset += size
-        if offset != flat_values.size:
-            raise ValueError(
-                "solver decisions do not match function parameter declarations"
-            )
-        return declaration.fit(target, tuple(parameters))
+        parameters = declaration.split_values(flat_values)
+        return declaration.fit(target, parameters)
 
     def create_variational_solver(
         self, problem: VariationalProblem

@@ -69,11 +69,59 @@ class FunctionParameter(ABC):
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         """Evaluate the declared function from structured parameter values."""
 
+    def split_values(self, flat_values: Any) -> tuple[Any, ...]:
+        """Split one flat solver vector into declared parameter blocks."""
+        if len(flat_values.shape) != 1:
+            raise ValueError("solver decisions must be a flat vector")
+        values = []
+        offset = 0
+        for declaration in self.list_concrete_parameters():
+            is_scalar = isinstance(
+                declaration, (BoundedVariable, UnboundedVariable)
+            )
+            if is_scalar:
+                size = 1
+            elif isinstance(declaration, (BoundVector, DenseTensorVariable)):
+                size = declaration.size
+            else:
+                raise TypeError(
+                    "function parameter declarations must be scalar or dense "
+                    "variables"
+                )
+            block = flat_values[offset : offset + size]
+            if block.shape[0] != size:
+                raise ValueError(
+                    "solver decisions do not match function parameter "
+                    "declarations"
+                )
+            values.append(
+                block[0] if is_scalar else block.reshape(declaration.shape)
+            )
+            offset += size
+        if offset != flat_values.shape[0]:
+            raise ValueError(
+                "solver decisions do not match function parameter declarations"
+            )
+        return tuple(values)
+
+    def build_fitted(
+        self,
+        target: FunctionSpace,
+        function: Callable[..., Any],
+        parameters: Sequence[Any],
+    ) -> FittedFunction:
+        """Construct a fitted function from structured concrete values."""
+        return FittedFunction(
+            self,
+            self.validate_target(target),
+            function,
+            tuple(parameters),
+        )
+
     def fit(
         self, target: FunctionSpace, parameters: Sequence[Any]
     ) -> FittedFunction:
         """Construct a fitted function from structured concrete values."""
-        target = self.validate_target(target)
         declarations = self.list_concrete_parameters()
         if not isinstance(parameters, (tuple, list)):
             raise TypeError(
@@ -104,11 +152,10 @@ class FunctionParameter(ABC):
                     "variables"
                 )
             values.append(value)
-        return FittedFunction(
-            self,
+        return self.build_fitted(
             target,
             lambda argument: self.evaluate(values, argument),
-            tuple(values),
+            values,
         )
 
     def build_function(
