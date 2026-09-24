@@ -245,10 +245,14 @@ class Function(SymbolicCallable, FunctionSignatureValue):
     def _call_pytorch_in_trace(
         self, args: Sequence[Tracer], outer_tape: Tape
     ) -> Tracer | tuple[Tracer | None, ...]:
-        backend = get_backend_by_name("pytorch", set_current=False)
-        native = backend.as_module(self)
+        import torch
+
+        from coker.backends.pytorch import PytorchBackend
+
         native_arguments = tuple(
-            None if isinstance(argument, Noop) else argument
+            None
+            if argument is None or isinstance(argument, Noop)
+            else argument
             for argument in args
         )
         input_spaces = tuple(
@@ -256,8 +260,38 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             for spec, argument in zip(self.signature.inputs, native_arguments)
             if argument is not None
         )
+        native_modules = {}
+        fallback_module = None
+
+        def module_for(present_arguments):
+            nonlocal fallback_module
+
+            tensor = next(
+                (
+                    argument
+                    for argument in present_arguments
+                    if isinstance(argument, torch.Tensor)
+                ),
+                None,
+            )
+            if tensor is None:
+                if fallback_module is None:
+                    fallback_module = get_backend_by_name(
+                        "pytorch", set_current=False
+                    ).as_module(self)
+                return fallback_module
+            key = tensor.device, tensor.dtype
+            try:
+                return native_modules[key]
+            except KeyError:
+                native = PytorchBackend(
+                    device=tensor.device, dtype=tensor.dtype
+                ).as_module(self)
+                native_modules[key] = native
+                return native
 
         def call_native(*present_arguments):
+            native = module_for(present_arguments)
             values = iter(present_arguments)
             return native(
                 *(

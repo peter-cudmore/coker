@@ -46,18 +46,16 @@ def get_basis(dimension: Dimension, i: int):
 
 
 def get_projection(dimension: Dimension, slc: slice):
-    if isinstance(dimension.dim, tuple):
-        cols = dimension.dim[0]
-    else:
+    if dimension.dim is None:
         return 1
 
+    cols = dimension.dim[0]
     indices = list(range(cols))[slc]
     rows = len(indices)
     proj = np.zeros((rows, cols), dtype=float)
     for row, col in enumerate(indices):
         proj[row, col] = 1
     return proj
-
 
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
