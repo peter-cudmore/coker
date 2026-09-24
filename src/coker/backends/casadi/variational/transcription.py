@@ -224,7 +224,7 @@ class _NlpScaling:
 def _scale_nlp(
     factory: _TranscriptionFactory,
     layout: DecisionLayout,
-    poly_collection: "SymbolicPolyCollection",
+    poly_collection: SymbolicPolyCollection,
     decision_variables: ca.MX,
     cost: ca.MX,
     g: ca.MX,
@@ -311,9 +311,9 @@ def _scale_nlp(
 class _CompiledNlp:
     nlp_solver: ca.Function
     init_solver: Optional[ca.Function]
-    callback_wrapper: Optional["CallbackWrapper"]
+    callback_wrapper: Optional[CallbackWrapper]
     warm_start: bool
-    assemble_solution: "CasadiSolutionAssembler"
+    assemble_solution: CasadiSolutionAssembler
     unscale_objective: Callable[[float], float]
     variable_scaling: object
     physical_decision_variables_0: ca.DM
@@ -326,7 +326,7 @@ class _CompiledNlp:
 def _compile_nlp(
     factory: _TranscriptionFactory,
     layout: DecisionLayout,
-    poly_collection: "SymbolicPolyCollection",
+    poly_collection: SymbolicPolyCollection,
     projectors,
     path_symbols: ca.MX,
     decision_variables: ca.MX,

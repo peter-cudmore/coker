@@ -1,5 +1,7 @@
 """Symbolic path, controls, and solution assembly for CasADi."""
 
+from __future__ import annotations
+
 from typing import Callable, Dict, Optional, Tuple
 
 import casadi as ca
@@ -20,9 +22,9 @@ class CasadiSolutionAssembler:
         self,
         *,
         problem: VariationalProblem,
-        factory: "_TranscriptionFactory",
+        factory: _TranscriptionFactory,
         output_function: ca.Function,
-        poly_collection: "SymbolicPolyCollection",
+        poly_collection: SymbolicPolyCollection,
         projectors: Tuple[
             Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
         ],

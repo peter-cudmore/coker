@@ -10,8 +10,8 @@ from .symbolic_path import SymbolicPolyCollection
 
 
 def _lower_loss(
-    factory: "_TranscriptionFactory",
-    poly_collection: "SymbolicPolyCollection",
+    factory: _TranscriptionFactory,
+    poly_collection: SymbolicPolyCollection,
     duration,
 ):
     """Lower the problem loss against one transcription's solution proxies."""
