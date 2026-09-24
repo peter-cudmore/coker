@@ -15,8 +15,6 @@ from coker.backends.casadi.variational.variable_scaling import (
 from coker.dynamics import VariationalProblem, VariationalSolution
 from coker.parameters import BoundedVariable, ParameterVariable
 from coker.dynamics.transcription.collocation import (
-    InterpolatingPoly,  # noqa: F401
-    InterpolatingPolyCollection,  # noqa: F401
     _predict_refined_degree,
     _split_refined_interval,
 )
@@ -28,13 +26,11 @@ from coker.toolkits.codesign.optimisation import (
     solve_info_from_casadi_stats,
 )
 
-from .bindings import ControlFactory  # noqa: F401
 from .factory import _TranscriptionFactory, _resolve_options
 from .loss import _lower_loss
 from .symbolic_path import (
     CallbackWrapper,
     CasadiSolutionAssembler,
-    SymbolicPoly,  # noqa: F401
     SymbolicPolyCollection,
 )
 
