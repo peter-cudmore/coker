@@ -420,13 +420,12 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                         a.tape for a in args if isinstance(a, Tracer)
                     )
                 return self._call_native_in_trace(args, outer_tape)
-            if outer_tape is None or outer_tape.backend is None:
-                raise RuntimeError(
-                    "Cannot compose a function without an enclosing backend"
+            if outer_tape is None:
+                outer_tape = next(
+                    arg.tape for arg in args if isinstance(arg, Tracer)
                 )
-            backend = get_backend_by_name(
-                outer_tape.backend, set_current=False
-            )
+            backend_name = outer_tape.backend or self.backend or "numpy"
+            backend = get_backend_by_name(backend_name, set_current=False)
             output = backend.compose(self, args, outer_tape)
         else:
             # Concrete evaluation: lower once per backend/options combination.

@@ -57,6 +57,7 @@ def get_projection(dimension: Dimension, slc: slice):
         proj[row, col] = 1
     return proj
 
+
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
         return Dimension.scalar()
