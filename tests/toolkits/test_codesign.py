@@ -10,7 +10,11 @@ from coker.toolkits.codesign import (
     bounded,
     norm as codesign_norm,
 )
-from coker.parameters.function_parameters import DenseLayer, FittedFunction
+from coker.parameters.function_parameters import (
+    DenseLayer,
+    FittedFunction,
+    MonotonePiecewiseLinear,
+)
 
 
 def quadratic(x, p, z):
@@ -170,6 +174,54 @@ def test_mathematical_program_reconstructs_function_parameter(
         (1,),
     ]
     assert fitted(np.array([1.0]))[0] == pytest.approx(value, abs=1e-6)
+    assert problem.solve_info is not None
+    assert problem.solve_info.success
+
+
+def test_mathematical_program_fits_monotone_piecewise_linear_cubic(
+    variational_backend,
+):
+    """A piecewise-linear fit matches cubic knots but not the cubic between them."""
+    knots = np.linspace(0.0, 2.0, 17)
+    targets = knots**3
+    response_space = FunctionSpace(
+        "response",
+        arguments=[Scalar("x")],
+        output=[Scalar("y")],
+    )
+    declaration = MonotonePiecewiseLinear(
+        domain_knots=knots,
+        lower_bound=-0.1,
+        upper_bound=8.1,
+        name="response",
+    )
+
+    with ProblemBuilder() as builder:
+        response = builder.new_function_parameter(response_space, declaration)
+        residuals = [
+            response(knot) - target for knot, target in zip(knots, targets)
+        ]
+        builder.objective = Minimise(
+            sum(residual * residual for residual in residuals)
+        )
+        builder.outputs = [response(knots[0])]
+        problem = builder.build(variational_backend)
+
+    objective, _ = problem()
+    fitted = problem.parameters["response"]
+    evaluation_points = np.linspace(0.0, 2.0, 101)
+    fitted_values = np.asarray(
+        [fitted(point) for point in evaluation_points],
+        dtype=float,
+    )
+    errors = fitted_values - evaluation_points**3
+    max_error = np.max(np.abs(errors))
+    rmse = np.sqrt(np.mean(errors**2))
+
+    assert np.isfinite(objective)
+    assert np.all(np.isfinite(fitted_values))
+    assert max_error < 2.5e-2
+    assert rmse < 1e-2
     assert problem.solve_info is not None
     assert problem.solve_info.success
 
