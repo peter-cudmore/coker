@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 from coker.backends.evaluator import Evaluator
 from coker.backends.lowered import LoweredFunction, LoweringOptions
 from coker.algebra.graph import Tape, Tracer
+from coker.algebra.ops import Noop, OP, invoke_callable
 from coker.algebra.dimensions import Dimension
 from coker.interfaces import SolverParameters, SymbolicCallable
 
@@ -112,23 +113,78 @@ class Backend(metaclass=ABCMeta):
         inputs: Sequence[Any],
         outer_tape: Tape,
     ) -> list[Tracer | None]:
-        """Re-emit a Coker function's graph into an enclosing trace."""
+        """Lower a function to this backend and record its native call."""
         if len(inputs) != len(function.tape.input_indicies):
             raise TypeError(
                 f"Expected {len(function.tape.input_indicies)} inputs, got "
                 f"{len(inputs)}"
             )
-        if any(isinstance(value, SymbolicCallable) for value in inputs) or any(
-            not isinstance(node, Tracer)
-            and any(
-                isinstance(argument, SymbolicCallable) for argument in node[1:]
-            )
-            for node in function.tape.nodes
+        if (
+            function._native_callable is not None
+            and function.backend != self.name
         ):
-            from coker.backends.numpy import NumpyBackend
+            raise RuntimeError(
+                "Cannot compose native callable for backend "
+                f"{function.backend!r} into {self.name!r} trace"
+            )
+        if (
+            outer_tape.backend is None
+            or self.name == "numpy"
+            or any(isinstance(value, SymbolicCallable) for value in inputs)
+            or any(
+                not isinstance(node, Tracer)
+                and any(
+                    isinstance(argument, SymbolicCallable)
+                    for argument in node[1:]
+                )
+                for node in function.tape.nodes
+            )
+        ):
+            return self._compose_graph(function, inputs, outer_tape)
+        from coker.algebra.function import Function
 
-            return NumpyBackend().evaluate(function, inputs)
+        lowered = self.lower(function)
+        native_inputs = tuple(
+            value
+            for value in inputs
+            if value is not None and not isinstance(value, Noop)
+        )
+        input_spaces = tuple(
+            spec.space
+            for spec, value in zip(function.signature.inputs, inputs)
+            if value is not None and not isinstance(value, Noop)
+        )
 
+        def execute(*present_inputs):
+            present_values = iter(present_inputs)
+            return lowered.execute(
+                tuple(
+                    (
+                        None
+                        if value is None or isinstance(value, Noop)
+                        else next(present_values)
+                    )
+                    for value in inputs
+                )
+            )
+
+        return Function._append_native_outputs(
+            outer_tape,
+            execute,
+            self.name,
+            input_spaces,
+            function.signature.outputs,
+            native_inputs,
+            name=function.name,
+        )
+
+    @staticmethod
+    def _compose_graph(
+        function: Function,
+        inputs: Sequence[Any],
+        outer_tape: Tape,
+    ) -> list[Tracer | None]:
+        """Re-emit higher-order calls that cannot lower independently."""
         values: dict[int, Any] = dict(
             zip(function.tape.input_indicies, inputs)
         )
@@ -138,19 +194,22 @@ class Backend(metaclass=ABCMeta):
                 return values[value.index]
             return value
 
-        for index, node in enumerate(function.tape.nodes):
+        for index in range(len(function.tape.nodes)):
+            node = function.tape.nodes[index]
             if isinstance(node, Tracer):
                 continue
             op, *arguments = node
-            if op.name in {"VALUE", "FUNCTION_VALUE"}:
-                values[index] = remap(arguments[0])
-                continue
-            values[index] = Tracer(
-                outer_tape,
-                outer_tape.append(
-                    op, *(remap(argument) for argument in arguments)
-                ),
-            )
+            arguments = tuple(remap(argument) for argument in arguments)
+            if op in (OP.VALUE, OP.FUNCTION_VALUE):
+                values[index] = arguments[0]
+            elif op == OP.EVALUATE and isinstance(
+                arguments[0], SymbolicCallable
+            ):
+                values[index] = invoke_callable(*arguments)
+            else:
+                values[index] = Tracer(
+                    outer_tape, outer_tape.append(op, *arguments)
+                )
         return [
             None if output is None else values[output.index]
             for output in function.output

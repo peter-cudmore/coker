@@ -1,10 +1,14 @@
 """PyTorch numerical backend."""
 
+from collections.abc import Sequence
+
 import numpy as np
 import torch
 
 from coker.algebra import Dimension
 from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.graph import CallableReference, Tape, Tracer
+from coker.algebra.ops import Noop
 from coker.backends.evaluator import GenericEvaluator
 from coker.backends.backend import (
     ArrayLike,
@@ -148,6 +152,80 @@ class PytorchBackend(Backend):
         return PytorchLoweredFunction(
             function,
             self.get_evaluator().build_plan(function.tape),
+        )
+
+    def compose(
+        self, function: Function, inputs: Sequence[object], outer_tape: Tape
+    ) -> list[Tracer | None]:
+        if not self._contains_native_callable(function):
+            return super().compose(function, inputs, outer_tape)
+
+        native_arguments = tuple(
+            None if value is None or isinstance(value, Noop) else value
+            for value in inputs
+        )
+        input_spaces = tuple(
+            spec.space
+            for spec, value in zip(function.signature.inputs, native_arguments)
+            if value is not None
+        )
+        native_modules = {}
+        fallback_module = None
+
+        def module_for(present_inputs):
+            nonlocal fallback_module
+
+            tensor = next(
+                (
+                    value
+                    for value in present_inputs
+                    if isinstance(value, torch.Tensor)
+                ),
+                None,
+            )
+            if tensor is None:
+                if fallback_module is None:
+                    fallback_module = self.as_module(function)
+                return fallback_module
+            key = tensor.device, tensor.dtype
+            try:
+                return native_modules[key]
+            except KeyError:
+                native = PytorchBackend(
+                    device=tensor.device, dtype=tensor.dtype
+                ).as_module(function)
+                native_modules[key] = native
+                return native
+
+        def execute(*present_inputs):
+            native = module_for(present_inputs)
+            values = iter(present_inputs)
+            return native(
+                *(
+                    None if value is None else next(values)
+                    for value in native_arguments
+                )
+            )
+
+        return Function._append_native_outputs(
+            outer_tape,
+            execute,
+            self.name,
+            input_spaces,
+            function.signature.outputs,
+            tuple(value for value in native_arguments if value is not None),
+            name=function.name,
+        )
+
+    @staticmethod
+    def _contains_native_callable(function: Function) -> bool:
+        return any(
+            not isinstance(node, Tracer)
+            and any(
+                isinstance(argument, CallableReference)
+                for argument in node[1:]
+            )
+            for node in function.tape.nodes
         )
 
     def as_module(self, function):

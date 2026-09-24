@@ -15,7 +15,6 @@ from coker.algebra.dimensions import (
     VectorSpace,
 )
 from coker.algebra.graph import (
-    CallableReference,
     DanglingTracerError,
     Tape,
     TraceContext,
@@ -148,8 +147,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         backend: str,
         input_spaces: Sequence[Scalar | VectorSpace | FunctionSpace],
         output_specs: Sequence[FunctionOutputSpec],
-        args: Sequence[Tracer],
-        *,
+        args: Sequence[Any],
         name: str | None = None,
     ) -> list[Tracer | None]:
         def result_output_dimension(
@@ -208,114 +206,6 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             )
             for output_index, output_spec in enumerate(output_specs)
         ]
-
-    def _call_native_in_trace(
-        self, args: Sequence[Tracer], outer_tape: Tape
-    ) -> Tracer | tuple[Tracer | None, ...]:
-        if outer_tape.backend != self.backend:
-            raise RuntimeError(
-                "Cannot compose native callable for backend "
-                f"{self.backend!r} into {outer_tape.backend!r} trace"
-            )
-        native = self._native_callable
-        assert native is not None
-        outputs = self._append_native_outputs(
-            outer_tape,
-            native,
-            self.backend,
-            [spec.space for spec in self.signature.inputs],
-            self.signature.outputs,
-            args,
-            name=self.name,
-        )
-        return outputs[0] if self.is_single else tuple(outputs)
-
-    def _contains_native_callable(self) -> bool:
-        for node in self.tape.nodes:
-            if isinstance(node, Tracer):
-                continue
-            _op, *arguments = node
-            if any(
-                isinstance(argument, CallableReference)
-                for argument in arguments
-            ):
-                return True
-        return False
-
-    def _call_pytorch_in_trace(
-        self, args: Sequence[Tracer], outer_tape: Tape
-    ) -> Tracer | tuple[Tracer | None, ...]:
-        import torch
-
-        from coker.backends.pytorch import PytorchBackend
-
-        native_arguments = tuple(
-            (
-                None
-                if argument is None or isinstance(argument, Noop)
-                else argument
-            )
-            for argument in args
-        )
-        input_spaces = tuple(
-            spec.space
-            for spec, argument in zip(self.signature.inputs, native_arguments)
-            if argument is not None
-        )
-        native_modules = {}
-        fallback_module = None
-
-        def module_for(present_arguments):
-            nonlocal fallback_module
-
-            tensor = next(
-                (
-                    argument
-                    for argument in present_arguments
-                    if isinstance(argument, torch.Tensor)
-                ),
-                None,
-            )
-            if tensor is None:
-                if fallback_module is None:
-                    fallback_module = get_backend_by_name(
-                        "pytorch", set_current=False
-                    ).as_module(self)
-                return fallback_module
-            key = tensor.device, tensor.dtype
-            try:
-                return native_modules[key]
-            except KeyError:
-                native = PytorchBackend(
-                    device=tensor.device, dtype=tensor.dtype
-                ).as_module(self)
-                native_modules[key] = native
-                return native
-
-        def call_native(*present_arguments):
-            native = module_for(present_arguments)
-            values = iter(present_arguments)
-            return native(
-                *(
-                    None if argument is None else next(values)
-                    for argument in native_arguments
-                )
-            )
-
-        outputs = self._append_native_outputs(
-            outer_tape,
-            call_native,
-            self.backend,
-            input_spaces,
-            self.signature.outputs,
-            tuple(
-                argument
-                for argument in native_arguments
-                if argument is not None
-            ),
-            name=self.name,
-        )
-        return outputs[0] if self.is_single else tuple(outputs)
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:
@@ -379,15 +269,11 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return BoundCallable(inner_fn, space, tuple(unique_captured))
 
     def call_inline(self, *args) -> Tuple[Tracer]:
-        """Evaluate this function symbolically inside an active trace.
+        """Evaluate through the NumPy tracing interpreter.
 
-        Unlike ``__call__``, which compiles to the configured backend,
-        this always routes through the numpy interpreter so the result
-        is a :class:`~coker.algebra.graph.Tracer` recorded on the
-        enclosing tape. Use this when composing functions inside an
-        ``implementation`` passed to :func:`function`.
+        Use this explicit path for symbolic higher-order evaluation. Regular
+        traced calls dispatch composition to the enclosing backend.
         """
-
         backend = get_backend_by_name("numpy", set_current=False)
         output = backend.evaluate(self, args)
         if self.is_single:
@@ -407,19 +293,6 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
         if any(isinstance(a, Tracer) for a in args):
             outer_tape = TraceContext.get_local_tape()
-            if (
-                self.backend == "pytorch"
-                and outer_tape is not None
-                and outer_tape.backend == "pytorch"
-                and self._contains_native_callable()
-            ):
-                return self._call_pytorch_in_trace(args, outer_tape)
-            if self._native_callable is not None:
-                if outer_tape is None:
-                    outer_tape = next(
-                        a.tape for a in args if isinstance(a, Tracer)
-                    )
-                return self._call_native_in_trace(args, outer_tape)
             if outer_tape is None:
                 outer_tape = next(
                     arg.tape for arg in args if isinstance(arg, Tracer)

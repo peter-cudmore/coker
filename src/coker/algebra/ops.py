@@ -284,10 +284,15 @@ def validate_evaluate_inputs(
     for i, (arg_dim, input_dim) in enumerate(
         zip(args, function_sig.input_dimensions())
     ):
-        if arg_dim != input_dim:
+        actual_dim = (
+            arg_dim.function_space
+            if isinstance(arg_dim, FunctionValueDimension)
+            else arg_dim
+        )
+        if actual_dim != input_dim:
             raise InvalidShape(
-                f"Argument {i} has dimension {arg_dim.dim}, expected "
-                f"{input_dim.dim}"
+                f"Argument {i} has dimension {actual_dim!r}, expected "
+                f"{input_dim!r}"
             )
 
 

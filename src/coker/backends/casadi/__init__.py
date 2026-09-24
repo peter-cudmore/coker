@@ -160,6 +160,8 @@ class CasadiBackend(Backend):
         return to_numpy_array(array)
 
     def to_backend_array(self, array):
+        if isinstance(array, (ca.MX, ca.DM)):
+            return array
         import scipy.sparse
 
         if array is None:
