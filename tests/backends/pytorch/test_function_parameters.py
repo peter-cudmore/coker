@@ -10,7 +10,7 @@ from coker.dynamics import (
     DynamicsSpec,
     VariationalProblemBuilder,
 )
-from coker.function_parameters import (
+from coker.parameters.function_parameters import (
     DenseLayer,
     FittedFunction,
     RadialBasisFunction,

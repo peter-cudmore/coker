@@ -7,7 +7,7 @@ from coker.dynamics import (
     create_autonomous_ode,
     direct_sum,
 )
-from coker.function_parameters import FunctionParameter, RadialBasisFunction
+from coker.parameters.function_parameters import FunctionParameter, RadialBasisFunction
 from coker.algebra.ops import Noop
 from coker.dynamics.system import (
     CompositionOperator,

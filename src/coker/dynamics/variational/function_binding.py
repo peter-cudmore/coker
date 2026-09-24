@@ -12,7 +12,7 @@ from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
-from coker.function_parameters import FunctionParameter
+from coker.parameters.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
 from coker.parameters import (
     BoundVector,

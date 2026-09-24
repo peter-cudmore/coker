@@ -152,7 +152,7 @@ class PytorchBackend(Backend):
 
     def fit_function_parameter(self, declaration, target, values):
         """Build a PyTorch-native fitted function from solver decisions."""
-        from coker.function_parameters import FittedFunction
+        from coker.parameters.function_parameters import FittedFunction
 
         flat_values = self.to_backend_array(values).reshape(-1)
         parameters = split_function_parameter_values(declaration, flat_values)

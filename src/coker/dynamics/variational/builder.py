@@ -19,7 +19,7 @@ from coker.parameters import (
     DenseTensorVariable,
     ParameterVariable,
 )
-from coker.function_parameters import FunctionParameter
+from coker.parameters.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variational.problem import (
     ConstraintSpec,

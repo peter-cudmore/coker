@@ -13,7 +13,7 @@ from coker.dynamics import (
     VariationalProblem,
     VariationalProblemBuilder,
 )
-from coker.function_parameters import (
+from coker.parameters.function_parameters import (
     ClosureParameter,
     DenseLayer,
     FittedFunction,
