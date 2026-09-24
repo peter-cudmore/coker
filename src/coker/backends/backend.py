@@ -11,9 +11,9 @@ if TYPE_CHECKING:
     from coker.dynamics.variational.problem import VariationalProblem
 from coker.backends.evaluator import Evaluator
 from coker.backends.lowered import LoweredFunction, LoweringOptions
-from coker.algebra.graph import Tracer
+from coker.algebra.graph import Tape, Tracer
 from coker.algebra.dimensions import Dimension
-from coker.interfaces import SolverParameters
+from coker.interfaces import SolverParameters, SymbolicCallable
 
 ArrayLike = Any
 
@@ -105,6 +105,56 @@ class Backend(metaclass=ABCMeta):
         return evaluate_inner(
             function.tape, inputs, function.output, self, workspace
         )
+
+    def compose(
+        self,
+        function: Function,
+        inputs: Sequence[Any],
+        outer_tape: Tape,
+    ) -> list[Tracer | None]:
+        """Re-emit a Coker function's graph into an enclosing trace."""
+        if len(inputs) != len(function.tape.input_indicies):
+            raise TypeError(
+                f"Expected {len(function.tape.input_indicies)} inputs, got "
+                f"{len(inputs)}"
+            )
+        if any(isinstance(value, SymbolicCallable) for value in inputs) or any(
+            not isinstance(node, Tracer)
+            and any(
+                isinstance(argument, SymbolicCallable) for argument in node[1:]
+            )
+            for node in function.tape.nodes
+        ):
+            from coker.backends.numpy import NumpyBackend
+
+            return NumpyBackend().evaluate(function, inputs)
+
+        values: dict[int, Any] = dict(
+            zip(function.tape.input_indicies, inputs)
+        )
+
+        def remap(value: Any) -> Any:
+            if isinstance(value, Tracer) and value.tape is function.tape:
+                return values[value.index]
+            return value
+
+        for index, node in enumerate(function.tape.nodes):
+            if isinstance(node, Tracer):
+                continue
+            op, *arguments = node
+            if op.name in {"VALUE", "FUNCTION_VALUE"}:
+                values[index] = remap(arguments[0])
+                continue
+            values[index] = Tracer(
+                outer_tape,
+                outer_tape.append(
+                    op, *(remap(argument) for argument in arguments)
+                ),
+            )
+        return [
+            None if output is None else values[output.index]
+            for output in function.output
+        ]
 
     def evaluate_integrals(
         self,

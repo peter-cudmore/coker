@@ -250,9 +250,11 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         from coker.backends.pytorch import PytorchBackend
 
         native_arguments = tuple(
-            None
-            if argument is None or isinstance(argument, Noop)
-            else argument
+            (
+                None
+                if argument is None or isinstance(argument, Noop)
+                else argument
+            )
             for argument in args
         )
         input_spaces = tuple(
@@ -418,10 +420,14 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                         a.tape for a in args if isinstance(a, Tracer)
                     )
                 return self._call_native_in_trace(args, outer_tape)
-            # Tracing context: interpret through numpy so ops are recorded on
-            # the outer tape rather than evaluated numerically.
-            backend = get_backend_by_name("numpy", set_current=False)
-            output = backend.evaluate(self, args)
+            if outer_tape is None or outer_tape.backend is None:
+                raise RuntimeError(
+                    "Cannot compose a function without an enclosing backend"
+                )
+            backend = get_backend_by_name(
+                outer_tape.backend, set_current=False
+            )
+            output = backend.compose(self, args, outer_tape)
         else:
             # Concrete evaluation: lower once per backend/options combination.
             lowered = self.lower()
