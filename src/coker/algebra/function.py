@@ -26,7 +26,7 @@ from coker.algebra.graph import (
 from coker.algebra.ops import OP, Noop, SelectOP
 from coker.algebra.tensor import SymbolicVector
 
-from coker.backends.backend import get_backend_by_name
+from coker.backends.backend import get_backend_by_name, get_current_backend
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -297,8 +297,12 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                 outer_tape = next(
                     arg.tape for arg in args if isinstance(arg, Tracer)
                 )
-            backend_name = outer_tape.backend or self.backend or "numpy"
-            backend = get_backend_by_name(backend_name, set_current=False)
+            backend_name = outer_tape.backend or self.backend
+            backend = (
+                get_backend_by_name(backend_name, set_current=False)
+                if backend_name is not None
+                else get_current_backend()
+            )
             output = backend.compose(self, args, outer_tape)
         else:
             # Concrete evaluation: lower once per backend/options combination.
