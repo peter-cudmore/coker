@@ -28,11 +28,11 @@ from .ops import (
 class _FittedModule(torch.nn.Module):
     def __init__(
         self,
-        native: torch.nn.Module,
+        declaration,
         concrete_values: tuple[torch.Tensor, ...],
     ) -> None:
         super().__init__()
-        self.native = native
+        self._declaration = declaration
         self._concrete_value_names = tuple(
             f"_concrete_value_{index}" for index in range(len(concrete_values))
         )
@@ -40,9 +40,11 @@ class _FittedModule(torch.nn.Module):
             self.register_buffer(name, value)
 
     def forward(self, argument):
-        return self.native(
+        return self._declaration.evaluate(
+            tuple(
+                self.get_buffer(name) for name in self._concrete_value_names
+            ),
             argument,
-            *(self.get_buffer(name) for name in self._concrete_value_names),
         )
 
 
@@ -160,8 +162,7 @@ class PytorchBackend(Backend):
 
         flat_values = self.to_backend_array(values).reshape(-1)
         parameters = split_function_parameter_values(declaration, flat_values)
-        native = self.as_module(declaration.build_function(target, self.name))
-        function = _FittedModule(native, parameters)
+        function = _FittedModule(declaration, parameters)
         return FittedFunction(declaration, target, function, parameters)
 
     def build_optimisation_problem(
