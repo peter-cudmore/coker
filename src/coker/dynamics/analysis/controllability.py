@@ -9,13 +9,14 @@ from coker.backends.sympy.analysis import (
     extract_control_affine_fields,
 )
 
-from coker.algebra.ops import Noop
-from coker.dynamics.model import DynamicalSystem
-
 from . import model as _rank
-from .dae import SymbolicDAESystem, geometry, lower_dae_system
+from .dae import (
+    SymbolicDAESystem,
+    geometry,
+    normalize_symbolic_system,
+)
 from .model import AnalysisStatus, ControllabilityResult
-from .symbolic import UnsupportedSystemError, lower_system
+from .symbolic import UnsupportedSystemError
 
 
 def _matrix_from_fields(fields, state_dimension: int) -> sp.ImmutableMatrix:
@@ -54,12 +55,7 @@ def analyse_controllability(
 ) -> ControllabilityResult:
     """Establish generic local accessibility through Lie-algebra rank."""
     try:
-        symbolic = (
-            lower_dae_system(system)
-            if isinstance(system, DynamicalSystem)
-            and not isinstance(system.g, Noop)
-            else lower_system(system)
-        )
+        symbolic = normalize_symbolic_system(system)
         tangent = (
             geometry(symbolic)
             if isinstance(symbolic, SymbolicDAESystem)

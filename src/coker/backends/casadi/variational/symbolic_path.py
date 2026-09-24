@@ -7,11 +7,10 @@ from typing import Callable, Dict, Optional, Tuple
 import casadi as ca
 import numpy as np
 
-from coker.dynamics import (
+from coker.dynamics import VariationalProblem, VariationalSolution
+from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     InterpolatingPolyCollection,
-    VariationalProblem,
-    VariationalSolution,
 )
 
 from .factory import _TranscriptionFactory

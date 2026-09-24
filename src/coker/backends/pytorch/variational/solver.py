@@ -22,9 +22,9 @@ from coker.backends.pytorch.dynamics import PytorchODESolverParameters
 from coker.parameters import BoundedVariable, UnboundedVariable
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
+    InterpolatingPolyCollection,
     generate_discritisation_operators,
 )
-from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
 from coker.dynamics.variational.solution import VariationalSolution
 from coker.toolkits.codesign import SolveFailure, SolveInfo, SolverOptions
 

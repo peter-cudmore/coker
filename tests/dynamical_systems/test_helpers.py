@@ -1,19 +1,20 @@
 from coker.dynamics.transcription.collocation import (
+    InterpolatingPoly,
+    InterpolatingPolyCollection,
     expand_coefficients,
     generate_discritisation_operators,
     legendre_coefficient,
     lgr_points,
 )
-from coker.dynamics.transcription.intervals import (
+from coker.dynamics.variational.mesh import (
     split_at_non_differentiable_points,
 )
-from coker.dynamics.transcription.collocation import InterpolatingPoly
 from coker.dynamics.variables import (
     PiecewiseConstantVariable,
     SpikeVariable,
 )
 from coker.dynamics.variational.problem import TranscriptionOptions
-from coker.dynamics import ConstantControlVariable, InterpolatingPolyCollection
+from coker.dynamics import ConstantControlVariable
 import numpy as np
 from functools import reduce
 from operator import mul

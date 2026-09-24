@@ -19,6 +19,7 @@ from coker.dynamics.analysis import (
     ControllabilityResult,
     IdentifiabilityResult,
     ObservabilityResult,
+    SymbolicDAESystem,
     SymbolicSystem,
     UnsupportedSystemError,
     analyse_controllability,
@@ -33,17 +34,17 @@ from coker.interfaces import SolverParameters
 from coker.dynamics.model import DynamicsSpec, DynamicalSystem
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
+    InterpolatingPolyCollection,
     evaluate_legendre_polynomial,
     expand_coefficients,
     generate_discritisation_operators,
     legendre_coefficient,
     lgr_points,
 )
-from coker.dynamics.transcription.intervals import (
+from coker.dynamics.variational.mesh import (
     split_at_non_differentiable_points,
 )
 from coker.dynamics.variational.builder import VariationalProblemBuilder
-from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
 from coker.dynamics.variational.problem import (
     ConstraintSpec,
     QuadratureSpec,

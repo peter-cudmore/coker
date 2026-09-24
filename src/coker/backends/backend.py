@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
     from coker.algebra.function import Function
-    from coker.dynamics.model import VariationalProblem
-
+    from coker.dynamics.variational.problem import VariationalProblem
 from coker.backends.evaluator import Evaluator
 from coker.backends.lowered import LoweredFunction, LoweringOptions
 from coker.algebra.graph import Tracer

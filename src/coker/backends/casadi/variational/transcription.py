@@ -12,17 +12,16 @@ from coker.backends.casadi.variational.variable_scaling import (
     _derive_constraint_scaling,
     _derive_variable_scaling,
 )
-from coker.dynamics import (
-    InterpolatingPoly,  # noqa: F401
-    InterpolatingPolyCollection,  # noqa: F401
-    VariationalProblem,
-    VariationalSolution,
-    split_at_non_differentiable_points,
-)
+from coker.dynamics import VariationalProblem, VariationalSolution
 from coker.parameters import BoundedVariable, ParameterVariable
 from coker.dynamics.transcription.collocation import (
+    InterpolatingPoly,  # noqa: F401
+    InterpolatingPolyCollection,  # noqa: F401
     _predict_refined_degree,
     _split_refined_interval,
+)
+from coker.dynamics.variational.mesh import (
+    split_at_non_differentiable_points,
 )
 from coker.toolkits.codesign.optimisation import (
     SolveFailure,
