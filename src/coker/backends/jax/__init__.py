@@ -8,14 +8,24 @@ import jax.numpy as jnp
 
 from coker.algebra.function import Function, create_function_from_native
 from coker.algebra import Dimension, OP
-from coker.algebra.graph import Tracer
+from coker.algebra.dimensions import (
+    FunctionSpace,
+    ResultBundleDimension,
+    Scalar,
+    VectorSpace,
+)
+from coker.algebra.graph import CallableReference, Tracer
 from coker.algebra.ops import (
     ConcatenateOP,
+    Noop,
     NormOP,
     ReshapeOP,
     SelectOP,
     invoke_callable,
+    normalize_evaluate_result,
 )
+from coker.backends.evaluator import _cast_outputs
+from coker.interfaces import SymbolicCallable
 
 from coker.backends.backend import (
     ArrayLike,
@@ -54,6 +64,116 @@ def div(num, den):
         return num
     else:
         return jnp.divide(num, den)
+
+
+class _JaxFunctionTableValue:
+    """A typed function-table target bound to evaluated capture values."""
+
+    def __init__(self, target: Function, captures, backend) -> None:
+        self._target = target
+        self._captures = tuple(captures)
+        self._backend = backend
+
+    def __call__(self, *public_arguments):
+        supplied_arguments = (*public_arguments, *self._captures)
+        input_spaces = tuple(
+            input_spec.space for input_spec in self._target.signature.inputs
+        )
+        present_input_count = sum(
+            input_space is not None and not isinstance(input_space, Noop)
+            for input_space in input_spaces
+        )
+        if len(supplied_arguments) != present_input_count:
+            raise TypeError(
+                f"Expected {present_input_count} present inputs, got "
+                f"{len(supplied_arguments)}"
+            )
+
+        arguments = iter(supplied_arguments)
+        target_inputs = tuple(
+            (
+                None
+                if input_space is None
+                else (
+                    Noop()
+                    if isinstance(input_space, Noop)
+                    else next(arguments)
+                )
+            )
+            for input_space in input_spaces
+        )
+        workspace = {}
+        _evaluate_jax_tape(
+            self._target.tape, target_inputs, self._backend, workspace
+        )
+        values = tuple(
+            workspace[output.index]
+            for output, output_spec in zip(
+                self._target.output, self._target.signature.outputs
+            )
+            if output_spec.shape is not None
+        )
+        if not values:
+            return ()
+        return values[0] if len(values) == 1 else values
+
+
+def _is_jax_callable(value) -> bool:
+    return isinstance(
+        value,
+        (SymbolicCallable, CallableReference, _JaxFunctionTableValue),
+    )
+
+
+def _evaluate_jax_tape(tape, inputs, backend, workspace) -> None:
+    """Evaluate a tape while resolving typed function-table entries."""
+    workspace[-1] = None
+    for index, value in zip(tape.input_indicies, inputs):
+        workspace[index] = (
+            value
+            if value is None
+            or isinstance(value, Noop)
+            or _is_jax_callable(value)
+            else backend.to_backend_array(value)
+        )
+
+    for index in range(len(tape.nodes)):
+        if index in workspace:
+            continue
+
+        op, *nodes = tape.nodes[index]
+        arguments = []
+        for node in nodes:
+            if isinstance(node, Tracer):
+                arguments.append(
+                    workspace[node.index] if node.tape is tape else node
+                )
+            elif _is_jax_callable(node):
+                arguments.append(node)
+            else:
+                arguments.append(backend.to_backend_array(node))
+
+        if op == OP.VALUE:
+            (value,) = arguments
+        elif op == OP.FUNCTION_VALUE:
+            reference, *captures = arguments
+            value = (
+                _JaxFunctionTableValue(reference.target, captures, backend)
+                if reference.is_function_reference
+                else reference
+            )
+        else:
+            value = backend.call(op, *arguments)
+
+        if op == OP.EVALUATE and isinstance(arguments[0], CallableReference):
+            value = normalize_evaluate_result(value, tape.dim[index])
+        workspace[index] = (
+            value
+            if op == OP.FUNCTION_VALUE
+            or _is_jax_callable(value)
+            or isinstance(tape.dim[index], ResultBundleDimension)
+            else backend.reshape(value, tape.dim[index])
+        )
 
 
 impls = {
@@ -141,19 +261,70 @@ class JaxLoweredFunction(LoweredFunction):
 
 
 class JaxBackend(Backend):
+    def materialize_parameter(self, target, declaration, blocks):
+        """Reconstruct a public parameter value from JAX solver blocks."""
+        flat_values = self._concatenate_parameter_blocks(blocks)
+        if isinstance(target, FunctionSpace):
+            return self._fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return jnp.reshape(flat_values, target.dimension)
+        if isinstance(target, Scalar):
+            if flat_values.size != 1:
+                raise ValueError("scalar parameter must have one solver value")
+            return flat_values[0]
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
+
     def fit_function_parameter(self, declaration, target, values):
+        """Materialize a fitted function from JAX decision values."""
+        return self._fit_function_parameter(
+            declaration,
+            target,
+            jnp.reshape(jnp.asarray(values), (-1,)),
+        )
+
+    @staticmethod
+    def _concatenate_parameter_blocks(blocks):
+        if not blocks:
+            raise ValueError("parameter blocks must not be empty")
+        return jnp.concatenate(
+            tuple(jnp.reshape(jnp.asarray(block), (-1,)) for block in blocks)
+        )
+
+    def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters.function_parameters import FittedFunction
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
         parameters = split_function_parameter_values(declaration, flat_values)
+        target = declaration.validate_target(target)
+        parameterization = declaration.build_function(target, self.name)
         return FittedFunction(
             declaration,
-            declaration.validate_target(target),
-            lambda argument: declaration.evaluate(parameters, argument),
+            target,
+            lambda argument: self._evaluate_parameterization(
+                parameterization, argument, parameters
+            ),
             parameters,
         )
+
+    def _evaluate_parameterization(
+        self, parameterization, argument, parameters
+    ):
+        workspace = {}
+        _evaluate_jax_tape(
+            parameterization.tape,
+            (argument, *parameters),
+            self,
+            workspace,
+        )
+        outputs = tuple(
+            workspace[output.index]
+            for output in parameterization.output
+            if output is not None
+        )
+        return outputs[0] if len(outputs) == 1 else outputs
 
     def __init__(self, *args, **kwargs):
         super(JaxBackend, self).__init__(*args, **kwargs)
@@ -194,7 +365,23 @@ class JaxBackend(Backend):
             f"Don't know how to resize {arg.__class__.__name__}"
         )
 
+    def evaluate(
+        self, function: Function, inputs: Sequence[Any]
+    ) -> list[Any | None]:
+        workspace = {}
+        _evaluate_jax_tape(function.tape, inputs, self, workspace)
+        return _cast_outputs(function.output, function.tape, workspace, self)
+
     def call(self, op, *args) -> ArrayLike:
+        if op == OP.EVALUATE:
+            callable_value, *arguments = args
+            if (
+                isinstance(callable_value, CallableReference)
+                and callable_value.is_function_reference
+            ):
+                return _JaxFunctionTableValue(callable_value.target, (), self)(
+                    *arguments
+                )
 
         try:
             result = impls[op](*args)

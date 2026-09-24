@@ -26,7 +26,7 @@ from coker.algebra.graph import (
 from coker.algebra.ops import OP, Noop, SelectOP
 from coker.algebra.tensor import SymbolicVector
 
-from coker.backends.backend import get_backend_by_name
+from coker.backends.backend import get_backend_by_name, get_current_backend
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -147,8 +147,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         backend: str,
         input_spaces: Sequence[Scalar | VectorSpace | FunctionSpace],
         output_specs: Sequence[FunctionOutputSpec],
-        args: Sequence[Tracer],
-        *,
+        args: Sequence[Any],
         name: str | None = None,
     ) -> list[Tracer | None]:
         def result_output_dimension(
@@ -207,27 +206,6 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             )
             for output_index, output_spec in enumerate(output_specs)
         ]
-
-    def _call_native_in_trace(
-        self, args: Sequence[Tracer], outer_tape: Tape
-    ) -> Tracer | tuple[Tracer | None, ...]:
-        if outer_tape.backend != self.backend:
-            raise RuntimeError(
-                "Cannot compose native callable for backend "
-                f"{self.backend!r} into {outer_tape.backend!r} trace"
-            )
-        native = self._native_callable
-        assert native is not None
-        outputs = self._append_native_outputs(
-            outer_tape,
-            native,
-            self.backend,
-            [spec.space for spec in self.signature.inputs],
-            self.signature.outputs,
-            args,
-            name=self.name,
-        )
-        return outputs[0] if self.is_single else tuple(outputs)
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:
@@ -291,15 +269,11 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return BoundCallable(inner_fn, space, tuple(unique_captured))
 
     def call_inline(self, *args) -> Tuple[Tracer]:
-        """Evaluate this function symbolically inside an active trace.
+        """Evaluate through the NumPy tracing interpreter.
 
-        Unlike ``__call__``, which compiles to the configured backend,
-        this always routes through the numpy interpreter so the result
-        is a :class:`~coker.algebra.graph.Tracer` recorded on the
-        enclosing tape. Use this when composing functions inside an
-        ``implementation`` passed to :func:`function`.
+        Use this explicit path for symbolic higher-order evaluation. Regular
+        traced calls dispatch composition to the enclosing backend.
         """
-
         backend = get_backend_by_name("numpy", set_current=False)
         output = backend.evaluate(self, args)
         if self.is_single:
@@ -318,17 +292,18 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         ]
 
         if any(isinstance(a, Tracer) for a in args):
-            if self._native_callable is not None:
-                outer_tape = TraceContext.get_local_tape()
-                if outer_tape is None:
-                    outer_tape = next(
-                        a.tape for a in args if isinstance(a, Tracer)
-                    )
-                return self._call_native_in_trace(args, outer_tape)
-            # Tracing context: interpret through numpy so ops are recorded on
-            # the outer tape rather than evaluated numerically.
-            backend = get_backend_by_name("numpy", set_current=False)
-            output = backend.evaluate(self, args)
+            outer_tape = TraceContext.get_local_tape()
+            if outer_tape is None:
+                outer_tape = next(
+                    arg.tape for arg in args if isinstance(arg, Tracer)
+                )
+            backend_name = outer_tape.backend or self.backend
+            backend = (
+                get_backend_by_name(backend_name, set_current=False)
+                if backend_name is not None
+                else get_current_backend()
+            )
+            output = backend.compose(self, args, outer_tape)
         else:
             # Concrete evaluation: lower once per backend/options combination.
             lowered = self.lower()
@@ -408,7 +383,12 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         public_space: FunctionSpace,
         bound_arguments: tuple[Tracer, ...],
     ) -> None:
-        if len(target.signature.inputs) != (
+        present_input_count = sum(
+            input_spec.space is not None
+            and not isinstance(input_spec.space, Noop)
+            for input_spec in target.signature.inputs
+        )
+        if present_input_count != (
             len(public_space.arguments) + len(bound_arguments)
         ):
             raise ValueError(

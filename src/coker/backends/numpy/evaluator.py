@@ -3,7 +3,7 @@
 import numpy as np
 
 from coker.algebra import OP
-from coker.algebra.graph import Tracer
+from coker.algebra.graph import Tracer, if_then_else
 from coker.algebra.ops import (
     ConcatenateOP,
     NormOP,
@@ -58,7 +58,11 @@ impls = {
     OP.EQUAL: np.equal,
     OP.LESS_EQUAL: np.less_equal,
     OP.LESS_THAN: np.less,
-    OP.CASE: lambda cond, t, f: t if cond else f,
+    OP.CASE: lambda condition, true_branch, false_branch: (
+        if_then_else(condition, true_branch, false_branch)
+        if isinstance(condition, Tracer)
+        else true_branch if condition else false_branch
+    ),
     OP.LOG: np.log,
     OP.EVALUATE: lambda callable_value, *args: invoke_callable(
         callable_value, *args

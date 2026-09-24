@@ -18,14 +18,21 @@ from coker.backends.lowered import (
     FunctionOutputSpec,
     FunctionSignature,
 )
+from coker.backends.pytorch import PytorchBackend
 from coker.backends.pytorch.dynamics import PytorchODESolverParameters
-from coker.parameters import BoundedVariable, UnboundedVariable
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     InterpolatingPolyCollection,
     generate_discritisation_operators,
 )
 from coker.dynamics.variational.solution import VariationalSolution
+from coker.parameters import (
+    BoundVector,
+    BoundedVariable,
+    DenseTensorVariable,
+    UnboundedVariable,
+)
+from coker.parameters.function_parameters import FunctionParameter
 from coker.toolkits.codesign import SolveFailure, SolveInfo, SolverOptions
 
 
@@ -68,6 +75,22 @@ class PytorchVariationalSolverOptions(SolverOptions):
             raise TypeError("optimiser_options must be a mapping")
 
 
+@dataclass(frozen=True)
+class _ParameterBlock:
+    """One original declaration represented in the flat solver vector."""
+
+    declaration: (
+        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
+    )
+    offset: int
+    shape: tuple[int, ...]
+    names: tuple[str, ...]
+
+    @property
+    def size(self) -> int:
+        return len(self.names)
+
+
 class PytorchVariationalSolver(VariationalSolver):
     """Fixed-horizon, bound-only neural-ODE parameter fitter."""
 
@@ -77,15 +100,21 @@ class PytorchVariationalSolver(VariationalSolver):
         self.problem = problem
         self._options = options or PytorchVariationalSolverOptions()
         backend = get_backend_by_name("pytorch", set_current=False)
+        self._device = backend.device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        self._dtype = backend.dtype or torch.get_default_dtype()
+        self._backend = PytorchBackend(device=self._device, dtype=self._dtype)
+        self._backend.name = "pytorch"
         self._loss_is_trace = isinstance(problem.loss, Tracer)
         loss = (
             Function(problem.loss.tape, problem.loss, backend="pytorch")
             if self._loss_is_trace
             else problem.loss
         )
-        self._loss = backend.lower(loss)
+        self._loss = self._backend.lower(loss)
         self._quadratures = tuple(
-            backend.lower(
+            self._backend.lower(
                 Function(
                     spec.integrand.tape, spec.integrand, backend="pytorch"
                 )
@@ -118,25 +147,55 @@ class PytorchVariationalSolver(VariationalSolver):
                 "PyTorch variational solving"
             )
         self._system_quadrature_size = q_dim.flat() if q_dim else 0
-        self._parameters = []
-        seen = set()
-        for declaration in problem.parameters or []:
-            if not isinstance(
-                declaration, (BoundedVariable, UnboundedVariable)
-            ):
-                raise NotImplementedError(
-                    "Only scalar decision parameters are supported by "
-                    "PyTorch variational solving"
-                )
-            if declaration.name in seen:
-                continue
-            seen.add(declaration.name)
-            self._parameters.append(declaration)
-        self._names = [p.name for p in self._parameters]
-        self._device = backend.device or torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
+        self._system_x0 = self._backend.lower(problem.system.x0)
+        self._system_dxdt = self._backend.lower(problem.system.dxdt)
+        self._system_dqdt = (
+            self._backend.lower(problem.system.dqdt)
+            if self._system_quadrature_size
+            else None
         )
-        self._dtype = backend.dtype or torch.get_default_dtype()
+        self._system_y = self._backend.lower(problem.system.y)
+        self._blocks = self._collect_parameter_blocks()
+        self._names = tuple(
+            name for block in self._blocks for name in block.names
+        )
+        if len(set(self._names)) != len(self._names):
+            raise ValueError(
+                "PyTorch variational parameter names must be unique"
+            )
+        self._parameter_indices = {
+            name: index for index, name in enumerate(self._names)
+        }
+        (
+            self._lower_bounds,
+            self._upper_bounds,
+            guesses,
+            self._bound_fixed_coordinates,
+        ) = self._parameter_vectors()
+        self._two_sided_bounds = (
+            torch.isfinite(self._lower_bounds)
+            & torch.isfinite(self._upper_bounds)
+            & ~self._bound_fixed_coordinates
+        )
+        self._lower_only_bounds = torch.isfinite(
+            self._lower_bounds
+        ) & ~torch.isfinite(self._upper_bounds)
+        self._upper_only_bounds = ~torch.isfinite(
+            self._lower_bounds
+        ) & torch.isfinite(self._upper_bounds)
+        self._has_two_sided_bounds = bool(self._two_sided_bounds.any())
+        self._has_lower_only_bounds = bool(self._lower_only_bounds.any())
+        self._has_upper_only_bounds = bool(self._upper_only_bounds.any())
+        self._raw_initial = self._raw_guess(guesses)
+        self._system_parameter_map = (
+            torch.as_tensor(
+                problem.system_parameter_map,
+                device=self._device,
+                dtype=self._dtype,
+            )
+            if problem.system_parameter_map is not None
+            else None
+        )
         self._t_initial = torch.zeros(
             (), device=self._device, dtype=self._dtype
         )
@@ -148,33 +207,240 @@ class PytorchVariationalSolver(VariationalSolver):
     def parameters(self):
         return list(self._names)
 
+    def _collect_parameter_blocks(self) -> tuple[_ParameterBlock, ...]:
+        """Retain original declaration blocks behind scalar fixing names."""
+        layout = self.problem.parameter_layout
+        entries: list[
+            tuple[
+                BoundedVariable
+                | UnboundedVariable
+                | BoundVector
+                | DenseTensorVariable,
+                int,
+                int,
+            ]
+        ] = []
+        offset = 0
+        if layout is None:
+            declarations = (
+                (declaration, None)
+                for declaration in self.problem.parameters or []
+            )
+            concrete_offsets = None
+        else:
+            concrete_offsets = layout.concrete_offsets
+            declarations = zip(
+                layout.declarations,
+                (
+                    layout.offsets
+                    if concrete_offsets is None
+                    else concrete_offsets
+                ),
+            )
+
+        for declaration, layout_offsets in declarations:
+            concrete = (
+                declaration.list_concrete_parameters()
+                if isinstance(declaration, FunctionParameter)
+                else (declaration,)
+            )
+            if concrete_offsets is None:
+                block_end = (
+                    offset if layout_offsets is None else layout_offsets[0]
+                )
+            elif len(layout_offsets) != len(concrete):
+                raise ValueError(
+                    "Function parameter layout does not match its declarations"
+                )
+            for concrete_index, concrete_declaration in enumerate(concrete):
+                if not isinstance(
+                    concrete_declaration,
+                    (
+                        BoundedVariable,
+                        UnboundedVariable,
+                        BoundVector,
+                        DenseTensorVariable,
+                    ),
+                ):
+                    raise NotImplementedError(
+                        "PyTorch variational solving requires scalar, vector, "
+                        "or dense tensor parameter declarations"
+                    )
+                size = (
+                    1
+                    if isinstance(
+                        concrete_declaration,
+                        (BoundedVariable, UnboundedVariable),
+                    )
+                    else concrete_declaration.size
+                )
+                if concrete_offsets is None:
+                    block_start = block_end
+                    block_end += size
+                else:
+                    block_start, block_end = layout_offsets[concrete_index]
+                    if block_end - block_start != size:
+                        raise ValueError(
+                            "Function parameter layout does not match its "
+                            "declarations"
+                        )
+                entries.append((concrete_declaration, block_start, block_end))
+            if (
+                concrete_offsets is None
+                and layout_offsets is not None
+                and block_end != layout_offsets[1]
+            ):
+                raise ValueError(
+                    "Function parameter layout does not match its declarations"
+                )
+            offset = block_end
+
+        if concrete_offsets is not None:
+            unique_entries = {
+                (start, end): (declaration, start, end)
+                for declaration, start, end in entries
+            }
+            entries = [unique_entries[key] for key in sorted(unique_entries)]
+            offset = 0
+            for _, block_start, block_end in entries:
+                if block_start != offset:
+                    raise ValueError(
+                        "Function parameter layout does not match its "
+                        "declarations"
+                    )
+                offset = block_end
+
+        flat_parameters = self.problem.parameters or []
+        width = offset
+        if len(flat_parameters) == width and all(
+            isinstance(declaration, (BoundedVariable, UnboundedVariable))
+            for declaration in flat_parameters
+        ):
+            names = tuple(declaration.name for declaration in flat_parameters)
+        else:
+            names = tuple(
+                (
+                    declaration.name
+                    if isinstance(
+                        declaration, (BoundedVariable, UnboundedVariable)
+                    )
+                    else f"{declaration.name}_{index}"
+                )
+                for declaration, start, end in entries
+                for index in range(end - start)
+            )
+        if any(not isinstance(name, str) or not name for name in names):
+            raise ValueError(
+                "PyTorch variational parameter names must be non-empty strings"
+            )
+        return tuple(
+            _ParameterBlock(
+                declaration,
+                start,
+                (
+                    ()
+                    if isinstance(
+                        declaration, (BoundedVariable, UnboundedVariable)
+                    )
+                    else declaration.shape
+                ),
+                names[start:end],
+            )
+            for declaration, start, end in entries
+        )
+
+    def _parameter_vectors(self):
+        lower_blocks = []
+        upper_blocks = []
+        guess_blocks = []
+        for block in self._blocks:
+            declaration = block.declaration
+            if isinstance(declaration, (BoundedVariable, UnboundedVariable)):
+                lower = np.asarray([declaration.lower_bound], dtype=float)
+                upper = np.asarray([declaration.upper_bound], dtype=float)
+                guess = np.asarray([declaration.guess], dtype=float)
+            elif isinstance(declaration, BoundVector):
+                lower = declaration.lower_bound.reshape(-1)
+                upper = declaration.upper_bound.reshape(-1)
+                guess = declaration.guess.reshape(-1)
+            else:
+                assert isinstance(declaration, DenseTensorVariable)
+                lower = np.full(declaration.size, -np.inf)
+                upper = np.full(declaration.size, np.inf)
+                guess = declaration.guess.reshape(-1)
+            lower_blocks.append(lower)
+            upper_blocks.append(upper)
+            guess_blocks.append(guess)
+
+        lower_values = (
+            np.concatenate(lower_blocks) if lower_blocks else np.zeros(0)
+        )
+        upper_values = (
+            np.concatenate(upper_blocks) if upper_blocks else np.zeros(0)
+        )
+        guesses = np.concatenate(guess_blocks) if guess_blocks else np.zeros(0)
+        if not np.all(np.isfinite(guesses)):
+            raise ValueError(
+                "PyTorch variational parameter guesses must be finite"
+            )
+        if (
+            np.any(np.isnan(lower_values))
+            or np.any(np.isnan(upper_values))
+            or np.any(np.isposinf(lower_values))
+            or np.any(np.isneginf(upper_values))
+        ):
+            raise ValueError(
+                "PyTorch variational parameter bounds are invalid"
+            )
+        finite_lower = np.isfinite(lower_values)
+        finite_upper = np.isfinite(upper_values)
+        if np.any(finite_lower & finite_upper & (lower_values > upper_values)):
+            raise ValueError(
+                "PyTorch variational lower bounds must not exceed upper bounds"
+            )
+        if np.any(
+            (finite_lower & (guesses < lower_values))
+            | (finite_upper & (guesses > upper_values))
+        ):
+            raise ValueError(
+                "PyTorch variational parameter guesses are outside their "
+                "bounds"
+            )
+        return (
+            torch.as_tensor(
+                lower_values, device=self._device, dtype=self._dtype
+            ),
+            torch.as_tensor(
+                upper_values, device=self._device, dtype=self._dtype
+            ),
+            torch.as_tensor(guesses, device=self._device, dtype=self._dtype),
+            torch.as_tensor(
+                finite_lower & finite_upper & (lower_values == upper_values),
+                device=self._device,
+                dtype=torch.bool,
+            ),
+        )
+
     def _check_fixed(self, fixed_parameters):
         unknown = set(fixed_parameters) - set(self._names)
         if unknown:
             raise ValueError(
                 f"Unknown variational parameter(s): {sorted(unknown)}"
             )
-        for p in self._parameters:
-            if p.name in fixed_parameters:
-                value = float(fixed_parameters[p.name])
-                if (
-                    not np.isfinite(value)
-                    or value < p.lower_bound
-                    or value > p.upper_bound
-                ):
-                    raise ValueError(
-                        f"Fixed parameter {p.name!r} is outside its bounds"
-                    )
+        for name, fixed_value in fixed_parameters.items():
+            value = float(fixed_value)
+            index = self._parameter_indices[name]
+            lower = self._lower_bounds[index]
+            upper = self._upper_bounds[index]
+            if not np.isfinite(value) or value < lower or value > upper:
+                raise ValueError(
+                    f"Fixed parameter {name!r} is outside its bounds"
+                )
 
     def _system_parameters(self, values):
-        if values.numel() == 0 or self.problem.system_parameter_map is None:
+        if values.numel() == 0 or self._system_parameter_map is None:
             return values
-        matrix = torch.as_tensor(
-            self.problem.system_parameter_map,
-            device=self._device,
-            dtype=self._dtype,
-        )
-        return (matrix @ values.reshape(-1, 1)).reshape(-1)
+        return (self._system_parameter_map @ values.reshape(-1, 1)).reshape(-1)
 
     def _trajectory_times(self):
         tau, map_time, *_ = generate_discritisation_operators(
@@ -189,15 +455,13 @@ class PytorchVariationalSolver(VariationalSolver):
     def _trace_arguments(
         self, signature, time, state, parameters, quadratures
     ):
-        system = self.problem.system
-
         def state_trajectory(_time):
             return state
 
         def output_trajectory(output_time):
-            return system.y(
-                output_time, state, None, None, parameters, None
-            ).reshape(-1)
+            return self._system_y.execute(
+                (output_time, state, None, None, parameters, None)
+            )[0].reshape(-1)
 
         arguments = {
             "t": time,
@@ -227,7 +491,7 @@ class PytorchVariationalSolver(VariationalSolver):
         parameters = self._system_parameters(values)
         if values.numel() == 0 and system.parameters is None:
             parameters = None
-        x0, z0 = system.x0(0.0, None, parameters)
+        x0, z0 = self._system_x0.execute((0.0, None, parameters))
         if z0 is not None:
             raise NotImplementedError(
                 "Algebraic states are not supported by "
@@ -259,13 +523,16 @@ class PytorchVariationalSolver(VariationalSolver):
             system_q_end = state_end + self._system_quadrature_size
             state = integrated[:state_end]
             registered_quadratures = integrated[system_q_end:]
-            dx = system.dxdt(time, state, None, None, parameters).reshape(-1)
+            dx = self._system_dxdt.execute(
+                (time, state, None, None, parameters)
+            )[0].reshape(-1)
             derivatives = [dx]
             if self._system_quadrature_size:
+                assert self._system_dqdt is not None
                 derivatives.append(
-                    system.dqdt(time, state, None, None, parameters).reshape(
-                        -1
-                    )
+                    self._system_dqdt.execute(
+                        (time, state, None, None, parameters)
+                    )[0].reshape(-1)
                 )
             if self._quadratures:
                 derivatives.append(
@@ -343,7 +610,9 @@ class PytorchVariationalSolver(VariationalSolver):
                 )
                 state = state[-1]
                 system_q = system_q[-1] if system_q is not None else None
-            return system.y(time, state, None, None, parameters, system_q)
+            return self._system_y.execute(
+                (time, state, None, None, parameters, system_q)
+            )[0]
 
         return output_native, self.problem.loss.input_spaces()[0]
 
@@ -364,98 +633,81 @@ class PytorchVariationalSolver(VariationalSolver):
             )
         )[0]
 
-    def _raw_guess(self, parameter):
-        guess = float(parameter.guess)
-        if not np.isfinite(guess):
-            raise ValueError(
-                f"Initial guess for parameter {parameter.name!r} "
-                "must be finite"
-            )
-
-        if (
-            np.isfinite(parameter.lower_bound)
-            and guess < parameter.lower_bound
-        ) or (
-            np.isfinite(parameter.upper_bound)
-            and guess > parameter.upper_bound
-        ):
-            raise ValueError(
-                f"Initial guess for parameter {parameter.name!r} is outside "
-                "its bounds"
-            )
+    def _raw_guess(self, guesses):
+        raw = guesses.clone()
         epsilon = torch.finfo(self._dtype).eps
-        lower, upper = parameter.lower_bound, parameter.upper_bound
-        if np.isfinite(lower) and np.isfinite(upper):
-            if lower >= upper:
-                raise ValueError(
-                    f"Parameter {parameter.name!r} must have lower bound "
-                    "below upper bound"
-                )
-            ratio = min(
-                max((guess - lower) / (upper - lower), epsilon), 1 - epsilon
+        if self._has_two_sided_bounds:
+            mask = self._two_sided_bounds
+            ratio = (guesses[mask] - self._lower_bounds[mask]) / (
+                self._upper_bounds[mask] - self._lower_bounds[mask]
             )
-            return torch.logit(
-                torch.tensor(ratio, device=self._device, dtype=self._dtype)
+            raw[mask] = torch.logit(
+                torch.clamp(ratio, min=epsilon, max=1 - epsilon)
             )
-        if np.isfinite(lower):
-            delta = max(guess - lower, epsilon)
-            return torch.log(
-                torch.expm1(
-                    torch.tensor(delta, device=self._device, dtype=self._dtype)
-                )
+        if self._has_lower_only_bounds:
+            mask = self._lower_only_bounds
+            delta = torch.clamp(
+                guesses[mask] - self._lower_bounds[mask], min=epsilon
             )
-        if np.isfinite(upper):
-            delta = max(upper - guess, epsilon)
-            return torch.log(
-                torch.expm1(
-                    torch.tensor(delta, device=self._device, dtype=self._dtype)
-                )
+            raw[mask] = delta + torch.log(-torch.expm1(-delta))
+        if self._has_upper_only_bounds:
+            mask = self._upper_only_bounds
+            delta = torch.clamp(
+                self._upper_bounds[mask] - guesses[mask], min=epsilon
             )
-        return torch.tensor(guess, device=self._device, dtype=self._dtype)
+            raw[mask] = delta + torch.log(-torch.expm1(-delta))
+        return raw
 
-    def _parameter_value(self, raw_value, parameter):
-        lower, upper = parameter.lower_bound, parameter.upper_bound
-        if np.isfinite(lower) and np.isfinite(upper):
-            return lower + (upper - lower) * torch.sigmoid(raw_value)
-        if np.isfinite(lower):
-            return lower + torch.nn.functional.softplus(raw_value)
-        if np.isfinite(upper):
-            return upper - torch.nn.functional.softplus(raw_value)
-        return raw_value
+    def _parameter_values(self, raw_values):
+        values = raw_values.clone()
+        values[self._bound_fixed_coordinates] = self._lower_bounds[
+            self._bound_fixed_coordinates
+        ]
+        if self._has_two_sided_bounds:
+            mask = self._two_sided_bounds
+            values[mask] = self._lower_bounds[mask] + (
+                self._upper_bounds[mask] - self._lower_bounds[mask]
+            ) * torch.sigmoid(raw_values[mask])
+        if self._has_lower_only_bounds:
+            mask = self._lower_only_bounds
+            values[mask] = self._lower_bounds[
+                mask
+            ] + torch.nn.functional.softplus(raw_values[mask])
+        if self._has_upper_only_bounds:
+            mask = self._upper_only_bounds
+            values[mask] = self._upper_bounds[
+                mask
+            ] - torch.nn.functional.softplus(raw_values[mask])
+        return values
 
     def solve(self, **fixed_parameters):
         self._check_fixed(fixed_parameters)
-        free = [p for p in self._parameters if p.name not in fixed_parameters]
-        fixed = {
-            p.name: torch.tensor(
-                float(v), device=self._device, dtype=self._dtype
-            )
-            for p, v in (
-                (p, fixed_parameters[p.name])
-                for p in self._parameters
-                if p.name in fixed_parameters
-            )
-        }
+        fixed_indices = torch.as_tensor(
+            [self._parameter_indices[name] for name in fixed_parameters],
+            device=self._device,
+            dtype=torch.long,
+        )
+        fixed_values = torch.as_tensor(
+            [float(value) for value in fixed_parameters.values()],
+            device=self._device,
+            dtype=self._dtype,
+        )
+        free_coordinates = ~self._bound_fixed_coordinates.clone()
+        if fixed_indices.numel():
+            free_coordinates[fixed_indices] = False
+        free_indices = torch.arange(
+            len(self._names),
+            device=self._device,
+            dtype=torch.long,
+        )[free_coordinates]
         raw = torch.nn.Parameter(
-            torch.stack([self._raw_guess(parameter) for parameter in free])
-            if free
-            else torch.zeros(0, device=self._device, dtype=self._dtype)
+            self._raw_initial.index_select(0, free_indices).clone()
         )
 
         def values_from_raw():
-            out = []
-            j = 0
-            for p in self._parameters:
-                if p.name in fixed:
-                    out.append(fixed[p.name])
-                else:
-                    out.append(self._parameter_value(raw[j], p))
-                    j += 1
-            return (
-                torch.stack(out)
-                if out
-                else torch.zeros(0, device=self._device, dtype=self._dtype)
-            )
+            raw_values = self._raw_initial.index_copy(0, free_indices, raw)
+            values = self._parameter_values(raw_values)
+            return values.index_copy(0, fixed_indices, fixed_values)
 
         def objective():
             values = values_from_raw()
@@ -478,7 +730,7 @@ class PytorchVariationalSolver(VariationalSolver):
             return self._loss.execute(args)[0]
 
         try:
-            if free:
+            if free_indices.numel():
                 optimizer = _OPTIMISER_TYPES[self._options.optimiser_method](
                     [raw], **dict(self._options.optimiser_options)
                 )
@@ -557,13 +809,12 @@ class PytorchVariationalSolver(VariationalSolver):
         system_parameter_values = self._system_parameters(values)
         public_parameters = (
             self.problem.parameter_layout.reconstruct(
-                system_parameter_values,
-                get_backend_by_name("pytorch", set_current=False),
+                system_parameter_values, self._backend
             )
             if self.problem.parameter_layout is not None
             else {
-                parameter.name: float(values[index].cpu())
-                for index, parameter in enumerate(self._parameters)
+                name: float(values[index].cpu())
+                for index, name in enumerate(self._names)
             }
         )
         return VariationalSolution.from_solver(

@@ -27,33 +27,28 @@ class ParameterValueLayout:
     targets: tuple[object, ...]
     declarations: tuple[object, ...]
     offsets: tuple[tuple[int, int], ...]
+    concrete_offsets: tuple[tuple[tuple[int, int], ...], ...] | None = None
 
     def reconstruct(
         self, values: object, backend: object | None = None
     ) -> Mapping[str, object]:
+        if backend is None:
+            backend = get_backend_by_name("numpy", set_current=False)
         result = {}
-        for target, declaration, (start, end) in zip(
-            self.targets, self.declarations, self.offsets
+        for index, (target, declaration, (start, end)) in enumerate(
+            zip(self.targets, self.declarations, self.offsets)
         ):
-            basis = values[start:end]
-            name = self._name(target, declaration)
-            if isinstance(target, FunctionSpace):
-                reconstruction_backend = (
-                    get_backend_by_name("numpy", set_current=False)
-                    if backend is None
-                    else backend
+            blocks = (
+                (values[start:end],)
+                if self.concrete_offsets is None
+                else tuple(
+                    values[block_start:block_end]
+                    for block_start, block_end in self.concrete_offsets[index]
                 )
-                result[name] = reconstruction_backend.fit_function_parameter(
-                    declaration, target, basis
-                )
-            elif isinstance(target, VectorSpace):
-                result[name] = self._numpy(basis, backend).reshape(
-                    declaration.shape
-                )
-            else:
-                result[name] = float(
-                    self._numpy(basis, backend).reshape((-1,))[0]
-                )
+            )
+            result[self._name(target, declaration)] = (
+                backend.materialize_parameter(target, declaration, blocks)
+            )
         return result
 
     @staticmethod
@@ -71,12 +66,6 @@ class ParameterValueLayout:
             return declaration.name
         assert isinstance(target, (Scalar, VectorSpace))
         return target.name
-
-    @staticmethod
-    def _numpy(values: object, backend: object | None) -> np.ndarray:
-        if backend is not None:
-            values = backend.to_numpy_array(values)
-        return np.asarray(values, dtype=float)
 
 
 def _function_concrete_declarations(
@@ -136,39 +125,34 @@ def _flatten_declaration(
     )
 
 
-def _flatten_declarations(
-    declarations: Sequence[
-        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
-    ],
-) -> list[BoundedVariable | UnboundedVariable]:
-    return [
-        scalar
-        for declaration in declarations
-        for scalar in _flatten_declaration(declaration)
-    ]
-
-
 def _reconstruct_concrete_values(
     values: object,
     declarations: Sequence[
         BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
     ],
+    offsets: Sequence[tuple[int, int]],
 ) -> tuple[object, ...]:
-    offset = 0
+    if len(declarations) != len(offsets):
+        raise ValueError(
+            "function parameter layout does not match its declarations"
+        )
     result = []
-    for declaration in declarations:
+    for declaration, (start, end) in zip(declarations, offsets):
         size = (
             1
             if isinstance(declaration, (BoundedVariable, UnboundedVariable))
             else declaration.size
         )
-        block = values[offset : offset + size]
+        if end - start != size:
+            raise ValueError(
+                "function parameter layout does not match its declarations"
+            )
+        block = values[start:end]
         result.append(
             block[0]
             if isinstance(declaration, (BoundedVariable, UnboundedVariable))
             else np.reshape(block, declaration.shape)
         )
-        offset += size
     return tuple(result)
 
 
@@ -184,7 +168,18 @@ def specialize_system_parameters(
 
     solver_declarations: list[object] = []
     offsets: list[tuple[int, int]] = []
+    concrete_offsets: list[tuple[tuple[int, int], ...]] = []
     function_declarations: list[tuple[object, ...] | None] = []
+    concrete_blocks: dict[
+        str,
+        tuple[
+            BoundedVariable
+            | UnboundedVariable
+            | BoundVector
+            | DenseTensorVariable,
+            tuple[int, int],
+        ],
+    ] = {}
     width = 0
     for index, (target, declaration) in enumerate(zip(space, declarations)):
         if isinstance(target, FunctionSpace):
@@ -197,23 +192,52 @@ def specialize_system_parameters(
             concrete_declarations = _function_concrete_declarations(
                 declaration
             )
-            flattened = _flatten_declarations(concrete_declarations)
             function_declarations.append(concrete_declarations)
         else:
-            flattened = _flatten_declarations((declaration,))
+            concrete_declarations = (declaration,)
             function_declarations.append(None)
+
+        flattened_blocks = tuple(
+            _flatten_declaration(concrete)
+            for concrete in concrete_declarations
+        )
+        size = sum(len(block) for block in flattened_blocks)
+        if not isinstance(target, FunctionSpace):
             expected_size = (
                 target.size if isinstance(target, VectorSpace) else 1
             )
-            if len(flattened) != expected_size:
+            if size != expected_size:
                 raise ValueError(
-                    f"Parameter {index} declares {len(flattened)} decisions, "
-                    f"expected {expected_size}"
+                    f"Parameter {index} declares {size} decisions, expected "
+                    f"{expected_size}"
                 )
-        size = len(flattened)
-        offsets.append((width, width + size))
-        solver_declarations.extend(flattened)
-        width += size
+
+        ranges = []
+        for concrete, flattened in zip(
+            concrete_declarations, flattened_blocks
+        ):
+            assert isinstance(concrete.name, str)
+            existing = concrete_blocks.get(concrete.name)
+            if existing is None:
+                block_range = (width, width + len(flattened))
+                solver_declarations.extend(flattened)
+                concrete_blocks[concrete.name] = (concrete, block_range)
+                width = block_range[1]
+            else:
+                previous, block_range = existing
+                if previous is not concrete:
+                    raise ValueError(
+                        "duplicate concrete parameter name "
+                        f"{concrete.name!r}; reuse the same declaration "
+                        "object to share decisions"
+                    )
+            ranges.append(block_range)
+        concrete_offsets.append(tuple(ranges))
+        offsets.append(
+            (min(start for start, _ in ranges), max(end for _, end in ranges))
+            if ranges
+            else (width, width)
+        )
 
     numeric_parameters = VectorSpace("p", width)
 
@@ -231,17 +255,16 @@ def specialize_system_parameters(
         for (
             target,
             declaration,
-            offset,
+            ranges,
             parameterization,
             concrete_declarations,
         ) in zip(
             space,
             declarations,
-            offsets,
+            concrete_offsets,
             parameterizations,
             function_declarations,
         ):
-            start, end = offset
             if parameterization is not None:
                 assert concrete_declarations is not None
                 values.append(
@@ -249,15 +272,17 @@ def specialize_system_parameters(
                         parameterization,
                         target,
                         _reconstruct_concrete_values(
-                            parameters[start:end], concrete_declarations
+                            parameters, concrete_declarations, ranges
                         ),
                     )
                 )
             elif isinstance(target, VectorSpace):
+                ((start, end),) = ranges
                 values.append(
                     np.reshape(parameters[start:end], declaration.shape)
                 )
             else:
+                ((start, _),) = ranges
                 values.append(parameters[start])
         return values
 
@@ -306,6 +331,9 @@ def specialize_system_parameters(
         ),
         solver_declarations,
         ParameterValueLayout(
-            tuple(space), tuple(declarations), tuple(offsets)
+            tuple(space),
+            tuple(declarations),
+            tuple(offsets),
+            tuple(concrete_offsets),
         ),
     )

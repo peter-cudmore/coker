@@ -13,7 +13,7 @@ from coker.algebra.dimensions import (
 )
 from coker.interfaces import SymbolicCallable
 from coker.algebra.graph import CallableReference, Tape, Tracer
-from coker.algebra.ops import OP, Operator, normalize_evaluate_result
+from coker.algebra.ops import Noop, OP, Operator, normalize_evaluate_result
 
 if TYPE_CHECKING:
     from coker.algebra.function import Function
@@ -33,6 +33,10 @@ def _normalize_evaluate_result(
 ) -> Any:
     if op == OP.EVALUATE and isinstance(args[0], CallableReference):
         return normalize_evaluate_result(value, dimension)
+    return value
+
+
+def _identity(value: Any) -> Any:
     return value
 
 
@@ -112,6 +116,7 @@ class GenericEvaluator(Evaluator):
         super().__init__(backend)
         self._operations = operations
         self._parameterised_operations = parameterised_operations
+        self._lowered_function_targets: dict[int, Any] = {}
 
     def _resolve_operation(self, op) -> Callable[..., Any]:
         try:
@@ -124,9 +129,73 @@ class GenericEvaluator(Evaluator):
             raise NotImplementedError(f"{op} is not implemented") from ex
         return lambda *args: operation(op, *args)
 
+    def _resolve_function_reference(
+        self, reference: CallableReference
+    ) -> Callable[..., Any]:
+        if not reference.is_function_reference:
+            return reference
+
+        target = reference.target
+        target_id = id(target)
+        try:
+            lowered = self._lowered_function_targets[target_id]
+        except KeyError:
+            lowered = self.backend.lower(target)
+            self._lowered_function_targets[target_id] = lowered
+
+        input_spaces = tuple(
+            input_spec.space for input_spec in target.signature.inputs
+        )
+        output_indices = tuple(
+            index
+            for index, output_spec in enumerate(target.signature.outputs)
+            if output_spec.shape is not None
+        )
+        input_count = sum(
+            input_space is not None and not isinstance(input_space, Noop)
+            for input_space in input_spaces
+        )
+
+        def invoke(*arguments):
+            if len(arguments) != input_count:
+                raise TypeError(
+                    f"Expected {input_count} present inputs, got "
+                    f"{len(arguments)}"
+                )
+            supplied_index = 0
+            target_inputs = []
+            for input_space in input_spaces:
+                if input_space is None:
+                    target_inputs.append(None)
+                elif isinstance(input_space, Noop):
+                    target_inputs.append(Noop())
+                else:
+                    target_inputs.append(arguments[supplied_index])
+                    supplied_index += 1
+
+            outputs = lowered.execute(target_inputs)
+            if len(output_indices) == 1:
+                return outputs[output_indices[0]]
+            return tuple(outputs[index] for index in output_indices)
+
+        return invoke
+
+    def _bind_function_reference(
+        self, reference: CallableReference, *captures: Any
+    ) -> Callable[..., Any]:
+        """Bind captures to a resolved function-table target."""
+        target = self._resolve_function_reference(reference)
+        if not reference.is_function_reference or not captures:
+            return target
+
+        def invoke(*arguments):
+            return target(*arguments, *captures)
+
+        return invoke
+
     def _resolve_post(self, dim: NodeDimension) -> Callable[[Any], Any]:
         if not dim.is_scalar():
-            return lambda value: value
+            return _identity
         reshape = self.backend.reshape
 
         def post(value):
@@ -182,16 +251,19 @@ class GenericEvaluator(Evaluator):
                     resolved.append(arg)
                 else:
                     resolved.append(backend.to_backend_array(arg))
-            value = (
-                resolved[0]
-                if op in {OP.VALUE, OP.FUNCTION_VALUE}
-                else backend.call(op, *resolved)
-            )
+            if op == OP.VALUE:
+                value = resolved[0]
+            elif op == OP.FUNCTION_VALUE:
+                value = self._bind_function_reference(*resolved)
+            else:
+                value = backend.call(op, *resolved)
             value = _normalize_evaluate_result(
                 op, resolved, value, graph.dim[i]
             )
-            if not isinstance(value, _SYMBOLIC_TYPES) and not isinstance(
-                graph.dim[i], ResultBundleDimension
+            if (
+                op != OP.FUNCTION_VALUE
+                and not isinstance(value, _SYMBOLIC_TYPES)
+                and not isinstance(graph.dim[i], ResultBundleDimension)
             ):
                 value = backend.reshape(value, graph.dim[i])
             workspace[i] = value
@@ -213,24 +285,30 @@ class GenericEvaluator(Evaluator):
                         alloc_inline(backend.to_backend_array(arg))
                     )
             dim = graph.dim[i]
-            operation_fn = self._resolve_operation(op)
-            if op == OP.EVALUATE:
-
-                def evaluate_fn(
-                    *values,
-                    _operation_fn=operation_fn,
-                    _op=op,
-                    _dim=dim,
-                ):
-                    value = _operation_fn(*values)
-                    return _normalize_evaluate_result(_op, values, value, _dim)
-
-                step_fn = evaluate_fn
+            if op == OP.FUNCTION_VALUE:
+                step_fn = self._bind_function_reference
             else:
-                step_fn = operation_fn
+                operation_fn = self._resolve_operation(op)
+                if op == OP.EVALUATE:
+
+                    def evaluate_fn(
+                        *values,
+                        _operation_fn=operation_fn,
+                        _op=op,
+                        _dim=dim,
+                    ):
+                        value = _operation_fn(*values)
+                        return _normalize_evaluate_result(
+                            _op, values, value, _dim
+                        )
+
+                    step_fn = evaluate_fn
+                else:
+                    step_fn = operation_fn
             post_fn = (
                 (lambda value: value)
-                if isinstance(dim, ResultBundleDimension)
+                if op == OP.FUNCTION_VALUE
+                or isinstance(dim, ResultBundleDimension)
                 else self._resolve_post(dim)
             )
             steps.append(

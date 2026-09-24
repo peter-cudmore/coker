@@ -5,7 +5,12 @@ import numpy as np
 import scipy.sparse.csc
 import scipy as scp
 
-from coker.algebra import Dimension
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+)
 from coker.algebra.function import Function, create_function_from_native
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
@@ -64,17 +69,51 @@ scalar_types = (
 
 
 class NumpyBackend(Backend):
+    def materialize_parameter(self, target, declaration, blocks):
+        """Reconstruct a public parameter value from NumPy solver blocks."""
+        flat_values = self._concatenate_parameter_blocks(blocks)
+        if isinstance(target, FunctionSpace):
+            return self._fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return flat_values.reshape(target.dimension)
+        if isinstance(target, Scalar):
+            if flat_values.size != 1:
+                raise ValueError("scalar parameter must have one solver value")
+            return flat_values[0]
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
+
     def fit_function_parameter(self, declaration, target, values):
+        """Materialize a fitted function from NumPy decision values."""
+        return self._fit_function_parameter(
+            declaration,
+            target,
+            np.asarray(values, dtype=float).reshape(-1),
+        )
+
+    @staticmethod
+    def _concatenate_parameter_blocks(blocks):
+        if not blocks:
+            raise ValueError("parameter blocks must not be empty")
+        return np.concatenate(
+            tuple(
+                np.asarray(block, dtype=float).reshape(-1) for block in blocks
+            )
+        )
+
+    def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters.function_parameters import FittedFunction
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
         parameters = split_function_parameter_values(declaration, flat_values)
+        target = declaration.validate_target(target)
+        native = self.lower(declaration.build_function(target, self.name))
         return FittedFunction(
             declaration,
-            declaration.validate_target(target),
-            lambda argument: declaration.evaluate(parameters, argument),
+            target,
+            lambda argument: native(argument, *parameters),
             parameters,
         )
 

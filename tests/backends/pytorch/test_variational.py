@@ -51,13 +51,8 @@ def test_cuda_fixed_and_unknown_parameter_validation():
         solver.solve(other=0.0)
 
 
-def test_cuda_parameter_guess_initializes_bound_transform():
-    solver = make_problem(guess=0.7).get_solver("pytorch")
-    parameter = solver._parameters[0]
-    value = solver._parameter_value(solver._raw_guess(parameter), parameter)
-    assert float(value.cpu()) == pytest.approx(0.7, abs=1e-6)
-
-    with pytest.raises(ValueError, match="outside its bounds"):
+def test_cuda_parameter_guess_rejects_outside_bounds():
+    with pytest.raises(ValueError, match="outside their bounds"):
         make_problem(guess=3.0).get_solver("pytorch").solve()
 
 

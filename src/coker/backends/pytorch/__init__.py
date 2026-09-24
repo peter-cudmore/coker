@@ -1,10 +1,15 @@
 """PyTorch numerical backend."""
 
+from collections.abc import Sequence
+
 import numpy as np
 import torch
 
 from coker.algebra import Dimension
+from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.graph import CallableReference, Tape, Tracer
+from coker.algebra.ops import Noop
 from coker.backends.evaluator import GenericEvaluator
 from coker.backends.backend import (
     ArrayLike,
@@ -69,6 +74,10 @@ class PytorchBackend(Backend):
     def to_backend_array(self, array):
         if isinstance(array, torch.Tensor):
             device_matches = self.device is None or array.device == self.device
+            if array.dtype == torch.bool:
+                return (
+                    array if device_matches else array.to(device=self.device)
+                )
             dtype_matches = self.dtype is None or array.dtype == self.dtype
             if device_matches and dtype_matches:
                 return array
@@ -146,9 +155,109 @@ class PytorchBackend(Backend):
             self.get_evaluator().build_plan(function.tape),
         )
 
+    def compose(
+        self, function: Function, inputs: Sequence[object], outer_tape: Tape
+    ) -> list[Tracer | None]:
+        if not self._contains_native_callable(function):
+            return super().compose(function, inputs, outer_tape)
+
+        native_arguments = tuple(
+            None if value is None or isinstance(value, Noop) else value
+            for value in inputs
+        )
+        input_spaces = tuple(
+            spec.space
+            for spec, value in zip(function.signature.inputs, native_arguments)
+            if value is not None
+        )
+        native_modules = {}
+        fallback_module = None
+
+        def module_for(present_inputs):
+            nonlocal fallback_module
+
+            tensor = next(
+                (
+                    value
+                    for value in present_inputs
+                    if isinstance(value, torch.Tensor)
+                ),
+                None,
+            )
+            if tensor is None:
+                if fallback_module is None:
+                    fallback_module = self.as_module(function)
+                return fallback_module
+            key = tensor.device, tensor.dtype
+            try:
+                return native_modules[key]
+            except KeyError:
+                native = PytorchBackend(
+                    device=tensor.device, dtype=tensor.dtype
+                ).as_module(function)
+                native_modules[key] = native
+                return native
+
+        def execute(*present_inputs):
+            native = module_for(present_inputs)
+            values = iter(present_inputs)
+            return native(
+                *(
+                    None if value is None else next(values)
+                    for value in native_arguments
+                )
+            )
+
+        return Function._append_native_outputs(
+            outer_tape,
+            execute,
+            self.name,
+            input_spaces,
+            function.signature.outputs,
+            tuple(value for value in native_arguments if value is not None),
+            name=function.name,
+        )
+
+    @staticmethod
+    def _contains_native_callable(function: Function) -> bool:
+        return any(
+            not isinstance(node, Tracer)
+            and any(
+                isinstance(argument, CallableReference)
+                for argument in node[1:]
+            )
+            for node in function.tape.nodes
+        )
+
     def as_module(self, function):
         """Lower a function to an eager ``torch.nn.Module``."""
         return self.lower(function).as_module()
+
+    def materialize_parameter(self, target, declaration, blocks):
+        """Reconstruct a public parameter value from native solver blocks."""
+        flat_values = torch.cat(
+            tuple(
+                (
+                    block
+                    if isinstance(block, torch.Tensor)
+                    else torch.as_tensor(
+                        block, device=self.device, dtype=self.dtype
+                    )
+                ).reshape(-1)
+                for block in blocks
+            )
+        )
+        if isinstance(target, FunctionSpace):
+            return self.fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return flat_values.reshape(declaration.shape)
+        if isinstance(target, Scalar):
+            return flat_values[0]
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
 
     def fit_function_parameter(self, declaration, target, values):
         """Build a PyTorch-native fitted function from solver decisions."""

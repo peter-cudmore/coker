@@ -3,12 +3,12 @@ from __future__ import annotations
 import sympy as sp
 import numpy as np
 from coker.algebra.function import Function, create_function_from_native
+from coker.interfaces import SymbolicCallable
 from coker.backends.backend import (
     ArrayLike,
     Backend,
     Evaluator,
     register_backend,
-    split_function_parameter_values,
 )
 from coker.backends.lowered import (
     FunctionSignature,
@@ -18,14 +18,22 @@ from coker.backends.lowered import (
 
 from coker.algebra.ops import (
     OP,
+    Noop,
     ConcatenateOP,
     NormOP,
     ReshapeOP,
     SelectOP,
     invoke_callable,
+    normalize_evaluate_result,
 )
-from coker.algebra.dimensions import Dimension, FunctionSpace
-from coker.algebra.graph import CallableReference
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    ResultBundleDimension,
+    Scalar,
+    VectorSpace,
+)
+from coker.algebra.graph import CallableReference, Tracer
 from coker.backends.sympy.shape import reshape
 
 MatrixType = (sp.Matrix, sp.ImmutableMatrix)
@@ -189,6 +197,125 @@ class _SymbolicVectorFunction:
         return sp.Array(values, shape=self._output.shape)
 
 
+class _SympyFunctionTableValue:
+    """A typed function-table target bound to evaluated capture values."""
+
+    def __init__(self, target: Function, captures, backend) -> None:
+        self._target = target
+        self._captures = tuple(captures)
+        self._backend = backend
+
+    def __call__(self, *public_arguments):
+        supplied_arguments = (*public_arguments, *self._captures)
+        present_input_count = sum(
+            input_spec.space is not None
+            and not isinstance(input_spec.space, Noop)
+            for input_spec in self._target.signature.inputs
+        )
+        if len(supplied_arguments) != present_input_count:
+            raise TypeError(
+                f"Expected {present_input_count} present inputs, got "
+                f"{len(supplied_arguments)}"
+            )
+
+        arguments = iter(supplied_arguments)
+        target_arguments = tuple(
+            (
+                None
+                if input_spec.space is None
+                else (
+                    Noop()
+                    if isinstance(input_spec.space, Noop)
+                    else next(arguments)
+                )
+            )
+            for input_spec in self._target.signature.inputs
+        )
+        outputs = _evaluate_sympy_tape(
+            self._target.tape,
+            target_arguments,
+            self._target.output,
+            self._backend,
+            {},
+        )
+        values = tuple(
+            output
+            for output, output_spec in zip(
+                outputs, self._target.signature.outputs
+            )
+            if output_spec.shape is not None
+        )
+        if not values:
+            return ()
+        return values[0] if len(values) == 1 else values
+
+
+def _is_sympy_callable(value) -> bool:
+    return isinstance(
+        value,
+        (
+            SymbolicCallable,
+            CallableReference,
+            _SympyFunctionTableValue,
+        ),
+    )
+
+
+def _evaluate_sympy_tape(tape, inputs, outputs, backend, workspace):
+    """Interpret a tape while resolving typed function-table values."""
+    from coker.backends.evaluator import _cast_outputs
+
+    workspace[-1] = None
+    for index, value in zip(tape.input_indicies, inputs):
+        workspace[index] = (
+            value
+            if _is_sympy_callable(value)
+            else backend.to_backend_array(value)
+        )
+
+    for index in range(len(tape.nodes)):
+        if index in workspace:
+            continue
+
+        op, *nodes = tape.nodes[index]
+        arguments = []
+        for node in nodes:
+            if isinstance(node, Tracer):
+                arguments.append(
+                    workspace[node.index] if node.tape is tape else node
+                )
+            elif _is_sympy_callable(node):
+                arguments.append(node)
+            else:
+                arguments.append(backend.to_backend_array(node))
+
+        if op == OP.VALUE:
+            (value,) = arguments
+        elif op == OP.FUNCTION_VALUE:
+            reference, *captures = arguments
+            value = (
+                _SympyFunctionTableValue(reference.target, captures, backend)
+                if reference.is_function_reference
+                else reference
+            )
+        else:
+            value = backend.call(op, *arguments)
+
+        if op == OP.EVALUATE and isinstance(
+            arguments[0], (CallableReference, _SympyFunctionTableValue)
+        ):
+            value = normalize_evaluate_result(value, tape.dim[index])
+        workspace[index] = (
+            value
+            if op == OP.FUNCTION_VALUE
+            or isinstance(value, (Tracer, SymbolicCallable, CallableReference))
+            or isinstance(tape.dim[index], ResultBundleDimension)
+            else backend.reshape(value, tape.dim[index])
+        )
+
+    return _cast_outputs(outputs, tape, workspace, backend)
+
+
 class SympyLoweredFunction(LoweredFunction):
     """SymPy evaluator-backed lowered execution handle."""
 
@@ -212,34 +339,109 @@ class SympyLoweredFunction(LoweredFunction):
         )
 
     def execute(self, inputs) -> tuple:
-        from coker.backends.evaluator import evaluate_inner
-
-        workspace = {}
         return tuple(
-            evaluate_inner(
+            _evaluate_sympy_tape(
                 self._function.tape,
                 inputs,
                 self._function.output,
                 self._backend,
-                workspace,
+                {},
             )
         )
 
 
 class SympyBackend(Backend):
+    def materialize_parameter(self, target, declaration, blocks):
+        """Reconstruct a public parameter value from SymPy solver blocks."""
+        flat_values = self._concatenate_parameter_blocks(blocks)
+        if isinstance(target, FunctionSpace):
+            return self._fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return self._reshape_parameter_values(
+                flat_values, target.dimension
+            )
+        if isinstance(target, Scalar):
+            if flat_values.rows != 1:
+                raise ValueError("scalar parameter must have one solver value")
+            return flat_values[0]
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
+
     def fit_function_parameter(self, declaration, target, values):
+        """Materialize a fitted function from SymPy decision values."""
+        return self._fit_function_parameter(
+            declaration,
+            target,
+            self._concatenate_parameter_blocks((values,)),
+        )
+
+    def _fit_function_parameter(self, declaration, target, flat_values):
+        from coker.parameters import BoundedVariable, UnboundedVariable
         from coker.parameters.function_parameters import FittedFunction
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
-        parameters = split_function_parameter_values(declaration, flat_values)
+        parameters = []
+        offset = 0
+        for concrete in declaration.list_concrete_parameters():
+            is_scalar = isinstance(
+                concrete, (BoundedVariable, UnboundedVariable)
+            )
+            size = 1 if is_scalar else concrete.size
+            block = flat_values[offset : offset + size, :]
+            if block.rows != size:
+                raise ValueError(
+                    "solver decisions do not match function parameter "
+                    "declarations"
+                )
+            parameters.append(
+                block[0]
+                if is_scalar
+                else self._reshape_parameter_values(block, concrete.shape)
+            )
+            offset += size
+        if offset != flat_values.rows:
+            raise ValueError(
+                "solver decisions do not match function parameter declarations"
+            )
+
+        target = declaration.validate_target(target)
+        native = self.lower(declaration.build_function(target, self.name))
         return FittedFunction(
             declaration,
-            declaration.validate_target(target),
-            lambda argument: declaration.evaluate(parameters, argument),
-            parameters,
+            target,
+            lambda argument: native(argument, *parameters),
+            tuple(parameters),
         )
+
+    def _concatenate_parameter_blocks(self, blocks):
+        if not blocks:
+            raise ValueError("parameter blocks must not be empty")
+        return sp.ImmutableMatrix(
+            sp.Matrix.vstack(
+                *(self._as_parameter_column(block) for block in blocks)
+            )
+        )
+
+    def _as_parameter_column(self, block):
+        value = self.to_backend_array(block)
+        if isinstance(value, MatrixType):
+            return sp.ImmutableMatrix(value.rows * value.cols, 1, list(value))
+        if isinstance(
+            value, (sp.ImmutableDenseNDimArray, sp.MutableDenseNDimArray)
+        ):
+            return sp.ImmutableMatrix(len(value), 1, list(value))
+        return sp.ImmutableMatrix([value])
+
+    @staticmethod
+    def _reshape_parameter_values(values, shape):
+        shape = (shape,) if isinstance(shape, int) else shape
+        if len(shape) == 1:
+            return sp.ImmutableMatrix(shape[0], 1, list(values))
+        if len(shape) == 2:
+            return sp.ImmutableMatrix(shape[0], shape[1], list(values))
+        return sp.ImmutableDenseNDimArray(list(values), shape)
 
     def to_numpy_array(self, array):
 
@@ -311,6 +513,15 @@ class SympyBackend(Backend):
         return self.to_backend_array(result)
 
     def call(self, op, *args):
+        if op == OP.EVALUATE:
+            callable_value, *arguments = args
+            if (
+                isinstance(callable_value, CallableReference)
+                and callable_value.is_function_reference
+            ):
+                return _SympyFunctionTableValue(
+                    callable_value.target, (), self
+                )(*arguments)
         if op in impls:
             result = impls[op](*args)
             return result
@@ -345,7 +556,9 @@ class SympyBackend(Backend):
 
     def evaluate(self, function: Function, inputs: ArrayLike):
 
-        results = super().evaluate(function, inputs)
+        results = _evaluate_sympy_tape(
+            function.tape, inputs, function.output, self, {}
+        )
 
         def eval(x):
             if x is None:
@@ -394,7 +607,6 @@ class SympyBackend(Backend):
         This is a sympy-specific utility for inspecting or printing functions
         symbolically; it is separate from lower() which returns a callable.
         """
-        from coker.backends.evaluator import evaluate_inner
 
         tape = function.tape
         args = []
@@ -437,7 +649,7 @@ class SympyBackend(Backend):
             args.append(sym)
             workspace[idx] = sym
         symbolic_backend = _SymbolicSympyBackend()
-        outputs = evaluate_inner(
+        outputs = _evaluate_sympy_tape(
             tape,
             args,
             function.output,
@@ -460,7 +672,11 @@ class _SymbolicSympyBackend(SympyBackend):
     """Lower external calls to undefined SymPy functions."""
 
     def call(self, op, *args):
-        if op == OP.EVALUATE and isinstance(args[0], CallableReference):
+        if (
+            op == OP.EVALUATE
+            and isinstance(args[0], CallableReference)
+            and not args[0].is_function_reference
+        ):
             return sp.Function(args[0].symbol_name)(*args[1:])
         return super().call(op, *args)
 
