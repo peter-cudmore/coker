@@ -1,7 +1,7 @@
 from collections import OrderedDict
 import math
 from functools import lru_cache
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -112,6 +112,7 @@ class CasadiVariationalSolver(VariationalSolver):
         self._warm_start = warm_start
         self._unscale_objective = unscale_objective
         self._last_primal: Optional[ca.DM] = None
+        self._last_lam_x: Optional[ca.DM] = None
         self._last_lam_g: Optional[ca.DM] = None
         self._adaptive_solve: Optional[
             Callable[[Dict[str, float]], VariationalSolution]
@@ -278,7 +279,7 @@ class _TranscriptionFactory:
                 self.p_guess_base,
                 self.p_upper_base,
             ),
-            self.p_output_map,
+            parameter_indices,
         ) = construct_parameters(problem.parameters)
         self.proj_p = (
             ca.DM(problem.system_parameter_map)
@@ -295,8 +296,8 @@ class _TranscriptionFactory:
             if self.free_horizon
             else float(problem.t_final)
         )
-        self.parameter_names = list(self.p_output_map.indices)
-        self.parameter_indices = dict(self.p_output_map.indices)
+        self.parameter_names = list(parameter_indices)
+        self.parameter_indices = parameter_indices
         self.reference_operator_cache = lru_cache(
             maxsize=_REFERENCE_OPERATOR_CACHE_SIZE
         )(_build_reference_operators)
@@ -347,17 +348,44 @@ class _TranscriptionFactory:
         algebraic = ca.MX.sym("defect_algebraic", self.z_size)
         control = ca.MX.sym("defect_control", self.u_symbols.shape[0])
         parameters = ca.MX.sym("defect_parameters", self.proj_p.shape[0])
+        quadrature = ca.MX.sym("defect_quadrature", self.q_size)
+
+        def control_law(_time):
+            return control
+
         (dynamics,) = self.evaluate_dynamics(
             time,
             state,
             algebraic,
-            lambda _time: control,
+            control_law,
             parameters,
+        )
+        quadrature_rates = []
+        if self.has_state_quadrature:
+            (base_rate,) = self.evaluate_quadrature(
+                time,
+                state,
+                algebraic,
+                control_law,
+                parameters,
+            )
+            quadrature_rates.append(base_rate)
+        quadrature_rates.extend(
+            self.evaluate_registered_quadratures(
+                (time, state, algebraic, control, parameters, quadrature)
+            )
         )
         return ca.Function(
             "defect_dynamics",
-            [time, state, algebraic, control, parameters],
-            [dynamics],
+            [time, state, algebraic, control, parameters, quadrature],
+            [
+                dynamics,
+                (
+                    ca.vertcat(*quadrature_rates)
+                    if quadrature_rates
+                    else ca.MX.zeros(0, 1)
+                ),
+            ],
         )
 
     def get_defect_nodes(self, degree: int) -> np.ndarray:
@@ -371,16 +399,35 @@ class _TranscriptionFactory:
         self._defect_nodes[degree] = nodes
         return np.asarray(nodes, dtype=float)
 
-    def evaluate_defect_dynamics(
+    def evaluate_defect_rates(
         self,
         times: np.ndarray,
-        states: np.ndarray,
-        algebraic: np.ndarray,
-        controls: np.ndarray,
-        parameters: np.ndarray,
-    ) -> np.ndarray:
-        """Evaluate state dynamics over one interval in a CasADi batch."""
-        count = int(times.shape[1])
+        values: np.ndarray,
+        solution: VariationalSolution,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Evaluate diagnostic state and quadrature rates in a CasADi batch."""
+        times = np.asarray(times, dtype=float).reshape((1, -1))
+        count = times.shape[1]
+        values = np.asarray(values, dtype=float).reshape(
+            (self.path_size, count)
+        )
+        controls = (
+            np.column_stack(
+                [
+                    np.asarray(
+                        solution.control_law(float(time)), dtype=float
+                    ).reshape((-1,))
+                    for time in times.flat
+                ]
+            )
+            if self.control_factory is not None
+            else np.zeros((0, count))
+        )
+        parameters = np.repeat(
+            solution._parameter_vector.reshape((-1, 1)),
+            count,
+            axis=1,
+        )
         try:
             evaluator = self._defect_dynamics_maps.pop(count)
         except KeyError:
@@ -388,15 +435,17 @@ class _TranscriptionFactory:
             if len(self._defect_dynamics_maps) == _DEFECT_EVALUATOR_CACHE_SIZE:
                 self._defect_dynamics_maps.popitem(last=False)
         self._defect_dynamics_maps[count] = evaluator
-        return np.asarray(
-            evaluator(
-                ca.DM(times),
-                ca.DM(states),
-                ca.DM(algebraic),
-                ca.DM(controls),
-                ca.DM(parameters),
-            ),
-            dtype=float,
+        state_rates, quadrature_rates = evaluator(
+            ca.DM(times * solution.t_final),
+            ca.DM(values[: self.x_size]),
+            ca.DM(values[self.x_size : self.x_size + self.z_size]),
+            ca.DM(controls),
+            ca.DM(parameters),
+            ca.DM(values[self.x_size + self.z_size :]),
+        )
+        return (
+            np.asarray(state_rates, dtype=float),
+            np.asarray(quadrature_rates, dtype=float),
         )
 
     def measure_interval_defect(
@@ -418,34 +467,11 @@ class _TranscriptionFactory:
             * powers[:-1]
         )
         interpolation = path_values @ np.asarray(poly.bases).T
-        states = interpolation @ powers
+        values = interpolation @ powers
         derivatives = (
             interpolation @ derivative_powers / (poly.width * solution.t_final)
         )
-        controls = (
-            np.column_stack(
-                [
-                    np.asarray(
-                        solution.control_law(float(time)), dtype=float
-                    ).reshape((-1,))
-                    for time in times
-                ]
-            )
-            if self.control_factory is not None
-            else np.zeros((0, len(times)))
-        )
-        parameters = np.repeat(
-            solution._parameter_vector.reshape((-1, 1)),
-            len(times),
-            axis=1,
-        )
-        model_dynamics = self.evaluate_defect_dynamics(
-            (times * solution.t_final).reshape((1, -1)),
-            states[: self.x_size],
-            states[self.x_size : self.x_size + self.z_size],
-            controls,
-            parameters,
-        )
+        model_dynamics, _ = self.evaluate_defect_rates(times, values, solution)
         state_derivatives = derivatives[: self.x_size]
         if state_derivatives.size == 0:
             return 0.0
@@ -461,47 +487,14 @@ class _TranscriptionFactory:
         state_rates = []
         quadrature_rates = []
         for time, value, _derivative in poly.knot_points():
-            control = solution.control_law(float(time))
-            state = value[: self.x_size]
-            algebraic = value[self.x_size : self.x_size + self.z_size]
-            quadrature = value[self.x_size + self.z_size :]
-            physical_time = float(time) * solution.t_final
-            (dynamics,) = self.evaluate_dynamics(
-                physical_time,
-                state,
-                algebraic,
-                control,
-                solution._parameter_vector,
+            dynamics, rates = self.evaluate_defect_rates(
+                np.asarray([time], dtype=float),
+                np.asarray(value, dtype=float).reshape((self.path_size, 1)),
+                solution,
             )
-            state_rates.append(
-                np.asarray(dynamics, dtype=float).reshape((-1,))
-            )
-            if self.q_size == 0:
-                continue
-            rates = []
-            if self.has_state_quadrature:
-                (base_rate,) = self.evaluate_quadrature(
-                    physical_time,
-                    state,
-                    algebraic,
-                    control,
-                    solution._parameter_vector,
-                )
-                rates.append(np.asarray(base_rate, dtype=float).reshape((-1,)))
-            rates.extend(
-                np.asarray(rate, dtype=float).reshape((-1,))
-                for rate in self.evaluate_registered_quadratures(
-                    (
-                        physical_time,
-                        state,
-                        algebraic,
-                        control,
-                        solution._parameter_vector,
-                        quadrature,
-                    )
-                )
-            )
-            quadrature_rates.append(np.concatenate(rates))
+            state_rates.append(dynamics.reshape((-1,)))
+            if self.q_size > 0:
+                quadrature_rates.append(rates.reshape((-1,)))
 
         weights = np.asarray(poly.weights, dtype=float).reshape((-1,))[:-1]
         _, start_value = poly.start_point()
@@ -540,184 +533,56 @@ class _TranscriptionFactory:
         )
 
 
-def _create_solver(
-    factory: _TranscriptionFactory,
-    intervals: List[Tuple[float, float]],
-    degrees: List[int],
-) -> CasadiVariationalSolver:
-    """Compile one mesh-specific NLP from shared factory state."""
-    problem = factory.problem
-    duration = factory.duration
-    projectors = factory.copy_solution_projectors()
+class _ConstraintAccumulator:
+    """Collect equality and ranged constraints with their bounds."""
 
-    poly_collection = SymbolicPolyCollection(
-        name="x",
-        dimension=factory.path_size,
-        intervals=intervals,
-        degrees=list(degrees),
-        factory=factory,
-        shared_value_indices=tuple(range(factory.x_size))
-        + tuple(
-            range(
-                factory.x_size + factory.z_size,
-                factory.path_size,
-            )
-        ),
-    )
-    horizon = problem.horizon_decision
-    layout = DecisionLayout(
-        horizon_size=1 if factory.free_horizon else 0,
-        path_size=int(poly_collection.symbols().shape[0]),
-        control_size=int(factory.u_symbols.shape[0]),
-        parameter_size=int(factory.p_symbols.shape[0]),
-        horizon_lower=horizon.lower_bound if horizon else -ca.inf,
-        horizon_guess=horizon.guess if horizon else 1.0,
-        horizon_upper=horizon.upper_bound if horizon else ca.inf,
-    )
+    def __init__(self, factory: _TranscriptionFactory):
+        self._factory = factory
+        self._equality_values = []
+        self._equality_tolerances = []
+        self._ranged_values = []
+        self._ranged_lowers = []
+        self._ranged_uppers = []
 
-    path_symbols = poly_collection.symbols()
-    decision_variables = layout.vector(
-        factory.horizon_symbol,
-        path_symbols,
-        factory.u_symbols,
-        factory.p_symbols,
-    )
-
-    equality_values = []
-    equality_tolerances = []
-
-    def append_equality(value, tolerance):
+    def add_equality(self, value, tolerance) -> None:
         if value is not None:
-            equality_values.append(value)
-            equality_tolerances.append(tolerance)
+            self._equality_values.append(value)
+            self._equality_tolerances.append(tolerance)
 
-    t0, x0_symbol = next(poly_collection.interval_starts())
-    x0_guess, z0_guess = factory.casadi.evaluate(
-        problem.system.x0,
-        [t0, factory.u_guess, factory.proj_p @ factory.p0_guess],
-    )
-    x0_val, z0_val = factory.casadi.evaluate(
-        problem.system.x0,
-        [t0, factory.control_eval, factory.proj_p @ factory.p],
-    )
+    def add_constraint(
+        self, constraint, args, *, validate_shape: bool = False
+    ) -> None:
+        (value,) = self._factory.casadi.evaluate(constraint.residual, args)
+        lower = self._factory.casadi.to_backend_array(constraint.lower_bound)
+        upper = self._factory.casadi.to_backend_array(constraint.upper_bound)
+        if validate_shape:
+            assert lower.shape == value.shape == upper.shape
+        self._ranged_values.append(value)
+        self._ranged_lowers.append(lower)
+        self._ranged_uppers.append(upper)
 
-    append_equality(factory.proj_x @ x0_symbol - x0_val, factory.tolerance)
-    if factory.z_size > 0:
-        append_equality(factory.proj_z @ x0_symbol - z0_val, factory.tolerance)
-    if factory.q_size > 0:
-        append_equality(factory.proj_q @ x0_symbol, factory.tolerance)
-
-    def append_constraint(constraint, args):
-        (value,) = factory.casadi.evaluate(constraint.residual, args)
-        g_constraints.append(value)
-        g_constraint_lowers.append(
-            factory.casadi.to_backend_array(constraint.lower_bound)
+    def build(self):
+        equality_lowers = [
+            -tolerance * ca.DM.ones(value.shape[0], 1)
+            for value, tolerance in zip(
+                self._equality_values, self._equality_tolerances
+            )
+        ]
+        equality_uppers = [-lower for lower in equality_lowers]
+        return (
+            ca.vertcat(*self._equality_values, *self._ranged_values),
+            ca.vertcat(*equality_lowers, *self._ranged_lowers),
+            ca.vertcat(*equality_uppers, *self._ranged_uppers),
         )
-        g_constraint_uppers.append(
-            factory.casadi.to_backend_array(constraint.upper_bound)
-        )
 
-    g_constraints = []
-    g_constraint_lowers = []
-    g_constraint_uppers = []
-    q_initial = ca.DM.zeros(factory.q_size, 1)
-    u_initial = factory.control_eval(t0)
-    initial_args = (
-        t0,
-        factory.proj_x @ x0_symbol,
-        z0_val,
-        u_initial,
-        factory.p,
-        q_initial,
-    )
-    for constraint in problem.initial_constraints:
-        append_constraint(constraint, initial_args)
 
-    for poly in poly_collection.polys:
-        for t, v, dv in poly.knot_points():
-            physical_t = duration * t
-            x = factory.proj_x @ v
-            z = factory.proj_z @ v
-            dx = factory.proj_x @ dv
-            (dynamics_ij,) = factory.evaluate_dynamics(
-                physical_t,
-                x,
-                z,
-                factory.control_eval(t),
-                factory.proj_p @ factory.p,
-            )
-            scale = duration
-            append_equality(
-                dx - scale * dynamics_ij,
-                factory.derivative_defect_tolerance,
-            )
-
-            if factory.q_size > 0:
-                dq = factory.proj_q @ dv
-                quadrature_values = []
-                if factory.has_state_quadrature:
-                    (base_quadrature,) = factory.evaluate_quadrature(
-                        physical_t,
-                        x,
-                        z,
-                        factory.control_eval(t),
-                        factory.proj_p @ factory.p,
-                    )
-                    quadrature_values.append(base_quadrature)
-                quadrature_values.extend(
-                    factory.evaluate_registered_quadratures(
-                        (
-                            physical_t,
-                            x,
-                            z,
-                            factory.control_eval(t),
-                            factory.proj_p @ factory.p,
-                            factory.proj_q @ v,
-                        )
-                    )
-                )
-                quadrature_ij = scale * ca.vertcat(*quadrature_values)
-                append_equality(
-                    dq - quadrature_ij,
-                    factory.derivative_defect_tolerance,
-                )
-
-            if factory.z_size > 0:
-                (alg,) = factory.evaluate_algebraic(
-                    physical_t,
-                    x,
-                    z,
-                    factory.control_eval(t),
-                    factory.proj_p @ factory.p,
-                )
-                append_equality(alg, factory.tolerance)
-
-    # Path constraints apply at interval endpoints and collocation knots.
-    for poly in poly_collection.polys:
-        for t, v in (poly.start_point(), poly.end_point()):
-            physical_t = duration * t
-            x = factory.proj_x @ v
-            z = factory.proj_z @ v
-            q = factory.proj_q @ v
-            args = (
-                physical_t,
-                x,
-                z,
-                factory.control_eval(t),
-                factory.proj_p @ factory.p,
-                q,
-            )
-            for constraint in problem.path_constraints:
-                append_constraint(constraint, args)
-
-    path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
-    path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
-    lower_bound_base = layout.bounds(
-        path_lower_bound, factory.u_lower, factory.p_lower_base
-    )
-    upper_bound_base = layout.upper_bounds(
-        path_upper_bound, factory.u_upper, factory.p_upper_base
-    )
+def _lower_loss(
+    factory: _TranscriptionFactory,
+    poly_collection: "SymbolicPolyCollection",
+    duration,
+):
+    """Lower the problem loss against one transcription's solution proxies."""
+    problem = factory.problem
 
     def normalized_time(time):
         return time if factory.free_horizon else time / duration
@@ -781,50 +646,42 @@ def _create_solver(
             problem.loss,
             [solution_proxy, factory.control_factory, factory.p],
         )
+    return cost
 
-    g = ca.vertcat(*equality_values, *g_constraints)
-    equality_lowers = [
-        -tolerance * ca.DM.ones(value.shape[0], 1)
-        for value, tolerance in zip(equality_values, equality_tolerances)
-    ]
-    equality_uppers = [-lower for lower in equality_lowers]
-    ubg = ca.vertcat(*equality_uppers, *g_constraint_uppers)
-    lbg = ca.vertcat(*equality_lowers, *g_constraint_lowers)
 
-    t_end, v_end = poly_collection.polys[-1].end_point()
-    x_end_val = factory.proj_x @ v_end
-    z_end_val = factory.proj_z @ v_end
-    q_end_val = factory.proj_q @ v_end
-    u_end = factory.control_eval(t_end)
-    end_args = (
-        duration * t_end,
-        x_end_val,
-        z_end_val,
-        u_end,
-        factory.p,
-        q_end_val,
-    )
+@dataclass
+class _NlpScaling:
+    decision_variables: ca.MX
+    raw_decision_variables: ca.MX
+    physical_variables: ca.MX
+    normalized_cost: ca.MX
+    normalized_g: ca.MX
+    physical_decision_variables_0: ca.DM
+    physical_lower_bound_base: ca.DM
+    physical_upper_bound_base: ca.DM
+    lbg: ca.DM
+    ubg: ca.DM
+    variable_scaling: object
+    objective_scale: float
 
-    for constraint in problem.terminal_constraints:
-        (g_inner,) = factory.casadi.evaluate(constraint.residual, end_args)
-        g_lower = factory.casadi.to_backend_array(constraint.lower_bound)
-        g_upper = factory.casadi.to_backend_array(constraint.upper_bound)
-        assert g_lower.shape == g_inner.shape == g_upper.shape
-        g = ca.vertcat(g, g_inner)
-        lbg = ca.vertcat(lbg, g_lower)
-        ubg = ca.vertcat(ubg, g_upper)
+    def unscale_objective(self, value: float) -> float:
+        return value * self.objective_scale
 
-    solver_options = dict(factory.options.optimiser_options)
-    warm_start = bool(solver_options.pop("warm_start", False))
-    if not factory.options.verbose:
-        solver_options.update(
-            {
-                "ipopt.print_level": 0,
-                "print_time": False,
-                "ipopt.sb": "yes",
-            }
-        )
 
+def _scale_nlp(
+    factory: _TranscriptionFactory,
+    layout: DecisionLayout,
+    poly_collection: "SymbolicPolyCollection",
+    decision_variables: ca.MX,
+    cost: ca.MX,
+    g: ca.MX,
+    lbg: ca.DM,
+    ubg: ca.DM,
+    lower_bound_base: ca.DM,
+    upper_bound_base: ca.DM,
+    x0_guess,
+    z0_guess,
+) -> _NlpScaling:
     state_guess = ca.vertcat(
         x0_guess,
         (z0_guess if z0_guess is not None else ca.DM.zeros(factory.z_size, 1)),
@@ -884,34 +741,110 @@ def _create_solver(
         lbg = inverse_constraint_scaling @ lbg
         ubg = inverse_constraint_scaling @ ubg
 
-    def unscale_objective(value: float) -> float:
-        return value * objective_scale
+    return _NlpScaling(
+        decision_variables=decision_variables,
+        raw_decision_variables=raw_decision_variables,
+        physical_variables=physical_variables,
+        normalized_cost=normalized_cost,
+        normalized_g=normalized_g,
+        physical_decision_variables_0=physical_decision_variables_0,
+        physical_lower_bound_base=physical_lower_bound_base,
+        physical_upper_bound_base=physical_upper_bound_base,
+        lbg=lbg,
+        ubg=ubg,
+        variable_scaling=variable_scaling,
+        objective_scale=objective_scale,
+    )
 
+
+@dataclass
+class _CompiledNlp:
+    nlp_solver: ca.Function
+    init_solver: Optional[ca.Function]
+    callback_wrapper: Optional["CallbackWrapper"]
+    warm_start: bool
+    assemble_solution: "CasadiSolutionAssembler"
+    unscale_objective: Callable[[float], float]
+    variable_scaling: object
+    physical_decision_variables_0: ca.DM
+    physical_lower_bound_base: ca.DM
+    physical_upper_bound_base: ca.DM
+    lbg: ca.DM
+    ubg: ca.DM
+
+
+def _compile_nlp(
+    factory: _TranscriptionFactory,
+    layout: DecisionLayout,
+    poly_collection: "SymbolicPolyCollection",
+    projectors,
+    path_symbols: ca.MX,
+    decision_variables: ca.MX,
+    cost: ca.MX,
+    g: ca.MX,
+    lbg: ca.DM,
+    ubg: ca.DM,
+    lower_bound_base: ca.DM,
+    upper_bound_base: ca.DM,
+    x0_guess,
+    z0_guess,
+) -> _CompiledNlp:
+    """Scale, compile, and configure one mesh-specific NLP."""
+    problem = factory.problem
+    solver_options = dict(factory.options.optimiser_options)
+    warm_start = bool(solver_options.pop("warm_start", False))
+    if not factory.options.verbose:
+        solver_options.update(
+            {
+                "ipopt.print_level": 0,
+                "print_time": False,
+                "ipopt.sb": "yes",
+            }
+        )
+
+    scaled = _scale_nlp(
+        factory=factory,
+        layout=layout,
+        poly_collection=poly_collection,
+        decision_variables=decision_variables,
+        cost=cost,
+        g=g,
+        lbg=lbg,
+        ubg=ubg,
+        lower_bound_base=lower_bound_base,
+        upper_bound_base=upper_bound_base,
+        x0_guess=x0_guess,
+        z0_guess=z0_guess,
+    )
     f_out = ca.Function(
         "Output",
-        [decision_variables],
+        [scaled.decision_variables],
         [
             ca.substitute(
-                path_symbols, raw_decision_variables, physical_variables
+                path_symbols,
+                scaled.raw_decision_variables,
+                scaled.physical_variables,
             ),
             ca.substitute(
                 factory.u_symbols,
-                raw_decision_variables,
-                physical_variables,
+                scaled.raw_decision_variables,
+                scaled.physical_variables,
             ),
             ca.substitute(
-                factory.p, raw_decision_variables, physical_variables
+                factory.p,
+                scaled.raw_decision_variables,
+                scaled.physical_variables,
             ),
             ca.substitute(
                 factory.p_symbols,
-                raw_decision_variables,
-                physical_variables,
+                scaled.raw_decision_variables,
+                scaled.physical_variables,
             ),
             (
                 ca.substitute(
                     factory.horizon_symbol,
-                    raw_decision_variables,
-                    physical_variables,
+                    scaled.raw_decision_variables,
+                    scaled.physical_variables,
                 )
                 if factory.free_horizon
                 else ca.DM(problem.t_final)
@@ -926,7 +859,7 @@ def _create_solver(
         poly_collection=poly_collection,
         projectors=projectors,
         proj_p=factory.proj_p,
-        parameter_value_map=factory.p_output_map,
+        parameter_indices=factory.parameter_indices,
         decode_controls=factory.control_decoder,
     )
 
@@ -938,34 +871,34 @@ def _create_solver(
         callback_wrapper = CallbackWrapper(
             "variational_iteration_callback",
             factory.options.interation_callback,
-            nx=decision_variables.shape[0],
-            ng=normalized_g.shape[0],
+            nx=scaled.decision_variables.shape[0],
+            ng=scaled.normalized_g.shape[0],
             assemble_solution=assemble_solution,
-            unscale_objective=unscale_objective,
+            unscale_objective=scaled.unscale_objective,
         )
         nlp_solver_options["iteration_callback"] = callback_wrapper
     init_solver = None
     if factory.options.initialise_near_guess:
         init_spec = {
-            "f": normalized_cost,
-            "x": decision_variables,
+            "f": scaled.normalized_cost,
+            "x": scaled.decision_variables,
             "g": ca.vertcat(
-                normalized_g,
+                scaled.normalized_g,
                 ca.substitute(
                     factory.p_symbols,
-                    raw_decision_variables,
-                    physical_variables,
+                    scaled.raw_decision_variables,
+                    scaled.physical_variables,
                 ),
                 ca.substitute(
                     factory.u_symbols,
-                    raw_decision_variables,
-                    physical_variables,
+                    scaled.raw_decision_variables,
+                    scaled.physical_variables,
                 ),
                 (
                     ca.substitute(
                         factory.horizon_symbol,
-                        raw_decision_variables,
-                        physical_variables,
+                        scaled.raw_decision_variables,
+                        scaled.physical_variables,
                     )
                     if factory.free_horizon
                     else ca.MX.zeros(0, 1)
@@ -980,11 +913,240 @@ def _create_solver(
         )
 
     nlp_spec = {
-        "f": normalized_cost,
-        "x": decision_variables,
-        "g": normalized_g,
+        "f": scaled.normalized_cost,
+        "x": scaled.decision_variables,
+        "g": scaled.normalized_g,
     }
     nlp_solver = ca.nlpsol("solver", "ipopt", nlp_spec, nlp_solver_options)
+    return _CompiledNlp(
+        nlp_solver=nlp_solver,
+        init_solver=init_solver,
+        callback_wrapper=callback_wrapper,
+        warm_start=warm_start,
+        assemble_solution=assemble_solution,
+        unscale_objective=scaled.unscale_objective,
+        variable_scaling=scaled.variable_scaling,
+        physical_decision_variables_0=scaled.physical_decision_variables_0,
+        physical_lower_bound_base=scaled.physical_lower_bound_base,
+        physical_upper_bound_base=scaled.physical_upper_bound_base,
+        lbg=scaled.lbg,
+        ubg=scaled.ubg,
+    )
+
+
+def _create_solver(
+    factory: _TranscriptionFactory,
+    intervals: List[Tuple[float, float]],
+    degrees: List[int],
+) -> CasadiVariationalSolver:
+    """Compile one mesh-specific NLP from shared factory state."""
+    problem = factory.problem
+    duration = factory.duration
+    projectors = factory.copy_solution_projectors()
+
+    poly_collection = SymbolicPolyCollection(
+        name="x",
+        dimension=factory.path_size,
+        intervals=intervals,
+        degrees=list(degrees),
+        factory=factory,
+        shared_value_indices=tuple(range(factory.x_size))
+        + tuple(
+            range(
+                factory.x_size + factory.z_size,
+                factory.path_size,
+            )
+        ),
+    )
+    horizon = problem.horizon_decision
+    layout = DecisionLayout(
+        horizon_size=1 if factory.free_horizon else 0,
+        path_size=int(poly_collection.symbols().shape[0]),
+        control_size=int(factory.u_symbols.shape[0]),
+        parameter_size=int(factory.p_symbols.shape[0]),
+        horizon_lower=horizon.lower_bound if horizon else -ca.inf,
+        horizon_guess=horizon.guess if horizon else 1.0,
+        horizon_upper=horizon.upper_bound if horizon else ca.inf,
+    )
+
+    path_symbols = poly_collection.symbols()
+    decision_variables = layout.vector(
+        factory.horizon_symbol,
+        path_symbols,
+        factory.u_symbols,
+        factory.p_symbols,
+    )
+
+    constraints = _ConstraintAccumulator(factory)
+
+    t0, x0_symbol = next(poly_collection.interval_starts())
+    x0_guess, z0_guess = factory.casadi.evaluate(
+        problem.system.x0,
+        [t0, factory.u_guess, factory.proj_p @ factory.p0_guess],
+    )
+    x0_val, z0_val = factory.casadi.evaluate(
+        problem.system.x0,
+        [t0, factory.control_eval, factory.proj_p @ factory.p],
+    )
+
+    constraints.add_equality(
+        factory.proj_x @ x0_symbol - x0_val, factory.tolerance
+    )
+    if factory.z_size > 0:
+        constraints.add_equality(
+            factory.proj_z @ x0_symbol - z0_val, factory.tolerance
+        )
+    if factory.q_size > 0:
+        constraints.add_equality(factory.proj_q @ x0_symbol, factory.tolerance)
+
+    q_initial = ca.DM.zeros(factory.q_size, 1)
+    u_initial = factory.control_eval(t0)
+    initial_args = (
+        t0,
+        factory.proj_x @ x0_symbol,
+        z0_val,
+        u_initial,
+        factory.p,
+        q_initial,
+    )
+    for constraint in problem.initial_constraints:
+        constraints.add_constraint(constraint, initial_args)
+
+    for poly in poly_collection.polys:
+        for t, v, dv in poly.knot_points():
+            physical_t = duration * t
+            x = factory.proj_x @ v
+            z = factory.proj_z @ v
+            dx = factory.proj_x @ dv
+            (dynamics_ij,) = factory.evaluate_dynamics(
+                physical_t,
+                x,
+                z,
+                factory.control_eval(t),
+                factory.proj_p @ factory.p,
+            )
+            scale = duration
+            constraints.add_equality(
+                dx - scale * dynamics_ij,
+                factory.derivative_defect_tolerance,
+            )
+
+            if factory.q_size > 0:
+                dq = factory.proj_q @ dv
+                quadrature_values = []
+                if factory.has_state_quadrature:
+                    (base_quadrature,) = factory.evaluate_quadrature(
+                        physical_t,
+                        x,
+                        z,
+                        factory.control_eval(t),
+                        factory.proj_p @ factory.p,
+                    )
+                    quadrature_values.append(base_quadrature)
+                quadrature_values.extend(
+                    factory.evaluate_registered_quadratures(
+                        (
+                            physical_t,
+                            x,
+                            z,
+                            factory.control_eval(t),
+                            factory.proj_p @ factory.p,
+                            factory.proj_q @ v,
+                        )
+                    )
+                )
+                quadrature_ij = scale * ca.vertcat(*quadrature_values)
+                constraints.add_equality(
+                    dq - quadrature_ij,
+                    factory.derivative_defect_tolerance,
+                )
+
+            if factory.z_size > 0:
+                (alg,) = factory.evaluate_algebraic(
+                    physical_t,
+                    x,
+                    z,
+                    factory.control_eval(t),
+                    factory.proj_p @ factory.p,
+                )
+                constraints.add_equality(alg, factory.tolerance)
+
+    # Path constraints apply at interval endpoints and collocation knots.
+    for poly in poly_collection.polys:
+        for t, v in (poly.start_point(), poly.end_point()):
+            physical_t = duration * t
+            x = factory.proj_x @ v
+            z = factory.proj_z @ v
+            q = factory.proj_q @ v
+            args = (
+                physical_t,
+                x,
+                z,
+                factory.control_eval(t),
+                factory.proj_p @ factory.p,
+                q,
+            )
+            for constraint in problem.path_constraints:
+                constraints.add_constraint(constraint, args)
+
+    path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
+    path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
+    lower_bound_base = layout.bounds(
+        path_lower_bound, factory.u_lower, factory.p_lower_base
+    )
+    upper_bound_base = layout.upper_bounds(
+        path_upper_bound, factory.u_upper, factory.p_upper_base
+    )
+
+    cost = _lower_loss(factory, poly_collection, duration)
+
+    t_end, v_end = poly_collection.polys[-1].end_point()
+    x_end_val = factory.proj_x @ v_end
+    z_end_val = factory.proj_z @ v_end
+    q_end_val = factory.proj_q @ v_end
+    u_end = factory.control_eval(t_end)
+    end_args = (
+        duration * t_end,
+        x_end_val,
+        z_end_val,
+        u_end,
+        factory.p,
+        q_end_val,
+    )
+
+    for constraint in problem.terminal_constraints:
+        constraints.add_constraint(constraint, end_args, validate_shape=True)
+
+    g, lbg, ubg = constraints.build()
+
+    compilation = _compile_nlp(
+        factory=factory,
+        layout=layout,
+        poly_collection=poly_collection,
+        projectors=projectors,
+        path_symbols=path_symbols,
+        decision_variables=decision_variables,
+        cost=cost,
+        g=g,
+        lbg=lbg,
+        ubg=ubg,
+        lower_bound_base=lower_bound_base,
+        upper_bound_base=upper_bound_base,
+        x0_guess=x0_guess,
+        z0_guess=z0_guess,
+    )
+    nlp_solver = compilation.nlp_solver
+    init_solver = compilation.init_solver
+    callback_wrapper = compilation.callback_wrapper
+    warm_start = compilation.warm_start
+    assemble_solution = compilation.assemble_solution
+    unscale_objective = compilation.unscale_objective
+    variable_scaling = compilation.variable_scaling
+    physical_decision_variables_0 = compilation.physical_decision_variables_0
+    physical_lower_bound_base = compilation.physical_lower_bound_base
+    physical_upper_bound_base = compilation.physical_upper_bound_base
+    lbg = compilation.lbg
+    ubg = compilation.ubg
 
     parameter_offset = layout.parameter_slice.start
     path_offset = layout.horizon_size
@@ -1134,13 +1296,6 @@ def create_variational_solver(
     initial_degrees = [problem.transcription_options.minimum_degree] * len(
         initial_intervals
     )
-    initial_solver = _create_solver(
-        factory, initial_intervals, initial_degrees
-    )
-    if not options.refinement_enabled:
-        return initial_solver
-
-    cache_capacity = 8
 
     def mesh_signature(
         intervals: List[Tuple[float, float]], degrees: List[int]
@@ -1150,27 +1305,20 @@ def create_variational_solver(
             tuple(int(degree) for degree in degrees),
         )
 
-    compiled_transcriptions: OrderedDict[
-        Tuple[Tuple[Tuple[float, float], ...], Tuple[int, ...]],
-        CasadiVariationalSolver,
-    ] = OrderedDict()
-    initial_signature = mesh_signature(initial_intervals, initial_degrees)
-    compiled_transcriptions[initial_signature] = initial_solver
+    @lru_cache(maxsize=8)
+    def compile_transcription(
+        signature: Tuple[Tuple[Tuple[float, float], ...], Tuple[int, ...]],
+    ) -> CasadiVariationalSolver:
+        return _create_solver(factory, list(signature[0]), list(signature[1]))
 
     def transcription_for(
         intervals: List[Tuple[float, float]], degrees: List[int]
     ) -> CasadiVariationalSolver:
-        signature = mesh_signature(intervals, degrees)
-        try:
-            solver = compiled_transcriptions.pop(signature)
-        except KeyError:
-            solver = _create_solver(
-                factory, list(signature[0]), list(signature[1])
-            )
-            if len(compiled_transcriptions) == cache_capacity:
-                compiled_transcriptions.popitem(last=False)
-        compiled_transcriptions[signature] = solver
-        return solver
+        return compile_transcription(mesh_signature(intervals, degrees))
+
+    initial_solver = transcription_for(initial_intervals, initial_degrees)
+    if not options.refinement_enabled:
+        return initial_solver
 
     def solve_adaptive(
         fixed_parameters: Dict[str, float],
@@ -1245,7 +1393,7 @@ class CasadiSolutionAssembler:
             Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
         ],
         proj_p: ca.DM,
-        parameter_value_map: Callable[[ca.DM], Dict[str, float]],
+        parameter_indices: Dict[str, int],
         decode_controls: Optional[Callable[[ca.DM], list]],
     ):
         self.problem = problem
@@ -1254,7 +1402,7 @@ class CasadiSolutionAssembler:
         self.poly_collection = poly_collection
         self.projectors = projectors
         self.proj_p = proj_p
-        self.parameter_value_map = parameter_value_map
+        self.parameter_indices = parameter_indices
         self.decode_controls = decode_controls
 
     def __call__(
@@ -1281,7 +1429,10 @@ class CasadiSolutionAssembler:
         public_parameters = (
             self.problem.parameter_layout.reconstruct(system_parameters)
             if self.problem.parameter_layout is not None
-            else self.parameter_value_map(free_parameters)
+            else {
+                name: float(free_parameters[index, 0])
+                for name, index in self.parameter_indices.items()
+            }
         )
         control_solutions = (
             self.decode_controls(control_coefficients)
@@ -1531,14 +1682,6 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
         return super().__call__(t)
 
 
-class ParameterOutputMap:
-    def __init__(self, indices: Dict[str, int]):
-        self.indices = indices
-
-    def __call__(self, value: ca.DM):
-        return {name: float(value[i, 0]) for name, i in self.indices.items()}
-
-
 def construct_parameters(parameters: Optional[List[ParameterVariable]]):
     parameters = parameters or []
 
@@ -1594,7 +1737,7 @@ def construct_parameters(parameters: Optional[List[ParameterVariable]]):
         symbol_vector,
         ca.DM(p0).reshape((-1, 1)) if p0 else ca.DM.zeros(0, 1),
         (lower, guess_vector, upper),
-        ParameterOutputMap(output_map),
+        output_map,
     )
 
 
