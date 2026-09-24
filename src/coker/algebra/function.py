@@ -251,13 +251,32 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             None if isinstance(argument, Noop) else argument
             for argument in args
         )
+        input_spaces = tuple(
+            spec.space
+            for spec, argument in zip(self.signature.inputs, native_arguments)
+            if argument is not None
+        )
+
+        def call_native(*present_arguments):
+            values = iter(present_arguments)
+            return native(
+                *(
+                    None if argument is None else next(values)
+                    for argument in native_arguments
+                )
+            )
+
         outputs = self._append_native_outputs(
             outer_tape,
-            native,
+            call_native,
             self.backend,
-            [spec.space for spec in self.signature.inputs],
+            input_spaces,
             self.signature.outputs,
-            native_arguments,
+            tuple(
+                argument
+                for argument in native_arguments
+                if argument is not None
+            ),
             name=self.name,
         )
         return outputs[0] if self.is_single else tuple(outputs)
