@@ -308,17 +308,6 @@ class _TranscriptionFactory:
         self._defect_nodes: OrderedDict[int, tuple[float, ...]] = OrderedDict()
         self._defect_dynamics = self._build_defect_dynamics()
 
-    def copy_solution_projectors(
-        self,
-    ) -> Tuple[
-        Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
-    ]:
-        """Return solution-owned projector arrays."""
-        return tuple(
-            projector.copy() if projector is not None else None
-            for projector in self._projectors
-        )
-
     def evaluate_dynamics(self, *args):
         return self.casadi.evaluate(self.problem.system.dxdt, args)
 
@@ -726,9 +715,6 @@ def _scale_nlp(
         )
         normalized_cost /= objective_scale
         decision_variables = normalized_variables
-        lower_bound_base, upper_bound_base = variable_scaling.encode_bounds(
-            physical_lower_bound_base, physical_upper_bound_base
-        )
         constraint_scaling = _derive_constraint_scaling(
             normalized_g,
             decision_variables,
@@ -942,7 +928,7 @@ def _create_solver(
     """Compile one mesh-specific NLP from shared factory state."""
     problem = factory.problem
     duration = factory.duration
-    projectors = factory.copy_solution_projectors()
+    projectors = factory._projectors
 
     poly_collection = SymbolicPolyCollection(
         name="x",
@@ -1007,22 +993,24 @@ def _create_solver(
     for constraint in problem.initial_constraints:
         constraints.add_constraint(constraint, initial_args)
 
+    system_parameters = factory.proj_p @ factory.p
+
     for poly in poly_collection.polys:
         for t, v, dv in poly.knot_points():
             physical_t = duration * t
             x = factory.proj_x @ v
             z = factory.proj_z @ v
             dx = factory.proj_x @ dv
+            control = factory.control_eval(t)
             (dynamics_ij,) = factory.evaluate_dynamics(
                 physical_t,
                 x,
                 z,
-                factory.control_eval(t),
-                factory.proj_p @ factory.p,
+                control,
+                system_parameters,
             )
-            scale = duration
             constraints.add_equality(
-                dx - scale * dynamics_ij,
+                dx - duration * dynamics_ij,
                 factory.derivative_defect_tolerance,
             )
 
@@ -1034,8 +1022,8 @@ def _create_solver(
                         physical_t,
                         x,
                         z,
-                        factory.control_eval(t),
-                        factory.proj_p @ factory.p,
+                        control,
+                        system_parameters,
                     )
                     quadrature_values.append(base_quadrature)
                 quadrature_values.extend(
@@ -1044,13 +1032,13 @@ def _create_solver(
                             physical_t,
                             x,
                             z,
-                            factory.control_eval(t),
-                            factory.proj_p @ factory.p,
+                            control,
+                            system_parameters,
                             factory.proj_q @ v,
                         )
                     )
                 )
-                quadrature_ij = scale * ca.vertcat(*quadrature_values)
+                quadrature_ij = duration * ca.vertcat(*quadrature_values)
                 constraints.add_equality(
                     dq - quadrature_ij,
                     factory.derivative_defect_tolerance,
@@ -1061,8 +1049,8 @@ def _create_solver(
                     physical_t,
                     x,
                     z,
-                    factory.control_eval(t),
-                    factory.proj_p @ factory.p,
+                    control,
+                    system_parameters,
                 )
                 constraints.add_equality(alg, factory.tolerance)
 
