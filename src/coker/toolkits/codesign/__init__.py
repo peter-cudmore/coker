@@ -277,7 +277,7 @@ class ProblemBuilder:
 
     def new_function_parameter(self, target, declaration):
         """Add a finite function parameter as optimisation decisions."""
-        from coker.dynamics.function_parameters import FunctionParameter
+        from coker.function_parameters import FunctionParameter
         from coker.dynamics.variables import (
             BoundedVariable,
             BoundVector,

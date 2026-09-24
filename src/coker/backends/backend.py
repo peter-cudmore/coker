@@ -92,7 +92,7 @@ class Backend(metaclass=ABCMeta):
     def _fit_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
-        from coker.dynamics.function_parameters import FittedFunction
+        from coker.function_parameters import FittedFunction
 
         flat_values = np.asarray(
             self.to_numpy_array(values), dtype=float

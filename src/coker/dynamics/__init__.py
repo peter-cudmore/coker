@@ -21,14 +21,6 @@ from coker.dynamics.variables import (
     UnboundedVariable,
     ValueType,
 )
-from coker.dynamics.function_parameters import (
-    ClosureParameter,
-    DenseLayer,
-    FittedFunction,
-    FunctionParameter,
-    MonotonePiecewiseLinear,
-    RadialBasisFunction,
-)
 from coker.dynamics.analysis import (
     AnalysisResult,
     AnalysisStatus,
@@ -84,7 +76,6 @@ __all__ = [
     "ControlSolution",
     "ControlVariable",
     "DynamicalSystem",
-    "ClosureParameter",
     "DynamicsSpec",
     "SymbolicDAESystem",
     "SymbolicSystem",
@@ -95,11 +86,6 @@ __all__ = [
     "InterpolatingPoly",
     "InterpolatingPolyCollection",
     "LossFunction",
-    "FittedFunction",
-    "FunctionParameter",
-    "MonotonePiecewiseLinear",
-    "DenseLayer",
-    "RadialBasisFunction",
     "ParameterMixin",
     "ParameterVariable",
     "PiecewiseConstantVariable",

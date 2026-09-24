@@ -10,8 +10,7 @@ from coker.toolkits.codesign import (
     bounded,
     norm as codesign_norm,
 )
-from coker.dynamics import DenseLayer
-from coker.dynamics.function_parameters import FittedFunction
+from coker.function_parameters import DenseLayer, FittedFunction
 
 
 def quadratic(x, p, z):

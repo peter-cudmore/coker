@@ -11,16 +11,18 @@ from coker.backends.backend import get_backend_by_name
 from coker.dynamics import (
     BoundVector,
     BoundedVariable,
-    ClosureParameter,
     DenseTensorVariable,
     DynamicsSpec,
-    FittedFunction,
-    MonotonePiecewiseLinear,
-    DenseLayer,
-    RadialBasisFunction,
     UnboundedVariable,
     VariationalProblem,
     VariationalProblemBuilder,
+)
+from coker.function_parameters import (
+    ClosureParameter,
+    DenseLayer,
+    FittedFunction,
+    MonotonePiecewiseLinear,
+    RadialBasisFunction,
 )
 from coker.dynamics.variational.function_binding import ParameterValueLayout
 from coker.dynamics.system import create_dynamics_from_spec

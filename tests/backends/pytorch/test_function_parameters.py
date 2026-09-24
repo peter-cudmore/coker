@@ -8,11 +8,13 @@ from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.dynamics import (
     BoundVector,
-    DenseLayer,
     DynamicsSpec,
+    VariationalProblemBuilder,
+)
+from coker.function_parameters import (
+    DenseLayer,
     FittedFunction,
     RadialBasisFunction,
-    VariationalProblemBuilder,
 )
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.toolkits.codesign import Minimise
@@ -116,9 +118,7 @@ def test_pytorch_variational_solver_lowers_dense_layer_parameter(monkeypatch):
         system,
         t_final=1.0,
         parameters=[
-            DenseLayer(
-                2, _identity_activation("pytorch", 2), name="response"
-            )
+            DenseLayer(2, _identity_activation("pytorch", 2), name="response")
         ],
         backend="pytorch",
     ) as builder:
@@ -160,9 +160,7 @@ def test_pytorch_solution_reconstructs_mapped_function_parameter(
         system,
         t_final=1.0,
         parameters=[
-            DenseLayer(
-                2, _identity_activation("pytorch"), name="response"
-            )
+            DenseLayer(2, _identity_activation("pytorch"), name="response")
         ],
         system_parameter_map=parameter_map,
         backend="pytorch",
@@ -183,9 +181,7 @@ def test_pytorch_solution_reconstructs_mapped_function_parameter(
         ]
     )
     raw_value = (
-        raw_basis[0] * argument[0]
-        + raw_basis[1] * argument[1]
-        + raw_basis[2]
+        raw_basis[0] * argument[0] + raw_basis[1] * argument[1] + raw_basis[2]
     )
 
     fitted = solution.parameters["response"]
