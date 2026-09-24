@@ -11,6 +11,7 @@ import numpy as np
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
+from coker.backends.backend import get_backend_by_name
 from coker.dynamics.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variables import (
@@ -37,18 +38,16 @@ class ParameterValueLayout:
             basis = values[start:end]
             name = self._name(target, declaration)
             if isinstance(target, FunctionSpace):
-                if backend is not None:
-                    result[name] = backend.reconstruct_function_parameter(
+                reconstruction_backend = (
+                    get_backend_by_name("numpy", set_current=False)
+                    if backend is None
+                    else backend
+                )
+                result[name] = (
+                    reconstruction_backend.reconstruct_function_parameter(
                         declaration, target, basis
                     )
-                else:
-                    result[name] = declaration.fit(
-                        target,
-                        _reconstruct_concrete_values(
-                            self._numpy(basis, None),
-                            _function_concrete_declarations(declaration),
-                        ),
-                    )
+                )
             elif isinstance(target, VectorSpace):
                 result[name] = self._numpy(basis, backend).reshape(
                     declaration.shape
