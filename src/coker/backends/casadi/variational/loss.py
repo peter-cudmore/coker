@@ -1,15 +1,12 @@
 """Loss lowering for CasADi variational transcriptions."""
 
-from typing import TYPE_CHECKING
-
 import casadi as ca
-
 from coker.algebra.graph import Tracer
 from coker.backends.casadi.lower import substitute
 
-if TYPE_CHECKING:
-    from .factory import _TranscriptionFactory
-    from .symbolic_path import SymbolicPolyCollection
+
+from .factory import _TranscriptionFactory
+from .symbolic_path import SymbolicPolyCollection
 
 
 def _lower_loss(

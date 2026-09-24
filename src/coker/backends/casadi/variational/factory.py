@@ -18,7 +18,7 @@ from coker.dynamics.transcription.collocation import (
 )
 from coker.dynamics.variational.solution import SegmentDefectDiagnostic
 
-from .symbolic_path import (
+from .bindings import (
     ControlFactory,
     _to_output_projector,
     construct_parameters,

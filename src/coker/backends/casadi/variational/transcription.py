@@ -30,12 +30,12 @@ from coker.toolkits.codesign.optimisation import (
     solve_info_from_casadi_stats,
 )
 
+from .bindings import ControlFactory  # noqa: F401
 from .factory import _TranscriptionFactory, _resolve_options
 from .loss import _lower_loss
 from .symbolic_path import (
     CallbackWrapper,
     CasadiSolutionAssembler,
-    ControlFactory,  # noqa: F401
     SymbolicPoly,  # noqa: F401
     SymbolicPolyCollection,
 )
