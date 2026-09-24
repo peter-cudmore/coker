@@ -115,6 +115,9 @@ def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
 
 
 class CasadiBackend(Backend):
+    def fit_function_parameter(self, declaration, target, values):
+        return self._fit_function_parameter(declaration, target, values)
+
     name = "casadi"
 
     def import_function(

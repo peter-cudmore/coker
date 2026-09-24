@@ -43,10 +43,8 @@ class ParameterValueLayout:
                     if backend is None
                     else backend
                 )
-                result[name] = (
-                    reconstruction_backend.reconstruct_function_parameter(
-                        declaration, target, basis
-                    )
+                result[name] = reconstruction_backend.fit_function_parameter(
+                    declaration, target, basis
                 )
             elif isinstance(target, VectorSpace):
                 result[name] = self._numpy(basis, backend).reshape(

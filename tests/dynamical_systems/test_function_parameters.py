@@ -7,6 +7,7 @@ import numpy as np
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
+from coker.backends.backend import get_backend_by_name
 from coker.dynamics import (
     BoundVector,
     BoundedVariable,
@@ -82,8 +83,12 @@ def test_function_space_contains_matching_functions():
     incompatible = function(
         [VectorSpace("time", 2)], lambda time: time[0], backend="numpy"
     )
-    fitted = RadialBasisFunction(centers=[0.0], width=1.0).fit(
-        space, ([0.0, 1.0],)
+    fitted = get_backend_by_name(
+        "numpy", set_current=False
+    ).fit_function_parameter(
+        RadialBasisFunction(centers=[0.0], width=1.0),
+        space,
+        [0.0, 1.0],
     )
 
     assert matching in space
@@ -112,7 +117,9 @@ def test_closure_parameter_binds_declared_scalar_decisions():
         "forcing", arguments=[Scalar("time")], output=[Scalar("rate")]
     )
 
-    fitted = closure.fit(target, (2.0, -1.0))
+    fitted = get_backend_by_name(
+        "numpy", set_current=False
+    ).fit_function_parameter(closure, target, [2.0, -1.0])
 
     assert closure.name == "affine"
     assert closure.list_concrete_parameters() == (
@@ -699,8 +706,12 @@ def test_system_integrates_function_valued_parameter(
         )
         integral = affine_integral
     else:
-        rate_value = RadialBasisFunction(centers=[0.0], width=1.0).fit(
-            rate, ([0.0, 1.0],)
+        rate_value = get_backend_by_name(
+            "numpy", set_current=False
+        ).fit_function_parameter(
+            RadialBasisFunction(centers=[0.0], width=1.0),
+            rate,
+            [0.0, 1.0],
         )
         integral = constant_integral
 

@@ -226,6 +226,8 @@ class SympyLoweredFunction(LoweredFunction):
 
 
 class SympyBackend(Backend):
+    def fit_function_parameter(self, declaration, target, values):
+        return self._fit_function_parameter(declaration, target, values)
 
     def to_numpy_array(self, array):
 

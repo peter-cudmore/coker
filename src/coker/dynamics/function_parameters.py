@@ -69,48 +69,6 @@ class FunctionParameter(ABC):
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         """Evaluate the declared function from structured parameter values."""
 
-    def fit(
-        self, target: FunctionSpace, parameters: Sequence[Any]
-    ) -> FittedFunction:
-        """Construct a fitted function from structured concrete values."""
-        target = self.validate_target(target)
-        declarations = self.list_concrete_parameters()
-        if not isinstance(parameters, (tuple, list)):
-            raise TypeError(
-                "function parameter values must be a structured sequence"
-            )
-        if len(parameters) != len(declarations):
-            raise ValueError("function parameter values have the wrong arity")
-        values: list[Any] = []
-        for value, declaration in zip(parameters, declarations):
-            if isinstance(declaration, (BoundVector, DenseTensorVariable)):
-                value = np.asarray(value, dtype=float)
-                if value.shape != declaration.shape:
-                    raise ValueError(
-                        f"function parameter {declaration.name!r} has shape "
-                        f"{value.shape}, expected {declaration.shape}"
-                    )
-            elif isinstance(declaration, (BoundedVariable, UnboundedVariable)):
-                value = np.asarray(value, dtype=float)
-                if value.size != 1:
-                    raise ValueError(
-                        f"function parameter {declaration.name!r} must be "
-                        "scalar"
-                    )
-                value = float(value.reshape(-1)[0])
-            else:
-                raise TypeError(
-                    "function parameter declarations must be scalar or dense "
-                    "variables"
-                )
-            values.append(value)
-        return FittedFunction(
-            self,
-            target,
-            lambda argument: self.evaluate(values, argument),
-            tuple(values),
-        )
-
     def build_function(
         self, target: FunctionSpace, backend: str | None
     ) -> Function:

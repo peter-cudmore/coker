@@ -145,7 +145,7 @@ class PytorchBackend(Backend):
         """Lower a function to an eager ``torch.nn.Module``."""
         return self.lower(function).as_module()
 
-    def reconstruct_function_parameter(self, declaration, target, values):
+    def fit_function_parameter(self, declaration, target, values):
         """Build a PyTorch-native fitted function from solver decisions."""
         from coker.dynamics.function_parameters import FittedFunction
 

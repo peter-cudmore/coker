@@ -89,16 +89,28 @@ class Backend(metaclass=ABCMeta):
             )
         return tuple(parameters)
 
-    def reconstruct_function_parameter(
+    @abstractmethod
+    def fit_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
-        """Reconstruct a generic fitted function from solver decisions."""
+        """Materialize a fitted function from backend decision values."""
+
+    def _fit_function_parameter(
+        self, declaration: Any, target: Any, values: ArrayLike
+    ) -> Any:
+        from coker.dynamics.function_parameters import FittedFunction
+
         flat_values = np.asarray(
             self.to_numpy_array(values), dtype=float
         ).reshape(-1)
-        return declaration.fit(
-            target,
-            self._split_function_parameter_values(declaration, flat_values),
+        parameters = self._split_function_parameter_values(
+            declaration, flat_values
+        )
+        return FittedFunction(
+            declaration,
+            declaration.validate_target(target),
+            lambda argument: declaration.evaluate(parameters, argument),
+            parameters,
         )
 
     def create_variational_solver(

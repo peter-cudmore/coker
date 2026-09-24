@@ -159,7 +159,7 @@ class MathematicalProgram(SymbolicCallable):
         result = {}
         for metadata, value in zip(self._parameter_captures, captured_values):
             if isinstance(metadata.target, FunctionSpace):
-                result[metadata.name] = backend.reconstruct_function_parameter(
+                result[metadata.name] = backend.fit_function_parameter(
                     metadata.declaration, metadata.target, value
                 )
             elif isinstance(metadata.target, Scalar):

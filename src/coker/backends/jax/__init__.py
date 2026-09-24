@@ -140,6 +140,9 @@ class JaxLoweredFunction(LoweredFunction):
 
 
 class JaxBackend(Backend):
+    def fit_function_parameter(self, declaration, target, values):
+        return self._fit_function_parameter(declaration, target, values)
+
     def __init__(self, *args, **kwargs):
         super(JaxBackend, self).__init__(*args, **kwargs)
 
