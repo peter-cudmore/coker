@@ -1,23 +1,28 @@
+from contextlib import contextmanager
+
 import numpy as np
+import pytest
 import torch
 
 import warnings
 
-from coker import FunctionSpace, VectorSpace, function
+from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.dynamics import (
     DynamicsSpec,
     VariationalProblemBuilder,
+    direct_sum,
 )
 from coker.parameters.function_parameters import (
+    ClosureParameter,
     DenseLayer,
     FittedFunction,
     RadialBasisFunction,
 )
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.toolkits.codesign import Minimise
-from coker.parameters import BoundVector
+from coker.parameters import BoundedVariable, BoundVector
 
 
 def _identity_activation(backend, width=1):
@@ -198,3 +203,166 @@ def test_pytorch_solution_reconstructs_mapped_function_parameter(
     assert isinstance(actual, torch.Tensor)
     np.testing.assert_allclose(actual.detach().cpu().numpy(), expected)
     assert not np.isclose(expected[0], raw_value)
+
+
+def _quadratic_rate_declaration(*, upper_bound=2.0):
+    return ClosureParameter.bind_callable(
+        lambda scale, inflow: scale * inflow**2,
+        [
+            BoundedVariable(
+                "rate_scale",
+                lower_bound=0.0,
+                upper_bound=upper_bound,
+                guess=0.5,
+            )
+        ],
+        [Scalar("inflow")],
+        name="rate",
+        backend="pytorch",
+    )
+
+
+def _two_batch_transfer_system():
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("inflow")],
+        output=[Scalar("transfer_rate")],
+    )
+
+    def batch_system():
+        return create_dynamics_from_spec(
+            DynamicsSpec(
+                inputs=Noop(),
+                parameters=(rate, Scalar("initial_inflow")),
+                algebraic=None,
+                initial_conditions=lambda _z, _u, p: (
+                    p[1] * np.array([1.0, 0.0]),
+                    None,
+                ),
+                dynamics=lambda _t, state, _z, _u, p: p[0](state[0])
+                * np.array([-1.0, 1.0]),
+                constraints=Noop(),
+                outputs=lambda _t, state, _z, _u, _p, _q: state,
+                quadratures=Noop(),
+            ),
+            backend="pytorch",
+        )
+
+    return direct_sum(batch_system(), batch_system(), backend="pytorch")[0]
+
+
+@contextmanager
+def _two_batch_transfer_problem(rate_declarations):
+    initial_inflows = (1.0, 2.0)
+    t_final = 0.2
+    targets = np.concatenate(
+        [
+            (
+                np.array(
+                    [
+                        inflow / (1.0 + inflow * t_final),
+                        inflow - inflow / (1.0 + inflow * t_final),
+                    ]
+                )
+            )
+            for inflow in initial_inflows
+        ]
+    )
+    fixed_initials = [
+        BoundedVariable(
+            f"initial_inflow_{index}",
+            lower_bound=inflow,
+            upper_bound=inflow,
+            guess=inflow,
+        )
+        for index, inflow in enumerate(initial_inflows)
+    ]
+    with VariationalProblemBuilder(
+        _two_batch_transfer_system(),
+        t_final=t_final,
+        parameters=[
+            rate_declarations[0],
+            fixed_initials[0],
+            rate_declarations[1],
+            fixed_initials[1],
+        ],
+        backend="pytorch",
+    ) as builder:
+        terminal = builder.output(builder.t_final)
+        residual = terminal - targets
+        problem = builder.build(
+            Minimise(
+                sum(
+                    residual[index] * residual[index]
+                    for index in range(targets.size)
+                )
+            )
+        )
+    yield problem, initial_inflows, targets
+
+
+def test_pytorch_fits_shared_function_parameter_across_fixed_batches(
+    monkeypatch,
+):
+    backend = get_backend_by_name("pytorch", set_current=False)
+    monkeypatch.setattr(backend, "device", torch.device("cpu"))
+    monkeypatch.setattr(backend, "dtype", torch.float64)
+    shared_rate = _quadratic_rate_declaration()
+
+    with _two_batch_transfer_problem((shared_rate, shared_rate)) as (
+        problem,
+        initial_inflows,
+        targets,
+    ):
+        solution = problem()
+
+        assert solution.solve_info.success
+        assert solution.cost < 1e-6
+        np.testing.assert_allclose(solution.state(0.2), targets, atol=2e-3)
+        fitted = solution.parameters["rate"]
+        assert isinstance(fitted, FittedFunction)
+        torch.testing.assert_close(
+            torch.stack(
+                [
+                    fitted(torch.tensor(inflow, dtype=torch.float64))
+                    for inflow in initial_inflows
+                ]
+            ),
+            torch.tensor(
+                [inflow**2 for inflow in initial_inflows],
+                dtype=torch.float64,
+            ),
+            rtol=0,
+            atol=2e-3,
+        )
+
+
+def test_pytorch_shares_compatible_duplicate_function_declarations(
+    monkeypatch,
+):
+    backend = get_backend_by_name("pytorch", set_current=False)
+    monkeypatch.setattr(backend, "device", torch.device("cpu"))
+    monkeypatch.setattr(backend, "dtype", torch.float64)
+
+    with _two_batch_transfer_problem(
+        (_quadratic_rate_declaration(), _quadratic_rate_declaration())
+    ) as (problem, _, targets):
+        solution = problem.get_solver().solve(rate_scale=1.0)
+
+        assert solution.solve_info.success
+        np.testing.assert_allclose(solution.state(0.2), targets, atol=2e-3)
+
+
+def test_pytorch_rejects_conflicting_duplicate_function_declarations():
+    with (
+        pytest.raises(
+            ValueError, match="(?i)conflicting concrete parameter declarations"
+        ),
+        _two_batch_transfer_problem(
+            (
+                _quadratic_rate_declaration(upper_bound=2.0),
+                _quadratic_rate_declaration(upper_bound=3.0),
+            )
+        ),
+    ):
+        pass

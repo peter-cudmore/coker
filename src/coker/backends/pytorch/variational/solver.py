@@ -155,12 +155,17 @@ class PytorchVariationalSolver(VariationalSolver):
         self._parameter_indices = {
             name: index for index, name in enumerate(self._names)
         }
-        self._lower_bounds, self._upper_bounds, guesses = (
-            self._parameter_vectors()
+        (
+            self._lower_bounds,
+            self._upper_bounds,
+            guesses,
+            self._bound_fixed_coordinates,
+        ) = self._parameter_vectors()
+        self._two_sided_bounds = (
+            torch.isfinite(self._lower_bounds)
+            & torch.isfinite(self._upper_bounds)
+            & ~self._bound_fixed_coordinates
         )
-        self._two_sided_bounds = torch.isfinite(
-            self._lower_bounds
-        ) & torch.isfinite(self._upper_bounds)
         self._lower_only_bounds = torch.isfinite(
             self._lower_bounds
         ) & ~torch.isfinite(self._upper_bounds)
@@ -210,20 +215,33 @@ class PytorchVariationalSolver(VariationalSolver):
                 (declaration, None)
                 for declaration in self.problem.parameters or []
             )
+            concrete_offsets = None
         else:
-            declarations = zip(layout.declarations, layout.offsets)
+            concrete_offsets = layout.concrete_offsets
+            declarations = zip(
+                layout.declarations,
+                (
+                    layout.offsets
+                    if concrete_offsets is None
+                    else concrete_offsets
+                ),
+            )
 
-        for declaration, layout_offset in declarations:
+        for declaration, layout_offsets in declarations:
             concrete = (
                 declaration.list_concrete_parameters()
                 if isinstance(declaration, FunctionParameter)
                 else (declaration,)
             )
-            block_offset = (
-                offset if layout_offset is None else layout_offset[0]
-            )
-            block_end = block_offset
-            for concrete_declaration in concrete:
+            if concrete_offsets is None:
+                block_end = (
+                    offset if layout_offsets is None else layout_offsets[0]
+                )
+            elif len(layout_offsets) != len(concrete):
+                raise ValueError(
+                    "Function parameter layout does not match its declarations"
+                )
+            for concrete_index, concrete_declaration in enumerate(concrete):
                 if not isinstance(
                     concrete_declaration,
                     (
@@ -245,19 +263,41 @@ class PytorchVariationalSolver(VariationalSolver):
                     )
                     else concrete_declaration.size
                 )
-                entries.append(
-                    (
-                        concrete_declaration,
-                        block_end,
-                        block_end + size,
-                    )
-                )
-                block_end += size
-            if layout_offset is not None and block_end != layout_offset[1]:
+                if concrete_offsets is None:
+                    block_start = block_end
+                    block_end += size
+                else:
+                    block_start, block_end = layout_offsets[concrete_index]
+                    if block_end - block_start != size:
+                        raise ValueError(
+                            "Function parameter layout does not match its "
+                            "declarations"
+                        )
+                entries.append((concrete_declaration, block_start, block_end))
+            if (
+                concrete_offsets is None
+                and layout_offsets is not None
+                and block_end != layout_offsets[1]
+            ):
                 raise ValueError(
                     "Function parameter layout does not match its declarations"
                 )
             offset = block_end
+
+        if concrete_offsets is not None:
+            unique_entries = {
+                (start, end): (declaration, start, end)
+                for declaration, start, end in entries
+            }
+            entries = [unique_entries[key] for key in sorted(unique_entries)]
+            offset = 0
+            for _, block_start, block_end in entries:
+                if block_start != offset:
+                    raise ValueError(
+                        "Function parameter layout does not match its "
+                        "declarations"
+                    )
+                offset = block_end
 
         flat_parameters = self.problem.parameters or []
         width = offset
@@ -343,11 +383,9 @@ class PytorchVariationalSolver(VariationalSolver):
             )
         finite_lower = np.isfinite(lower_values)
         finite_upper = np.isfinite(upper_values)
-        if np.any(
-            finite_lower & finite_upper & (lower_values >= upper_values)
-        ):
+        if np.any(finite_lower & finite_upper & (lower_values > upper_values)):
             raise ValueError(
-                "PyTorch variational lower bounds must be below upper bounds"
+                "PyTorch variational lower bounds must not exceed upper bounds"
             )
         if np.any(
             (finite_lower & (guesses < lower_values))
@@ -365,6 +403,11 @@ class PytorchVariationalSolver(VariationalSolver):
                 upper_values, device=self._device, dtype=self._dtype
             ),
             torch.as_tensor(guesses, device=self._device, dtype=self._dtype),
+            torch.as_tensor(
+                finite_lower & finite_upper & (lower_values == upper_values),
+                device=self._device,
+                dtype=torch.bool,
+            ),
         )
 
     def _check_fixed(self, fixed_parameters):
@@ -603,6 +646,9 @@ class PytorchVariationalSolver(VariationalSolver):
 
     def _parameter_values(self, raw_values):
         values = raw_values.clone()
+        values[self._bound_fixed_coordinates] = self._lower_bounds[
+            self._bound_fixed_coordinates
+        ]
         if self._has_two_sided_bounds:
             mask = self._two_sided_bounds
             values[mask] = self._lower_bounds[mask] + (
@@ -632,15 +678,14 @@ class PytorchVariationalSolver(VariationalSolver):
             device=self._device,
             dtype=self._dtype,
         )
-        free_indices = torch.as_tensor(
-            [
-                index
-                for index, name in enumerate(self._names)
-                if name not in fixed_parameters
-            ],
+        free_coordinates = ~self._bound_fixed_coordinates.clone()
+        if fixed_indices.numel():
+            free_coordinates[fixed_indices] = False
+        free_indices = torch.arange(
+            len(self._names),
             device=self._device,
             dtype=torch.long,
-        )
+        )[free_coordinates]
         raw = torch.nn.Parameter(
             self._raw_initial.index_select(0, free_indices).clone()
         )
