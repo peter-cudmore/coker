@@ -20,7 +20,7 @@ from coker.interfaces import SolverParameters
 ArrayLike = Any
 
 
-def _split_function_parameter_values(declaration: Any, flat_values: Any):
+def split_function_parameter_values(declaration: Any, flat_values: Any):
     """Split flat backend values into the declaration's concrete blocks."""
     from coker.dynamics.variables import BoundedVariable, UnboundedVariable
 
@@ -97,7 +97,7 @@ class Backend(metaclass=ABCMeta):
         flat_values = np.asarray(
             self.to_numpy_array(values), dtype=float
         ).reshape(-1)
-        parameters = _split_function_parameter_values(declaration, flat_values)
+        parameters = split_function_parameter_values(declaration, flat_values)
         return FittedFunction(
             declaration,
             declaration.validate_target(target),
