@@ -7,6 +7,7 @@ import torch
 import warnings
 
 from coker import FunctionSpace, Scalar, VectorSpace, function
+from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.dynamics import (
@@ -29,6 +30,51 @@ def _identity_activation(backend, width=1):
     return function(
         [VectorSpace("hidden", width)], lambda hidden: hidden, backend=backend
     )
+
+
+def _relu_scalar_activation(backend):
+    signature_source = function(
+        [Scalar("hidden")],
+        lambda hidden: hidden,
+        backend="pytorch",
+    )
+    return backend.import_function(torch.relu, signature_source.signature)
+
+
+@pytest.mark.parametrize("bind_activation", (False, True))
+def test_pytorch_fitted_dense_layer_preserves_nested_relu_activation(
+    bind_activation,
+):
+    backend = get_backend_by_name("pytorch", set_current=False)
+    response = FunctionSpace(
+        "response",
+        arguments=[Scalar("inflow")],
+        output=[Scalar("rate")],
+    )
+    activation = _relu_scalar_activation(backend)
+    if bind_activation:
+        activation = BoundCallable(
+            activation,
+            FunctionSpace(
+                "relu",
+                arguments=[Scalar("hidden")],
+                output=[Scalar("output")],
+            ),
+            (),
+        )
+    declaration = DenseLayer(1, activation, name="response")
+
+    fitted = backend.fit_function_parameter(
+        declaration,
+        response,
+        np.array([1.1796, -0.3112]),
+    )
+
+    assert isinstance(fitted, FittedFunction)
+    assert fitted(torch.tensor(0.0, dtype=torch.float64)).item() == 0.0
+    assert fitted(
+        torch.tensor(1.0, dtype=torch.float64)
+    ).item() == pytest.approx(0.8684)
 
 
 def test_pytorch_fits_bound_vector_parameter(monkeypatch):
