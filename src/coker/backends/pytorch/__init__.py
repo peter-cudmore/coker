@@ -69,6 +69,10 @@ class PytorchBackend(Backend):
     def to_backend_array(self, array):
         if isinstance(array, torch.Tensor):
             device_matches = self.device is None or array.device == self.device
+            if array.dtype == torch.bool:
+                return (
+                    array if device_matches else array.to(device=self.device)
+                )
             dtype_matches = self.dtype is None or array.dtype == self.dtype
             if device_matches and dtype_matches:
                 return array

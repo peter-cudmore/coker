@@ -148,7 +148,7 @@ class RadialBasisFunction(FunctionParameter):
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         (basis,) = parameters
-        value = basis[-1]
+        value = basis[len(self.centers)]
         for index, center in enumerate(self.centers):
             distance = (argument - center) / self.width
             value += basis[index] * np.exp(-0.5 * distance * distance)
