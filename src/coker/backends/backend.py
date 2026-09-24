@@ -13,7 +13,12 @@ from coker.backends.evaluator import Evaluator
 from coker.backends.lowered import LoweredFunction, LoweringOptions
 from coker.algebra.graph import Tape, Tracer
 from coker.algebra.ops import Noop, OP, SelectOP
-from coker.algebra.dimensions import Dimension, FunctionSpace
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+)
 from coker.interfaces import SolverParameters
 
 ArrayLike = Any
@@ -82,11 +87,22 @@ class Backend(metaclass=ABCMeta):
         """Wrap a backend solver for use as a numerical program module."""
         return implementation
 
-    @abstractmethod
+    def materialize_parameter(
+        self,
+        target: Scalar | VectorSpace | FunctionSpace,
+        declaration: Any,
+        blocks: tuple[ArrayLike, ...],
+    ) -> Any:
+        raise NotImplementedError(
+            f"{self.__class__.__name__} cannot materialize parameters"
+        )
+
     def fit_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
-        """Materialize a fitted function from backend decision values."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} cannot materialize function parameters"
+        )
 
     def create_variational_solver(
         self, problem: VariationalProblem

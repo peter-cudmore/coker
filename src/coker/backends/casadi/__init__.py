@@ -116,18 +116,76 @@ def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
 
 
 class CasadiBackend(Backend):
+    def materialize_parameter(self, target, declaration, blocks):
+        """Reconstruct a public parameter value from CasADi solver blocks."""
+        flat_values = self._concatenate_parameter_blocks(blocks)
+        if isinstance(target, FunctionSpace):
+            return self._fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return np.asarray(
+                self.to_numpy_array(flat_values), dtype=float
+            ).reshape(target.dimension)
+        if isinstance(target, Scalar):
+            if flat_values.numel() != 1:
+                raise ValueError("scalar parameter must have one solver value")
+            return float(
+                np.asarray(
+                    self.to_numpy_array(flat_values), dtype=float
+                ).reshape(-1)[0]
+            )
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
+
     def fit_function_parameter(self, declaration, target, values):
+        """Materialize a fitted function from CasADi decision values."""
+        return self._fit_function_parameter(
+            declaration,
+            target,
+            self._concatenate_parameter_blocks((values,)),
+        )
+
+    def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters.function_parameters import FittedFunction
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
-        parameters = split_function_parameter_values(declaration, flat_values)
+        parameters = split_function_parameter_values(
+            declaration,
+            np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(
+                -1
+            ),
+        )
         return FittedFunction(
             declaration,
             declaration.validate_target(target),
             lambda argument: declaration.evaluate(parameters, argument),
             parameters,
+        )
+
+    def _concatenate_parameter_blocks(self, blocks):
+        if not blocks:
+            raise ValueError("parameter blocks must not be empty")
+        return ca.vertcat(
+            *(self._as_parameter_column(block) for block in blocks)
+        )
+
+    @staticmethod
+    def _as_parameter_column(block):
+        value = (
+            block if isinstance(block, (ca.DM, ca.MX, ca.SX)) else ca.DM(block)
+        )
+        return ca.reshape(value, value.numel(), 1)
+
+    @staticmethod
+    def _reshape_parameter_values(values, shape):
+        shape = (shape,) if isinstance(shape, int) else shape
+        if len(shape) == 1:
+            return ca.reshape(values, shape[0], 1)
+        if len(shape) == 2:
+            return ca.reshape(values, shape[1], shape[0]).T
+        raise ValueError(
+            "CasADi parameter tensors must have one or two dimensions"
         )
 
     name = "casadi"

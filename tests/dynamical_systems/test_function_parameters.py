@@ -322,6 +322,45 @@ def test_parameter_layout_reconstructs_public_values():
     assert fitted(0.0) == pytest.approx(17.0)
 
 
+def test_parameter_layout_passes_disjoint_function_blocks_to_backend():
+    class RecordingBackend:
+        def materialize_parameter(self, target, declaration, blocks):
+            self.target = target
+            self.declaration = declaration
+            self.blocks = blocks
+            return blocks
+
+    target = FunctionSpace(
+        "response",
+        arguments=[VectorSpace("state", 1)],
+        output=[VectorSpace("rate", 1)],
+    )
+    declaration = DenseLayer(
+        1,
+        function(
+            [VectorSpace("hidden", 1)],
+            lambda hidden: hidden,
+            backend="numpy",
+        ),
+        name="response",
+    )
+    backend = RecordingBackend()
+    layout = ParameterValueLayout(
+        targets=(target,),
+        declarations=(declaration,),
+        offsets=((0, 3),),
+        concrete_offsets=(((0, 1), (2, 3)),),
+    )
+
+    parameters = layout.reconstruct(np.arange(3.0), backend)
+
+    assert backend.target is target
+    assert backend.declaration is declaration
+    np.testing.assert_array_equal(backend.blocks[0], [0.0])
+    np.testing.assert_array_equal(backend.blocks[1], [2.0])
+    assert parameters["response"] is backend.blocks
+
+
 def test_variational_lowers_output_loss_with_control_input(
     variational_backend,
 ):

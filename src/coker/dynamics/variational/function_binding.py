@@ -32,35 +32,23 @@ class ParameterValueLayout:
     def reconstruct(
         self, values: object, backend: object | None = None
     ) -> Mapping[str, object]:
+        if backend is None:
+            backend = get_backend_by_name("numpy", set_current=False)
         result = {}
         for index, (target, declaration, (start, end)) in enumerate(
             zip(self.targets, self.declarations, self.offsets)
         ):
-            basis = (
-                values[start:end]
+            blocks = (
+                (values[start:end],)
                 if self.concrete_offsets is None
-                else self._flat_values(
-                    values, self.concrete_offsets[index], backend
+                else tuple(
+                    values[block_start:block_end]
+                    for block_start, block_end in self.concrete_offsets[index]
                 )
             )
-            name = self._name(target, declaration)
-            if isinstance(target, FunctionSpace):
-                reconstruction_backend = (
-                    get_backend_by_name("numpy", set_current=False)
-                    if backend is None
-                    else backend
-                )
-                result[name] = reconstruction_backend.fit_function_parameter(
-                    declaration, target, basis
-                )
-            elif isinstance(target, VectorSpace):
-                result[name] = self._numpy(basis, backend).reshape(
-                    declaration.shape
-                )
-            else:
-                result[name] = float(
-                    self._numpy(basis, backend).reshape((-1,))[0]
-                )
+            result[self._name(target, declaration)] = (
+                backend.materialize_parameter(target, declaration, blocks)
+            )
         return result
 
     @staticmethod
@@ -78,33 +66,6 @@ class ParameterValueLayout:
             return declaration.name
         assert isinstance(target, (Scalar, VectorSpace))
         return target.name
-
-    @staticmethod
-    def _numpy(values: object, backend: object | None) -> np.ndarray:
-        if backend is not None:
-            values = backend.to_numpy_array(values)
-        return np.asarray(values, dtype=float)
-
-    @staticmethod
-    def _flat_values(
-        values: object,
-        offsets: tuple[tuple[int, int], ...],
-        backend: object | None,
-    ) -> object:
-        blocks = tuple(values[start:end] for start, end in offsets)
-        if not blocks:
-            return values[0:0]
-        if len(blocks) == 1:
-            return blocks[0]
-        if backend is not None and backend.name == "pytorch":
-            import torch
-
-            return torch.cat(blocks)
-        return np.concatenate(
-            tuple(
-                ParameterValueLayout._numpy(block, backend) for block in blocks
-            )
-        )
 
 
 def _function_concrete_declarations(
@@ -162,58 +123,6 @@ def _flatten_declaration(
         "concrete parameter declarations must be scalar, vector, or dense "
         "tensor variables"
     )
-
-
-def _concrete_declaration_conflict(
-    existing: (
-        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
-    ),
-    candidate: (
-        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
-    ),
-) -> str | None:
-    """Describe why two named concrete declarations cannot share a block."""
-    if type(existing) is not type(candidate):
-        return "declaration kinds differ"
-    existing_size = (
-        1
-        if isinstance(existing, (BoundedVariable, UnboundedVariable))
-        else existing.size
-    )
-    candidate_size = (
-        1
-        if isinstance(candidate, (BoundedVariable, UnboundedVariable))
-        else candidate.size
-    )
-    if existing_size != candidate_size:
-        return "sizes differ"
-    existing_shape = (
-        ()
-        if isinstance(existing, (BoundedVariable, UnboundedVariable))
-        else existing.shape
-    )
-    candidate_shape = (
-        ()
-        if isinstance(candidate, (BoundedVariable, UnboundedVariable))
-        else candidate.shape
-    )
-    if existing_shape != candidate_shape:
-        return "shapes differ"
-    if isinstance(existing, (BoundedVariable, BoundVector)):
-        assert isinstance(candidate, (BoundedVariable, BoundVector))
-        if not np.array_equal(
-            np.asarray(existing.lower_bound), np.asarray(candidate.lower_bound)
-        ):
-            return "lower bounds differ"
-        if not np.array_equal(
-            np.asarray(existing.upper_bound), np.asarray(candidate.upper_bound)
-        ):
-            return "upper bounds differ"
-    if not np.array_equal(
-        np.asarray(existing.guess), np.asarray(candidate.guess)
-    ):
-        return "initial guesses differ"
-    return None
 
 
 def _reconstruct_concrete_values(
@@ -316,11 +225,11 @@ def specialize_system_parameters(
                 width = block_range[1]
             else:
                 previous, block_range = existing
-                conflict = _concrete_declaration_conflict(previous, concrete)
-                if conflict is not None:
+                if previous is not concrete:
                     raise ValueError(
-                        "conflicting concrete parameter declarations for name "
-                        f"{concrete.name!r}: {conflict}"
+                        "duplicate concrete parameter name "
+                        f"{concrete.name!r}; reuse the same declaration "
+                        "object to share decisions"
                     )
             ranges.append(block_range)
         concrete_offsets.append(tuple(ranges))

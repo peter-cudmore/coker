@@ -455,27 +455,25 @@ def test_pytorch_cuda_fits_shared_function_parameter_with_projections(
     assert np.isfinite(solution.cost)
 
 
-def test_pytorch_shares_compatible_duplicate_function_declarations(
-    monkeypatch,
-):
-    backend = get_backend_by_name("pytorch", set_current=False)
-    monkeypatch.setattr(backend, "device", torch.device("cpu"))
-    monkeypatch.setattr(backend, "dtype", torch.float64)
-
-    with _two_batch_transfer_problem(
-        (_quadratic_rate_declaration(), _quadratic_rate_declaration())
-    ) as (problem, _, targets):
-        solution = problem.get_solver().solve(rate_scale=1.0)
-
-        assert solution.solve_info.success
-        np.testing.assert_allclose(solution.state(0.2), targets, atol=2e-3)
+def test_pytorch_rejects_distinct_duplicate_function_declarations():
+    with (
+        pytest.raises(
+            ValueError,
+            match=(
+                "duplicate concrete parameter name .*reuse the same "
+                "declaration object"
+            ),
+        ),
+        _two_batch_transfer_problem(
+            (_quadratic_rate_declaration(), _quadratic_rate_declaration())
+        ),
+    ):
+        pass
 
 
 def test_pytorch_rejects_conflicting_duplicate_function_declarations():
     with (
-        pytest.raises(
-            ValueError, match="(?i)conflicting concrete parameter declarations"
-        ),
+        pytest.raises(ValueError, match="duplicate concrete parameter name"),
         _two_batch_transfer_problem(
             (
                 _quadratic_rate_declaration(upper_bound=2.0),

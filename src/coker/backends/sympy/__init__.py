@@ -9,7 +9,6 @@ from coker.backends.backend import (
     Backend,
     Evaluator,
     register_backend,
-    split_function_parameter_values,
 )
 from coker.backends.lowered import (
     FunctionSignature,
@@ -31,6 +30,8 @@ from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
     ResultBundleDimension,
+    Scalar,
+    VectorSpace,
 )
 from coker.algebra.graph import CallableReference, Tracer
 from coker.backends.sympy.shape import reshape
@@ -350,19 +351,97 @@ class SympyLoweredFunction(LoweredFunction):
 
 
 class SympyBackend(Backend):
+    def materialize_parameter(self, target, declaration, blocks):
+        """Reconstruct a public parameter value from SymPy solver blocks."""
+        flat_values = self._concatenate_parameter_blocks(blocks)
+        if isinstance(target, FunctionSpace):
+            return self._fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return self._reshape_parameter_values(
+                flat_values, target.dimension
+            )
+        if isinstance(target, Scalar):
+            if flat_values.rows != 1:
+                raise ValueError("scalar parameter must have one solver value")
+            return flat_values[0]
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
+
     def fit_function_parameter(self, declaration, target, values):
+        """Materialize a fitted function from SymPy decision values."""
+        return self._fit_function_parameter(
+            declaration,
+            target,
+            self._concatenate_parameter_blocks((values,)),
+        )
+
+    def _fit_function_parameter(self, declaration, target, flat_values):
+        from coker.parameters import BoundedVariable, UnboundedVariable
         from coker.parameters.function_parameters import FittedFunction
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
-        parameters = split_function_parameter_values(declaration, flat_values)
+        parameters = []
+        offset = 0
+        for concrete in declaration.list_concrete_parameters():
+            is_scalar = isinstance(
+                concrete, (BoundedVariable, UnboundedVariable)
+            )
+            size = 1 if is_scalar else concrete.size
+            block = flat_values[offset : offset + size, :]
+            if block.rows != size:
+                raise ValueError(
+                    "solver decisions do not match function parameter "
+                    "declarations"
+                )
+            parameters.append(
+                block[0]
+                if is_scalar
+                else self._reshape_parameter_values(block, concrete.shape)
+            )
+            offset += size
+        if offset != flat_values.rows:
+            raise ValueError(
+                "solver decisions do not match function parameter declarations"
+            )
+
+        target = declaration.validate_target(target)
+        native = self.lower(declaration.build_function(target, self.name))
         return FittedFunction(
             declaration,
-            declaration.validate_target(target),
-            lambda argument: declaration.evaluate(parameters, argument),
-            parameters,
+            target,
+            lambda argument: native(argument, *parameters),
+            tuple(parameters),
         )
+
+    def _concatenate_parameter_blocks(self, blocks):
+        if not blocks:
+            raise ValueError("parameter blocks must not be empty")
+        return sp.ImmutableMatrix(
+            sp.Matrix.vstack(
+                *(self._as_parameter_column(block) for block in blocks)
+            )
+        )
+
+    def _as_parameter_column(self, block):
+        value = self.to_backend_array(block)
+        if isinstance(value, MatrixType):
+            return sp.ImmutableMatrix(value.rows * value.cols, 1, list(value))
+        if isinstance(
+            value, (sp.ImmutableDenseNDimArray, sp.MutableDenseNDimArray)
+        ):
+            return sp.ImmutableMatrix(len(value), 1, list(value))
+        return sp.ImmutableMatrix([value])
+
+    @staticmethod
+    def _reshape_parameter_values(values, shape):
+        shape = (shape,) if isinstance(shape, int) else shape
+        if len(shape) == 1:
+            return sp.ImmutableMatrix(shape[0], 1, list(values))
+        if len(shape) == 2:
+            return sp.ImmutableMatrix(shape[0], shape[1], list(values))
+        return sp.ImmutableDenseNDimArray(list(values), shape)
 
     def to_numpy_array(self, array):
 

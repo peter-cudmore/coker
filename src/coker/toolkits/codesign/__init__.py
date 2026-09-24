@@ -53,7 +53,7 @@ class _ParameterCapture:
     name: str
     target: Scalar | VectorSpace | FunctionSpace
     declaration: Any
-    capture: Tracer
+    blocks: tuple[Tracer, ...]
 
 
 class MathematicalProgram(SymbolicCallable):
@@ -119,9 +119,10 @@ class MathematicalProgram(SymbolicCallable):
             self.solve_info = getattr(self._impl, "last_solve_info", None)
         if not isinstance(result, (list, tuple)):
             result = [result]
-        expected_results = len(self.result_shape) + len(
-            self._parameter_captures
+        capture_sizes = tuple(
+            len(capture.blocks) for capture in self._parameter_captures
         )
+        expected_results = len(self.result_shape) + sum(capture_sizes)
         if len(result) != expected_results:
             raise ValueError(
                 f"Backend returned {len(result)} results for "
@@ -132,7 +133,14 @@ class MathematicalProgram(SymbolicCallable):
         public_result_count = len(self.result_shape)
         objective, *outputs = result[:public_result_count]
         captured_values = result[public_result_count:]
-        self.parameters = self._reconstruct_parameters(captured_values)
+        captured_blocks = []
+        offset = 0
+        for size in capture_sizes:
+            captured_blocks.append(
+                tuple(captured_values[offset : offset + size])
+            )
+            offset += size
+        self.parameters = self._reconstruct_parameters(captured_blocks)
         objective_array = np.asarray(objective)
         if objective_array.size != 1:
             raise TypeError(
@@ -148,7 +156,7 @@ class MathematicalProgram(SymbolicCallable):
         )
 
     def _reconstruct_parameters(
-        self, captured_values: Sequence[Any]
+        self, captured_blocks: Sequence[tuple[Any, ...]]
     ) -> dict[str, Any]:
         """Rebuild public decision values from private solver captures."""
         from coker.backends import get_backend_by_name
@@ -156,19 +164,14 @@ class MathematicalProgram(SymbolicCallable):
         backend = get_backend_by_name(
             self.backend or "numpy", set_current=False
         )
-        result = {}
-        for metadata, value in zip(self._parameter_captures, captured_values):
-            if isinstance(metadata.target, FunctionSpace):
-                result[metadata.name] = backend.fit_function_parameter(
-                    metadata.declaration, metadata.target, value
-                )
-            elif isinstance(metadata.target, Scalar):
-                result[metadata.name] = float(np.asarray(value).reshape(-1)[0])
-            else:
-                result[metadata.name] = np.asarray(value).reshape(
-                    metadata.target.dimension
-                )
-        return result
+        return {
+            metadata.name: backend.materialize_parameter(
+                metadata.target, metadata.declaration, blocks
+            )
+            for metadata, blocks in zip(
+                self._parameter_captures, captured_blocks
+            )
+        }
 
     def _call_symbolic(self, *args):
         """Emit objective and output evaluations on the symbolic tape."""
@@ -271,7 +274,7 @@ class ProblemBuilder:
         variable = self._add_decision(name, shape, initial_value)
         space = variable.dim.to_space(name)
         self._parameter_captures.append(
-            _ParameterCapture(name, space, space, variable)
+            _ParameterCapture(name, space, space, (variable,))
         )
         return variable
 
@@ -321,11 +324,13 @@ class ProblemBuilder:
                     bounded(value, concrete.lower_bound, concrete.upper_bound)
                 )
             concrete_values.append(value)
-        capture = np.concatenate(
-            [np.reshape(value, (-1,)) for value in concrete_values]
-        )
         self._parameter_captures.append(
-            _ParameterCapture(declaration.name, target, declaration, capture)
+            _ParameterCapture(
+                declaration.name,
+                target,
+                declaration,
+                tuple(concrete_values),
+            )
         )
         return BoundCallable(
             declaration.build_function(target, None),
@@ -387,7 +392,11 @@ class ProblemBuilder:
             [
                 self.objective.expression,
                 *self.outputs,
-                *(capture.capture for capture in self._parameter_captures),
+                *(
+                    block
+                    for capture in self._parameter_captures
+                    for block in capture.blocks
+                ),
             ],
             self._normalise_initial_conditions(),
             options=self.solver_options,
