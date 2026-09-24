@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable, Sequence
@@ -88,22 +87,6 @@ class Backend(metaclass=ABCMeta):
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
         """Materialize a fitted function from backend decision values."""
-
-    def _fit_function_parameter(
-        self, declaration: Any, target: Any, values: ArrayLike
-    ) -> Any:
-        from coker.parameters.function_parameters import FittedFunction
-
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
-        parameters = split_function_parameter_values(declaration, flat_values)
-        return FittedFunction(
-            declaration,
-            declaration.validate_target(target),
-            lambda argument: declaration.evaluate(parameters, argument),
-            parameters,
-        )
 
     def create_variational_solver(
         self, problem: VariationalProblem

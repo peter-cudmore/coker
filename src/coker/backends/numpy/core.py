@@ -16,6 +16,7 @@ from coker.backends.backend import (
     Backend,
     SolverParameters,
     register_backend,
+    split_function_parameter_values,
 )
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 
@@ -64,7 +65,18 @@ scalar_types = (
 
 class NumpyBackend(Backend):
     def fit_function_parameter(self, declaration, target, values):
-        return self._fit_function_parameter(declaration, target, values)
+        from coker.parameters.function_parameters import FittedFunction
+
+        flat_values = np.asarray(
+            self.to_numpy_array(values), dtype=float
+        ).reshape(-1)
+        parameters = split_function_parameter_values(declaration, flat_values)
+        return FittedFunction(
+            declaration,
+            declaration.validate_target(target),
+            lambda argument: declaration.evaluate(parameters, argument),
+            parameters,
+        )
 
     def to_numpy_array(self, array) -> ArrayLike:
         return array
