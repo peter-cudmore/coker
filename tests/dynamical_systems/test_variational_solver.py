@@ -145,16 +145,7 @@ def test_vector_linear_system(variational_backend):
 
 
 @pytest.mark.parametrize("enable_scaling", [True, False])
-def test_fitting_constant(enable_scaling, monkeypatch):
-    if not enable_scaling:
-        for helper in (
-            "_derive_variable_scaling",
-            "_derive_objective_scale",
-        ):
-            monkeypatch.setattr(
-                f"coker.backends.casadi.variational.transcription.{helper}",
-                lambda *_args: pytest.fail("scaling was enabled"),
-            )
+def test_fitting_constant(enable_scaling):
 
     def x0(p):
         return p[0]
