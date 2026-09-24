@@ -950,13 +950,8 @@ def _create_solver(
         intervals=intervals,
         degrees=list(degrees),
         factory=factory,
-        shared_value_indices=tuple(range(factory.x_size))
-        + tuple(
-            range(
-                factory.x_size + factory.z_size,
-                factory.path_size,
-            )
-        ),
+        state_size=factory.x_size,
+        algebraic_size=factory.z_size,
     )
     horizon = problem.horizon_decision
     layout = DecisionLayout(
@@ -1521,50 +1516,43 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
         intervals,
         degrees,
         factory: Optional[_TranscriptionFactory] = None,
-        shared_value_indices: Optional[Tuple[int, ...]] = None,
+        *,
+        state_size: Optional[int] = None,
+        algebraic_size: int = 0,
     ):
         assert len(intervals) == len(degrees)
         self._dimension = dimension
-        self.shared_value_indices = tuple(
-            range(dimension)
-            if shared_value_indices is None
-            else shared_value_indices
-        )
-        if len(set(self.shared_value_indices)) != len(
-            self.shared_value_indices
-        ) or any(
-            index < 0 or index >= dimension
-            for index in self.shared_value_indices
+        self._state_size = dimension if state_size is None else state_size
+        self._algebraic_size = algebraic_size
+        if (
+            self._state_size < 0
+            or self._algebraic_size < 0
+            or self._state_size + self._algebraic_size > dimension
         ):
             raise ValueError(
-                "shared_value_indices must be unique component indices"
+                "state_size and algebraic_size must fit path dimension"
             )
-        self._unshared_value_indices = tuple(
-            index
-            for index in range(dimension)
-            if index not in self.shared_value_indices
-        )
         polys = []
         for i, (interval, degree) in enumerate(zip(intervals, degrees)):
             if i == 0:
                 values = ca.MX.sym(f"{name}_{i}", (degree + 1) * dimension)
                 decision_values = values
             else:
-                unshared_start = (
+                algebraic_start = (
                     ca.MX.sym(
-                        f"{name}_{i}_start",
-                        len(self._unshared_value_indices),
+                        f"{name}_{i}_algebraic_start",
+                        self._algebraic_size,
                     )
-                    if self._unshared_value_indices
+                    if self._algebraic_size
                     else ca.MX.zeros(0, 1)
                 )
                 boundary_values = self._boundary_values(
                     polys[-1].end_point()[1],
-                    unshared_start,
+                    algebraic_start,
                 )
                 tail_values = ca.MX.sym(f"{name}_{i}_tail", degree * dimension)
                 values = ca.vertcat(boundary_values, tail_values)
-                decision_values = ca.vertcat(unshared_start, tail_values)
+                decision_values = ca.vertcat(algebraic_start, tail_values)
             polys.append(
                 SymbolicPoly(
                     f"{name}_{i}",
@@ -1580,31 +1568,24 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
         self._symbols = ca.vertcat(*[poly.symbols() for poly in polys])
         self._symbol_size = int(self._symbols.shape[0])
 
-    def _boundary_values(
-        self, previous_end: ca.MX, unshared_values: ca.MX
-    ) -> ca.MX:
-        unshared_offset = 0
-        values = []
-        for index in range(self._dimension):
-            if index in self.shared_value_indices:
-                values.append(previous_end[index])
-            else:
-                values.append(unshared_values[unshared_offset])
-                unshared_offset += 1
-        return ca.vertcat(*values) if values else ca.MX.zeros(0, 1)
-
     def symbols(self):
         return self._symbols
 
     def size(self):
         return self._symbol_size
 
-    def _unshared_values(self, values: ca.DM) -> ca.DM:
-        if not self._unshared_value_indices:
-            return ca.MX.zeros(0, 1)
-        return ca.vertcat(
-            *[values[index] for index in self._unshared_value_indices]
-        )
+    def _boundary_values(
+        self, previous_end: ca.MX, algebraic_start: ca.MX
+    ) -> ca.MX:
+        algebraic_end = self._state_size + self._algebraic_size
+        pieces = []
+        if self._state_size:
+            pieces.append(previous_end[: self._state_size])
+        if self._algebraic_size:
+            pieces.append(algebraic_start)
+        if algebraic_end < self._dimension:
+            pieces.append(previous_end[algebraic_end:])
+        return ca.vertcat(*pieces) if pieces else ca.MX.zeros(0, 1)
 
     def constant_guess(self, value: ca.DM) -> ca.DM:
         """Repeat one path value in the compact decision storage."""
@@ -1612,8 +1593,13 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
             ca.repmat(value, self.polys[0].degree + 1),
         ]
         for poly in self.polys[1:]:
-            if self._unshared_value_indices:
-                pieces.append(self._unshared_values(value))
+            if self._algebraic_size:
+                pieces.append(
+                    value[
+                        self._state_size : self._state_size
+                        + self._algebraic_size
+                    ]
+                )
             pieces.append(ca.repmat(value, poly.degree))
         return ca.vertcat(*pieces)
 
@@ -1628,8 +1614,13 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
             if index == 0:
                 pieces.extend(values)
                 continue
-            if self._unshared_value_indices:
-                pieces.append(self._unshared_values(values[0]))
+            if self._algebraic_size:
+                pieces.append(
+                    values[0][
+                        self._state_size : self._state_size
+                        + self._algebraic_size
+                    ]
+                )
             pieces.extend(values[1:])
         return ca.vertcat(*pieces)
 
@@ -1647,16 +1638,19 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
             if index == 0:
                 values = decision_values
             else:
-                start = np.empty((poly.dimension, 1), dtype=np_array.dtype)
                 previous_end = fixed_values[-1][-poly.dimension :]
-                start[list(self.shared_value_indices)] = previous_end[
-                    list(self.shared_value_indices)
-                ]
-                unshared_size = len(self._unshared_value_indices)
-                start[list(self._unshared_value_indices)] = decision_values[
-                    :unshared_size
-                ]
-                values = np.vstack((start, decision_values[unshared_size:]))
+                algebraic_end = self._state_size + self._algebraic_size
+                pieces = []
+                if self._state_size:
+                    pieces.append(previous_end[: self._state_size])
+                if self._algebraic_size:
+                    pieces.append(decision_values[: self._algebraic_size])
+                if algebraic_end < self._dimension:
+                    pieces.append(previous_end[algebraic_end:])
+                start = np.vstack(pieces)
+                values = np.vstack(
+                    (start, decision_values[self._algebraic_size :])
+                )
             assert values.shape == (poly.size(), 1)
             fixed_values.append(values)
             polys.append(

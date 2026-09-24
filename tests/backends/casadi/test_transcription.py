@@ -68,6 +68,25 @@ def test_poly_collection_scalar():
 
 
 @pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
+def test_poly_collection_shares_state_and_quadrature_boundaries():
+    collection = SymbolicPolyCollection(
+        "path",
+        dimension=3,
+        intervals=[(0, 1), (1, 2)],
+        degrees=[2, 2],
+        state_size=1,
+        algebraic_size=1,
+    )
+
+    _, first_end = collection.polys[0].end_point()
+    _, second_start = collection.polys[1].start_point()
+
+    assert ca.is_equal(first_end[0], second_start[0], 2)
+    assert not ca.is_equal(first_end[1], second_start[1], 2)
+    assert ca.is_equal(first_end[2], second_start[2], 2)
+
+
+@pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
 def test_poly_collection_vector():
     intervals = [(0, 1), (1, 2)]
     collocation_degree = [4, 4]
