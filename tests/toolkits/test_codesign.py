@@ -10,8 +10,7 @@ from coker.toolkits.codesign import (
     bounded,
     norm as codesign_norm,
 )
-from coker.dynamics import RadialBasisFunction
-from coker.dynamics.function_parameters import FittedFunction
+from coker.parameters.function_parameters import DenseLayer, FittedFunction
 
 
 def quadratic(x, p, z):
@@ -21,8 +20,8 @@ def quadratic(x, p, z):
 
 def test_mathematical_program_composes_symbolically_and_compiles():
     program = MathematicalProgram(
-        input_shape=(Dimension(None),),
-        output_shape=(Dimension(None),),
+        input_shape=(Dimension.scalar(),),
+        output_shape=(Dimension.scalar(),),
         implementation=lambda x: (x**2, x + 1),
     )
 
@@ -49,8 +48,8 @@ def test_symbolic_program_results_share_one_invocation():
         return x**2, x + 1, x + 2
 
     program = MathematicalProgram(
-        input_shape=(Dimension(None),),
-        output_shape=(Dimension(None), Dimension(None)),
+        input_shape=(Dimension.scalar(),),
+        output_shape=(Dimension.scalar(), Dimension.scalar()),
         implementation=implementation,
     )
     composed = function(
@@ -88,7 +87,7 @@ def test_optimisation_zero_input_problem(variational_backend):
     assert problem.output_shape == (
         Dimension((3,)),
         Dimension((2,)),
-        Dimension(None),
+        Dimension.scalar(),
     )
 
     soln = problem()
@@ -137,12 +136,19 @@ def test_mathematical_program_reconstructs_function_parameter(
     variational_backend,
 ):
     rate = FunctionSpace(
-        "rate", arguments=[Scalar("time")], output=[Scalar("rate")]
+        "rate",
+        arguments=[VectorSpace("state", 1)],
+        output=[VectorSpace("rate", 1)],
     )
-    declaration = RadialBasisFunction([0.0], 1.0, name="response")
+    activation = function(
+        [VectorSpace("hidden", 1)],
+        lambda hidden: hidden,
+        backend=variational_backend,
+    )
+    declaration = DenseLayer(1, activation, name="response")
     with ProblemBuilder() as builder:
         response = builder.new_function_parameter(rate, declaration)
-        value = response(0.0)
+        value = response(np.array([1.0]))[0]
         builder.objective = Minimise((value - 0.5) ** 2)
         builder.outputs = [value]
         problem = builder.build(variational_backend)
@@ -159,8 +165,11 @@ def test_mathematical_program_reconstructs_function_parameter(
     assert fitted.specification is declaration
     assert fitted.space is rate
     assert callable(fitted.function)
-    assert fitted.parameters.shape == (2,)
-    assert fitted(0.0) == pytest.approx(value, abs=1e-6)
+    assert [parameter.shape for parameter in fitted.parameters] == [
+        (1, 1),
+        (1,),
+    ]
+    assert fitted(np.array([1.0]))[0] == pytest.approx(value, abs=1e-6)
     assert problem.solve_info is not None
     assert problem.solve_info.success
 

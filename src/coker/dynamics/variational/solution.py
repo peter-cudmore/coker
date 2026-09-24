@@ -6,7 +6,9 @@ import numpy as np
 
 from coker.algebra.function import InequalityExpression
 from coker.dynamics.variables import ControlSolution
-from coker.dynamics.variational.polynomials import InterpolatingPolyCollection
+from coker.dynamics.transcription.collocation import (
+    InterpolatingPolyCollection,
+)
 from coker.toolkits.codesign.optimisation import SolveInfo
 
 
@@ -42,6 +44,18 @@ def _evaluate_violation(raw_value, lower, upper) -> np.ndarray:
     return np.array(violations, dtype=float) if violations else np.zeros((0,))
 
 
+@dataclass(frozen=True)
+class SegmentDefectDiagnostic:
+    """Physical segment residuals and mesh provenance from a transcription."""
+
+    normalized_interval: Tuple[float, float]
+    physical_interval: Tuple[float, float]
+    degree: int
+    tolerance: float
+    state_residual: np.ndarray
+    quadrature_residual: np.ndarray
+
+
 @dataclass
 class VariationalSolution:
     cost: float
@@ -59,6 +73,7 @@ class VariationalSolution:
     solve_info: Optional[SolveInfo] = None
     adaptive_refinement_rounds: Optional[int] = None
     adaptive_maximum_defect: Optional[float] = None
+    segment_defects: Tuple[SegmentDefectDiagnostic, ...] = ()
     path_constraint_exprs: List[InequalityExpression] = field(
         default_factory=list
     )

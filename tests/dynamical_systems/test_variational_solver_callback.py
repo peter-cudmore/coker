@@ -4,11 +4,11 @@ from coker import VectorSpace
 from coker.backends.casadi import CasadiVariationalOptions
 
 from coker.dynamics import (
-    BoundedVariable,
     VariationalProblem,
     VariationalSolution,
     create_autonomous_ode,
 )
+from coker.parameters import BoundedVariable
 
 
 class LossCheckingCallback:

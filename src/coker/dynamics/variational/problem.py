@@ -7,10 +7,9 @@ from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, InequalityExpression, function
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
-from coker.dynamics.variables import (
+from coker.dynamics.variables import ControlVariable, LossFunction
+from coker.parameters import (
     BoundedVariable,
-    ControlVariable,
-    LossFunction,
     ParameterMixin,
     ParameterVariable,
 )
@@ -64,8 +63,14 @@ class TranscriptionOptions:
         minimum_n_intervals: Minimum number of intervals in the initial mesh.
         minimum_degree: Collocation polynomial degree for each initial
             interval.
-        absolute_tolerance: Permitted absolute residual for transcription
-            equality constraints.
+        absolute_tolerance: Default permitted absolute residual for
+            transcription equality constraints.
+        segment_defect_tolerance: Reference tolerance retained with physical
+            post-solve segment-defect diagnostics. ``None`` uses
+            ``absolute_tolerance``; it does not add NLP constraints.
+        derivative_defect_tolerance: Override for collocation derivative
+            defects. ``None`` uses ``absolute_tolerance``; zero enforces
+            equality.
         verbose: Show CasADi/IPOPT solver output when no explicit backend
             options are supplied.
         optimiser_options: CasADi/IPOPT solver settings when no explicit
@@ -85,6 +90,8 @@ class TranscriptionOptions:
     minimum_n_intervals: int = 4
     minimum_degree: int = 7
     absolute_tolerance: float = 1e-12
+    segment_defect_tolerance: Optional[float] = None
+    derivative_defect_tolerance: Optional[float] = None
     verbose: bool = False
     optimiser_options: dict = field(default_factory=dict)
     initialise_near_guess: bool = True

@@ -1,105 +1,17 @@
-import abc
-from dataclasses import dataclass, field
-from typing import Callable, Sequence, Union
+from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 
-from coker.algebra.dimensions import Scalar, VectorSpace
-
-
-class ParameterMixin(abc.ABC):
-    @abc.abstractmethod
-    def degrees_of_freedom(self, *interval) -> int:
-        pass
-
-
-@dataclass
-class BoundedVariable(ParameterMixin):
-    name: str
-    lower_bound: float
-    upper_bound: float
-    guess: float = 0
-
-    def degrees_of_freedom(self, *interval):
-        return 1
+from coker.algebra.dimensions import Scalar
+from coker.parameters import (
+    ParameterMixin as _ParameterMixin,
+    ValueType as _ValueType,
+)
 
 
 @dataclass
-class UnboundedVariable(ParameterMixin):
-    """Scalar decision variable with a finite initial guess and no bounds."""
-
-    name: str
-    guess: float = 0
-    lower_bound: float = field(default=-np.inf, init=False)
-    upper_bound: float = field(default=np.inf, init=False)
-
-    def degrees_of_freedom(self, *interval):
-        return 1
-
-
-@dataclass
-class DenseTensorVariable(ParameterMixin):
-    """Finite dense decision block reconstructed with its declared shape."""
-
-    name: str
-    guess: np.ndarray | Sequence[float]
-
-    def __post_init__(self):
-        guess = np.asarray(self.guess, dtype=float)
-        if guess.ndim == 0 or not np.all(np.isfinite(guess)):
-            raise ValueError("DenseTensorVariable guess must be finite array")
-        self.guess = guess
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return self.guess.shape
-
-    @property
-    def size(self) -> int:
-        return self.guess.size
-
-    def degrees_of_freedom(self, *interval):
-        return self.size
-
-
-@dataclass
-class BoundVector(ParameterMixin):
-    """One-dimensional finite decision block with component-wise bounds."""
-
-    name: str
-    lower_bound: np.ndarray | Sequence[float]
-    upper_bound: np.ndarray | Sequence[float]
-    guess: np.ndarray | Sequence[float]
-
-    def __post_init__(self):
-        self.guess = np.asarray(self.guess, dtype=float)
-        self.lower_bound = np.asarray(self.lower_bound, dtype=float)
-        self.upper_bound = np.asarray(self.upper_bound, dtype=float)
-        if (
-            self.guess.ndim != 1
-            or self.lower_bound.shape != self.guess.shape
-            or self.upper_bound.shape != self.guess.shape
-            or not np.all(np.isfinite(self.guess))
-            or np.any(self.lower_bound > self.upper_bound)
-            or np.any(self.guess < self.lower_bound)
-            or np.any(self.guess > self.upper_bound)
-        ):
-            raise ValueError("BoundVector bounds and guess are invalid")
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return self.guess.shape
-
-    @property
-    def size(self) -> int:
-        return self.guess.size
-
-    def degrees_of_freedom(self, *interval):
-        return self.size
-
-
-@dataclass
-class PiecewiseConstantVariable(ParameterMixin):
+class PiecewiseConstantVariable(_ParameterMixin):
     name: str
     sample_rate: float
     upper_bound: float = np.inf
@@ -114,7 +26,7 @@ class PiecewiseConstantVariable(ParameterMixin):
 
 
 @dataclass
-class SpikeVariable(ParameterMixin):
+class SpikeVariable(_ParameterMixin):
     name: str
     time: float
     upper_bound: float = np.inf
@@ -128,7 +40,7 @@ class SpikeVariable(ParameterMixin):
 
 
 @dataclass
-class ConstantControlVariable(ParameterMixin):
+class ConstantControlVariable(_ParameterMixin):
     name: str
     upper_bound: float = np.inf
     lower_bound: float = -np.inf
@@ -175,21 +87,12 @@ class PiecewiseControlSolution:
 ControlSolution = (
     SpikeControlSolution | PiecewiseControlSolution | ConstantControlSolution
 )
-
-Constant = Union[float, int]
-ValueType = Scalar | VectorSpace
-ControlLaw = Callable[[Scalar], ValueType]
+ControlLaw = Callable[[Scalar], _ValueType]
 ControlVariable = (
     ConstantControlVariable | PiecewiseConstantVariable | SpikeVariable
 )
-ParameterVariable = (
-    BoundedVariable
-    | UnboundedVariable
-    | BoundVector
-    | DenseTensorVariable
-    | Constant
-)
+
 Solution = (
-    "DynamicalSystem" | Callable[[Scalar, ControlLaw, ValueType], Scalar]
+    "DynamicalSystem" | Callable[[Scalar, ControlLaw, _ValueType], Scalar]
 )
-LossFunction = Callable[[Solution, ControlLaw, ValueType], Scalar]
+LossFunction = Callable[[Solution, ControlLaw, _ValueType], Scalar]

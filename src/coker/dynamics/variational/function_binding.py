@@ -11,9 +11,10 @@ import numpy as np
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
-from coker.dynamics.function_parameters import FunctionParameter
+from coker.backends.backend import get_backend_by_name
+from coker.parameters.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
-from coker.dynamics.variables import (
+from coker.parameters import (
     BoundVector,
     BoundedVariable,
     DenseTensorVariable,
@@ -37,12 +38,13 @@ class ParameterValueLayout:
             basis = values[start:end]
             name = self._name(target, declaration)
             if isinstance(target, FunctionSpace):
-                result[name] = (
-                    backend.reconstruct_function_parameter(
-                        declaration, target, basis
-                    )
-                    if backend is not None
-                    else declaration.fit(target, self._numpy(basis, None))
+                reconstruction_backend = (
+                    get_backend_by_name("numpy", set_current=False)
+                    if backend is None
+                    else backend
+                )
+                result[name] = reconstruction_backend.fit_function_parameter(
+                    declaration, target, basis
                 )
             elif isinstance(target, VectorSpace):
                 result[name] = self._numpy(basis, backend).reshape(
@@ -77,61 +79,20 @@ class ParameterValueLayout:
         return np.asarray(values, dtype=float)
 
 
-def _basis_declarations(
-    index: int, target: FunctionSpace, declaration: FunctionParameter
-) -> list[BoundedVariable | UnboundedVariable]:
+def _function_concrete_declarations(
+    declaration: FunctionParameter,
+) -> tuple[
+    BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable,
+    ...,
+]:
     if not isinstance(declaration.name, str) or not declaration.name:
         raise ValueError("function parameter name must be a non-empty string")
-    declaration.validate_target(target)
-    values = declaration.decision_declarations()
-    if len(values) == 2:
-        basis, initial = values
-        lower = upper = None
-    elif len(values) == 4:
-        basis, initial, lower, upper = values
-    else:
+    values = declaration.list_concrete_parameters()
+    if not isinstance(values, tuple):
         raise TypeError(
-            "function parameter declarations must include zero or two bounds"
+            "function parameter concrete declarations must be a tuple"
         )
-    if not isinstance(basis, VectorSpace):
-        raise TypeError("function parameter basis must be a VectorSpace")
-    size = basis.size
-    initial = np.asarray(initial, dtype=float)
-    if (
-        initial.ndim != 1
-        or initial.size != size
-        or not np.all(np.isfinite(initial))
-    ):
-        raise ValueError("function parameter initial values are invalid")
-    if lower is None:
-        return [
-            UnboundedVariable(
-                f"p_{index}_theta_{offset}", guess=float(initial[offset])
-            )
-            for offset in range(size)
-        ]
-    lower, upper = (np.asarray(value, dtype=float) for value in (lower, upper))
-    if (
-        lower.ndim != 1
-        or upper.ndim != 1
-        or lower.size != size
-        or upper.size != size
-        or np.any(np.isnan(lower))
-        or np.any(np.isnan(upper))
-        or np.any(lower > upper)
-        or np.any(initial < lower)
-        or np.any(initial > upper)
-    ):
-        raise ValueError("function parameter bounds are invalid")
-    return [
-        BoundedVariable(
-            f"p_{index}_theta_{offset}",
-            float(lower[offset]),
-            float(upper[offset]),
-            guess=float(initial[offset]),
-        )
-        for offset in range(size)
-    ]
+    return values
 
 
 def _tensor_declarations(
@@ -156,6 +117,61 @@ def _tensor_declarations(
     ]
 
 
+def _flatten_declaration(
+    declaration: (
+        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
+    ),
+) -> list[BoundedVariable | UnboundedVariable]:
+    if not isinstance(declaration.name, str) or not declaration.name:
+        raise ValueError(
+            "concrete parameter declaration name must be non-empty"
+        )
+    if isinstance(declaration, (BoundedVariable, UnboundedVariable)):
+        return [declaration]
+    if isinstance(declaration, (BoundVector, DenseTensorVariable)):
+        return _tensor_declarations(declaration)
+    raise TypeError(
+        "concrete parameter declarations must be scalar, vector, or dense "
+        "tensor variables"
+    )
+
+
+def _flatten_declarations(
+    declarations: Sequence[
+        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
+    ],
+) -> list[BoundedVariable | UnboundedVariable]:
+    return [
+        scalar
+        for declaration in declarations
+        for scalar in _flatten_declaration(declaration)
+    ]
+
+
+def _reconstruct_concrete_values(
+    values: object,
+    declarations: Sequence[
+        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
+    ],
+) -> tuple[object, ...]:
+    offset = 0
+    result = []
+    for declaration in declarations:
+        size = (
+            1
+            if isinstance(declaration, (BoundedVariable, UnboundedVariable))
+            else declaration.size
+        )
+        block = values[offset : offset + size]
+        result.append(
+            block[0]
+            if isinstance(declaration, (BoundedVariable, UnboundedVariable))
+            else np.reshape(block, declaration.shape)
+        )
+        offset += size
+    return tuple(result)
+
+
 def specialize_system_parameters(
     system: DynamicalSystem, declarations: Sequence[object]
 ) -> tuple[DynamicalSystem, list[object], ParameterValueLayout | None]:
@@ -168,6 +184,7 @@ def specialize_system_parameters(
 
     solver_declarations: list[object] = []
     offsets: list[tuple[int, int]] = []
+    function_declarations: list[tuple[object, ...] | None] = []
     width = 0
     for index, (target, declaration) in enumerate(zip(space, declarations)):
         if isinstance(target, FunctionSpace):
@@ -176,21 +193,27 @@ def specialize_system_parameters(
                     f"Parameter {index} must implement FunctionParameter, got "
                     f"{type(declaration).__name__}"
                 )
-            basis_declarations = _basis_declarations(
-                index, target, declaration
+            declaration.validate_target(target)
+            concrete_declarations = _function_concrete_declarations(
+                declaration
             )
-            size = len(basis_declarations)
-            offsets.append((width, width + size))
-            solver_declarations.extend(basis_declarations)
-            width += size
-        elif isinstance(target, VectorSpace):
-            offsets.append((width, width + target.size))
-            solver_declarations.extend(_tensor_declarations(declaration))
-            width += target.size
+            flattened = _flatten_declarations(concrete_declarations)
+            function_declarations.append(concrete_declarations)
         else:
-            offsets.append((width, width + 1))
-            solver_declarations.append(declaration)
-            width += 1
+            flattened = _flatten_declarations((declaration,))
+            function_declarations.append(None)
+            expected_size = (
+                target.size if isinstance(target, VectorSpace) else 1
+            )
+            if len(flattened) != expected_size:
+                raise ValueError(
+                    f"Parameter {index} declares {len(flattened)} decisions, "
+                    f"expected {expected_size}"
+                )
+        size = len(flattened)
+        offsets.append((width, width + size))
+        solver_declarations.extend(flattened)
+        width += size
 
     numeric_parameters = VectorSpace("p", width)
 
@@ -205,14 +228,29 @@ def specialize_system_parameters(
 
     def reconstruct_parameters(parameters):
         values = []
-        for target, declaration, offset, parameterization in zip(
-            space, declarations, offsets, parameterizations
+        for (
+            target,
+            declaration,
+            offset,
+            parameterization,
+            concrete_declarations,
+        ) in zip(
+            space,
+            declarations,
+            offsets,
+            parameterizations,
+            function_declarations,
         ):
             start, end = offset
             if parameterization is not None:
+                assert concrete_declarations is not None
                 values.append(
                     BoundCallable(
-                        parameterization, target, (parameters[start:end],)
+                        parameterization,
+                        target,
+                        _reconstruct_concrete_values(
+                            parameters[start:end], concrete_declarations
+                        ),
                     )
                 )
             elif isinstance(target, VectorSpace):

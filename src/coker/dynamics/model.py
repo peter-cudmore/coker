@@ -10,7 +10,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.function import Function, function
 from coker.algebra.ops import Noop
-from coker.dynamics.function_parameters import FittedFunction
+from coker.parameters.function_parameters import FittedFunction
 
 
 ParameterDeclaration: TypeAlias = Scalar | VectorSpace | FunctionSpace

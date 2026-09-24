@@ -157,7 +157,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             if shape is None or isinstance(shape, (Dimension, FunctionSpace)):
                 return shape
             if isinstance(shape, Scalar):
-                return Dimension(None)
+                return Dimension.scalar()
             if isinstance(shape, VectorSpace):
                 return Dimension(shape.dimension)
             raise TypeError(f"Unsupported native output shape {shape!r}")

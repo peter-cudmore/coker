@@ -11,13 +11,14 @@ from coker.backends.sympy.analysis import (
     extract_field_components,
 )
 
-from coker.algebra.ops import Noop
-from coker.dynamics.model import DynamicalSystem
-
 from . import model as _rank
-from .dae import SymbolicDAESystem, geometry, lower_dae_system
+from .dae import (
+    SymbolicDAESystem,
+    geometry,
+    normalize_symbolic_system,
+)
 from .model import ObservabilityResult
-from .symbolic import SymbolicSystem, UnsupportedSystemError, lower_system
+from .symbolic import UnsupportedSystemError
 
 
 def analyse_observability(
@@ -30,18 +31,7 @@ def analyse_observability(
     codistribution under both the drift and each control vector field.
     """
     try:
-        if isinstance(system, SymbolicDAESystem | SymbolicSystem):
-            symbolic = system
-        elif isinstance(system, DynamicalSystem):
-            symbolic = (
-                lower_dae_system(system)
-                if not isinstance(system.g, Noop)
-                else lower_system(system)
-            )
-        else:
-            return _rank.create_inconclusive(
-                ObservabilityResult, "system is unsupported for analysis"
-            )
+        symbolic = normalize_symbolic_system(system)
         tangent = (
             geometry(symbolic)
             if isinstance(symbolic, SymbolicDAESystem)

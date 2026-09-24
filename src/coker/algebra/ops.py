@@ -222,7 +222,7 @@ class NormOP(Operator):
         self.ord = ord
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
-        return Dimension(None)
+        return Dimension.scalar()
 
     def is_linear(self):
         return False
@@ -253,7 +253,7 @@ class ClipOP(Operator):
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         assert all(d.is_scalar() for d in dims)
-        return Dimension(None)
+        return Dimension.scalar()
 
     def is_linear(self):
         return False
@@ -422,7 +422,7 @@ def shape_matmul(d_1: Dimension, d_2: Dimension):
         except TypeError as ex:
             raise ex
     else:
-        return Dimension(None)
+        return Dimension.scalar()
 
 
 @register_shape(OP.EXP, OP.SQRT)
@@ -442,7 +442,7 @@ def cross_shape(d_1: Dimension, d_2: Dimension):
 @register_shape(OP.DOT)
 def dot_shape(d_1: Dimension, d_2: Dimension):
     if d_1.dim == d_2.dim and (d_1.is_vector() or d_1.is_covector()):
-        return Dimension(None)
+        return Dimension.scalar()
 
     raise InvalidArgument(
         "Dot product only defined for vectors from the same space."

@@ -5,10 +5,11 @@ from coker import FunctionSpace, Scalar, VectorSpace
 from coker.dynamics import (
     AnalysisStatus,
     IdentifiabilityResult,
-    UnboundedVariable,
+    SymbolicDAESystem,
     analyse_identifiability,
     create_autonomous_ode,
 )
+from coker.parameters import UnboundedVariable
 from coker.dynamics.system import create_control_system
 
 
@@ -31,6 +32,29 @@ def test_identifiability_recovers_decay_rate_with_unknown_initial_state():
     )
 
     result = analyse_identifiability(system)
+
+    _assert_rank_result(
+        result,
+        status=AnalysisStatus.TRUE,
+        rank=2,
+        required_rank=2,
+    )
+
+
+def test_identifiability_accepts_symbolic_dae_system():
+    state, algebraic, rate = sp.symbols("x z rate")
+
+    result = analyse_identifiability(
+        SymbolicDAESystem(
+            state=(state,),
+            algebraic=(algebraic,),
+            parameters=(rate,),
+            controls=(),
+            dynamics=(-rate * state,),
+            constraints=(algebraic - state,),
+            outputs=(algebraic,),
+        )
+    )
 
     _assert_rank_result(
         result,

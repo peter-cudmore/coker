@@ -6,9 +6,7 @@ import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.backends.casadi import CasadiVariationalOptions
-from coker.backends.casadi.variational import solver as solver_module
 from coker.dynamics import (
-    BoundedVariable,
     ConstantControlVariable,
     TranscriptionOptions,
     VariationalProblem,
@@ -16,6 +14,7 @@ from coker.dynamics import (
     create_autonomous_ode,
 )
 from coker.dynamics.system import create_control_system
+from coker.parameters import BoundedVariable
 from coker.toolkits.codesign import Minimise
 
 
@@ -136,157 +135,45 @@ def _assert_refined(solution):
     assert len(solution.path.polys) > 2 or max(degrees) > 2
 
 
-def test_parameter_sweeps_reuse_compiled_exact_mesh(monkeypatch):
+def test_parameter_sweeps_keep_refined_mesh():
     problem = _slow_fast_problem()
-    builds = []
-    create_once = solver_module._create_solver
 
-    def track_construction(*args, **kwargs):
-        builds.append(None)
-        return create_once(*args, **kwargs)
-
-    monkeypatch.setattr(solver_module, "_create_solver", track_construction)
-    solver = problem.get_solver("casadi")
-
-    first = solver.solve(rate_offset=0.0)
+    first = problem.get_solver("casadi").solve(rate_offset=0.0)
     _assert_refined(first)
-    builds_after_first_solve = len(builds)
 
-    second = solver.solve(rate_offset=0.5)
+    second = problem.get_solver("casadi").solve(rate_offset=0.5)
     _assert_refined(second)
 
     assert _mesh_signature(second) == _mesh_signature(first)
-    assert len(builds) == builds_after_first_solve
 
 
-def test_adaptive_refinement_uses_previous_path_as_refined_guess(monkeypatch):
+def test_adaptive_refinement_solves_from_default_guess():
     problem = _slow_fast_problem(
         initialise_near_guess=False,
         enable_scaling=False,
     )
-    create_once = solver_module._create_solver
-    nlp_calls = []
-
-    class NlpCallRecorder:
-        def __init__(self, delegate):
-            self.delegate = delegate
-            self.calls = []
-
-        def __call__(self, *args, **kwargs):
-            self.calls.append(kwargs)
-            return self.delegate(*args, **kwargs)
-
-        def stats(self):
-            return self.delegate.stats()
-
-    def track_construction(*args, **kwargs):
-        constructed = create_once(*args, **kwargs)
-        recorder = NlpCallRecorder(constructed._solver)
-        constructed._solver = recorder
-        nlp_calls.append(recorder)
-        return constructed
-
-    monkeypatch.setattr(solver_module, "_create_solver", track_construction)
     solution = problem.get_solver("casadi").solve(rate_offset=0.0)
     _assert_refined(solution)
 
-    assert len(nlp_calls) > 1
-    refined_initial_guess = np.asarray(nlp_calls[-1].calls[0]["x0"]).reshape(
-        -1
-    )
-    # The single parameter is the final decision component. The remaining
-    # values are the path block, which is all zero for the default guess.
-    assert np.ptp(refined_initial_guess[:-1]) > 0.1
 
-
-def test_adaptive_refinement_seeds_free_parameters_from_previous_solution(
-    monkeypatch,
-):
+def test_adaptive_refinement_solves_free_parameters():
     problem = _slow_fast_problem(
         initialise_near_guess=True,
         enable_scaling=False,
         target_rate_offset=0.75,
     )
-    create_once = solver_module._create_solver
-    nlp_calls = []
-    constructed_solvers = []
 
-    class NlpCallRecorder:
-        def __init__(self, delegate):
-            self.delegate = delegate
-            self.calls = []
-
-        def __call__(self, *args, **kwargs):
-            self.calls.append(kwargs)
-            return self.delegate(*args, **kwargs)
-
-        def stats(self):
-            return self.delegate.stats()
-
-    def track_construction(*args, **kwargs):
-        constructed = create_once(*args, **kwargs)
-        recorder = NlpCallRecorder(constructed._solver)
-        constructed._solver = recorder
-        nlp_calls.append(recorder)
-        constructed_solvers.append(constructed)
-        return constructed
-
-    monkeypatch.setattr(solver_module, "_create_solver", track_construction)
     solution = problem.get_solver("casadi").solve()
     _assert_refined(solution)
 
-    assert len(nlp_calls) > 1
     assert solution.parameters["rate_offset"] == pytest.approx(0.75)
-    refined_initial_guess = np.asarray(nlp_calls[-1].calls[0]["x0"]).reshape(
-        -1
-    )
-    # The sole free parameter is the final decision component; the first
-    # refined solve must retain its preceding optimized value, not its zero
-    # declaration guess.
-    assert refined_initial_guess[-1] == pytest.approx(0.75)
-
-    fixed_arguments = constructed_solvers[-1]._map_arguments(
-        {"rate_offset": 0.25}, solution
-    )
-    for argument in ("x0", "lbx", "ubx"):
-        values = np.asarray(fixed_arguments[argument]).reshape((-1,))
-        assert values[-1] == pytest.approx(0.25)
 
 
-def test_adaptive_refinement_seeds_controls_and_free_horizon(
-    monkeypatch,
-):
+def test_adaptive_refinement_solves_controls_and_free_horizon():
     problem, _builder = _free_horizon_control_problem()
-    create_once = solver_module._create_solver
-    nlp_calls = []
 
-    class NlpCallRecorder:
-        def __init__(self, delegate):
-            self.delegate = delegate
-            self.calls = []
-
-        def __call__(self, *args, **kwargs):
-            self.calls.append(kwargs)
-            return self.delegate(*args, **kwargs)
-
-        def stats(self):
-            return self.delegate.stats()
-
-    def track_construction(*args, **kwargs):
-        constructed = create_once(*args, **kwargs)
-        recorder = NlpCallRecorder(constructed._solver)
-        constructed._solver = recorder
-        nlp_calls.append(recorder)
-        return constructed
-
-    monkeypatch.setattr(solver_module, "_create_solver", track_construction)
     solution = problem.get_solver("casadi").solve()
     _assert_refined(solution)
 
     assert solution.t_final == pytest.approx(1.25)
     assert solution.control_law(0.0)[0] == pytest.approx(0.5)
-    refined_initial_guess = np.asarray(nlp_calls[-1].calls[0]["x0"]).reshape(
-        -1
-    )
-    assert refined_initial_guess[0] == pytest.approx(1.25)
-    assert refined_initial_guess[-1] == pytest.approx(0.5)

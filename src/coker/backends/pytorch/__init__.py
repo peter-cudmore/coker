@@ -6,7 +6,12 @@ import torch
 from coker.algebra import Dimension
 from coker.algebra.function import Function, create_function_from_native
 from coker.backends.evaluator import GenericEvaluator
-from coker.backends.backend import ArrayLike, Backend, register_backend
+from coker.backends.backend import (
+    ArrayLike,
+    Backend,
+    split_function_parameter_values,
+    register_backend,
+)
 from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from .dynamics import PytorchODESolverParameters, evaluate_integrals
@@ -21,13 +26,24 @@ from .ops import (
 
 
 class _FittedModule(torch.nn.Module):
-    def __init__(self, native: torch.nn.Module, basis: torch.Tensor) -> None:
+    def __init__(
+        self,
+        native: torch.nn.Module,
+        concrete_values: tuple[torch.Tensor, ...],
+    ) -> None:
         super().__init__()
         self.native = native
-        self.register_buffer("basis", basis)
+        self._concrete_value_names = tuple(
+            f"_concrete_value_{index}" for index in range(len(concrete_values))
+        )
+        for name, value in zip(self._concrete_value_names, concrete_values):
+            self.register_buffer(name, value)
 
     def forward(self, argument):
-        return self.native(argument, self.basis)
+        return self.native(
+            argument,
+            *(self.get_buffer(name) for name in self._concrete_value_names),
+        )
 
 
 class PytorchBackend(Backend):
@@ -134,15 +150,15 @@ class PytorchBackend(Backend):
         """Lower a function to an eager ``torch.nn.Module``."""
         return self.lower(function).as_module()
 
-    def reconstruct_function_parameter(self, declaration, target, values):
+    def fit_function_parameter(self, declaration, target, values):
         """Build a PyTorch-native fitted function from solver decisions."""
-        from coker.dynamics.function_parameters import FittedFunction
+        from coker.parameters.function_parameters import FittedFunction
 
-        basis_space, *_ = declaration.decision_declarations()
-        basis = self.to_backend_array(values).reshape(basis_space.dimension)
+        flat_values = self.to_backend_array(values).reshape(-1)
+        parameters = split_function_parameter_values(declaration, flat_values)
         native = self.as_module(declaration.build_function(target, self.name))
-        function = _FittedModule(native, basis)
-        return FittedFunction(declaration, target, function, function.basis)
+        function = _FittedModule(native, parameters)
+        return FittedFunction(declaration, target, function, parameters)
 
     def build_optimisation_problem(
         self,

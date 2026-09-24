@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable, Sequence
 from importlib.metadata import entry_points
@@ -7,8 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
     from coker.algebra.function import Function
-    from coker.dynamics.model import VariationalProblem
-
+    from coker.dynamics.variational.problem import VariationalProblem
 from coker.backends.evaluator import Evaluator
 from coker.backends.lowered import LoweredFunction, LoweringOptions
 from coker.algebra.graph import Tracer
@@ -16,6 +16,31 @@ from coker.algebra.dimensions import Dimension
 from coker.interfaces import SolverParameters
 
 ArrayLike = Any
+
+
+def split_function_parameter_values(declaration: Any, flat_values: Any):
+    """Split flat backend values into the declaration's concrete blocks."""
+    from coker.parameters import BoundedVariable, UnboundedVariable
+
+    parameters = []
+    offset = 0
+    for concrete in declaration.list_concrete_parameters():
+        is_scalar = isinstance(concrete, (BoundedVariable, UnboundedVariable))
+        size = 1 if is_scalar else concrete.size
+        block = flat_values[offset : offset + size]
+        if block.shape[0] != size:
+            raise ValueError(
+                "solver decisions do not match function parameter declarations"
+            )
+        parameters.append(
+            block[0] if is_scalar else block.reshape(concrete.shape)
+        )
+        offset += size
+    if offset != flat_values.shape[0]:
+        raise ValueError(
+            "solver decisions do not match function parameter declarations"
+        )
+    return tuple(parameters)
 
 
 class Backend(metaclass=ABCMeta):
@@ -56,11 +81,11 @@ class Backend(metaclass=ABCMeta):
         """Wrap a backend solver for use as a numerical program module."""
         return implementation
 
-    def reconstruct_function_parameter(
+    @abstractmethod
+    def fit_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
-        """Reconstruct a generic fitted function from backend values."""
-        return declaration.fit(target, self.to_numpy_array(values))
+        """Materialize a fitted function from backend decision values."""
 
     def create_variational_solver(
         self, problem: VariationalProblem

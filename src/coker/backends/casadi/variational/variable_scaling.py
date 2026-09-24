@@ -153,3 +153,45 @@ def _derive_variable_scaling(
     if np.any(~np.isfinite(offset)) or np.any(~np.isfinite(scale)):
         raise ValueError("could not derive finite scaling")
     return _VariableScaling(offset, scale)
+
+
+def _derive_constraint_scaling(
+    residual: ca.MX,
+    variables: ca.MX,
+    guess: Any,
+    lower: Any,
+    upper: Any,
+) -> np.ndarray:
+    """Derive positive row scales from residual, bounds, and sensitivity."""
+    x0 = _as_vector(guess, "guess")
+    lower_bounds = _as_vector(lower, "lower")
+    upper_bounds = _as_vector(upper, "upper")
+    if lower_bounds.size != upper_bounds.size:
+        raise ValueError("lower and upper bounds must have equal lengths")
+
+    evaluator = ca.Function(
+        "constraint_scaling",
+        [variables],
+        [residual, ca.jacobian(residual, variables)],
+    )
+    values, jacobian = evaluator(ca.DM(x0))
+    values_array = np.asarray(values, dtype=float).reshape(-1)
+    jacobian_array = np.asarray(jacobian, dtype=float)
+    if values_array.size != lower_bounds.size:
+        raise ValueError("constraint bounds must match residual size")
+    if not (
+        np.all(np.isfinite(values_array))
+        and np.all(np.isfinite(jacobian_array))
+    ):
+        raise ValueError("constraint residual and Jacobian must be finite")
+
+    bound_magnitudes = np.maximum(
+        np.where(np.isfinite(lower_bounds), np.abs(lower_bounds), 0.0),
+        np.where(np.isfinite(upper_bounds), np.abs(upper_bounds), 0.0),
+    )
+    sensitivities = np.max(np.abs(jacobian_array), axis=1)
+    scales = np.maximum.reduce(
+        [np.abs(values_array), sensitivities, bound_magnitudes]
+    )
+    scales[scales == 0.0] = 1.0
+    return scales

@@ -9,21 +9,23 @@ parameter-fitting or optimal-control style problems against them.
 Core entry points
 -----------------
 
-The main public surface is re-exported from :mod:`coker.dynamics`:
+The dynamics API is re-exported from :mod:`coker.dynamics`; general and
+function-valued declarations are exposed from their respective packages:
 
 - :func:`coker.dynamics.create_autonomous_ode`
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
-- :class:`coker.dynamics.BoundedVariable`
-- :class:`coker.dynamics.UnboundedVariable`
+- :class:`coker.parameters.BoundedVariable`
+- :class:`coker.parameters.UnboundedVariable`
 - :class:`coker.dynamics.TranscriptionOptions`
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
-- :class:`coker.dynamics.BoundVector`
-- :class:`coker.dynamics.DenseTensorVariable`
-- :class:`coker.dynamics.FunctionParameter`
-- :class:`coker.dynamics.MonotonePiecewiseLinear`
-- :class:`coker.dynamics.Perceptron`
-- :class:`coker.dynamics.RadialBasisFunction`
+- :class:`coker.parameters.BoundVector`
+- :class:`coker.parameters.DenseTensorVariable`
+- :class:`coker.function_parameters.FunctionParameter`
+- :class:`coker.function_parameters.ClosureParameter`
+- :class:`coker.function_parameters.MonotonePiecewiseLinear`
+- :class:`coker.function_parameters.DenseLayer`
+- :class:`coker.function_parameters.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -79,42 +81,55 @@ Function-valued parameters
 
 Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
 :class:`~coker.dynamics.FunctionParameter` realization at problem construction;
-Coker replaces it with the realization's scalar basis decisions before solving.
-The function space and realization must agree on argument and scalar-output
-shapes.
+Coker replaces its concrete parameter blocks with scalar solver decisions before
+solving. The function space and realization must agree on their argument and
+output shapes.
+Solver-bound function parameters require a non-empty ``name``; Coker uses it
+to name their concrete parameter blocks.
+``DenseLayer`` realizes ``activation(weights @ x + bias)`` for vector targets
+and ``activation(weight * x + bias)`` for scalar targets. Vector activations
+and targets use vector inputs and outputs. Scalar activations and targets use
+two unbounded scalar decisions, ``weight`` and ``bias``.
 
-``Perceptron`` requires one vector argument and a scalar output.
-``RadialBasisFunction`` and ``MonotonePiecewiseLinear`` require one scalar
-argument and a scalar output.
+``ClosureParameter`` binds explicitly declared scalar or dense parameter blocks
+to a Coker function. Its function receives those blocks first, then the target
+function arguments. Use ``ClosureParameter.bind_callable`` to trace a Python
+implementation with that calling convention.
 
-For example, a scalar response over a two-component state can use a perceptron:
+For example, a one-component vector response over a two-component state can use
+a dense layer with an identity activation:
 
 .. code-block:: python
 
-   from coker import FunctionSpace, Scalar, VectorSpace
-   from coker.dynamics import Perceptron, VariationalProblemBuilder
+   from coker import FunctionSpace, VectorSpace, function
+   from coker.dynamics import VariationalProblemBuilder
+   from coker.function_parameters import DenseLayer
    from coker.toolkits.codesign import Minimise
 
+   activation = function(
+       [VectorSpace("hidden", 1)],
+       lambda hidden: hidden,
+   )
    response = FunctionSpace(
        "response",
        arguments=[VectorSpace("state", 2)],
-       output=[Scalar("rate")],
+       output=[VectorSpace("rate", 1)],
    )
    # The system must declare ``parameters=(response,)`` and call ``p[0](x)``.
    with VariationalProblemBuilder(
        system,
        t_final=1.0,
-       parameters=[Perceptron(2, name="response")],
+       parameters=[DenseLayer(2, activation, name="response")],
    ) as problem:
        built = problem.build(
            Minimise((problem.output(problem.t_final)[0] - 0.5) ** 2)
        )
 
-``Perceptron`` and ``RadialBasisFunction`` decisions are unbounded by default.
-Pass both ``lower_bound`` and ``upper_bound`` to constrain every basis
-coefficient. ``MonotonePiecewiseLinear`` has unbounded internal decisions, but
-its declared output bounds and monotonicity are enforced by its
-parameterization.
+``DenseLayer`` weights and biases, and ``RadialBasisFunction`` coefficients,
+are unbounded by default. Pass both ``lower_bound`` and ``upper_bound`` to
+``RadialBasisFunction`` to constrain every coefficient.
+``MonotonePiecewiseLinear`` has unbounded internal decisions, but its declared
+output bounds and monotonicity are enforced by its parameterization.
 
 The builder classifies comparisons by their time binding: expressions at
 ``t`` are path constraints, expressions at ``0`` are initial point
@@ -169,6 +184,13 @@ when that limit is reached. Refinement stops when every interval is at or below
 below that normalized width. ``maximum_degree`` must be no less than
 ``minimum_degree``. Leave ``refinement_enabled`` at its default ``False`` for
 a single transcription solve.
+
+``absolute_tolerance`` bounds initial-condition, continuity, and algebraic
+residuals. Set ``segment_defect_tolerance`` and
+``derivative_defect_tolerance`` independently to bound the integrated
+per-segment defects and the collocation derivative defects. Both default to
+``None`` and therefore inherit ``absolute_tolerance``; either may be ``0.0``
+to require an exact NLP equality.
 
 During one adaptive solve, the CasADi model setup is retained while only
 mesh-dependent NLPs are compiled. Each refined mesh interpolates the preceding
@@ -226,7 +248,7 @@ immediately after time:
 
 Values for a declared ``FunctionSpace`` parameter may be ordinary Python
 callables, :class:`coker.Function` objects, or
-:class:`~coker.dynamics.FittedFunction` objects. Coker normalizes and validates
+:class:`~coker.function_parameters.FittedFunction` objects. Coker normalizes
 these values once before integration, so callers do not provide backend-native
 or lowered handles. No ``Noop`` placeholder is used for direct evaluation.
 
@@ -237,11 +259,9 @@ shape of its initial guess:
 
 .. code-block:: python
 
-   from coker.dynamics import (
-       BoundVector,
-       MonotonePiecewiseLinear,
-       VariationalProblemBuilder,
-   )
+   from coker.dynamics import VariationalProblemBuilder
+   from coker.function_parameters import MonotonePiecewiseLinear
+   from coker.parameters import BoundVector
 
    with VariationalProblemBuilder(
        system,
@@ -263,13 +283,15 @@ shape of its initial guess:
    ) as builder:
        problem = builder.build(Minimise(builder.output(builder.t_final)[0] ** 2))
 
-Function-valued parameters currently require one scalar argument and one scalar
-output. ``MonotonePiecewiseLinear`` expands its monotonic basis into scalar
-solver decisions, then reconstructs a callable parameter for the original
-system. The returned ``solution.parameters`` mapping restores scalar decisions
-as ``float`` values and vector or dense tensor decisions as shaped NumPy
-arrays. Function decisions are ``FittedFunction`` objects, retaining their
-specification, space, callable, and fitted parameters.
+Function-valued parameters use named concrete parameter blocks.
+``DenseLayer`` expands its weights and bias, while
+``MonotonePiecewiseLinear`` and ``RadialBasisFunction`` each expand one vector
+block. The solver flattens those blocks into scalar decisions, then restores
+their original shapes when rebuilding a callable parameter. The returned
+``solution.parameters`` mapping restores scalar decisions as ``float`` values
+and vector or dense tensor decisions as shaped NumPy arrays. Function decisions
+are ``FittedFunction`` objects, retaining their specification, space, callable,
+and structured fitted parameters.
 
 ``MonotonePiecewiseLinear.domain_knots`` should span the normalized integration
 domain from ``0`` to ``1``; use ``0`` and ``1`` as the endpoint knots and add
@@ -289,11 +311,8 @@ unknown parameter is the constant state value of a one-dimensional system.
 
    import numpy as np
    from coker import VectorSpace
-   from coker.dynamics import (
-       BoundedVariable,
-       VariationalProblem,
-       create_autonomous_ode,
-   )
+   from coker.dynamics import VariationalProblem, create_autonomous_ode
+   from coker.parameters import BoundedVariable
 
    def x0(p):
        return p[0]

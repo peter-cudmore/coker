@@ -12,14 +12,14 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import Noop, OP
-from coker.dynamics.variables import (
+from coker.dynamics.variables import ControlVariable
+from coker.parameters import (
     BoundVector,
     BoundedVariable,
-    ControlVariable,
     DenseTensorVariable,
     ParameterVariable,
 )
-from coker.dynamics.function_parameters import FunctionParameter
+from coker.parameters.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variational.problem import (
     ConstraintSpec,

@@ -207,7 +207,7 @@ def test_import_module_supports_multi_output_calls(pytorch_backend):
 @pytest.mark.parametrize(
     "value, dimension, expected_shape",
     [
-        (torch.tensor([2.0]), Dimension(None), torch.Size([])),
+        (torch.tensor([2.0]), Dimension.scalar(), torch.Size([])),
         (torch.arange(6.0), Dimension((2, 3)), torch.Size([2, 3])),
         (torch.arange(6.0).reshape(2, 3), Dimension((6,)), torch.Size([6])),
     ],

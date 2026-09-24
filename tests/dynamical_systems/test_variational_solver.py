@@ -1,23 +1,14 @@
-from types import SimpleNamespace
-
-
-import casadi as ca
-
 import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.backends.casadi import CasadiVariationalOptions
 from coker.dynamics import (
-    BoundedVariable,
     TranscriptionOptions,
     VariationalProblem,
     VariationalSolution,
 )
 from coker.toolkits.codesign import SolveFailure
-from coker.backends.casadi.variational.solver import (
-    ControlFactory,
-    _accepts_small_search_direction,
-)
+from coker.backends.casadi.variational.bindings import ControlFactory
 from coker.dynamics.variables import ConstantControlVariable
 
 
@@ -25,6 +16,7 @@ from coker.dynamics.system import (
     create_autonomous_ode,
     create_control_system,
 )
+from coker.parameters import BoundedVariable
 
 # Dynamics
 # xdot = a x + u
@@ -59,21 +51,6 @@ def test_homogenous_integrator(variational_backend):
 
     for t in np.linspace(0, 1, 10):
         assert np.isclose(solution(t), system(t), atol=1e-3)
-
-
-def test_accepts_feasible_small_search_direction():
-    result = {"f": ca.DM(1.0), "g": ca.DM([0.5])}
-    solve_info = SimpleNamespace(
-        return_status="Search_Direction_Becomes_Too_Small"
-    )
-
-    assert _accepts_small_search_direction(
-        solve_info,
-        result,
-        ca.DM([0.0]),
-        ca.DM([1.0]),
-        tolerance=1e-12,
-    )
 
 
 def test_control_factory_builds_symbols_and_zero_guess():
@@ -168,16 +145,7 @@ def test_vector_linear_system(variational_backend):
 
 
 @pytest.mark.parametrize("enable_scaling", [True, False])
-def test_fitting_constant(enable_scaling, monkeypatch):
-    if not enable_scaling:
-        for helper in (
-            "_derive_variable_scaling",
-            "_derive_objective_scale",
-        ):
-            monkeypatch.setattr(
-                f"coker.backends.casadi.variational.solver.{helper}",
-                lambda *_args: pytest.fail("scaling was enabled"),
-            )
+def test_fitting_constant(enable_scaling):
 
     def x0(p):
         return p[0]

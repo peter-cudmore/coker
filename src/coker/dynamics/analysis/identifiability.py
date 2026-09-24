@@ -12,14 +12,16 @@ from coker.backends.sympy.analysis import (
     compute_lie_derivative,
 )
 
-from coker.algebra.ops import Noop
-from coker.dynamics.model import DynamicalSystem
-from coker.dynamics.variables import BoundedVariable, UnboundedVariable
+from coker.parameters import BoundedVariable, UnboundedVariable
 
 from . import model as _rank
-from .dae import SymbolicDAESystem, geometry, lower_dae_system
+from .dae import (
+    SymbolicDAESystem,
+    geometry,
+    normalize_symbolic_system,
+)
 from .model import IdentifiabilityResult
-from .symbolic import SymbolicSystem, UnsupportedSystemError, lower_system
+from .symbolic import SymbolicSystem, UnsupportedSystemError
 
 
 def _apply_parameter_roles(
@@ -80,16 +82,7 @@ def analyse_identifiability(
 ) -> IdentifiabilityResult:
     """Analyse generic local identifiability by augmented observability."""
     try:
-        symbolic = (
-            lower_dae_system(system)
-            if isinstance(system, DynamicalSystem)
-            and not isinstance(system.g, Noop)
-            else (
-                system
-                if isinstance(system, SymbolicSystem)
-                else lower_system(system)
-            )
-        )
+        symbolic = normalize_symbolic_system(system)
         symbolic = _apply_parameter_roles(symbolic, parameters)
         tangent = (
             geometry(symbolic)

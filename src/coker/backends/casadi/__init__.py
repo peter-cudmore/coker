@@ -20,6 +20,7 @@ from coker.backends.backend import (
     Backend,
     Evaluator,
     register_backend,
+    split_function_parameter_values,
 )
 from coker.backends.lowered import (
     FunctionInputSpec,
@@ -42,7 +43,7 @@ from coker.backends.casadi.lowered import CasadiLoweredFunction
 from coker.backends.casadi.variational.options import (  # noqa: F401
     CasadiVariationalOptions,
 )
-from coker.backends.casadi.variational.solver import (
+from coker.backends.casadi.variational.transcription import (
     create_variational_solver,
 )
 from coker.dynamics import VariationalProblem
@@ -115,6 +116,20 @@ def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
 
 
 class CasadiBackend(Backend):
+    def fit_function_parameter(self, declaration, target, values):
+        from coker.parameters.function_parameters import FittedFunction
+
+        flat_values = np.asarray(
+            self.to_numpy_array(values), dtype=float
+        ).reshape(-1)
+        parameters = split_function_parameter_values(declaration, flat_values)
+        return FittedFunction(
+            declaration,
+            declaration.validate_target(target),
+            lambda argument: declaration.evaluate(parameters, argument),
+            parameters,
+        )
+
     name = "casadi"
 
     def import_function(

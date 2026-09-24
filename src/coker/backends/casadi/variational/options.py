@@ -1,7 +1,9 @@
 """CasADi-specific configuration for variational transcription."""
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
+
 from coker.dynamics.variational.problem import VariationalIterationCallback
 
 
@@ -31,7 +33,7 @@ class CasadiVariationalOptions:
         maximum_iterations: Maximum number of mesh-refinement iterations after
             the initial transcription solve.
         minimum_interval_duration: Smallest normalized interval width allowed
-            when h-refinement bisects an interval.
+            when h-refinement splits an interval.
     """
 
     verbose: bool = False
@@ -47,11 +49,16 @@ class CasadiVariationalOptions:
 
     def __post_init__(self) -> None:
         """Validate refinement bounds before the solver builds a mesh."""
-        if self.mesh_tolerance <= 0:
-            raise ValueError("mesh_tolerance must be positive")
+        if not math.isfinite(self.mesh_tolerance) or self.mesh_tolerance <= 0:
+            raise ValueError("mesh_tolerance must be finite and positive")
         if self.maximum_degree < 1:
             raise ValueError("maximum_degree must be positive")
         if self.maximum_iterations < 0:
             raise ValueError("maximum_iterations must be non-negative")
-        if self.minimum_interval_duration <= 0:
-            raise ValueError("minimum_interval_duration must be positive")
+        if (
+            not math.isfinite(self.minimum_interval_duration)
+            or self.minimum_interval_duration <= 0
+        ):
+            raise ValueError(
+                "minimum_interval_duration must be finite and positive"
+            )

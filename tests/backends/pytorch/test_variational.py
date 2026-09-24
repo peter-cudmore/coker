@@ -3,7 +3,6 @@ import pytest
 
 from coker import VectorSpace
 from coker.dynamics import (
-    BoundedVariable,
     VariationalProblem,
     VariationalProblemBuilder,
 )
@@ -13,6 +12,7 @@ from coker.backends.pytorch.variational import PytorchVariationalSolverOptions
 from coker.algebra.ops import Noop
 from coker.dynamics import DynamicsSpec
 from coker.dynamics.system import create_dynamics_from_spec
+from coker.parameters import BoundedVariable
 
 
 def make_problem(*, guess=0.0):

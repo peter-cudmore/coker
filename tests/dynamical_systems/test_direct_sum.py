@@ -2,13 +2,14 @@ import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.dynamics import (
-    BoundedVariable,
     DynamicsSpec,
-    FunctionParameter,
-    RadialBasisFunction,
     VariationalProblem,
     create_autonomous_ode,
     direct_sum,
+)
+from coker.parameters.function_parameters import (
+    FunctionParameter,
+    RadialBasisFunction,
 )
 from coker.algebra.ops import Noop
 from coker.dynamics.system import (
@@ -17,6 +18,7 @@ from coker.dynamics.system import (
     create_dynamics_from_spec,
 )
 from ..util import is_close
+from coker.parameters import BoundedVariable
 
 
 class _ConstantFunctionParameter(FunctionParameter):
@@ -27,16 +29,12 @@ class _ConstantFunctionParameter(FunctionParameter):
     def validate_target(self, target):
         return target
 
-    def decision_declarations(self):
-        return (
-            VectorSpace("constant", 1),
-            np.array([self.guess]),
-            -np.ones(1),
-            np.ones(1),
-        )
+    def list_concrete_parameters(self):
+        return (BoundedVariable("constant", -1.0, 1.0, self.guess),)
 
-    def evaluate(self, basis, _argument):
-        return basis[0]
+    def evaluate(self, parameters, _argument):
+        (value,) = parameters
+        return value
 
 
 def test_direct_sum_scalar(variational_backend):

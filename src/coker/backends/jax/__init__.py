@@ -22,6 +22,7 @@ from coker.backends.backend import (
     Backend,
     Evaluator,
     register_backend,
+    split_function_parameter_values,
 )
 
 from coker.backends.lowered import (
@@ -140,6 +141,20 @@ class JaxLoweredFunction(LoweredFunction):
 
 
 class JaxBackend(Backend):
+    def fit_function_parameter(self, declaration, target, values):
+        from coker.parameters.function_parameters import FittedFunction
+
+        flat_values = np.asarray(
+            self.to_numpy_array(values), dtype=float
+        ).reshape(-1)
+        parameters = split_function_parameter_values(declaration, flat_values)
+        return FittedFunction(
+            declaration,
+            declaration.validate_target(target),
+            lambda argument: declaration.evaluate(parameters, argument),
+            parameters,
+        )
+
     def __init__(self, *args, **kwargs):
         super(JaxBackend, self).__init__(*args, **kwargs)
 

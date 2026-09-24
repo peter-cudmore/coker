@@ -16,6 +16,7 @@ from coker.backends.sympy.analysis import (
 from coker.dynamics.model import DynamicalSystem
 
 from .symbolic import (
+    SymbolicSystem,
     UnsupportedSystemError,
     _argument_symbols,
     _argument_symbols_for_declarations,
@@ -30,6 +31,7 @@ from .symbolic import (
     _replace_expressions,
     _require_finite_dimension,
     _scalar_symbol,
+    lower_system,
 )
 
 
@@ -44,6 +46,24 @@ class SymbolicDAESystem:
     dynamics: tuple[sp.Expr, ...]
     constraints: tuple[sp.Expr, ...]
     outputs: tuple[sp.Expr, ...]
+
+
+def normalize_symbolic_system(
+    system: object,
+) -> SymbolicSystem | SymbolicDAESystem:
+    """Return symbolic ODE or DAE data for a supported analysis input."""
+    if isinstance(system, (SymbolicSystem, SymbolicDAESystem)):
+        return system
+    if isinstance(system, DynamicalSystem):
+        return (
+            lower_dae_system(system)
+            if not isinstance(system.g, Noop)
+            else lower_system(system)
+        )
+    raise UnsupportedSystemError(
+        "system analysis requires a DynamicalSystem, SymbolicSystem, "
+        "or SymbolicDAESystem"
+    )
 
 
 def geometry(system: SymbolicDAESystem) -> ConstraintGeometry:

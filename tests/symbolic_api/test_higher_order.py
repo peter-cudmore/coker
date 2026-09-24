@@ -116,7 +116,7 @@ def test_vector_norm_order_is_preserved(backend):
         backend=backend,
     )
 
-    assert norm_1.output_shape() == (Dimension(None),)
+    assert norm_1.output_shape() == (Dimension.scalar(),)
     result = norm_1(np.array([3.0, -4.0]))
     assert isinstance(result, float)
     assert is_close(result, 7.0, tolerance=1e-6)
