@@ -536,6 +536,9 @@ def test_dense_layer_declares_and_evaluates_scalar_parameters():
     assert isinstance(bias, UnboundedVariable)
     assert weight.name == "response_weight"
     assert bias.name == "response_bias"
+    assert weight.guess == 1.0
+    assert bias.guess == 0.0
+
     assert declaration.validate_target(target) is target
     assert declaration.evaluate((2.0, -1.0), 3.0) == 5.0
     assert declaration.build_function(target, "numpy")(3.0, 2.0, -1.0) == 5.0
@@ -563,6 +566,8 @@ def test_dense_layer_declares_and_evaluates_vector_parameters():
     assert weights.shape == (2, 2)
     assert bias.name == "response_bias"
     assert bias.shape == (2,)
+    np.testing.assert_array_equal(weights.guess, np.eye(2))
+    np.testing.assert_array_equal(bias.guess, np.zeros(2))
     assert declaration.validate_target(target) is target
 
     parameters = (

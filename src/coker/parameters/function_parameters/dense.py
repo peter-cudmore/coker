@@ -144,7 +144,7 @@ class DenseLayer(FunctionParameter):
                         _concrete_parameter_name(
                             self.name, "dense_layer", "weight"
                         ),
-                        0.0,
+                        1.0,
                     ),
                     UnboundedVariable(
                         _concrete_parameter_name(
@@ -159,7 +159,7 @@ class DenseLayer(FunctionParameter):
                         _concrete_parameter_name(
                             self.name, "dense_layer", "weights"
                         ),
-                        np.zeros((self.hidden_size, self.input_size)),
+                        np.eye(self.hidden_size, self.input_size),
                     ),
                     DenseTensorVariable(
                         _concrete_parameter_name(
