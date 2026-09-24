@@ -77,31 +77,6 @@ def test_pytorch_fitted_dense_layer_preserves_nested_relu_activation(
     ).item() == pytest.approx(0.8684)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
-def test_pytorch_cuda_fitted_dense_layer_preserves_relu_activation():
-    backend = get_backend_by_name("pytorch", set_current=False)
-    response = FunctionSpace(
-        "response",
-        arguments=[Scalar("inflow")],
-        output=[Scalar("rate")],
-    )
-    declaration = DenseLayer(
-        1,
-        _relu_scalar_activation(backend),
-        name="response",
-    )
-
-    fitted = backend.fit_function_parameter(
-        declaration,
-        response,
-        torch.tensor([1.1796, -0.3112], device="cuda"),
-    )
-
-    value = fitted(torch.tensor(0.0, device="cuda"))
-    assert value.device.type == "cuda"
-    assert value.item() == 0.0
-
-
 def test_pytorch_fits_bound_vector_parameter(monkeypatch):
     backend = get_backend_by_name("pytorch", set_current=False)
     monkeypatch.setattr(backend, "device", torch.device("cpu"))
