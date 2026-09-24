@@ -6,7 +6,7 @@ from typing import Any, Callable, Sequence
 
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, function
-from coker.dynamics.variables import (
+from coker.parameters import (
     BoundVector,
     BoundedVariable,
     DenseTensorVariable,

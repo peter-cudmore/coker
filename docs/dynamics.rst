@@ -9,22 +9,23 @@ parameter-fitting or optimal-control style problems against them.
 Core entry points
 -----------------
 
-The main public surface is re-exported from :mod:`coker.dynamics`:
+The dynamics API is re-exported from :mod:`coker.dynamics`; general and
+function-valued declarations are exposed from their respective packages:
 
 - :func:`coker.dynamics.create_autonomous_ode`
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
-- :class:`coker.dynamics.BoundedVariable`
-- :class:`coker.dynamics.UnboundedVariable`
+- :class:`coker.parameters.BoundedVariable`
+- :class:`coker.parameters.UnboundedVariable`
 - :class:`coker.dynamics.TranscriptionOptions`
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
-- :class:`coker.dynamics.BoundVector`
-- :class:`coker.dynamics.DenseTensorVariable`
-- :class:`coker.dynamics.FunctionParameter`
-- :class:`coker.dynamics.ClosureParameter`
-- :class:`coker.dynamics.MonotonePiecewiseLinear`
-- :class:`coker.dynamics.DenseLayer`
-- :class:`coker.dynamics.RadialBasisFunction`
+- :class:`coker.parameters.BoundVector`
+- :class:`coker.parameters.DenseTensorVariable`
+- :class:`coker.function_parameters.FunctionParameter`
+- :class:`coker.function_parameters.ClosureParameter`
+- :class:`coker.function_parameters.MonotonePiecewiseLinear`
+- :class:`coker.function_parameters.DenseLayer`
+- :class:`coker.function_parameters.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -101,7 +102,8 @@ a dense layer with an identity activation:
 .. code-block:: python
 
    from coker import FunctionSpace, VectorSpace, function
-   from coker.dynamics import DenseLayer, VariationalProblemBuilder
+   from coker.dynamics import VariationalProblemBuilder
+   from coker.function_parameters import DenseLayer
    from coker.toolkits.codesign import Minimise
 
    activation = function(
@@ -246,7 +248,7 @@ immediately after time:
 
 Values for a declared ``FunctionSpace`` parameter may be ordinary Python
 callables, :class:`coker.Function` objects, or
-:class:`~coker.dynamics.FittedFunction` objects. Coker normalizes and validates
+:class:`~coker.function_parameters.FittedFunction` objects. Coker normalizes
 these values once before integration, so callers do not provide backend-native
 or lowered handles. No ``Noop`` placeholder is used for direct evaluation.
 
@@ -257,11 +259,9 @@ shape of its initial guess:
 
 .. code-block:: python
 
-   from coker.dynamics import (
-       BoundVector,
-       MonotonePiecewiseLinear,
-       VariationalProblemBuilder,
-   )
+   from coker.dynamics import VariationalProblemBuilder
+   from coker.function_parameters import MonotonePiecewiseLinear
+   from coker.parameters import BoundVector
 
    with VariationalProblemBuilder(
        system,
@@ -311,11 +311,8 @@ unknown parameter is the constant state value of a one-dimensional system.
 
    import numpy as np
    from coker import VectorSpace
-   from coker.dynamics import (
-       BoundedVariable,
-       VariationalProblem,
-       create_autonomous_ode,
-   )
+   from coker.dynamics import VariationalProblem, create_autonomous_ode
+   from coker.parameters import BoundedVariable
 
    def x0(p):
        return p[0]

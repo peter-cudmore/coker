@@ -5,10 +5,10 @@ from coker import FunctionSpace, Scalar, VectorSpace
 from coker.dynamics import (
     AnalysisStatus,
     IdentifiabilityResult,
-    UnboundedVariable,
     analyse_identifiability,
     create_autonomous_ode,
 )
+from coker.parameters import UnboundedVariable
 from coker.dynamics.system import create_control_system
 
 

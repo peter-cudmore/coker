@@ -7,7 +7,6 @@ from coker import FunctionSpace, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.dynamics import (
-    BoundVector,
     DynamicsSpec,
     VariationalProblemBuilder,
 )
@@ -18,6 +17,7 @@ from coker.function_parameters import (
 )
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.toolkits.codesign import Minimise
+from coker.parameters import BoundVector
 
 
 def _identity_activation(backend, width=1):

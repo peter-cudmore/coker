@@ -9,7 +9,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from coker.algebra.dimensions import FunctionSpace
-from coker.dynamics.variables import (
+from coker.parameters import (
     BoundVector,
     DenseTensorVariable,
     ParameterVariable,

@@ -8,12 +8,14 @@ import casadi as ca
 import numpy as np
 
 from coker.dynamics import (
-    BoundedVariable,
     ConstantControlVariable,
     ControlVariable,
-    ParameterVariable,
     PiecewiseConstantVariable,
     SpikeVariable,
+)
+from coker.parameters import (
+    BoundedVariable,
+    ParameterVariable,
     UnboundedVariable,
 )
 

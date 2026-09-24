@@ -14,7 +14,7 @@ from coker.backends.sympy.analysis import (
 
 from coker.algebra.ops import Noop
 from coker.dynamics.model import DynamicalSystem
-from coker.dynamics.variables import BoundedVariable, UnboundedVariable
+from coker.parameters import BoundedVariable, UnboundedVariable
 
 from . import model as _rank
 from .dae import SymbolicDAESystem, geometry, lower_dae_system

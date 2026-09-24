@@ -7,10 +7,9 @@ from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, InequalityExpression, function
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop
-from coker.dynamics.variables import (
+from coker.dynamics.variables import ControlVariable, LossFunction
+from coker.parameters import (
     BoundedVariable,
-    ControlVariable,
-    LossFunction,
     ParameterMixin,
     ParameterVariable,
 )

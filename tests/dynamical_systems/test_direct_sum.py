@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.dynamics import (
-    BoundedVariable,
     DynamicsSpec,
     VariationalProblem,
     create_autonomous_ode,
@@ -16,6 +15,7 @@ from coker.dynamics.system import (
     create_dynamics_from_spec,
 )
 from ..util import is_close
+from coker.parameters import BoundedVariable
 
 
 class _ConstantFunctionParameter(FunctionParameter):

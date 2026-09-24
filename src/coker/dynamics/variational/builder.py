@@ -12,10 +12,10 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import Noop, OP
-from coker.dynamics.variables import (
+from coker.dynamics.variables import ControlVariable
+from coker.parameters import (
     BoundVector,
     BoundedVariable,
-    ControlVariable,
     DenseTensorVariable,
     ParameterVariable,
 )

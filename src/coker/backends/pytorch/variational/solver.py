@@ -19,7 +19,7 @@ from coker.backends.lowered import (
     FunctionSignature,
 )
 from coker.backends.pytorch.dynamics import PytorchODESolverParameters
-from coker.dynamics.variables import BoundedVariable, UnboundedVariable
+from coker.parameters import BoundedVariable, UnboundedVariable
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     generate_discritisation_operators,

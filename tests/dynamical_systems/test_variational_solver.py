@@ -3,7 +3,6 @@ import pytest
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.backends.casadi import CasadiVariationalOptions
 from coker.dynamics import (
-    BoundedVariable,
     TranscriptionOptions,
     VariationalProblem,
     VariationalSolution,
@@ -17,6 +16,7 @@ from coker.dynamics.system import (
     create_autonomous_ode,
     create_control_system,
 )
+from coker.parameters import BoundedVariable
 
 # Dynamics
 # xdot = a x + u

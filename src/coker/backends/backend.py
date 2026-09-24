@@ -22,7 +22,7 @@ ArrayLike = Any
 
 def split_function_parameter_values(declaration: Any, flat_values: Any):
     """Split flat backend values into the declaration's concrete blocks."""
-    from coker.dynamics.variables import BoundedVariable, UnboundedVariable
+    from coker.parameters import BoundedVariable, UnboundedVariable
 
     parameters = []
     offset = 0

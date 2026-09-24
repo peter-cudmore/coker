@@ -14,7 +14,7 @@ from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
 from coker.function_parameters import FunctionParameter
 from coker.dynamics.model import DynamicalSystem
-from coker.dynamics.variables import (
+from coker.parameters import (
     BoundVector,
     BoundedVariable,
     DenseTensorVariable,

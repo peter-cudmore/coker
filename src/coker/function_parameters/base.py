@@ -15,7 +15,7 @@ from coker.algebra.dimensions import (
     VectorSpace,
 )
 from coker.algebra.function import BoundCallable, Function, function
-from coker.dynamics.variables import (
+from coker.parameters import (
     BoundVector,
     BoundedVariable,
     DenseTensorVariable,

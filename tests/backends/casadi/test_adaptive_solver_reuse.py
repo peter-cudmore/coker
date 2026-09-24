@@ -7,7 +7,6 @@ import pytest
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.backends.casadi import CasadiVariationalOptions
 from coker.dynamics import (
-    BoundedVariable,
     ConstantControlVariable,
     TranscriptionOptions,
     VariationalProblem,
@@ -15,6 +14,7 @@ from coker.dynamics import (
     create_autonomous_ode,
 )
 from coker.dynamics.system import create_control_system
+from coker.parameters import BoundedVariable
 from coker.toolkits.codesign import Minimise
 
 

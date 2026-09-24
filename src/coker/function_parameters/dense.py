@@ -10,7 +10,7 @@ import numpy as np
 
 from coker.algebra.dimensions import FunctionSpace, VectorSpace
 from coker.algebra.function import BoundCallable, Function
-from coker.dynamics.variables import (
+from coker.parameters import (
     DenseTensorVariable,
     ParameterVariable,
     UnboundedVariable,

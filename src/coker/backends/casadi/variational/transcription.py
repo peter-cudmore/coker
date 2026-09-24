@@ -13,14 +13,13 @@ from coker.backends.casadi.variational.variable_scaling import (
     _derive_variable_scaling,
 )
 from coker.dynamics import (
-    BoundedVariable,
     InterpolatingPoly,  # noqa: F401
     InterpolatingPolyCollection,  # noqa: F401
-    ParameterVariable,
     VariationalProblem,
     VariationalSolution,
     split_at_non_differentiable_points,
 )
+from coker.parameters import BoundedVariable, ParameterVariable
 from coker.dynamics.transcription.collocation import (
     _predict_refined_degree,
     _split_refined_interval,

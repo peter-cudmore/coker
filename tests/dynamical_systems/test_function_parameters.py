@@ -9,11 +9,7 @@ from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
 from coker.dynamics import (
-    BoundVector,
-    BoundedVariable,
-    DenseTensorVariable,
     DynamicsSpec,
-    UnboundedVariable,
     VariationalProblem,
     VariationalProblemBuilder,
 )
@@ -28,6 +24,12 @@ from coker.dynamics.variational.function_binding import ParameterValueLayout
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.dynamics.variables import ConstantControlVariable
 from coker.toolkits.codesign import Minimise
+from coker.parameters import (
+    BoundVector,
+    BoundedVariable,
+    DenseTensorVariable,
+    UnboundedVariable,
+)
 
 
 def test_system_accepts_a_function_valued_positional_parameter():

@@ -10,7 +10,7 @@ import numpy as np
 
 from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.graph import if_then_else
-from coker.dynamics.variables import DenseTensorVariable, ParameterVariable
+from coker.parameters import DenseTensorVariable, ParameterVariable
 
 from .base import (
     FunctionParameter,
