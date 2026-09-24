@@ -85,11 +85,10 @@ solving. The function space and realization must agree on their argument and
 output shapes.
 Solver-bound function parameters require a non-empty ``name``; Coker uses it
 to name their concrete parameter blocks.
-
-``DenseLayer`` realizes ``activation(weights @ x + bias)``. Its target has one
-vector input and one vector output; its activation is a Coker function from the
-hidden vector to the output vector. ``RadialBasisFunction`` and
-``MonotonePiecewiseLinear`` require one scalar argument and one scalar output.
+``DenseLayer`` realizes ``activation(weights @ x + bias)`` for vector targets
+and ``activation(weight * x + bias)`` for scalar targets. Vector activations
+and targets use vector inputs and outputs. Scalar activations and targets use
+two unbounded scalar decisions, ``weight`` and ``bias``.
 
 ``ClosureParameter`` binds explicitly declared scalar or dense parameter blocks
 to a Coker function. Its function receives those blocks first, then the target

@@ -441,6 +441,23 @@ def test_monotone_function_rejects_unimplemented_explicit_constraints():
         )
 
 
+def test_dense_layer_declares_and_evaluates_scalar_parameters():
+    activation = function([Scalar("hidden")], lambda hidden: hidden)
+    target = FunctionSpace(
+        "response", arguments=[Scalar("state")], output=[Scalar("rate")]
+    )
+    declaration = DenseLayer(1, activation, name="response")
+    weight, bias = declaration.list_concrete_parameters()
+
+    assert isinstance(weight, UnboundedVariable)
+    assert isinstance(bias, UnboundedVariable)
+    assert weight.name == "response_weight"
+    assert bias.name == "response_bias"
+    assert declaration.validate_target(target) is target
+    assert declaration.evaluate((2.0, -1.0), 3.0) == 5.0
+    assert declaration.build_function(target, "numpy")(3.0, 2.0, -1.0) == 5.0
+
+
 def test_dense_layer_declares_and_evaluates_vector_parameters():
     activation = function(
         [VectorSpace("hidden", 2)],

@@ -196,6 +196,24 @@ def _activation_widths(
     return input_width, output_shape[0]
 
 
+def _is_scalar_activation(activation: Function | BoundCallable) -> bool:
+    if not isinstance(activation, (Function, BoundCallable)):
+        raise TypeError("activation must be a Coker Function or BoundCallable")
+    inputs = (
+        activation.input_spaces()
+        if isinstance(activation, Function)
+        else activation.public_space.arguments
+    )
+    outputs = activation.output_shape()
+    return (
+        len(inputs) == 1
+        and isinstance(inputs[0], Scalar)
+        and len(outputs) == 1
+        and isinstance(outputs[0], Dimension)
+        and outputs[0].is_scalar()
+    )
+
+
 def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
     if not isinstance(target, FunctionSpace):
         raise TypeError("target must be a FunctionSpace")
@@ -357,7 +375,7 @@ class MonotonePiecewiseLinear(FunctionParameter):
 
 @dataclass(frozen=True)
 class DenseLayer(FunctionParameter):
-    """Affine vector layer followed by a Coker activation function."""
+    """Affine scalar or vector layer followed by a Coker activation."""
 
     input_size: int
     activation: Function | BoundCallable
@@ -373,22 +391,45 @@ class DenseLayer(FunctionParameter):
             or self.input_size < 1
         ):
             raise ValueError("input_size must be a positive integer")
-        _activation_widths(self.activation)
+        is_scalar = _is_scalar_activation(self.activation)
+        if is_scalar and self.input_size != 1:
+            raise ValueError("scalar activation requires input_size 1")
+        if not is_scalar:
+            _activation_widths(self.activation)
         object.__setattr__(self, "input_size", int(self.input_size))
         object.__setattr__(
             self,
             "parameters",
             (
-                DenseTensorVariable(
-                    _concrete_parameter_name(
-                        self.name, "dense_layer", "weights"
+                (
+                    UnboundedVariable(
+                        _concrete_parameter_name(
+                            self.name, "dense_layer", "weight"
+                        ),
+                        0.0,
                     ),
-                    np.zeros((self.hidden_size, self.input_size)),
-                ),
-                DenseTensorVariable(
-                    _concrete_parameter_name(self.name, "dense_layer", "bias"),
-                    np.zeros(self.hidden_size),
-                ),
+                    UnboundedVariable(
+                        _concrete_parameter_name(
+                            self.name, "dense_layer", "bias"
+                        ),
+                        0.0,
+                    ),
+                )
+                if is_scalar
+                else (
+                    DenseTensorVariable(
+                        _concrete_parameter_name(
+                            self.name, "dense_layer", "weights"
+                        ),
+                        np.zeros((self.hidden_size, self.input_size)),
+                    ),
+                    DenseTensorVariable(
+                        _concrete_parameter_name(
+                            self.name, "dense_layer", "bias"
+                        ),
+                        np.zeros(self.hidden_size),
+                    ),
+                )
             ),
         )
 
@@ -401,6 +442,9 @@ class DenseLayer(FunctionParameter):
         return _activation_widths(self.activation)[1]
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        if _is_scalar_activation(self.activation):
+            return _validate_scalar_target(target)
+
         if not isinstance(target, FunctionSpace):
             raise TypeError("target must be a FunctionSpace")
         if len(target.arguments) != 1 or not isinstance(
@@ -433,8 +477,10 @@ class DenseLayer(FunctionParameter):
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
-        weights, bias = parameters
-        return self.activation(weights @ argument + bias)
+        weight, bias = parameters
+        if _is_scalar_activation(self.activation):
+            return self.activation(weight * argument + bias)
+        return self.activation(weight @ argument + bias)
 
 
 @dataclass(frozen=True)
