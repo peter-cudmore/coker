@@ -394,6 +394,78 @@ def test_variational_fits_bound_vector_parameter(variational_backend):
 @pytest.mark.skipif(
     importlib.util.find_spec("casadi") is None, reason="CasADi not available"
 )
+def test_casadi_initialises_shared_monotone_transfer_rate():
+    initial_sources = np.array([0.25, 0.5, 0.75, 1.0])
+    target_time = 0.8
+    target_receivers = initial_sources - 1 / np.sqrt(
+        1 / initial_sources**2 + 2 * target_time
+    )
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("source")],
+        output=[Scalar("rate")],
+    )
+    basis = np.eye(initial_sources.size)
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(rate,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (
+                np.concatenate(
+                    (initial_sources, np.zeros_like(initial_sources))
+                ),
+                None,
+            ),
+            dynamics=lambda _t, state, _z, _u, p: np.concatenate(
+                (
+                    -sum(
+                        p[0](state[index]) * state[index] * basis[index]
+                        for index in range(initial_sources.size)
+                    ),
+                    sum(
+                        p[0](state[index]) * state[index] * basis[index]
+                        for index in range(initial_sources.size)
+                    ),
+                )
+            ),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend="casadi",
+    )
+    knots = np.linspace(0.0, 1.0, 15)
+    increments = np.diff(np.concatenate(([0.0], knots**2)))
+    declaration = MonotonePiecewiseLinear(
+        domain_knots=knots,
+        lower_bound=0.0,
+        upper_bound=1.0,
+        guess=np.log(np.maximum(increments, 1e-4) * 1_000.0),
+        name="rate",
+    )
+    problem = VariationalProblem(
+        system=system,
+        t_final=target_time,
+        parameters=[declaration],
+        loss=lambda solution, _p: sum(
+            (solution(target_time, _p)[initial_sources.size + index] - target)
+            for index, target in enumerate(target_receivers)
+        ),
+        backend="casadi",
+    )
+
+    solution = problem()
+
+    assert solution.solve_info.success
+    assert solution.cost < 1e-4
+    fitted = solution.parameters["rate"]
+    assert fitted(0.0) < 1e-3
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("casadi") is None, reason="CasADi not available"
+)
 def test_casadi_fits_monotone_function_parameter():
     function_parameter = FunctionSpace(
         "p_0", arguments=[Scalar("x")], output=[Scalar("y")]
