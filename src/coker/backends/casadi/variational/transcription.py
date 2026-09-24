@@ -20,6 +20,7 @@ from coker.backends.casadi.lower import (
     substitute,
 )
 from coker.algebra.graph import Tracer
+from coker.algebra.ops import Noop
 from coker.backends.casadi.variational.layout import DecisionLayout
 from coker.backends.casadi.variational.options import CasadiVariationalOptions
 from coker.dynamics import (
@@ -69,10 +70,6 @@ def _resolve_options(problem: VariationalProblem) -> CasadiVariationalOptions:
             "CasadiVariationalOptions as backend_options"
         )
     return options
-
-
-def noop(*_args):
-    return None
 
 
 def _derive_objective_scale(nominal_cost: object, tolerance: object) -> float:
@@ -260,7 +257,7 @@ class _TranscriptionFactory:
             self.u_lower = []
             self.u_upper = []
             self.u_guess = ca.DM.zeros(0, 1)
-            self.control_eval = noop
+            self.control_eval = Noop()
             self.control_decoder = None
         else:
             self.u_symbols = self.control_factory.symbols()
@@ -314,12 +311,12 @@ class _TranscriptionFactory:
     def evaluate_quadrature(self, *args):
         if self.problem.system.dqdt is not None:
             return self.casadi.evaluate(self.problem.system.dqdt, args)
-        return noop
+        return Noop()
 
     def evaluate_algebraic(self, *args):
         if self.problem.system.g:
             return self.casadi.evaluate(self.problem.system.g, args)
-        return noop
+        return Noop()
 
     def evaluate_registered_quadratures(self, args):
         values = []
