@@ -379,7 +379,12 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         public_space: FunctionSpace,
         bound_arguments: tuple[Tracer, ...],
     ) -> None:
-        if len(target.signature.inputs) != (
+        present_input_count = sum(
+            input_spec.space is not None
+            and not isinstance(input_spec.space, Noop)
+            for input_spec in target.signature.inputs
+        )
+        if present_input_count != (
             len(public_space.arguments) + len(bound_arguments)
         ):
             raise ValueError(
