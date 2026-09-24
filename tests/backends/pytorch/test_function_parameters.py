@@ -252,7 +252,7 @@ def _two_batch_transfer_system():
 
 
 @contextmanager
-def _two_batch_transfer_problem(rate_declarations):
+def _two_batch_transfer_problem(rate_declarations, output_projection=None):
     initial_inflows = (1.0, 2.0)
     t_final = 0.2
     targets = np.concatenate(
@@ -289,6 +289,9 @@ def _two_batch_transfer_problem(rate_declarations):
         backend="pytorch",
     ) as builder:
         terminal = builder.output(builder.t_final)
+        if output_projection is not None:
+            terminal = output_projection @ terminal
+            targets = output_projection @ targets
         residual = terminal - targets
         problem = builder.build(
             Minimise(
@@ -335,6 +338,33 @@ def test_pytorch_fits_shared_function_parameter_across_fixed_batches(
             rtol=0,
             atol=2e-3,
         )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_pytorch_cuda_fits_shared_function_parameter_with_projections(
+    monkeypatch,
+):
+    backend = get_backend_by_name("pytorch", set_current=False)
+    monkeypatch.setattr(backend, "device", torch.device("cuda"))
+    monkeypatch.setattr(backend, "dtype", torch.float64)
+    output_projection = np.array(
+        [
+            [1.0, 0.1, 0.2, 0.3],
+            [0.2, 1.0, 0.3, 0.1],
+            [0.3, 0.2, 1.0, 0.1],
+            [0.1, 0.3, 0.2, 1.0],
+        ]
+    )
+    shared_rate = _quadratic_rate_declaration()
+
+    with _two_batch_transfer_problem(
+        (shared_rate, shared_rate),
+        output_projection=output_projection,
+    ) as (problem, _, _):
+        solution = problem()
+
+    assert solution.solve_info.success
+    assert np.isfinite(solution.cost)
 
 
 def test_pytorch_shares_compatible_duplicate_function_declarations(

@@ -18,6 +18,7 @@ from coker.backends.lowered import (
     FunctionOutputSpec,
     FunctionSignature,
 )
+from coker.backends.pytorch import PytorchBackend
 from coker.backends.pytorch.dynamics import PytorchODESolverParameters
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
@@ -99,15 +100,21 @@ class PytorchVariationalSolver(VariationalSolver):
         self.problem = problem
         self._options = options or PytorchVariationalSolverOptions()
         backend = get_backend_by_name("pytorch", set_current=False)
+        self._device = backend.device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        self._dtype = backend.dtype or torch.get_default_dtype()
+        self._backend = PytorchBackend(device=self._device, dtype=self._dtype)
+        self._backend.name = "pytorch"
         self._loss_is_trace = isinstance(problem.loss, Tracer)
         loss = (
             Function(problem.loss.tape, problem.loss, backend="pytorch")
             if self._loss_is_trace
             else problem.loss
         )
-        self._loss = backend.lower(loss)
+        self._loss = self._backend.lower(loss)
         self._quadratures = tuple(
-            backend.lower(
+            self._backend.lower(
                 Function(
                     spec.integrand.tape, spec.integrand, backend="pytorch"
                 )
@@ -140,10 +147,14 @@ class PytorchVariationalSolver(VariationalSolver):
                 "PyTorch variational solving"
             )
         self._system_quadrature_size = q_dim.flat() if q_dim else 0
-        self._device = backend.device or torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
+        self._system_x0 = self._backend.lower(problem.system.x0)
+        self._system_dxdt = self._backend.lower(problem.system.dxdt)
+        self._system_dqdt = (
+            self._backend.lower(problem.system.dqdt)
+            if self._system_quadrature_size
+            else None
         )
-        self._dtype = backend.dtype or torch.get_default_dtype()
+        self._system_y = self._backend.lower(problem.system.y)
         self._blocks = self._collect_parameter_blocks()
         self._names = tuple(
             name for block in self._blocks for name in block.names
@@ -444,15 +455,13 @@ class PytorchVariationalSolver(VariationalSolver):
     def _trace_arguments(
         self, signature, time, state, parameters, quadratures
     ):
-        system = self.problem.system
-
         def state_trajectory(_time):
             return state
 
         def output_trajectory(output_time):
-            return system.y(
-                output_time, state, None, None, parameters, None
-            ).reshape(-1)
+            return self._system_y.execute(
+                (output_time, state, None, None, parameters, None)
+            )[0].reshape(-1)
 
         arguments = {
             "t": time,
@@ -482,7 +491,7 @@ class PytorchVariationalSolver(VariationalSolver):
         parameters = self._system_parameters(values)
         if values.numel() == 0 and system.parameters is None:
             parameters = None
-        x0, z0 = system.x0(0.0, None, parameters)
+        x0, z0 = self._system_x0.execute((0.0, None, parameters))
         if z0 is not None:
             raise NotImplementedError(
                 "Algebraic states are not supported by "
@@ -514,13 +523,16 @@ class PytorchVariationalSolver(VariationalSolver):
             system_q_end = state_end + self._system_quadrature_size
             state = integrated[:state_end]
             registered_quadratures = integrated[system_q_end:]
-            dx = system.dxdt(time, state, None, None, parameters).reshape(-1)
+            dx = self._system_dxdt.execute(
+                (time, state, None, None, parameters)
+            )[0].reshape(-1)
             derivatives = [dx]
             if self._system_quadrature_size:
+                assert self._system_dqdt is not None
                 derivatives.append(
-                    system.dqdt(time, state, None, None, parameters).reshape(
-                        -1
-                    )
+                    self._system_dqdt.execute(
+                        (time, state, None, None, parameters)
+                    )[0].reshape(-1)
                 )
             if self._quadratures:
                 derivatives.append(
@@ -598,7 +610,9 @@ class PytorchVariationalSolver(VariationalSolver):
                 )
                 state = state[-1]
                 system_q = system_q[-1] if system_q is not None else None
-            return system.y(time, state, None, None, parameters, system_q)
+            return self._system_y.execute(
+                (time, state, None, None, parameters, system_q)
+            )[0]
 
         return output_native, self.problem.loss.input_spaces()[0]
 
@@ -795,8 +809,7 @@ class PytorchVariationalSolver(VariationalSolver):
         system_parameter_values = self._system_parameters(values)
         public_parameters = (
             self.problem.parameter_layout.reconstruct(
-                system_parameter_values,
-                get_backend_by_name("pytorch", set_current=False),
+                system_parameter_values, self._backend
             )
             if self.problem.parameter_layout is not None
             else {
