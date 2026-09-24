@@ -147,12 +147,32 @@ class PytorchBackend(Backend):
 
     def reconstruct_function_parameter(self, declaration, target, values):
         """Build a PyTorch-native fitted function from solver decisions."""
+        from coker.dynamics.function_parameters import FittedFunction
+        from coker.dynamics.variables import (
+            BoundedVariable,
+            UnboundedVariable,
+        )
 
         flat_values = self.to_backend_array(values).reshape(-1)
-        parameters = declaration.split_values(flat_values)
+        concrete_values = []
+        offset = 0
+        for concrete in declaration.list_concrete_parameters():
+            size = (
+                1
+                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
+                else concrete.size
+            )
+            block = flat_values[offset : offset + size]
+            concrete_values.append(
+                block[0]
+                if isinstance(concrete, (BoundedVariable, UnboundedVariable))
+                else block.reshape(concrete.shape)
+            )
+            offset += size
+        parameters = tuple(concrete_values)
         native = self.as_module(declaration.build_function(target, self.name))
         function = _FittedModule(native, parameters)
-        return declaration.build_fitted(target, function, parameters)
+        return FittedFunction(declaration, target, function, parameters)
 
     def build_optimisation_problem(
         self,
