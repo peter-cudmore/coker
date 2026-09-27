@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import weakref
 from collections import defaultdict
+from collections.abc import Sequence
 from types import FunctionType
 
 import threading
@@ -24,6 +25,7 @@ from coker.algebra.ops import (
     Noop,
     Operator,
     ReshapeOP,
+    SelectOP,
     numpy_atomics,
     numpy_composites,
 )
@@ -107,8 +109,8 @@ class TapeInner:
         self._nodes = []
         self._constants = []
         self._constant_hashmap = {}
-        self._callable_archive = []
-        self._callable_hashmap = {}
+        self._native_callable_archive = []
+        self._native_callable_hashmap = {}
         self._function_table = []
         self._function_hashmap = {}
         self.tape_ref = weakref.ref(tape_ref)
@@ -173,11 +175,12 @@ class TapeInner:
             self._nodes.append((self.CONSTANT_REF, value_idx))
         elif op == OP.FUNCTION_VALUE:
             reference, *captures = args
-            if isinstance(reference, _FunctionReference):
+            if isinstance(reference, _FunctionValueBinding):
                 self._nodes.append(
                     (
                         self.FUNCTION_TABLE_REF,
                         reference._archive_index,
+                        reference.function_space,
                         *captures,
                     )
                 )
@@ -209,12 +212,14 @@ class TapeInner:
                 self.tape_ref(), archive_index
             )
         if op == self.FUNCTION_TABLE_REF:
-            table_index, *captures = args
-            return (
-                OP.FUNCTION_VALUE,
-                _FunctionReference(self.tape_ref(), table_index),
-                *captures,
+            table_index, function_space, *captures = args
+            binding = _FunctionValueBinding(
+                self.tape_ref(),
+                table_index,
+                function_space,
+                tuple(captures),
             )
+            return OP.FUNCTION_VALUE, binding, *captures
         return op, *args
 
     def __len__(self):
@@ -222,7 +227,7 @@ class TapeInner:
 
 
 @dataclasses.dataclass
-class _CallableArchiveEntry:
+class _NativeCallableArchiveEntry:
     """Native callable and its input/output declaration stored by a tape."""
 
     callable_value: Callable
@@ -233,11 +238,9 @@ class _CallableArchiveEntry:
 
 @dataclasses.dataclass
 class _FunctionTableEntry:
-    """A typed target and its callable declaration stored by a tape."""
+    """A pure Coker function target stored by a tape."""
 
     target: Any
-    capture_dependencies: tuple["Tracer", ...]
-    function_space: FunctionSpace
 
 
 class CallableReference:
@@ -248,8 +251,8 @@ class CallableReference:
         self._archive_index = archive_index
 
     @property
-    def _entry(self) -> _CallableArchiveEntry:
-        return self._tape().nodes._callable_archive[self._archive_index]
+    def _entry(self) -> _NativeCallableArchiveEntry:
+        return self._tape().nodes._native_callable_archive[self._archive_index]
 
     @property
     def is_function_reference(self) -> bool:
@@ -278,11 +281,19 @@ class CallableReference:
         return self._entry.callable_value(*args)
 
 
-class _FunctionReference(CallableReference):
-    """A typed function-table target with values bound at its use site."""
+class _FunctionValueBinding(CallableReference):
+    """A pure function-table target with binding data at one value site."""
 
-    def __init__(self, tape: Tape, table_index: int):
+    def __init__(
+        self,
+        tape: Tape,
+        table_index: int,
+        function_space: FunctionSpace,
+        capture_dependencies: tuple[Tracer, ...],
+    ) -> None:
         super().__init__(tape, table_index)
+        self._function_space = function_space
+        self._capture_dependencies = capture_dependencies
 
     @property
     def _entry(self) -> _FunctionTableEntry:
@@ -299,7 +310,11 @@ class _FunctionReference(CallableReference):
 
     @property
     def capture_dependencies(self) -> tuple[Tracer, ...]:
-        return self._entry.capture_dependencies
+        return self._capture_dependencies
+
+    @property
+    def function_space(self) -> FunctionSpace:
+        return self._function_space
 
     @property
     def result_dimension(
@@ -353,7 +368,7 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def _create_callable_reference(
+    def _create_native_callable_reference(
         self,
         callable_value: Callable[..., Any],
         function_space: FunctionSpace,
@@ -373,12 +388,12 @@ class Tape:
             (result_dimension,) = output_dimensions
 
         key = (id(callable_value), name)
-        archive_index = self._inner._callable_hashmap.get(key)
+        archive_index = self._inner._native_callable_hashmap.get(key)
         if archive_index is None:
-            archive_index = len(self._inner._callable_archive)
-            self._inner._callable_hashmap[key] = archive_index
-            self._inner._callable_archive.append(
-                _CallableArchiveEntry(
+            archive_index = len(self._inner._native_callable_archive)
+            self._inner._native_callable_hashmap[key] = archive_index
+            self._inner._native_callable_archive.append(
+                _NativeCallableArchiveEntry(
                     callable_value,
                     function_space,
                     result_dimension,
@@ -390,27 +405,13 @@ class Tape:
     def _create_function_reference(
         self, function_value: Any
     ) -> CallableReference:
-        """Store a Coker function value for backend lowering.
-
-        Entries retain a pure :class:`Function` target. A
-        :class:`BoundCallable` is normalized to that target plus its explicit
-        captured tracer dependencies, so the table itself contains no binding
-        state.
-        """
+        """Create a function-value binding over a pure table target."""
         from coker.algebra.function import BoundCallable, Function
 
         if isinstance(function_value, BoundCallable):
             target = function_value.target
             captures = function_value.bound_arguments
             function_space = function_value.public_space
-            key = (
-                "bound",
-                id(target),
-                id(function_space),
-                tuple(
-                    (id(capture.tape), capture.index) for capture in captures
-                ),
-            )
         elif isinstance(function_value, Function):
             target = function_value
             captures = ()
@@ -435,7 +436,6 @@ class Tape:
                     if output_spec.shape is not None
                 ],
             )
-            key = ("function", id(target))
         else:
             raise TypeError(
                 "Function table entries require a Function or BoundCallable"
@@ -454,14 +454,77 @@ class Tape:
         if invalid_captures:
             raise DanglingTracerError(tracers=invalid_captures)
 
-        table_index = self._inner._function_hashmap.get(key)
+        table_index = self._inner._function_hashmap.get(id(target))
         if table_index is None:
             table_index = len(self._inner._function_table)
-            self._inner._function_hashmap[key] = table_index
-            self._inner._function_table.append(
-                _FunctionTableEntry(target, tuple(captures), function_space)
+            self._inner._function_hashmap[id(target)] = table_index
+            self._inner._function_table.append(_FunctionTableEntry(target))
+        return _FunctionValueBinding(
+            self,
+            table_index,
+            function_space,
+            tuple(captures),
+        )
+
+    def append_function_call(
+        self,
+        function: Any,
+        inputs: Sequence[Any],
+    ) -> list[Tracer | None]:
+        """Record a generic Coker function-table call on this tape."""
+        if len(inputs) != len(function.tape.input_indicies):
+            raise TypeError(
+                f"Expected {len(function.tape.input_indicies)} inputs, got "
+                f"{len(inputs)}"
             )
-        return _FunctionReference(self, table_index)
+
+        from coker.algebra.function import BoundCallable, Function
+
+        arguments = []
+        for value, spec in zip(inputs, function.signature.inputs):
+            expected_space = spec.space
+            if expected_space is None or isinstance(expected_space, Noop):
+                continue
+            if isinstance(value, BoundCallable):
+                arguments.append(self._create_function_reference(value))
+                continue
+            if not isinstance(value, Function):
+                arguments.append(value)
+                continue
+            if isinstance(expected_space, FunctionSpace) and (
+                len(expected_space.arguments)
+                == sum(
+                    input_spec.space is not None
+                    and not isinstance(input_spec.space, Noop)
+                    for input_spec in value.signature.inputs
+                )
+            ):
+                value = BoundCallable(value, expected_space, ())
+            arguments.append(self._create_function_reference(value))
+        reference = self._create_function_reference(function)
+        bundle = Tracer(
+            self,
+            self.append(OP.EVALUATE, reference, *arguments),
+        )
+        present_output_count = sum(
+            output.shape is not None for output in function.signature.outputs
+        )
+        result: list[Tracer | None] = []
+        output_index = 0
+        for output in function.signature.outputs:
+            if output.shape is None:
+                result.append(None)
+            else:
+                result.append(
+                    bundle
+                    if present_output_count == 1
+                    else Tracer(
+                        self,
+                        self.append(SelectOP(output_index), bundle),
+                    )
+                )
+                output_index += 1
+        return result
 
     def find_dependents(self, tracer: Tracer) -> Set[int]:
         if tracer is None or tracer is Noop():
@@ -610,6 +673,11 @@ class Tape:
                 OP.FUNCTION_VALUE,
                 reference.is_function_reference,
                 reference._archive_index,
+                (
+                    id(reference.function_space)
+                    if reference.is_function_reference
+                    else None
+                ),
                 *captures,
             )
         )

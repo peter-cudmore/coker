@@ -181,7 +181,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             arguments=list(input_spaces),
             output=output_spaces,
         )
-        native_ref = tape._create_callable_reference(
+        native_ref = tape._create_native_callable_reference(
             native,
             function_space,
             result_dimension,
@@ -297,13 +297,15 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                 outer_tape = next(
                     arg.tape for arg in args if isinstance(arg, Tracer)
                 )
-            backend_name = outer_tape.backend or self.backend
-            backend = (
-                get_backend_by_name(backend_name, set_current=False)
-                if backend_name is not None
-                else get_current_backend()
+            backend_name = (
+                outer_tape.backend
+                or self.backend
+                or get_current_backend().name
             )
-            output = backend.compose(self, args, outer_tape)
+            backend = get_backend_by_name(backend_name, set_current=False)
+            output = backend.append_native_call(self, args, outer_tape)
+            if output is None:
+                output = outer_tape.append_function_call(self, args)
         else:
             # Concrete evaluation: lower once per backend/options combination.
             lowered = self.lower()

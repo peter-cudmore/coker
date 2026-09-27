@@ -5,9 +5,10 @@ from typing import Mapping, Sequence
 
 import torch
 
+from coker.algebra.function import Function
 from coker.algebra.dimensions import ResultBundleDimension
-from coker.algebra.ops import OP
-from coker.algebra.graph import Tracer
+from coker.algebra.ops import Noop, OP
+from coker.algebra.graph import CallableReference, Tracer
 from coker.backends.evaluator import _normalize_evaluate_result
 from coker.backends.backend import get_backend_by_name
 from coker.backends.optimisation import (
@@ -168,6 +169,12 @@ class _PytorchOptimisationProblem:
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.dtype = backend.dtype or torch.get_default_dtype()
+        self._function_backend = backend.__class__(
+            device=self.device,
+            dtype=self.dtype,
+        )
+        self._function_backend.name = backend.name
+        self._lowered_function_targets: dict[Function, object] = {}
         self._warm_start_decision = None
         self._warm_start_multipliers = None
         self.last_solve_info: SolveInfo | None = None
@@ -559,6 +566,66 @@ class _PytorchOptimisationProblem:
             for i in self.tape.input_indicies
         ]
 
+    def _resolve_function_reference(self, reference: CallableReference):
+        if not reference.is_function_reference:
+            return reference
+
+        target = reference.target
+        try:
+            lowered = self._lowered_function_targets[target]
+        except KeyError:
+            lowered = self._function_backend.lower(target)
+            self._lowered_function_targets[target] = lowered
+
+        input_spaces = tuple(
+            input_spec.space for input_spec in target.signature.inputs
+        )
+        output_indices = tuple(
+            index
+            for index, output_spec in enumerate(target.signature.outputs)
+            if output_spec.shape is not None
+        )
+        input_count = sum(
+            input_space is not None and not isinstance(input_space, Noop)
+            for input_space in input_spaces
+        )
+
+        def invoke(*arguments):
+            if len(arguments) != input_count:
+                raise TypeError(
+                    f"Expected {input_count} present inputs, got "
+                    f"{len(arguments)}"
+                )
+            supplied_index = 0
+            target_inputs = []
+            for input_space in input_spaces:
+                if input_space is None:
+                    target_inputs.append(None)
+                elif isinstance(input_space, Noop):
+                    target_inputs.append(Noop())
+                else:
+                    target_inputs.append(arguments[supplied_index])
+                    supplied_index += 1
+
+            outputs = lowered.execute(target_inputs)
+            if len(output_indices) == 1:
+                return outputs[output_indices[0]]
+            return tuple(outputs[index] for index in output_indices)
+
+        return invoke
+
+    def _bind_function_reference(
+        self, reference: CallableReference, *captures
+    ):
+        target = self._resolve_function_reference(reference)
+        if not reference.is_function_reference or not captures:
+            return target
+
+        def invoke(*arguments):
+            return target(*arguments, *captures)
+
+        return invoke
+
     def _evaluate_tracers(self, tracers, decision, runtime_args):
         inputs = self._materialise_inputs(decision, runtime_args)
         workspace = {-1: None}
@@ -572,12 +639,18 @@ class _PytorchOptimisationProblem:
                 (
                     workspace[node.index]
                     if isinstance(node, Tracer) and node.tape == self.tape
-                    else _to_backend_array(node, self.device)
+                    else (
+                        node
+                        if isinstance(node, CallableReference)
+                        else _to_backend_array(node, self.device)
+                    )
                 )
                 for node in nodes
             ]
-            if op in {OP.VALUE, OP.FUNCTION_VALUE}:
-                value = args[0]
+            if op == OP.VALUE:
+                (value,) = args
+            elif op == OP.FUNCTION_VALUE:
+                value = self._bind_function_reference(*args)
             elif op in impls:
                 value = impls[op](*args)
             elif op in parameterised_impls:
@@ -589,7 +662,8 @@ class _PytorchOptimisationProblem:
             )
             workspace[index] = (
                 value
-                if isinstance(value, Tracer)
+                if op == OP.FUNCTION_VALUE
+                or isinstance(value, Tracer)
                 or isinstance(self.tape.dim[index], ResultBundleDimension)
                 else _reshape(value, self.tape.dim[index])
             )

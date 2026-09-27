@@ -114,10 +114,9 @@ class _FunctionTableResolver:
 
     def resolve(
         self,
-        reference: CallableReference,
+        target: coker.Function,
         captures: Sequence[Any],
     ) -> _CasadiFunctionTableValue:
-        target = reference.target
         try:
             native_target = self._targets[target]
         except KeyError:
@@ -392,7 +391,9 @@ def substitute(
             if op == OP.FUNCTION_VALUE:
                 reference, *captures = args
                 if reference.is_function_reference:
-                    v = function_table_resolver.resolve(reference, captures)
+                    v = function_table_resolver.resolve(
+                        reference.target, captures
+                    )
                 else:
                     v = reference
             elif op == OP.EVALUATE and isinstance(

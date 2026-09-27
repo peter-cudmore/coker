@@ -155,11 +155,12 @@ class PytorchBackend(Backend):
             self.get_evaluator().build_plan(function.tape),
         )
 
-    def compose(
+    def append_native_call(
         self, function: Function, inputs: Sequence[object], outer_tape: Tape
-    ) -> list[Tracer | None]:
+    ) -> list[Tracer | None] | None:
+        super().append_native_call(function, inputs, outer_tape)
         if not self._contains_native_callable(function):
-            return super().compose(function, inputs, outer_tape)
+            return None
 
         native_arguments = tuple(
             None if value is None or isinstance(value, Noop) else value

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 from coker.backends.evaluator import Evaluator
 from coker.backends.lowered import LoweredFunction, LoweringOptions
 from coker.algebra.graph import Tape, Tracer
-from coker.algebra.ops import Noop, OP, SelectOP
+
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
@@ -123,18 +123,13 @@ class Backend(metaclass=ABCMeta):
             function.tape, inputs, function.output, self, workspace
         )
 
-    def compose(
+    def append_native_call(
         self,
         function: Function,
         inputs: Sequence[Any],
         outer_tape: Tape,
-    ) -> list[Tracer | None]:
-        """Record a Coker function-table call on ``outer_tape``."""
-        if len(inputs) != len(function.tape.input_indicies):
-            raise TypeError(
-                f"Expected {len(function.tape.input_indicies)} inputs, got "
-                f"{len(inputs)}"
-            )
+    ) -> list[Tracer | None] | None:
+        """Append a backend-specific native call, if this backend owns it."""
         if (
             function._native_callable is not None
             and function.backend != self.name
@@ -143,55 +138,7 @@ class Backend(metaclass=ABCMeta):
                 "Cannot compose native callable for backend "
                 f"{function.backend!r} into {self.name!r} trace"
             )
-
-        from coker.algebra.function import BoundCallable, Function
-
-        arguments = []
-        for value, spec in zip(inputs, function.signature.inputs):
-            expected_space = spec.space
-            if expected_space is None or isinstance(expected_space, Noop):
-                continue
-            if isinstance(value, BoundCallable):
-                arguments.append(outer_tape._create_function_reference(value))
-                continue
-            if not isinstance(value, Function):
-                arguments.append(value)
-                continue
-            if isinstance(expected_space, FunctionSpace) and (
-                len(expected_space.arguments)
-                == sum(
-                    input_spec.space is not None
-                    and not isinstance(input_spec.space, Noop)
-                    for input_spec in value.signature.inputs
-                )
-            ):
-                value = BoundCallable(value, expected_space, ())
-            arguments.append(outer_tape._create_function_reference(value))
-        arguments = tuple(arguments)
-        reference = outer_tape._create_function_reference(function)
-        bundle = Tracer(
-            outer_tape,
-            outer_tape.append(OP.EVALUATE, reference, *arguments),
-        )
-        present_output_count = sum(
-            output.shape is not None for output in function.signature.outputs
-        )
-        result: list[Tracer | None] = []
-        output_index = 0
-        for output in function.signature.outputs:
-            if output.shape is None:
-                result.append(None)
-            else:
-                result.append(
-                    bundle
-                    if present_output_count == 1
-                    else Tracer(
-                        outer_tape,
-                        outer_tape.append(SelectOP(output_index), bundle),
-                    )
-                )
-                output_index += 1
-        return result
+        return None
 
     def evaluate_integrals(
         self,

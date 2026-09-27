@@ -193,10 +193,11 @@ class MathematicalProgram(SymbolicCallable):
         ]
         result_dimensions = self.result_shape
         result_space = VectorSpace(
-            "program_result", sum(dim.flat() for dim in result_dimensions)
+            "program_result",
+            sum(dimension.flat() for dimension in result_dimensions),
         )
         function_space = FunctionSpace("program", arguments, [result_space])
-        reference = tape._create_callable_reference(
+        reference = tape._create_native_callable_reference(
             self,
             function_space,
             function_space.output_dimensions()[0],

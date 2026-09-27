@@ -1,6 +1,6 @@
 import pytest
 
-from coker import Scalar
+from coker import Scalar, function
 from coker.backends import get_backend_by_name
 from coker.algebra.ops import OP
 from coker.algebra.graph import CallableReference
@@ -46,6 +46,21 @@ def test_native_result_bundle_preserves_absent_outputs():
     imported = get_backend_by_name("numpy").import_function(native, signature)
 
     assert imported(3.0) == (4.0, None)
+
+
+def test_native_function_rejects_cross_backend_composition():
+    signature = FunctionSignature(
+        inputs=(FunctionInputSpec("x", Scalar("x")),),
+        outputs=(FunctionOutputSpec("output", Scalar("output")),),
+    )
+    imported = get_backend_by_name("numpy").import_function(
+        lambda x: x, signature
+    )
+
+    with pytest.raises(
+        RuntimeError, match="native callable for backend 'numpy'"
+    ):
+        function([Scalar("x")], lambda x: imported(x), backend="sympy")
 
 
 def test_native_result_bundle_rejects_wrong_result_count():

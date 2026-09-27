@@ -116,7 +116,7 @@ class GenericEvaluator(Evaluator):
         super().__init__(backend)
         self._operations = operations
         self._parameterised_operations = parameterised_operations
-        self._lowered_function_targets: dict[int, Any] = {}
+        self._lowered_function_targets: dict[Function, Any] = {}
 
     def _resolve_operation(self, op) -> Callable[..., Any]:
         try:
@@ -136,12 +136,11 @@ class GenericEvaluator(Evaluator):
             return reference
 
         target = reference.target
-        target_id = id(target)
         try:
-            lowered = self._lowered_function_targets[target_id]
+            lowered = self._lowered_function_targets[target]
         except KeyError:
             lowered = self.backend.lower(target)
-            self._lowered_function_targets[target_id] = lowered
+            self._lowered_function_targets[target] = lowered
 
         input_spaces = tuple(
             input_spec.space for input_spec in target.signature.inputs

@@ -66,16 +66,15 @@ def div(num, den):
         return jnp.divide(num, den)
 
 
-class _JaxFunctionTableValue:
-    """A typed function-table target bound to evaluated capture values."""
+class _JaxFunctionTableTarget:
+    """A reusable JAX implementation for one pure function-table target."""
 
-    def __init__(self, target: Function, captures, backend) -> None:
+    def __init__(self, target: Function, backend, resolver) -> None:
         self._target = target
-        self._captures = tuple(captures)
         self._backend = backend
+        self._resolver = resolver
 
-    def __call__(self, *public_arguments):
-        supplied_arguments = (*public_arguments, *self._captures)
+    def __call__(self, *supplied_arguments):
         input_spaces = tuple(
             input_spec.space for input_spec in self._target.signature.inputs
         )
@@ -104,7 +103,11 @@ class _JaxFunctionTableValue:
         )
         workspace = {}
         _evaluate_jax_tape(
-            self._target.tape, target_inputs, self._backend, workspace
+            self._target.tape,
+            target_inputs,
+            self._backend,
+            workspace,
+            function_table_resolver=self._resolver,
         )
         values = tuple(
             workspace[output.index]
@@ -118,6 +121,51 @@ class _JaxFunctionTableValue:
         return values[0] if len(values) == 1 else values
 
 
+class _JaxFunctionTableValue:
+    """A reusable target bound to evaluated function-value captures."""
+
+    def __init__(self, target, captures) -> None:
+        self._target = target
+        self._captures = tuple(captures)
+
+    def __call__(self, *public_arguments):
+        return self._target(*public_arguments, *self._captures)
+
+
+class _JaxFunctionTableResolver:
+    """Cache native targets by pure table target, not binding data."""
+
+    def __init__(self, backend) -> None:
+        self._backend = backend
+        self._targets: dict[Function, _JaxFunctionTableTarget] = {}
+
+    def resolve(self, target: Function, captures):
+        try:
+            native_target = self._targets[target]
+        except KeyError:
+            native_target = _JaxFunctionTableTarget(
+                target, self._backend, self
+            )
+            self._targets[target] = native_target
+        return _JaxFunctionTableValue(native_target, captures)
+
+
+_FUNCTION_TABLE_RESOLVER_KEY = object()
+
+
+def _get_function_table_resolver(
+    workspace, backend, resolver: _JaxFunctionTableResolver | None = None
+) -> _JaxFunctionTableResolver:
+    if resolver is not None:
+        return resolver
+    try:
+        return workspace[_FUNCTION_TABLE_RESOLVER_KEY]
+    except KeyError:
+        resolver = _JaxFunctionTableResolver(backend)
+        workspace[_FUNCTION_TABLE_RESOLVER_KEY] = resolver
+        return resolver
+
+
 def _is_jax_callable(value) -> bool:
     return isinstance(
         value,
@@ -125,8 +173,18 @@ def _is_jax_callable(value) -> bool:
     )
 
 
-def _evaluate_jax_tape(tape, inputs, backend, workspace) -> None:
+def _evaluate_jax_tape(
+    tape,
+    inputs,
+    backend,
+    workspace,
+    *,
+    function_table_resolver: _JaxFunctionTableResolver | None = None,
+) -> None:
     """Evaluate a tape while resolving typed function-table entries."""
+    function_table_resolver = _get_function_table_resolver(
+        workspace, backend, function_table_resolver
+    )
     workspace[-1] = None
     for index, value in zip(tape.input_indicies, inputs):
         workspace[index] = (
@@ -158,7 +216,7 @@ def _evaluate_jax_tape(tape, inputs, backend, workspace) -> None:
         elif op == OP.FUNCTION_VALUE:
             reference, *captures = arguments
             value = (
-                _JaxFunctionTableValue(reference.target, captures, backend)
+                function_table_resolver.resolve(reference.target, captures)
                 if reference.is_function_reference
                 else reference
             )
@@ -236,9 +294,9 @@ def basis(i, n):
 
 class JaxLoweredFunction(LoweredFunction):
     def __init__(self, backend: JaxBackend, function) -> None:
-
         self._backend = backend
         self._function = function
+        self._function_table_resolver = _JaxFunctionTableResolver(backend)
 
     @property
     def backend_name(self) -> str:
@@ -257,7 +315,22 @@ class JaxLoweredFunction(LoweredFunction):
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
-        return tuple(self._backend.evaluate(self._function, inputs))
+        workspace = {}
+        _evaluate_jax_tape(
+            self._function.tape,
+            inputs,
+            self._backend,
+            workspace,
+            function_table_resolver=self._function_table_resolver,
+        )
+        return tuple(
+            _cast_outputs(
+                self._function.output,
+                self._function.tape,
+                workspace,
+                self._backend,
+            )
+        )
 
 
 class JaxBackend(Backend):
@@ -379,9 +452,9 @@ class JaxBackend(Backend):
                 isinstance(callable_value, CallableReference)
                 and callable_value.is_function_reference
             ):
-                return _JaxFunctionTableValue(callable_value.target, (), self)(
-                    *arguments
-                )
+                return _JaxFunctionTableResolver(self).resolve(
+                    callable_value.target, ()
+                )(*arguments)
 
         try:
             result = impls[op](*args)
