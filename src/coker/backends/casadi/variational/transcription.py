@@ -137,11 +137,38 @@ class CasadiVariationalSolver(VariationalSolver):
         )
         solve_info = solve_info_from_casadi_stats(self._solver.stats())
         if not solve_info.success:
-            raise SolveFailure(
-                "CasADi variational solve failed with status "
-                f"{solve_info.return_status}",
-                solve_info,
+            objective = float(result["f"])
+            constraints = np.asarray(result["g"], dtype=float).reshape(-1)
+            decision_variables = np.asarray(result["x"], dtype=float).reshape(
+                -1
             )
+            lower_bounds = np.asarray(
+                solver_arguments["lbg"], dtype=float
+            ).reshape(-1)
+            upper_bounds = np.asarray(
+                solver_arguments["ubg"], dtype=float
+            ).reshape(-1)
+            maximum_constraint_violation = max(
+                0.0,
+                float(np.max(lower_bounds - constraints, initial=0.0)),
+                float(np.max(constraints - upper_bounds, initial=0.0)),
+            )
+            accepts_small_search_direction = (
+                solve_info.return_status
+                == "Search_Direction_Becomes_Too_Small"
+                and math.isfinite(objective)
+                and np.isfinite(constraints).all()
+                and np.isfinite(decision_variables).all()
+                and maximum_constraint_violation
+                <= self.problem.transcription_options.absolute_tolerance
+            )
+            if not accepts_small_search_direction:
+                raise SolveFailure(
+                    "CasADi variational solve failed with status "
+                    f"{solve_info.return_status}",
+                    solve_info,
+                )
+            solve_info = replace(solve_info, success=True)
         if self._warm_start:
             self._last_primal = result["x"]
             self._last_lam_x = result["lam_x"]
