@@ -5,6 +5,7 @@ from functools import reduce
 from operator import mul
 from typing import List, Optional, Tuple, Union
 from coker.interfaces import FunctionSignatureValue
+from coker.algebra.exceptions import InvalidArgument, InvalidShape
 
 
 @dataclasses.dataclass
@@ -147,15 +148,12 @@ class Dimension:
 
 @dataclasses.dataclass(frozen=True)
 class ResultBundleDimension:
-    """Ordered dimensions returned by one multi-output native call."""
+    """Ordered dimensions returned by one multi-output callable."""
 
-    outputs: tuple[Dimension | FunctionSpace | None, ...]
+    outputs: tuple[Dimension | FunctionSpace, ...]
 
     def select(self, index: int) -> Dimension | FunctionSpace:
-        output = self.outputs[index]
-        if output is None:
-            raise ValueError(f"Cannot select absent result {index}")
-        return output
+        return self.outputs[index]
 
 
 @dataclasses.dataclass
@@ -164,12 +162,10 @@ class FunctionSpace:
 
     Attributes:
         name (str): The name of the function space.
-        arguments (List[Scalar | VectorSpace]): A list specifying the
-            input arguments of the function, where each argument can be
-            either a scalar or a vector space.
-        output (List[Scalar | VectorSpace]): A list specifying the
-            output of the function, where each element can be either a
-            scalar or a vector space.
+        arguments (List[Scalar | VectorSpace | FunctionSpace]): A list
+            specifying the input arguments.
+        output (List[Scalar | VectorSpace | FunctionSpace]): A list
+            specifying ordered outputs.
         signature (Optional[Tuple[int]]): Optional list of integers
             denoting the degree of differentiability for each argument.
             If not provided, the default is smooth (infinitely
@@ -178,7 +174,7 @@ class FunctionSpace:
     """
 
     name: str
-    arguments: List[Scalar | VectorSpace]
+    arguments: List[Scalar | VectorSpace | FunctionSpace]
     output: List[Scalar | VectorSpace | FunctionSpace]
     signature: Optional[Tuple[int]] = None
     """Optional list of integers specifying the degree of
@@ -186,6 +182,12 @@ class FunctionSpace:
 
     Defaults to infinite (that is, smooth functions).
     """
+
+    def __post_init__(self) -> None:
+        if self.output is None or any(
+            output is None for output in self.output
+        ):
+            raise TypeError("FunctionSpace output spaces must not be None")
 
     def input_dimensions(self):
         return [
@@ -201,9 +203,7 @@ class FunctionSpace:
             for arg in self.arguments
         ]
 
-    def output_dimensions(self):
-        if self.output is None:
-            return (None,)
+    def output_dimensions(self) -> list[Dimension | FunctionSpace]:
         return [
             (
                 out
@@ -217,34 +217,119 @@ class FunctionSpace:
             for out in self.output
         ]
 
+    def matches_signature(self, other: FunctionSpace) -> bool:
+        """Return whether another function space has the same I/O shapes."""
+        return (
+            isinstance(other, FunctionSpace)
+            and tuple(self.input_dimensions())
+            == tuple(other.input_dimensions())
+            and tuple(self.output_dimensions())
+            == tuple(other.output_dimensions())
+        )
+
+    def validate_argument(
+        self,
+        argument_dimension: Dimension | FunctionSpace,
+        position: int,
+    ) -> None:
+        """Validate one argument against this callable's declared input."""
+        if type(position) is not int:
+            raise InvalidArgument("argument position must be an integer")
+        input_dimensions = self.input_dimensions()
+        if position < 0 or position >= len(input_dimensions):
+            raise InvalidArgument(
+                f"argument position {position} is outside the callable "
+                f"signature with {len(input_dimensions)} arguments"
+            )
+        actual_dimension = argument_dimension
+        expected_dimension = input_dimensions[position]
+        if isinstance(actual_dimension, FunctionSpace) and isinstance(
+            expected_dimension, FunctionSpace
+        ):
+            dimensions_match = actual_dimension.matches_signature(
+                expected_dimension
+            )
+        elif isinstance(actual_dimension, Dimension) and isinstance(
+            expected_dimension, Dimension
+        ):
+            dimensions_match = actual_dimension == expected_dimension
+        else:
+            dimensions_match = False
+        if not dimensions_match:
+            raise InvalidShape(
+                f"argument {position} has dimension {actual_dimension!r}, "
+                f"expected {expected_dimension!r}"
+            )
+
+    def bind_argument(
+        self,
+        argument_dimension: Dimension | FunctionSpace,
+        position: int,
+    ) -> FunctionSpace:
+        """Return this callable signature with one argument bound."""
+        try:
+            self.validate_argument(argument_dimension, position)
+        except InvalidShape as exc:
+            raise InvalidShape(f"BIND {exc}") from exc
+        except InvalidArgument as exc:
+            raise InvalidArgument(f"BIND {exc}") from exc
+        signature = self.signature
+        if signature is not None:
+            signature = signature[:position] + signature[position + 1 :]
+        return FunctionSpace(
+            self.name,
+            arguments=[
+                argument
+                for index, argument in enumerate(self.arguments)
+                if index != position
+            ],
+            output=list(self.output),
+            signature=signature,
+        )
+
     def __contains__(self, value) -> bool:
         """Return whether a Coker function has this input/output signature."""
         if not isinstance(value, FunctionSignatureValue):
             return False
         return tuple(value.input_shape()) == tuple(
             self.input_dimensions()
-        ) and tuple(value.output_shape()) == tuple(self.output_dimensions())
+        ) and tuple(
+            dimension
+            for dimension in value.output_shape()
+            if dimension is not None
+        ) == tuple(
+            self.output_dimensions()
+        )
+
+    def evaluation_dimension(
+        self,
+    ) -> Dimension | FunctionSpace | ResultBundleDimension:
+        """Return the graph result shape declared by this callable."""
+        output_dimensions = self.output_dimensions()
+        return (
+            output_dimensions[0]
+            if len(output_dimensions) == 1
+            else ResultBundleDimension(tuple(output_dimensions))
+        )
 
     def is_scalar(self):
         output_dimensions = self.output_dimensions()
-        return len(output_dimensions) == 1 and output_dimensions[0].is_scalar()
-
-    @staticmethod
-    def create_scalar_function_space(name: str, continuity_index=None):
-        return FunctionSpace(
-            name=name,
-            arguments=[Dimension.scalar()],
-            output=[Dimension.scalar()],
-            continuity_index=continuity_index,
+        return (
+            len(output_dimensions) == 1
+            and isinstance(output_dimensions[0], Dimension)
+            and output_dimensions[0].is_scalar()
         )
 
-
-@dataclasses.dataclass(frozen=True)
-class FunctionValueDimension:
-    """Complete declaration retained by a function-table value."""
-
-    function_space: FunctionSpace
-    result_dimension: Dimension | FunctionSpace | ResultBundleDimension
+    @staticmethod
+    def create_scalar_function_space(
+        name: str, continuity_index: Optional[Tuple[int]] = None
+    ):
+        return FunctionSpace(
+            name=name,
+            arguments=[Scalar(f"{name}_input")],
+            output=[Scalar(f"{name}_output")],
+            signature=continuity_index,
+        )
 
 
 @dataclasses.dataclass

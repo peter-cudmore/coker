@@ -1,12 +1,11 @@
 import enum
-from typing import Any, Callable, Dict, Sequence
+from typing import Any, Callable, Dict
 
 import numpy as np
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
-    FunctionValueDimension,
     ResultBundleDimension,
 )
 from typing_extensions import final
@@ -39,9 +38,10 @@ class OP(enum.Enum):
     ARCTAN2 = 23
     LESS_THAN = 24
     LESS_EQUAL = 25
-    FUNCTION_VALUE = 26
-    EVALUATE = 27
-    LOG = 28
+    FUNCTION = 26
+    BIND = 27
+    EVALUATE = 28
+    LOG = 29
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -62,13 +62,15 @@ class Noop:
         return None
 
     def __new__(cls, *args, **kwargs):
-        if not hasattr(cls, "instance"):
+        if "instance" not in cls.__dict__:
             cls.instance = super().__new__(cls)
         return cls.instance
 
     @staticmethod
     def cast_to_function_space(arguments=None):
-        return FunctionSpace("noop", arguments, None)
+        return FunctionSpace(
+            "noop", [] if arguments is None else arguments, []
+        )
 
 
 class Operator:
@@ -154,16 +156,6 @@ def normalize_evaluate_result(
                 f"{result_array.size} elements; expected {dimension.flat()}"
             )
     return value
-
-
-def invoke_callable(callable_value: Any, *arguments: Any) -> Any:
-    """Invoke a callable, expanding explicit bound arguments first."""
-    from coker.algebra.function import BoundCallable
-
-    if isinstance(callable_value, BoundCallable):
-        target, expanded_arguments = callable_value.expand_call(*arguments)
-        return target(*expanded_arguments)
-    return callable_value(*arguments)
 
 
 class ConcatenateOP(Operator):
@@ -272,42 +264,32 @@ def register_shape(*ops: OP):
     return inner
 
 
-def validate_evaluate_inputs(
-    function_sig: FunctionSpace, args: Sequence[Dimension]
-) -> None:
-    if len(args) != len(function_sig.arguments):
-        raise InvalidShape(
-            f"Expected {len(function_sig.arguments)} arguments, got "
-            f"{len(args)}"
-        )
-
-    for i, (arg_dim, input_dim) in enumerate(
-        zip(args, function_sig.input_dimensions())
-    ):
-        if arg_dim != input_dim:
-            raise InvalidShape(
-                f"Argument {i} has dimension {arg_dim.dim}, expected "
-                f"{input_dim.dim}"
-            )
+@register_shape(OP.BIND)
+def bind_shape(
+    function_value: FunctionSpace,
+    argument: Dimension | FunctionSpace,
+    position: int,
+) -> FunctionSpace:
+    if not isinstance(function_value, FunctionSpace):
+        raise InvalidShape("BIND requires a function value")
+    return function_value.bind_argument(argument, position)
 
 
 @register_shape(OP.EVALUATE)
 def evaluate_shape(
-    function_value: FunctionSpace | FunctionValueDimension,
-    *args: Dimension,
-) -> Dimension | FunctionSpace | ResultBundleDimension:
-    if isinstance(function_value, FunctionValueDimension):
-        validate_evaluate_inputs(function_value.function_space, args)
-        return function_value.result_dimension
-
-    validate_evaluate_inputs(function_value, args)
-    try:
-        (result_dimension,) = function_value.output_dimensions()
-    except ValueError as ex:
+    function_value: FunctionSpace,
+    *args: Dimension | FunctionSpace,
+) -> Dimension | FunctionSpace | ResultBundleDimension | None:
+    if not isinstance(function_value, FunctionSpace):
+        raise InvalidShape("EVALUATE requires a function value")
+    if len(args) != len(function_value.arguments):
         raise InvalidShape(
-            "EVALUATE requires a function with one declared result"
-        ) from ex
-    return result_dimension
+            f"Expected {len(function_value.arguments)} arguments, got "
+            f"{len(args)}"
+        )
+    for index, argument in enumerate(args):
+        function_value.validate_argument(argument, index)
+    return function_value.evaluation_dimension()
 
 
 __componentwise_ops = [

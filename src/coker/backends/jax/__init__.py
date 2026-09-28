@@ -6,21 +6,34 @@ from typing import Any, List
 import numpy as np
 import jax.numpy as jnp
 
-from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.function import Function
 from coker.algebra import Dimension, OP
-from coker.algebra.graph import Tracer
+from coker.algebra.dimensions import (
+    FunctionSpace,
+    ResultBundleDimension,
+    Scalar,
+    VectorSpace,
+)
+from coker.algebra.graph import FunctionSymbol, Tracer
 from coker.algebra.ops import (
     ConcatenateOP,
+    Noop,
     NormOP,
     ReshapeOP,
     SelectOP,
-    invoke_callable,
 )
+from coker.backends.evaluator import (
+    FunctionSymbolResolver,
+    _cast_outputs,
+    bind_callable,
+)
+from coker.interfaces import SymbolicCallable
 
 from coker.backends.backend import (
     ArrayLike,
     Backend,
     Evaluator,
+    import_native_function,
     register_backend,
     split_function_parameter_values,
 )
@@ -56,6 +69,144 @@ def div(num, den):
         return jnp.divide(num, den)
 
 
+class _JaxFunctionTableTarget:
+    """Execute a Coker target without crossing JAX's public output boundary."""
+
+    def __init__(self, target: Function, backend, resolver) -> None:
+        self._target = target
+        self._backend = backend
+        self._resolver = resolver
+
+    def __call__(self, *supplied_arguments):
+        input_spaces = tuple(
+            input_spec.space for input_spec in self._target.signature.inputs
+        )
+        present_input_count = sum(
+            input_space is not None and not isinstance(input_space, Noop)
+            for input_space in input_spaces
+        )
+        if len(supplied_arguments) != present_input_count:
+            raise TypeError(
+                f"Expected {present_input_count} present inputs, got "
+                f"{len(supplied_arguments)}"
+            )
+
+        arguments = iter(supplied_arguments)
+        target_inputs = tuple(
+            (
+                None
+                if input_space is None
+                else (
+                    Noop()
+                    if isinstance(input_space, Noop)
+                    else next(arguments)
+                )
+            )
+            for input_space in input_spaces
+        )
+        workspace = {}
+        _evaluate_jax_tape(
+            self._target.tape,
+            target_inputs,
+            self._backend,
+            workspace,
+            function_symbol_resolver=self._resolver,
+        )
+        values = tuple(
+            workspace[output.index]
+            for output, output_spec in zip(
+                self._target.output, self._target.signature.outputs
+            )
+            if output_spec.shape is not None
+        )
+        if not values:
+            return ()
+        return values[0] if len(values) == 1 else values
+
+
+class _JaxFunctionSymbolResolver(FunctionSymbolResolver):
+    """Resolve Coker targets without coercing JAX tracer results."""
+
+    def resolve(self, symbol: FunctionSymbol):
+        target = symbol.target
+        if not isinstance(target, Function):
+            return super().resolve(symbol)
+        try:
+            return self._lowered_function_targets[target]
+        except KeyError:
+            native_target = _JaxFunctionTableTarget(
+                target, self._backend, self
+            )
+            self._lowered_function_targets[target] = native_target
+            return native_target
+
+
+def _is_jax_callable(value) -> bool:
+    return isinstance(value, (SymbolicCallable, FunctionSymbol)) or callable(
+        value
+    )
+
+
+def _evaluate_jax_tape(
+    tape,
+    inputs,
+    backend,
+    workspace,
+    *,
+    function_symbol_resolver: FunctionSymbolResolver | None = None,
+) -> None:
+    """Evaluate a tape while resolving typed function symbols."""
+    function_symbol_resolver = (
+        _JaxFunctionSymbolResolver(backend)
+        if function_symbol_resolver is None
+        else function_symbol_resolver
+    )
+    workspace[-1] = None
+    for index, value in zip(tape.input_indicies, inputs):
+        workspace[index] = (
+            value
+            if value is None
+            or isinstance(value, Noop)
+            or _is_jax_callable(value)
+            else backend.to_backend_array(value)
+        )
+
+    for index in range(len(tape.nodes)):
+        if index in workspace:
+            continue
+
+        op, *nodes = tape.nodes[index]
+        arguments = []
+        for argument_index, node in enumerate(nodes):
+            if op == OP.BIND and argument_index == 2:
+                arguments.append(node)
+            elif isinstance(node, Tracer):
+                arguments.append(
+                    workspace[node.index] if node.tape is tape else node
+                )
+            elif _is_jax_callable(node):
+                arguments.append(node)
+            else:
+                arguments.append(backend.to_backend_array(node))
+
+        if op == OP.VALUE:
+            (value,) = arguments
+        elif op == OP.FUNCTION:
+            value = function_symbol_resolver.resolve(arguments[0])
+        elif op == OP.BIND:
+            value = bind_callable(*arguments)
+        else:
+            value = backend.call(op, *arguments)
+
+        workspace[index] = (
+            value
+            if op in {OP.FUNCTION, OP.BIND}
+            or _is_jax_callable(value)
+            or isinstance(tape.dim[index], ResultBundleDimension)
+            else backend.reshape(value, tape.dim[index])
+        )
+
+
 impls = {
     OP.ADD: jnp.add,
     OP.SUB: jnp.subtract,
@@ -82,9 +233,7 @@ impls = {
     OP.EQUAL: jnp.equal,
     OP.CASE: lambda c, t, f: t if c else f,
     OP.LOG: jnp.log,
-    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
+    OP.EVALUATE: lambda callable_value, *args: callable_value(*args),
 }
 
 parameterised_impls = {
@@ -116,9 +265,9 @@ def basis(i, n):
 
 class JaxLoweredFunction(LoweredFunction):
     def __init__(self, backend: JaxBackend, function) -> None:
-
         self._backend = backend
         self._function = function
+        self._function_symbol_resolver = _JaxFunctionSymbolResolver(backend)
 
     @property
     def backend_name(self) -> str:
@@ -137,23 +286,80 @@ class JaxLoweredFunction(LoweredFunction):
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
-        return tuple(self._backend.evaluate(self._function, inputs))
+        workspace = {}
+        _evaluate_jax_tape(
+            self._function.tape,
+            inputs,
+            self._backend,
+            workspace,
+            function_symbol_resolver=self._function_symbol_resolver,
+        )
+        return tuple(
+            _cast_outputs(
+                self._function.output,
+                self._function.tape,
+                workspace,
+                self._backend,
+            )
+        )
 
 
 class JaxBackend(Backend):
-    def fit_function_parameter(self, declaration, target, values):
+    def _materialize_parameter(self, target, declaration, blocks):
+        flat_values = self._concatenate_parameter_blocks(blocks)
+        if isinstance(target, FunctionSpace):
+            return self._fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return jnp.reshape(flat_values, target.dimension)
+        if isinstance(target, Scalar):
+            if flat_values.size != 1:
+                raise ValueError("scalar parameter must have one solver value")
+            return flat_values[0]
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
+
+    @staticmethod
+    def _concatenate_parameter_blocks(blocks):
+        if not blocks:
+            raise ValueError("parameter blocks must not be empty")
+        return jnp.concatenate(
+            tuple(jnp.reshape(jnp.asarray(block), (-1,)) for block in blocks)
+        )
+
+    def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters.function_parameters import FittedFunction
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
         parameters = split_function_parameter_values(declaration, flat_values)
+        target = declaration.validate_target(target)
+        parameterization = declaration.build_function(target, self.name)
         return FittedFunction(
             declaration,
-            declaration.validate_target(target),
-            lambda argument: declaration.evaluate(parameters, argument),
+            target,
+            lambda argument: self._evaluate_parameterization(
+                parameterization, argument, parameters
+            ),
             parameters,
         )
+
+    def _evaluate_parameterization(
+        self, parameterization, argument, parameters
+    ):
+        workspace = {}
+        _evaluate_jax_tape(
+            parameterization.tape,
+            (argument, *parameters),
+            self,
+            workspace,
+        )
+        outputs = tuple(
+            workspace[output.index]
+            for output in parameterization.output
+            if output is not None
+        )
+        return outputs[0] if len(outputs) == 1 else outputs
 
     def __init__(self, *args, **kwargs):
         super(JaxBackend, self).__init__(*args, **kwargs)
@@ -194,6 +400,13 @@ class JaxBackend(Backend):
             f"Don't know how to resize {arg.__class__.__name__}"
         )
 
+    def evaluate(
+        self, function: Function, inputs: Sequence[Any]
+    ) -> list[Any | None]:
+        workspace = {}
+        _evaluate_jax_tape(function.tape, inputs, self, workspace)
+        return _cast_outputs(function.output, function.tape, workspace, self)
+
     def call(self, op, *args) -> ArrayLike:
 
         try:
@@ -222,7 +435,7 @@ class JaxBackend(Backend):
         name: str | None = None,
     ) -> Function:
         """Import a JAX-compatible callable as a Coker function."""
-        return create_function_from_native(
+        return import_native_function(
             implementation, signature, backend=self.name, name=name
         )
 

@@ -1,12 +1,11 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import casadi as ca
 import numpy as np
 
 import coker
-from coker.algebra.function import BoundCallable
-from coker.algebra.graph import CallableReference, Tape, Tracer
+from coker.algebra.graph import FunctionSymbol, Tape, Tracer
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,
@@ -14,9 +13,156 @@ from coker.algebra.ops import (
     NormOP,
     ReshapeOP,
     SelectOP,
-    normalize_evaluate_result,
 )
-from coker.algebra.dimensions import FunctionSpace
+from coker.algebra.dimensions import FunctionSpace, ResultBundleDimension
+from coker.backends.evaluator import _NativeCallable, bind_callable
+
+
+class _CasadiFunctionTableTarget:
+    """A Coker target lowered to a CasADi-native callable."""
+
+    def __init__(
+        self,
+        target: Callable[..., Any],
+        function: coker.Function,
+    ) -> None:
+        self._target = target
+        self._function = function
+
+    def __call__(self, *present_arguments: Any) -> Any:
+        arguments = iter(present_arguments)
+        target_arguments = tuple(
+            (
+                None
+                if input_spec.space is None
+                else (
+                    Noop()
+                    if isinstance(input_spec.space, Noop)
+                    else next(arguments)
+                )
+            )
+            for input_spec in self._function.signature.inputs
+        )
+        if isinstance(self._target, ca.Function):
+            result = self._target(
+                *(
+                    argument
+                    for index, argument in zip(
+                        self._function.tape.input_indicies, target_arguments
+                    )
+                    if index >= 0
+                )
+            )
+        else:
+            result = self._target(*target_arguments)
+
+        output_specs = self._function.signature.outputs
+        if isinstance(self._target, ca.Function):
+            present_count = sum(
+                output_spec.shape is not None for output_spec in output_specs
+            )
+            values = (result,) if present_count == 1 else tuple(result)
+            values = iter(values)
+            result = tuple(
+                (None if output_spec.shape is None else next(values))
+                for output_spec in output_specs
+            )
+        else:
+            result = (result,) if self._function.is_single else tuple(result)
+        present_results = tuple(
+            value
+            for value, output_spec in zip(result, output_specs)
+            if output_spec.shape is not None
+        )
+        return (
+            present_results[0]
+            if len(present_results) == 1
+            else present_results
+        )
+
+
+class _PartiallyLoweredFunctionTarget:
+    """Evaluate targets whose FunctionSpace inputs cannot enter ca.Function."""
+
+    def __init__(
+        self, target: coker.Function, resolver: "_FunctionTableResolver"
+    ) -> None:
+        self._target = target
+        self._resolver = resolver
+
+    def __call__(self, *arguments: Any) -> Any:
+        workspace = {
+            index: argument
+            for index, argument in zip(
+                self._target.tape.input_indicies, arguments
+            )
+            if index >= 0
+        }
+        result = substitute(
+            self._target.output,
+            workspace,
+            function_table_resolver=self._resolver,
+        )
+        if self._target.is_single:
+            return result[0]
+        return result
+
+
+class _FunctionTableResolver:
+    """Lower Coker targets once and resolve imported native callables."""
+
+    def __init__(self) -> None:
+        self._targets: dict[coker.Function, Callable[..., Any]] = {}
+
+    def resolve(self, symbol: FunctionSymbol) -> Callable[..., Any]:
+        target = symbol.target
+        if not isinstance(target, coker.Function):
+            return _NativeCallable(
+                target,
+                ResultBundleDimension(
+                    tuple(symbol.function_space.output_dimensions())
+                ),
+            )
+        try:
+            return self._targets[target]
+        except KeyError:
+            if any(
+                isinstance(space, FunctionSpace)
+                for space in target.input_shape()
+            ):
+                native_target = _PartiallyLoweredFunctionTarget(target, self)
+            else:
+                inputs, outputs = lower(
+                    target.tape,
+                    target.output,
+                    function_table_resolver=self,
+                )
+                native_target = ca.Function(
+                    f"function_table_{len(self._targets)}",
+                    inputs,
+                    [output for output in outputs if output is not None],
+                )
+            resolved = _CasadiFunctionTableTarget(native_target, target)
+            self._targets[target] = resolved
+            return resolved
+
+
+_FUNCTION_TABLE_RESOLVER_KEY = -3
+
+
+def _get_function_table_resolver(
+    workspace: dict[int, Any],
+    resolver: _FunctionTableResolver | None = None,
+) -> _FunctionTableResolver:
+    if resolver is not None:
+        return resolver
+    try:
+        return workspace[_FUNCTION_TABLE_RESOLVER_KEY]
+    except KeyError:
+        resolver = _FunctionTableResolver()
+        workspace[_FUNCTION_TABLE_RESOLVER_KEY] = resolver
+        return resolver
+
 
 impls = {
     OP.ADD: lambda x, y: x + y,
@@ -44,36 +190,8 @@ impls = {
     OP.LESS_THAN: ca.lt,
     OP.CASE: lambda c, t, f: ca.if_else(c, t, f),
     OP.LOG: ca.log,
-    OP.EVALUATE: lambda callable_value, *args: casadi_eval(
-        callable_value, *args
-    ),
+    OP.EVALUATE: lambda callable_value, *args: callable_value(*args),
 }
-
-
-def casadi_eval(function, *args):
-    if isinstance(function, BoundCallable):
-        target, expanded_arguments = function.expand_call(*args)
-        return casadi_eval(target, *expanded_arguments)
-    # Native references and solver proxies are invoked directly.
-    if not isinstance(function, coker.Function):
-        return function(*args)
-    if function.backend not in (None, "casadi"):
-        raise RuntimeError(
-            "Cannot lower CasADi OP.EVALUATE node for "
-            f"backend {function.backend!r}; node callable "
-            f"{function!r} belongs to backend {function.backend!r}"
-        )
-    # coker.Function: evaluate symbolically via substitute, keeping CasADi
-    # types (MX/DM) throughout rather than converting to Python scalars.
-    workspace = {
-        idx: arg
-        for idx, arg in zip(function.tape.input_indicies, args)
-        if idx >= 0
-    }
-    result = substitute(function.output, workspace)
-    if function.is_single:
-        return result[0]
-    return result
 
 
 def concat(*args: ca.MX, axis=0):
@@ -211,34 +329,50 @@ def extract_symbols(arg: ca.MX):
 
 
 def substitute(
-    output: Sequence[Tracer | None], workspace: dict[int, Any]
+    output: Sequence[Tracer | None],
+    workspace: dict[int, Any],
+    *,
+    function_table_resolver: _FunctionTableResolver | None = None,
 ) -> list[Any | None]:
+    function_table_resolver = _get_function_table_resolver(
+        workspace, function_table_resolver
+    )
+
     def get_node(node: Any) -> Any:
-        if isinstance(node, CallableReference):
+        if isinstance(node, FunctionSymbol):
             return node
-        if node is None or node.index == Tape.NONE:
+        if node is None or node is Noop():
+            return node
+        if not isinstance(node, Tracer):
+            return node
+        if node.index == Tape.NONE:
             return None
-        if node is Noop():
-            return node
         if node.index in workspace:
             return workspace[node.index]
 
         if node.is_constant():
             v = to_casadi(node.value())
         else:
-            op, *args = node.value()
-            args = [get_node(arg) for arg in args]
-            if op == OP.FUNCTION_VALUE:
-                (v,) = args
+            op, *nodes = node.value()
+            args = [
+                (
+                    argument
+                    if op == OP.BIND and argument_index == 2
+                    else get_node(argument)
+                )
+                for argument_index, argument in enumerate(nodes)
+            ]
+            if op == OP.FUNCTION:
+                v = function_table_resolver.resolve(args[0])
+            elif op == OP.BIND:
+                v = bind_callable(*args)
             elif op in impls:
                 try:
                     v = impls[op](*args)
-                except RuntimeError as e:
-                    raise e
+                except RuntimeError as error:
+                    raise error
             else:
                 v = call_parameterised_op(op, *args)
-            if op == OP.EVALUATE and isinstance(args[0], CallableReference):
-                v = normalize_evaluate_result(v, node.dim)
         try:
             if not node.dim.is_scalar():
                 shape = (
@@ -260,10 +394,14 @@ def lower(
     tape: Tape,
     output: Sequence[Tracer | None],
     workspace: dict[int, Any] | None = None,
+    *,
+    function_table_resolver: _FunctionTableResolver | None = None,
 ) -> tuple[list[ca.MX], list[Any | None]]:
-    workspace = {} if not workspace else workspace
+    workspace = {} if workspace is None else workspace
     inputs = dict()
     for i in tape.input_indicies:
+        if i < 0:
+            continue
         if i in workspace:
             s = extract_symbols(workspace[i])
             inputs.update({s_i.__hash__(): s_i for s_i in s})
@@ -277,5 +415,9 @@ def lower(
         workspace[i] = v
         inputs[v.__hash__()] = v
 
-    result = substitute(output, workspace)
+    result = substitute(
+        output,
+        workspace,
+        function_table_resolver=function_table_resolver,
+    )
     return list(inputs.values()), result

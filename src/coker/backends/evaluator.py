@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
+from itertools import count
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
@@ -12,8 +14,8 @@ from coker.algebra.dimensions import (
     ResultBundleDimension,
 )
 from coker.interfaces import SymbolicCallable
-from coker.algebra.graph import CallableReference, Tape, Tracer
-from coker.algebra.ops import OP, Operator, normalize_evaluate_result
+from coker.algebra.graph import FunctionSymbol, Tape, Tracer
+from coker.algebra.ops import Noop, OP, normalize_evaluate_result
 
 if TYPE_CHECKING:
     from coker.algebra.function import Function
@@ -21,19 +23,142 @@ if TYPE_CHECKING:
 
 NodeDimension = Dimension | FunctionSpace | ResultBundleDimension
 
-_SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | CallableReference
+_SYMBOLIC_CALLABLE_TYPES = SymbolicCallable | FunctionSymbol
 _SYMBOLIC_TYPES = Tracer | _SYMBOLIC_CALLABLE_TYPES
 
 
-def _normalize_evaluate_result(
-    op: OP | Operator,
-    args: Sequence[Any],
-    value: Any,
-    dimension: NodeDimension,
-) -> Any:
-    if op == OP.EVALUATE and isinstance(args[0], CallableReference):
-        return normalize_evaluate_result(value, dimension)
+def _is_symbolic_value(value: Any) -> bool:
+    return isinstance(value, _SYMBOLIC_TYPES) or callable(value)
+
+
+class _NativeCallable:
+    """Invoke an imported callable and validate its declared result."""
+
+    __slots__ = ("_target", "_result_dimension")
+
+    def __init__(self, target: Callable[..., Any], result_dimension) -> None:
+        self._target = target
+        self._result_dimension = result_dimension
+
+    def __call__(self, *arguments: Any) -> Any:
+        return normalize_evaluate_result(
+            self._target(*arguments),
+            self._result_dimension,
+        )
+
+
+class _BoundNativeCallable:
+    """Callable with one positional argument bound at a public position."""
+
+    __slots__ = ("_target", "_argument", "_position")
+
+    def __init__(
+        self, target: Callable[..., Any], argument: Any, position: int
+    ) -> None:
+        self._target = target
+        self._argument = argument
+        self._position = position
+
+    def __call__(self, *arguments: Any) -> Any:
+        position = self._position
+        return self._target(
+            *arguments[:position],
+            self._argument,
+            *arguments[position:],
+        )
+
+
+def bind_callable(
+    callable_value: Callable[..., Any], argument: Any, position: int
+) -> Callable[..., Any]:
+    """Return ``callable_value`` with one argument bound at ``position``."""
+    return _BoundNativeCallable(callable_value, argument, position)
+
+
+class FunctionSymbolResolver:
+    """Resolve immutable function symbols to backend-native callables."""
+
+    def __init__(self, backend: Backend) -> None:
+        self._backend = backend
+        self._lowered_function_targets: dict[Function, Any] = {}
+
+    @staticmethod
+    def is_native(symbol: FunctionSymbol) -> bool:
+        """Return whether a symbol resolves to a backend-native target."""
+        from coker.algebra.function import Function
+
+        return not isinstance(symbol.target, Function)
+
+    def resolve(self, symbol: FunctionSymbol) -> Callable[..., Any]:
+        target = symbol.target
+        if self.is_native(symbol):
+            return _NativeCallable(
+                target,
+                ResultBundleDimension(
+                    tuple(symbol.function_space.output_dimensions())
+                ),
+            )
+
+        try:
+            lowered = self._lowered_function_targets[target]
+        except KeyError:
+            lowered = self._backend.lower(target)
+            self._lowered_function_targets[target] = lowered
+
+        input_spaces = tuple(
+            input_spec.space for input_spec in target.signature.inputs
+        )
+        output_indices = tuple(
+            index
+            for index, output_spec in enumerate(target.signature.outputs)
+            if output_spec.shape is not None
+        )
+        input_count = sum(
+            input_space is not None and not isinstance(input_space, Noop)
+            for input_space in input_spaces
+        )
+
+        def invoke(*arguments):
+            if len(arguments) != input_count:
+                raise TypeError(
+                    f"Expected {input_count} present inputs, got "
+                    f"{len(arguments)}"
+                )
+            supplied_index = 0
+            target_inputs = []
+            for input_space in input_spaces:
+                if input_space is None:
+                    target_inputs.append(None)
+                elif isinstance(input_space, Noop):
+                    target_inputs.append(Noop())
+                else:
+                    target_inputs.append(arguments[supplied_index])
+                    supplied_index += 1
+
+            outputs = lowered.execute(target_inputs)
+            return (
+                outputs[output_indices[0]]
+                if len(output_indices) == 1
+                else tuple(outputs[index] for index in output_indices)
+            )
+
+        return invoke
+
+
+def _identity(value: Any) -> Any:
     return value
+
+
+def _resolve_special_operation(
+    op, function_symbols: FunctionSymbolResolver
+) -> Callable[..., Any] | None:
+    if op == OP.VALUE:
+        return _identity
+    if op == OP.FUNCTION:
+        return function_symbols.resolve
+    if op == OP.BIND:
+        return bind_callable
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +170,7 @@ class _PlanStep(NamedTuple):
     fn: Callable[..., Any]
     arg_indices: list[int]
     out_idx: int
-    post_fn: Callable[[Any], Any]
+    scalar_dimension: NodeDimension | None
 
 
 class CompiledPlan:
@@ -63,11 +188,13 @@ class CompiledPlan:
         workspace: dict[int, Any],
         input_indices: Sequence[int],
         to_backend_array: Callable[[Any], Any],
+        reshape: Callable[[Any, Dimension], Any],
     ) -> None:
         self._steps = steps
         self._workspace = workspace  # constants pre-filled; reused each call
         self._input_indices = input_indices
         self._to_backend_array = to_backend_array
+        self._reshape = reshape
 
     def execute(self, inputs: Sequence[Any]) -> dict[int, Any]:
         ws = self._workspace
@@ -81,9 +208,12 @@ class CompiledPlan:
                 )
 
         for step in self._steps:
-            ws[step.out_idx] = step.post_fn(
-                step.fn(*[ws[i] for i in step.arg_indices])
-            )
+            value = step.fn(*[ws[i] for i in step.arg_indices])
+            if step.scalar_dimension is not None and not _is_symbolic_value(
+                value
+            ):
+                value = self._reshape(value, step.scalar_dimension)
+            ws[step.out_idx] = value
 
         return ws
 
@@ -97,6 +227,14 @@ class Evaluator(ABC):
     @abstractmethod
     def build_plan(self, graph: Tape) -> CompiledPlan:
         """Compile ``graph`` into a reusable execution plan."""
+
+    def evaluate(
+        self, function: Function, inputs: Sequence[Any]
+    ) -> list[Any | None]:
+        workspace = self.build_plan(function.tape).execute(inputs)
+        return _cast_outputs(
+            function.output, function.tape, workspace, self.backend
+        )
 
 
 class GenericEvaluator(Evaluator):
@@ -112,8 +250,14 @@ class GenericEvaluator(Evaluator):
         super().__init__(backend)
         self._operations = operations
         self._parameterised_operations = parameterised_operations
+        self._function_symbols = FunctionSymbolResolver(backend)
 
     def _resolve_operation(self, op) -> Callable[..., Any]:
+        special_operation = _resolve_special_operation(
+            op, self._function_symbols
+        )
+        if special_operation is not None:
+            return special_operation
         try:
             return self._operations[op]
         except KeyError:
@@ -122,19 +266,7 @@ class GenericEvaluator(Evaluator):
             operation = self._parameterised_operations[type(op)]
         except KeyError as ex:
             raise NotImplementedError(f"{op} is not implemented") from ex
-        return lambda *args: operation(op, *args)
-
-    def _resolve_post(self, dim: NodeDimension) -> Callable[[Any], Any]:
-        if not dim.is_scalar():
-            return lambda value: value
-        reshape = self.backend.reshape
-
-        def post(value):
-            if not isinstance(value, Tracer):
-                return reshape(value, dim)
-            return value
-
-        return post
+        return partial(operation, op)
 
     def build_plan(self, graph: Tape) -> CompiledPlan:
         """Walk the tape once and return a compiled execution plan."""
@@ -160,21 +292,17 @@ class GenericEvaluator(Evaluator):
         # Negative slots below -(len+10) are reserved for inline constants
         # (cross-tape Tracers or bare values) used as node arguments.
         workspace: dict[int, Any] = {-1: None}
-        next_slot = [-(len(graph.nodes) + 10)]
-
-        def alloc_inline(value):
-            slot = next_slot[0]
-            next_slot[0] -= 1
-            workspace[slot] = value
-            return slot
+        inline_slots = count(start=-(len(graph.nodes) + 10), step=-1)
 
         for i, node in enumerate(graph.nodes):
             if is_dynamic.get(i, True) or isinstance(node, Tracer):
                 continue
             op, *args = node
             resolved = []
-            for arg in args:
-                if isinstance(arg, Tracer) and arg.tape is graph:
+            for argument_index, arg in enumerate(args):
+                if op == OP.BIND and argument_index == 2:
+                    resolved.append(arg)
+                elif isinstance(arg, Tracer) and arg.tape is graph:
                     resolved.append(workspace[arg.index])
                 elif isinstance(arg, Tracer):
                     resolved.append(arg)
@@ -182,16 +310,11 @@ class GenericEvaluator(Evaluator):
                     resolved.append(arg)
                 else:
                     resolved.append(backend.to_backend_array(arg))
-            value = (
-                resolved[0]
-                if op in {OP.VALUE, OP.FUNCTION_VALUE}
-                else backend.call(op, *resolved)
-            )
-            value = _normalize_evaluate_result(
-                op, resolved, value, graph.dim[i]
-            )
-            if not isinstance(value, _SYMBOLIC_TYPES) and not isinstance(
-                graph.dim[i], ResultBundleDimension
+            value = self._resolve_operation(op)(*resolved)
+            if (
+                op not in {OP.FUNCTION, OP.BIND}
+                and not _is_symbolic_value(value)
+                and not isinstance(graph.dim[i], ResultBundleDimension)
             ):
                 value = backend.reshape(value, graph.dim[i])
             workspace[i] = value
@@ -203,50 +326,43 @@ class GenericEvaluator(Evaluator):
                 continue
             op, *args = node
             arg_indices = []
-            for arg in args:
-                if isinstance(arg, Tracer) and arg.tape is graph:
+            for argument_index, arg in enumerate(args):
+                if op == OP.BIND and argument_index == 2:
+                    value = arg
+                elif isinstance(arg, Tracer) and arg.tape is graph:
                     arg_indices.append(arg.index)
+                    continue
                 elif isinstance(arg, _SYMBOLIC_TYPES):
-                    arg_indices.append(alloc_inline(arg))
+                    value = arg
                 else:
-                    arg_indices.append(
-                        alloc_inline(backend.to_backend_array(arg))
-                    )
+                    value = backend.to_backend_array(arg)
+                slot = next(inline_slots)
+                workspace[slot] = value
+                arg_indices.append(slot)
             dim = graph.dim[i]
-            operation_fn = self._resolve_operation(op)
-            if op == OP.EVALUATE:
-
-                def evaluate_fn(
-                    *values,
-                    _operation_fn=operation_fn,
-                    _op=op,
-                    _dim=dim,
-                ):
-                    value = _operation_fn(*values)
-                    return _normalize_evaluate_result(_op, values, value, _dim)
-
-                step_fn = evaluate_fn
-            else:
-                step_fn = operation_fn
-            post_fn = (
-                (lambda value: value)
-                if isinstance(dim, ResultBundleDimension)
-                else self._resolve_post(dim)
+            step_fn = self._resolve_operation(op)
+            scalar_dimension = (
+                dim
+                if op not in {OP.FUNCTION, OP.BIND}
+                and not isinstance(dim, ResultBundleDimension)
+                and dim.is_scalar()
+                else None
             )
             steps.append(
                 _PlanStep(
                     step_fn,
                     arg_indices,
                     i,
-                    post_fn,
+                    scalar_dimension,
                 )
             )
 
         return CompiledPlan(
-            steps,
+            tuple(steps),
             workspace,
             graph.input_indicies,
             backend.to_backend_array,
+            backend.reshape,
         )
 
 
@@ -285,7 +401,7 @@ def _cast_outputs(
 
 
 # ---------------------------------------------------------------------------
-# Original interpreted evaluator (kept for sympy backend and optimisation)
+# Interpreter retained for optimiser callbacks with ad hoc workspaces
 # ---------------------------------------------------------------------------
 
 
@@ -297,8 +413,9 @@ def evaluate_inner(
     workspace: dict[int, Any],
 ) -> list[Any | None]:
     workspace[-1] = None
+    function_symbols = FunctionSymbolResolver(backend)
     for index, arg in zip(graph.input_indicies, args):
-        if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES):
+        if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES) or callable(arg):
             workspace[index] = arg
         else:
             workspace[index] = backend.to_backend_array(arg)
@@ -312,7 +429,7 @@ def evaluate_inner(
                     return workspace[node.index]
                 else:
                     return node
-            elif isinstance(node, _SYMBOLIC_CALLABLE_TYPES):
+            elif isinstance(node, _SYMBOLIC_CALLABLE_TYPES) or callable(node):
                 return node
 
             return backend.to_backend_array(node)
@@ -323,9 +440,17 @@ def evaluate_inner(
     for w in work_list:
         op, *nodes = graph.nodes[w]
 
-        args = [cast_node(n) for n in nodes]
-        if op in {OP.VALUE, OP.FUNCTION_VALUE}:
-            (value,) = args
+        args = [
+            (
+                node
+                if op == OP.BIND and argument_index == 2
+                else cast_node(node)
+            )
+            for argument_index, node in enumerate(nodes)
+        ]
+        special_operation = _resolve_special_operation(op, function_symbols)
+        if special_operation is not None:
+            value = special_operation(*args)
         else:
             try:
                 value = backend.call(op, *args)
@@ -334,10 +459,10 @@ def evaluate_inner(
                 ex.add_note(f"Node: {op}({args})")
                 raise ex from ex
 
-        value = _normalize_evaluate_result(op, args, value, graph.dim[w])
         workspace[w] = (
             value
-            if isinstance(value, _SYMBOLIC_TYPES)
+            if op in {OP.FUNCTION, OP.BIND}
+            or _is_symbolic_value(value)
             or isinstance(graph.dim[w], ResultBundleDimension)
             else backend.reshape(value, graph.dim[w])
         )

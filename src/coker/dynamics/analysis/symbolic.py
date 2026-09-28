@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from itertools import product
 from typing import Iterable, Sequence
 
+import numpy as np
 import sympy as sp
 from sympy.core.function import AppliedUndef
 
@@ -375,11 +376,12 @@ def _scalar_symbol(value: object, subject: str) -> sp.Symbol:
 def _argument_symbols(
     value: object, dimension: Dimension, subject: str
 ) -> tuple[sp.Symbol, ...]:
-    values = _values_for_dimension(
-        value,
-        dimension,
-        f"{subject} did not lower to the declared scalar symbols",
-    )
+    try:
+        values = _values_for_dimension(value, dimension)
+    except ValueError as exc:
+        raise UnsupportedSystemError(
+            f"{subject} did not lower to the declared scalar symbols"
+        ) from exc
     if not all(isinstance(symbol, sp.Symbol) for symbol in values):
         raise UnsupportedSystemError(
             f"{subject} did not lower to the declared scalar symbols"
@@ -448,22 +450,23 @@ def _control_values(
 
 
 def _values_for_dimension(
-    value: object, dimension: Dimension, invalid_shape_message: str
+    value: object, dimension: Dimension
 ) -> tuple[sp.Expr, ...]:
     values = _flatten(value)
     if len(values) != dimension.flat():
-        raise UnsupportedSystemError(invalid_shape_message)
+        raise ValueError("symbolic value does not match declared dimension")
     return values
 
 
 def _expressions_for_dimension(
     value: object, dimension: Dimension, subject: str
 ) -> tuple[sp.Expr, ...]:
-    return _values_for_dimension(
-        value,
-        dimension,
-        f"{subject} has an unsupported symbolic shape",
-    )
+    try:
+        return _values_for_dimension(value, dimension)
+    except ValueError as exc:
+        raise UnsupportedSystemError(
+            f"{subject} has an unsupported symbolic shape"
+        ) from exc
 
 
 def _control_symbols(
@@ -545,8 +548,8 @@ def _flatten(value: object) -> tuple[sp.Expr, ...]:
             for row in range(value.rows)
             for column in range(value.cols)
         )
-    shape = getattr(value, "shape", None)
-    if shape is not None:
+    if isinstance(value, (np.ndarray, sp.NDimArray)):
+        shape = value.shape
         if len(shape) == 0:
             return (sp.sympify(value),)
         return tuple(
@@ -555,4 +558,9 @@ def _flatten(value: object) -> tuple[sp.Expr, ...]:
         )
     if isinstance(value, (list, tuple)):
         return tuple(element for item in value for element in _flatten(item))
-    return (sp.sympify(value),)
+    try:
+        return (sp.sympify(value),)
+    except sp.SympifyError as exc:
+        raise UnsupportedSystemError(
+            "symbolic analysis received an unsupported symbolic value"
+        ) from exc

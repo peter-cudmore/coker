@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -7,7 +9,11 @@ try:
         SymbolicPoly,
         SymbolicPolyCollection,
     )
+    from coker.backends.casadi.variational.transcription import (
+        CasadiVariationalSolver,
+    )
     from coker.dynamics import InterpolatingPolyCollection
+    from coker.toolkits.codesign import SolveFailure
     import casadi as ca
 
     casadi_available = True
@@ -142,3 +148,61 @@ def test_poly_collection_vector():
 
     assert result.shape == (3, 1)
     np.testing.assert_allclose(result.full().ravel(), fixed_result)
+
+
+@pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
+@pytest.mark.parametrize(
+    ("objective", "constraint_value", "accepted"),
+    [
+        (1.0, 5e-7, True),
+        (1.0, 2e-6, False),
+        (np.nan, 0.0, False),
+    ],
+)
+def test_search_direction_too_small_requires_feasible_finite_result(
+    objective, constraint_value, accepted
+):
+    class StubSolver:
+        def __call__(self, **_kwargs):
+            return {
+                "x": ca.DM([0.0]),
+                "f": ca.DM([objective]),
+                "g": ca.DM([constraint_value]),
+            }
+
+        def stats(self):
+            return {
+                "success": False,
+                "return_status": "Search_Direction_Becomes_Too_Small",
+            }
+
+    def map_arguments(_fixed_parameters, _previous_solution):
+        return {
+            "x0": ca.DM([0.0]),
+            "lbx": ca.DM([-ca.inf]),
+            "ubx": ca.DM([ca.inf]),
+            "lbg": ca.DM([0.0]),
+            "ubg": ca.DM([0.0]),
+        }
+
+    solver = CasadiVariationalSolver(
+        problem=SimpleNamespace(
+            transcription_options=SimpleNamespace(absolute_tolerance=1e-6)
+        ),
+        parameters=[],
+        map_arguments=map_arguments,
+        solver=StubSolver(),
+        assemble_solution=lambda _x, cost, solve_info: (cost, solve_info),
+    )
+
+    if not accepted:
+        with pytest.raises(SolveFailure) as error:
+            solver._solve_once()
+        assert not error.value.solve_info.success
+        return
+
+    cost, solve_info = solver._solve_once()
+
+    assert cost == 1.0
+    assert solve_info.success
+    assert solve_info.return_status == "Search_Direction_Becomes_Too_Small"

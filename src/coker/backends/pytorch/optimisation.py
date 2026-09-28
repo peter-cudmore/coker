@@ -7,8 +7,8 @@ import torch
 
 from coker.algebra.dimensions import ResultBundleDimension
 from coker.algebra.ops import OP
-from coker.algebra.graph import Tracer
-from coker.backends.evaluator import _normalize_evaluate_result
+from coker.algebra.graph import FunctionSymbol, Tracer
+from coker.backends.evaluator import FunctionSymbolResolver, bind_callable
 from coker.backends.backend import get_backend_by_name
 from coker.backends.optimisation import (
     build_initial_guess,
@@ -168,6 +168,12 @@ class _PytorchOptimisationProblem:
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.dtype = backend.dtype or torch.get_default_dtype()
+        self._function_backend = backend.__class__(
+            device=self.device,
+            dtype=self.dtype,
+        )
+        self._function_backend.name = backend.name
+        self._function_symbols = FunctionSymbolResolver(self._function_backend)
         self._warm_start_decision = None
         self._warm_start_multipliers = None
         self.last_solve_info: SolveInfo | None = None
@@ -563,33 +569,42 @@ class _PytorchOptimisationProblem:
         inputs = self._materialise_inputs(decision, runtime_args)
         workspace = {-1: None}
         for index, value in zip(self.tape.input_indicies, inputs):
-            workspace[index] = _to_backend_array(value, self.device)
+            workspace[index] = (
+                value
+                if isinstance(value, FunctionSymbol) or callable(value)
+                else _to_backend_array(value, self.device)
+            )
         for index in range(len(self.tape.nodes)):
             if index in workspace:
                 continue
             op, *nodes = self.tape.nodes[index]
-            args = [
-                (
-                    workspace[node.index]
-                    if isinstance(node, Tracer) and node.tape == self.tape
-                    else _to_backend_array(node, self.device)
-                )
-                for node in nodes
-            ]
-            if op in {OP.VALUE, OP.FUNCTION_VALUE}:
-                value = args[0]
+            args = []
+            for argument_index, node in enumerate(nodes):
+                if op == OP.BIND and argument_index == 2:
+                    args.append(node)
+                elif isinstance(node, Tracer) and node.tape == self.tape:
+                    args.append(workspace[node.index])
+                elif isinstance(node, FunctionSymbol) or callable(node):
+                    args.append(node)
+                else:
+                    args.append(_to_backend_array(node, self.device))
+            if op == OP.VALUE:
+                (value,) = args
+            elif op == OP.FUNCTION:
+                value = self._function_symbols.resolve(args[0])
+            elif op == OP.BIND:
+                value = bind_callable(*args)
             elif op in impls:
                 value = impls[op](*args)
             elif op in parameterised_impls:
                 value = call_parameterised_op(op, *args)
             else:
                 raise NotImplementedError(f"{op} is not implemented")
-            value = _normalize_evaluate_result(
-                op, args, value, self.tape.dim[index]
-            )
             workspace[index] = (
                 value
-                if isinstance(value, Tracer)
+                if op in {OP.FUNCTION, OP.BIND}
+                or isinstance(value, Tracer)
+                or callable(value)
                 or isinstance(self.tape.dim[index], ResultBundleDimension)
                 else _reshape(value, self.tape.dim[index])
             )

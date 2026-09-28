@@ -29,11 +29,7 @@ def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
         target.arguments[0], Scalar
     ):
         raise ValueError("target must have exactly one scalar argument")
-    if (
-        target.output is None
-        or len(target.output) != 1
-        or not isinstance(target.output[0], Scalar)
-    ):
+    if len(target.output) != 1 or not isinstance(target.output[0], Scalar):
         raise ValueError("target must have exactly one scalar output")
     return target
 

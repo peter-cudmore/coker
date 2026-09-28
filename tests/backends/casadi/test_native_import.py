@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from coker import FunctionSpace, Scalar, function
+from coker.algebra.ops import Noop
+from coker.algebra.function import BoundCallable
 from coker.backends.casadi import CasadiBackend
 from coker.backends.lowered import (
     FunctionInputSpec,
@@ -9,6 +11,14 @@ from coker.backends.lowered import (
     FunctionSignature,
     LoweringOptions,
 )
+from coker.dynamics import DynamicsSpec, VariationalProblemBuilder
+from coker.dynamics.system import create_dynamics_from_spec
+from coker.parameters import BoundedVariable
+from coker.parameters.function_parameters import (
+    ClosureParameter,
+    FittedFunction,
+)
+from coker.toolkits.codesign import Minimise
 
 ca = pytest.importorskip("casadi")
 
@@ -95,3 +105,97 @@ def test_functionspace_lowering_keeps_evaluate_fallback_boundary():
     lowered = outer.lower()
     assert lowered.ca_function is None
     assert lowered.execute([inner]) == (6.0,)
+
+
+def test_casadi_solution_reconstructs_native_function_parameter():
+    response = FunctionSpace(
+        "response",
+        arguments=[Scalar("inflow")],
+        output=[Scalar("rate")],
+    )
+    scale = ca.MX.sym("scale")
+    inflow = ca.MX.sym("inflow")
+    native_rate = CasadiBackend().import_function(
+        ca.Function("native_rate", [scale, inflow], [scale * inflow]),
+        FunctionSignature(
+            inputs=(
+                FunctionInputSpec("scale", Scalar("scale")),
+                FunctionInputSpec("inflow", Scalar("inflow")),
+            ),
+            outputs=(FunctionOutputSpec("rate", Scalar("rate")),),
+        ),
+    )
+    native_rate.name = "response"
+    declaration = ClosureParameter(
+        native_rate,
+        (
+            BoundedVariable(
+                "rate_scale", lower_bound=1.0, upper_bound=1.0, guess=1.0
+            ),
+        ),
+    )
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(response,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (0.0, None),
+            dynamics=lambda _t, _x, _z, _u, parameters: parameters[0](0.5),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend="casadi",
+    )
+    with VariationalProblemBuilder(
+        system,
+        t_final=1.0,
+        parameters=[declaration],
+        backend="casadi",
+    ) as builder:
+        problem = builder.build(
+            Minimise((builder.output(builder.t_final)[0] - 0.5) ** 2)
+        )
+
+    solution = problem()
+
+    fitted = solution.parameters["response"]
+    assert isinstance(fitted, FittedFunction)
+    assert fitted(0.25) == pytest.approx(0.25)
+
+
+def test_imported_casadi_function_supports_incremental_currying():
+    x = ca.MX.sym("x")
+    scale = ca.MX.sym("scale")
+    offset = ca.MX.sym("offset")
+    imported = CasadiBackend().import_function(
+        ca.Function(
+            "curried_affine",
+            [x, scale, offset],
+            [scale * x + offset],
+        ),
+        FunctionSignature(
+            inputs=(
+                FunctionInputSpec("x", Scalar("x")),
+                FunctionInputSpec("scale", Scalar("scale")),
+                FunctionInputSpec("offset", Scalar("offset")),
+            ),
+            outputs=(FunctionOutputSpec("value", Scalar("value")),),
+        ),
+    )
+    public_space = FunctionSpace(
+        "affine",
+        arguments=[Scalar("x")],
+        output=[Scalar("value")],
+    )
+    composed = function(
+        [Scalar("scale"), Scalar("offset"), Scalar("x")],
+        lambda captured_scale, captured_offset, argument: BoundCallable(
+            imported,
+            public_space,
+            (captured_scale, captured_offset),
+        )(argument),
+        backend="casadi",
+    )
+
+    assert composed(3.0, 4.0, 2.0) == pytest.approx(10.0)

@@ -102,11 +102,7 @@ def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
         target.arguments[0], Scalar
     ):
         raise ValueError("target must have exactly one scalar argument")
-    if (
-        target.output is None
-        or len(target.output) != 1
-        or not isinstance(target.output[0], Scalar)
-    ):
+    if len(target.output) != 1 or not isinstance(target.output[0], Scalar):
         raise ValueError("target must have exactly one scalar output")
     return target
 
@@ -144,7 +140,7 @@ class DenseLayer(FunctionParameter):
                         _concrete_parameter_name(
                             self.name, "dense_layer", "weight"
                         ),
-                        0.0,
+                        1.0,
                     ),
                     UnboundedVariable(
                         _concrete_parameter_name(
@@ -159,7 +155,7 @@ class DenseLayer(FunctionParameter):
                         _concrete_parameter_name(
                             self.name, "dense_layer", "weights"
                         ),
-                        np.zeros((self.hidden_size, self.input_size)),
+                        np.eye(self.hidden_size, self.input_size),
                     ),
                     DenseTensorVariable(
                         _concrete_parameter_name(
@@ -196,10 +192,8 @@ class DenseLayer(FunctionParameter):
             raise ValueError(
                 f"target vector argument must have width {self.input_size}"
             )
-        if (
-            target.output is None
-            or len(target.output) != 1
-            or not isinstance(target.output[0], VectorSpace)
+        if len(target.output) != 1 or not isinstance(
+            target.output[0], VectorSpace
         ):
             raise ValueError("target must have exactly one vector output")
         if (

@@ -9,7 +9,7 @@ import importlib
 import numpy as np
 import pytest
 
-from coker import function, Scalar, VectorSpace, FunctionSpace
+from coker import FunctionSpace, Scalar, VectorSpace, function, if_then_else
 from coker.algebra.function import BoundCallable
 from coker.algebra.graph import TraceContext, Tracer
 
@@ -228,7 +228,7 @@ def test_casadi_inner_with_functionspace_called_from_casadi_outer():
     assert abs(result - 11.0) < 1e-9, f"Expected 11.0, got {result}"
 
 
-def test_bound_callable_expands_captures_as_target_arguments():
+def test_bound_callable_appends_captures_to_target_arguments():
     target = function(
         [Scalar("t"), Scalar("a")],
         lambda t, a: a * t,
@@ -241,13 +241,8 @@ def test_bound_callable_expands_captures_as_target_arguments():
     )
     with TraceContext(backend="casadi") as tape:
         captured_a = tape.input(Scalar("a"))
-        bound = BoundCallable(target, public_space, (captured_a,))
+        result = BoundCallable(target, public_space, (captured_a,))(3.0)
 
-        expanded_target, arguments = bound.expand_call(3.0)
-        result = bound(3.0)
-
-    assert expanded_target is target
-    assert arguments == (3.0, captured_a)
     assert isinstance(result, Tracer)
     assert tape.depends_on(result, captured_a)
 
@@ -285,3 +280,23 @@ def test_casadi_inner_with_functionspace_closure_over_outer_variable():
     # inner(u, x=3) = a*3;  outer = a*3 + a = a*4; at a=2: 8
     result = outer(2.0, 3.0)
     assert abs(result - 8.0) < 1e-9, f"Expected 8.0, got {result}"
+
+
+def test_casadi_inner_conditional_preserves_symbolic_branch():
+    """Composed conditionals must remain symbolic in the enclosing graph."""
+    inner = function(
+        arguments=[Scalar("x"), VectorSpace("theta", 2)],
+        implementation=lambda x, theta: if_then_else(
+            x <= 0.2, theta[0], theta[1]
+        ),
+        backend="casadi",
+    )
+    outer = function(
+        arguments=[Scalar("x"), VectorSpace("parameters", 4)],
+        implementation=lambda x, parameters: inner(x, parameters[2:]),
+        backend="casadi",
+    )
+    parameters = np.array([-1.0, 1.0, 0.3, 0.7])
+
+    assert outer(0.1, parameters) == pytest.approx(0.3)
+    assert outer(0.25, parameters) == pytest.approx(0.7)

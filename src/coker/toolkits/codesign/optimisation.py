@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 
 import numpy as np
+from scipy.optimize import OptimizeResult
 
 from coker.algebra.graph import Tracer
 
@@ -99,20 +100,22 @@ def solve_info_from_casadi_stats(
 
 
 def solve_info_from_scipy_result(
-    result, *, solver: str = "trust-constr"
+    result: OptimizeResult, *, solver: str = "trust-constr"
 ) -> SolveInfo:
-    """Normalise a SciPy optimiser result object."""
-    iteration_count = getattr(result, "nit", None)
+    """Normalise a SciPy optimiser result mapping."""
+    iteration_count = result.get("nit")
     if iteration_count is not None:
         iteration_count = int(iteration_count)
 
-    status = getattr(result, "status", None)
+    status = result.get("status")
     unified_status = None if status is None else str(status)
+    success = bool(result.get("success", False))
+    return_status = str(result.get("message", "unknown"))
     return SolveInfo(
         backend="numpy",
         solver=solver,
-        success=bool(getattr(result, "success", False)),
-        return_status=str(getattr(result, "message", "unknown")),
+        success=success,
+        return_status=return_status,
         unified_return_status=unified_status,
         iteration_count=iteration_count,
     )

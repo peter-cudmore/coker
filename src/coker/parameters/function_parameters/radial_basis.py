@@ -32,11 +32,7 @@ def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
         target.arguments[0], Scalar
     ):
         raise ValueError("target must have exactly one scalar argument")
-    if (
-        target.output is None
-        or len(target.output) != 1
-        or not isinstance(target.output[0], Scalar)
-    ):
+    if len(target.output) != 1 or not isinstance(target.output[0], Scalar):
         raise ValueError("target must have exactly one scalar output")
     return target
 
@@ -148,7 +144,7 @@ class RadialBasisFunction(FunctionParameter):
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         (basis,) = parameters
-        value = basis[-1]
+        value = basis[len(self.centers)]
         for index, center in enumerate(self.centers):
             distance = (argument - center) / self.width
             value += basis[index] * np.exp(-0.5 * distance * distance)

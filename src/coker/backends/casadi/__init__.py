@@ -12,13 +12,14 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.function import Function
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
 from coker.backends.backend import (
     ArrayLike,
     Backend,
     Evaluator,
+    import_native_function,
     register_backend,
     split_function_parameter_values,
 )
@@ -116,18 +117,67 @@ def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
 
 
 class CasadiBackend(Backend):
-    def fit_function_parameter(self, declaration, target, values):
+    def _materialize_parameter(self, target, declaration, blocks):
+        flat_values = self._concatenate_parameter_blocks(blocks)
+        if isinstance(target, FunctionSpace):
+            return self._fit_function_parameter(
+                declaration, target, flat_values
+            )
+        if isinstance(target, VectorSpace):
+            return np.asarray(
+                self.to_numpy_array(flat_values), dtype=float
+            ).reshape(target.dimension)
+        if isinstance(target, Scalar):
+            if flat_values.numel() != 1:
+                raise ValueError("scalar parameter must have one solver value")
+            return float(
+                np.asarray(
+                    self.to_numpy_array(flat_values), dtype=float
+                ).reshape(-1)[0]
+            )
+        raise TypeError(
+            "parameter target must be a scalar, vector, or function space"
+        )
+
+    def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters.function_parameters import FittedFunction
 
-        flat_values = np.asarray(
-            self.to_numpy_array(values), dtype=float
-        ).reshape(-1)
-        parameters = split_function_parameter_values(declaration, flat_values)
+        parameters = split_function_parameter_values(
+            declaration,
+            np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(
+                -1
+            ),
+        )
         return FittedFunction(
             declaration,
             declaration.validate_target(target),
             lambda argument: declaration.evaluate(parameters, argument),
             parameters,
+        )
+
+    def _concatenate_parameter_blocks(self, blocks):
+        if not blocks:
+            raise ValueError("parameter blocks must not be empty")
+        return ca.vertcat(
+            *(self._as_parameter_column(block) for block in blocks)
+        )
+
+    @staticmethod
+    def _as_parameter_column(block):
+        value = (
+            block if isinstance(block, (ca.DM, ca.MX, ca.SX)) else ca.DM(block)
+        )
+        return ca.reshape(value, value.numel(), 1)
+
+    @staticmethod
+    def _reshape_parameter_values(values, shape):
+        shape = (shape,) if isinstance(shape, int) else shape
+        if len(shape) == 1:
+            return ca.reshape(values, shape[0], 1)
+        if len(shape) == 2:
+            return ca.reshape(values, shape[1], shape[0]).T
+        raise ValueError(
+            "CasADi parameter tensors must have one or two dimensions"
         )
 
     name = "casadi"
@@ -152,7 +202,7 @@ class CasadiBackend(Backend):
             if signature is None
             else signature
         )
-        return create_function_from_native(
+        return import_native_function(
             ca_function, signature, backend=self.name
         )
 
@@ -160,6 +210,8 @@ class CasadiBackend(Backend):
         return to_numpy_array(array)
 
     def to_backend_array(self, array):
+        if isinstance(array, (ca.MX, ca.DM)):
+            return array
         import scipy.sparse
 
         if array is None:

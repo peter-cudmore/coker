@@ -9,21 +9,22 @@ import threading
 
 import numpy as np
 import scipy as sp
-from typing import Any, Callable, Iterable, List, Set, Tuple
+from typing import Any, Iterable, List, Set, Tuple
 
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
-    FunctionValueDimension,
     ResultBundleDimension,
     Scalar,
     VectorSpace,
 )
+from coker.interfaces import SymbolicCallable
 from coker.algebra.ops import (
     OP,
     Noop,
     Operator,
     ReshapeOP,
+    SelectOP,
     numpy_atomics,
     numpy_composites,
 )
@@ -46,11 +47,10 @@ def get_basis(dimension: Dimension, i: int):
 
 
 def get_projection(dimension: Dimension, slc: slice):
-    if isinstance(dimension.dim, tuple):
-        cols = dimension.dim[0]
-    else:
+    if dimension.dim is None:
         return 1
 
+    cols = dimension.dim[0]
     indices = list(range(cols))[slc]
     rows = len(indices)
     proj = np.zeros((rows, cols), dtype=float)
@@ -62,7 +62,7 @@ def get_projection(dimension: Dimension, slc: slice):
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
         return Dimension.scalar()
-    if isinstance(arg, CallableReference):
+    if isinstance(arg, FunctionSymbol):
         return arg.function_space
     try:
         d = Dimension(arg.shape)
@@ -107,8 +107,8 @@ class TapeInner:
         self._nodes = []
         self._constants = []
         self._constant_hashmap = {}
-        self._callable_archive = []
-        self._callable_hashmap = {}
+        self._symbol_table = []
+        self._symbol_hashmap = {}
         self.tape_ref = weakref.ref(tape_ref)
         assert self.INNER_REF not in OP.__members__.values()
         assert self.CONSTANT_REF not in OP.__members__.values()
@@ -168,9 +168,9 @@ class TapeInner:
                 self._constants.append(value)
 
             self._nodes.append((self.CONSTANT_REF, value_idx))
-        elif op == OP.FUNCTION_VALUE:
-            (reference,) = args
-            self._nodes.append((self.FUNCTION_REF, reference._archive_index))
+        elif op == OP.FUNCTION:
+            (symbol,) = args
+            self._nodes.append((self.FUNCTION_REF, symbol._archive_index))
         else:
             self._nodes.append((op, *args))
         return idx
@@ -191,53 +191,55 @@ class TapeInner:
             return OP.VALUE, self._constants[value_idx]
         if op == self.FUNCTION_REF:
             (archive_index,) = args
-            return OP.FUNCTION_VALUE, CallableReference(
-                self.tape_ref(), archive_index
-            )
+            return OP.FUNCTION, FunctionSymbol(self.tape_ref(), archive_index)
         return op, *args
 
     def __len__(self):
         return len(self._nodes)
 
 
-@dataclasses.dataclass
-class _CallableArchiveEntry:
-    """Native callable and its input/output declaration stored by a tape."""
+@dataclasses.dataclass(frozen=True)
+class SymbolEntry:
+    """Immutable metadata and target for one callable symbol."""
 
-    callable_value: Callable
+    target: Any
     function_space: FunctionSpace
-    result_dimension: Dimension | FunctionSpace | ResultBundleDimension
     name: str | None
+    _identity: tuple[Any, ...] = dataclasses.field(repr=False, compare=False)
+
+    def __hash__(self) -> int:
+        return hash(self._identity)
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, SymbolEntry) and (
+            self._identity == other._identity
+        )
 
 
-class CallableReference:
-    """A reference to a callable entry owned by a tape."""
+class FunctionSymbol:
+    """Opaque handle to a callable target declared in one tape."""
 
     def __init__(self, tape: Tape, archive_index: int):
         self._tape = weakref.ref(tape)
         self._archive_index = archive_index
 
     @property
-    def _entry(self) -> _CallableArchiveEntry:
-        return self._tape().nodes._callable_archive[self._archive_index]
+    def _entry(self) -> SymbolEntry:
+        return self._tape().nodes._symbol_table[self._archive_index]
+
+    @property
+    def target(self) -> Any:
+        """Return the target interpreted by a backend."""
+        return self._entry.target
 
     @property
     def function_space(self) -> FunctionSpace:
         return self._entry.function_space
 
     @property
-    def result_dimension(
-        self,
-    ) -> Dimension | FunctionSpace | ResultBundleDimension:
-        return self._entry.result_dimension
-
-    @property
     def symbol_name(self) -> str:
         """Return the stable name used for symbolic external calls."""
         return self._entry.name or f"function_{self._archive_index}"
-
-    def __call__(self, *args):
-        return self._entry.callable_value(*args)
 
 
 class Tape:
@@ -271,39 +273,14 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def _create_callable_reference(
-        self,
-        callable_value: Callable[..., Any],
-        function_space: FunctionSpace,
-        result_dimension: (
-            Dimension | FunctionSpace | ResultBundleDimension | None
-        ) = None,
-        *,
-        name: str | None = None,
-    ) -> CallableReference:
-        if result_dimension is None:
-            output_dimensions = function_space.output_dimensions()
-            if len(output_dimensions) != 1:
-                raise ValueError(
-                    "Callable references require one result or an explicit "
-                    "result dimension"
-                )
-            (result_dimension,) = output_dimensions
-
-        key = (id(callable_value), name)
-        archive_index = self._inner._callable_hashmap.get(key)
+    def intern_symbol(self, entry: Any) -> FunctionSymbol:
+        """Allocate or retrieve a symbol for opaque entry metadata."""
+        archive_index = self._inner._symbol_hashmap.get(entry)
         if archive_index is None:
-            archive_index = len(self._inner._callable_archive)
-            self._inner._callable_hashmap[key] = archive_index
-            self._inner._callable_archive.append(
-                _CallableArchiveEntry(
-                    callable_value,
-                    function_space,
-                    result_dimension,
-                    name,
-                )
-            )
-        return CallableReference(self, archive_index)
+            archive_index = len(self._inner._symbol_table)
+            self._inner._symbol_hashmap[entry] = archive_index
+            self._inner._symbol_table.append(entry)
+        return FunctionSymbol(self, archive_index)
 
     def find_dependents(self, tracer: Tracer) -> Set[int]:
         if tracer is None or tracer is Noop():
@@ -370,6 +347,15 @@ class Tape:
                 yield Tracer(self, index)
 
     def _compute_shape(self, op: OP | Operator, *args):
+        if op == OP.BIND:
+            function_value, argument, position = args
+            assert isinstance(function_value, Tracer)
+            assert isinstance(argument, Tracer)
+            return op.compute_shape(
+                function_value.dim,
+                argument.dim,
+                position,
+            )
         dims = []
         for arg in args:
             if arg is None:
@@ -385,6 +371,17 @@ class Tape:
         *args,
     ) -> int:
         args = [strip_symbols_from_array(a) for a in args]
+        if op == OP.FUNCTION:
+            if len(args) != 1:
+                raise TypeError("FUNCTION requires exactly one symbol")
+            return self.insert_symbol_value(args[0]).index
+        if op == OP.BIND:
+            if len(args) != 3:
+                raise TypeError(
+                    "BIND requires a symbol value, argument, and position"
+                )
+            if type(args[2]) is not int:
+                raise TypeError("BIND argument position must be an integer")
 
         if self._substitutions:
             args = [
@@ -402,17 +399,18 @@ class Tape:
         if invalid_tracers:
             raise DanglingTracerError(tracers=invalid_tracers)
 
+        def insert_argument(index: int, argument: Any):
+            if op == OP.BIND and index == 2:
+                return argument
+            if isinstance(argument, Tracer):
+                return argument.copy()
+            if isinstance(argument, (FunctionSymbol, SymbolicCallable)):
+                return self.insert_symbol_value(argument)
+            return self.insert_value(argument)
+
         args = [
-            (
-                a.copy()
-                if isinstance(a, Tracer)
-                else (
-                    self.insert_function_value(a)
-                    if isinstance(a, CallableReference)
-                    else self.insert_value(a)
-                )
-            )
-            for a in args
+            insert_argument(index, argument)
+            for index, argument in enumerate(args)
         ]
 
         node_hash = hash((op, *args))
@@ -442,19 +440,24 @@ class Tape:
         self._node_hashmap[node_hash] = idx
         return Tracer(self, idx)
 
-    def insert_function_value(self, reference: CallableReference) -> Tracer:
-        node_hash = hash((OP.FUNCTION_VALUE, reference._archive_index))
+    def insert_symbol_value(self, value: Any) -> Tracer:
+        """Insert a symbol or delegate its value emission to the owner."""
+        if isinstance(value, SymbolicCallable):
+            return value._emit_symbol_value(self)
+        if not isinstance(value, FunctionSymbol):
+            raise TypeError(
+                "Symbol values must be a FunctionSymbol or SymbolicCallable"
+            )
+        if value._tape() is not self:
+            raise ValueError("Symbols must belong to this tape")
+
+        node_hash = hash((OP.FUNCTION, value._archive_index))
         if node_hash in self._node_hashmap:
             return Tracer(self, self._node_hashmap[node_hash])
 
         index = len(self.dim)
-        self.nodes.push_op(OP.FUNCTION_VALUE, reference)
-        self.dim.append(
-            FunctionValueDimension(
-                reference.function_space,
-                reference.result_dimension,
-            )
-        )
+        self.nodes.push_op(OP.FUNCTION, value)
+        self.dim.append(value.function_space)
         self._node_hashmap[node_hash] = index
         return Tracer(self, index)
 
@@ -478,7 +481,11 @@ class Tape:
             size = 1
         elif isinstance(v, FunctionSpace):
             self.dim.append(v)
-            size = sum([d.flat() for d in v.output_dimensions()])
+            size = sum(
+                dimension.flat()
+                for dimension in v.output_dimensions()
+                if isinstance(dimension, Dimension)
+            )
         else:
             assert False, f"Invalid input type {v}: of {type(v)} "
 
@@ -893,7 +900,13 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return self._emit(OP.CASE, norm == 0, self, self / norm)
 
     def __call__(self, *args):
-        return self._emit(OP.EVALUATE, self, *args)
+        result = self._emit(OP.EVALUATE, self, *args)
+        if not isinstance(result.dim, ResultBundleDimension):
+            return result
+        return tuple(
+            result._emit(SelectOP(index), result)
+            for index in range(len(result.dim.outputs))
+        )
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):

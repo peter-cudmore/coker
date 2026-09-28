@@ -10,12 +10,166 @@ if TYPE_CHECKING:
     from coker.algebra.function import Function
     from coker.dynamics.variational.problem import VariationalProblem
 from coker.backends.evaluator import Evaluator
-from coker.backends.lowered import LoweredFunction, LoweringOptions
-from coker.algebra.graph import Tracer
-from coker.algebra.dimensions import Dimension
+from coker.backends.lowered import (
+    FunctionOutputSpec,
+    FunctionSignature,
+    LoweredFunction,
+    LoweringOptions,
+)
+from coker.algebra.graph import SymbolEntry, Tape, TraceContext, Tracer
+from coker.algebra.ops import OP, SelectOP
+
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    Scalar,
+    VectorSpace,
+)
 from coker.interfaces import SolverParameters
 
 ArrayLike = Any
+
+
+def create_native_symbol_entry(
+    target: Callable[..., Any],
+    function_space: FunctionSpace,
+    *,
+    name: str | None = None,
+) -> SymbolEntry:
+    """Describe a backend-native target for opaque tape interning."""
+    return SymbolEntry(
+        target,
+        function_space,
+        name,
+        (
+            "native",
+            id(target),
+            id(function_space),
+            name,
+        ),
+    )
+
+
+def _restore_output_slots(
+    tape: Tape,
+    result: Tracer,
+    output_specs: Sequence[FunctionOutputSpec],
+) -> list[Tracer | None]:
+    """Expand compact graph outputs into their declared ABI slots."""
+    output_count = sum(
+        output_spec.shape is not None for output_spec in output_specs
+    )
+    present_results = (
+        (result,)
+        if output_count == 1
+        else tuple(
+            Tracer(tape, tape.append(SelectOP(index), result))
+            for index in range(output_count)
+        )
+    )
+    present_results_iter = iter(present_results)
+    return [
+        (None if output_spec.shape is None else next(present_results_iter))
+        for output_spec in output_specs
+    ]
+
+
+def append_native_outputs(
+    tape: Tape,
+    native: Callable[..., Any],
+    backend: str,
+    input_spaces: Sequence[Scalar | VectorSpace | FunctionSpace],
+    output_specs: Sequence[FunctionOutputSpec],
+    args: Sequence[Any],
+    name: str | None = None,
+) -> list[Tracer | None]:
+    """Emit one backend-native evaluation and select its public outputs."""
+
+    output_indices = tuple(
+        index
+        for index, output_spec in enumerate(output_specs)
+        if output_spec.shape is not None
+    )
+    output_spaces = [
+        (
+            output_spec.shape.to_space(output_spec.name)
+            if isinstance(output_spec.shape, Dimension)
+            else output_spec.shape
+        )
+        for output_spec in output_specs
+        if output_spec.shape is not None
+    ]
+
+    def compact_native(*native_args: Any) -> Any:
+        native_outputs = native(*native_args)
+        values = (
+            (native_outputs,)
+            if len(output_specs) == 1
+            else tuple(native_outputs)
+        )
+        if len(values) != len(output_specs):
+            raise ValueError(
+                f"Native callable returned {len(values)} results; expected "
+                f"{len(output_specs)}"
+            )
+        present_outputs = tuple(values[index] for index in output_indices)
+        return (
+            present_outputs[0]
+            if len(present_outputs) == 1
+            else present_outputs
+        )
+
+    function_space = FunctionSpace(
+        f"{backend}_native",
+        arguments=list(input_spaces),
+        output=output_spaces,
+    )
+    symbol = tape.intern_symbol(
+        create_native_symbol_entry(
+            compact_native,
+            function_space,
+            name=name,
+        )
+    )
+    result = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
+    return _restore_output_slots(tape, result, output_specs)
+
+
+def import_native_function(
+    native: Callable[..., Any],
+    signature: FunctionSignature,
+    *,
+    backend: str,
+    name: str | None = None,
+):
+    """Build a traceable Coker function around a backend-native callable."""
+    from coker.algebra.function import Function
+
+    if not isinstance(signature, FunctionSignature):
+        raise TypeError("signature must be a FunctionSignature")
+
+    input_spaces = [spec.space for spec in signature.inputs]
+    with TraceContext(backend=backend) as tape:
+        args = [tape.input(space) for space in input_spaces]
+        outputs = append_native_outputs(
+            tape,
+            native,
+            backend,
+            input_spaces,
+            signature.outputs,
+            args,
+            name=name,
+        )
+
+    result = Function(
+        tape,
+        outputs[0] if len(outputs) == 1 else outputs,
+        backend=backend,
+        name=name,
+        signature=signature,
+    )
+    result._native_callable = native
+    return result
 
 
 def split_function_parameter_values(declaration: Any, flat_values: Any):
@@ -81,15 +235,21 @@ class Backend(metaclass=ABCMeta):
         """Wrap a backend solver for use as a numerical program module."""
         return implementation
 
-    @abstractmethod
-    def fit_function_parameter(
-        self, declaration: Any, target: Any, values: ArrayLike
+    def _materialize_parameter(
+        self,
+        target: Scalar | VectorSpace | FunctionSpace,
+        declaration: Any,
+        blocks: tuple[ArrayLike, ...],
     ) -> Any:
-        """Materialize a fitted function from backend decision values."""
+        """Reconstruct one public parameter from native solver blocks."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} cannot materialize parameters"
+        )
 
     def create_variational_solver(
         self, problem: VariationalProblem
     ) -> VariationalSolver:
+        """Create this backend's solver for a variational problem."""
         raise NotImplementedError
 
     @abstractmethod
@@ -99,12 +259,24 @@ class Backend(metaclass=ABCMeta):
     def evaluate(
         self, function: Function, inputs: Sequence[Any]
     ) -> list[Any | None]:
-        from coker.backends.evaluator import evaluate_inner
+        return self.get_evaluator().evaluate(function, inputs)
 
-        workspace: dict[int, Any] = {}
-        return evaluate_inner(
-            function.tape, inputs, function.output, self, workspace
-        )
+    def append_native_call(
+        self,
+        function: Function,
+        inputs: Sequence[Any],
+        outer_tape: Tape,
+    ) -> list[Tracer | None] | None:
+        """Append a backend-specific native call, if this backend owns it."""
+        if (
+            function._native_callable is not None
+            and function.backend != self.name
+        ):
+            raise RuntimeError(
+                "Cannot compose native callable for backend "
+                f"{function.backend!r} into {self.name!r} trace"
+            )
+        return None
 
     def evaluate_integrals(
         self,

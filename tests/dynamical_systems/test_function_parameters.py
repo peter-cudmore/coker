@@ -7,7 +7,6 @@ import numpy as np
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
-from coker.backends.backend import get_backend_by_name
 from coker.dynamics import (
     DynamicsSpec,
     VariationalProblem,
@@ -87,16 +86,8 @@ def test_function_space_contains_matching_functions():
     incompatible = function(
         [VectorSpace("time", 2)], lambda time: time[0], backend="numpy"
     )
-    fitted = get_backend_by_name(
-        "numpy", set_current=False
-    ).fit_function_parameter(
-        RadialBasisFunction(centers=[0.0], width=1.0),
-        space,
-        [0.0, 1.0],
-    )
 
     assert matching in space
-    assert fitted in space
     assert incompatible not in space
 
 
@@ -107,7 +98,7 @@ def test_function_space_contains_bound_callable():
     assert bound in space
 
 
-def test_closure_parameter_binds_declared_scalar_decisions():
+def test_closure_parameter_retains_declared_scalar_decisions():
     closure = ClosureParameter.bind_callable(
         lambda gain, offset, value: gain * value + offset,
         [
@@ -117,20 +108,12 @@ def test_closure_parameter_binds_declared_scalar_decisions():
         [Scalar("value")],
         name="affine",
     )
-    target = FunctionSpace(
-        "forcing", arguments=[Scalar("time")], output=[Scalar("rate")]
-    )
-
-    fitted = get_backend_by_name(
-        "numpy", set_current=False
-    ).fit_function_parameter(closure, target, [2.0, -1.0])
 
     assert closure.name == "affine"
     assert closure.list_concrete_parameters() == (
         UnboundedVariable("gain", 0.0),
         UnboundedVariable("offset", 0.0),
     )
-    assert fitted(3.0) == 5.0
 
 
 def test_builder_specializes_function_parameter_to_numeric_decisions():
@@ -322,6 +305,45 @@ def test_parameter_layout_reconstructs_public_values():
     assert fitted(0.0) == pytest.approx(17.0)
 
 
+def test_parameter_layout_passes_disjoint_function_blocks_to_backend():
+    class RecordingBackend:
+        def _materialize_parameter(self, target, declaration, blocks):
+            self.target = target
+            self.declaration = declaration
+            self.blocks = blocks
+            return blocks
+
+    target = FunctionSpace(
+        "response",
+        arguments=[VectorSpace("state", 1)],
+        output=[VectorSpace("rate", 1)],
+    )
+    declaration = DenseLayer(
+        1,
+        function(
+            [VectorSpace("hidden", 1)],
+            lambda hidden: hidden,
+            backend="numpy",
+        ),
+        name="response",
+    )
+    backend = RecordingBackend()
+    layout = ParameterValueLayout(
+        targets=(target,),
+        declarations=(declaration,),
+        offsets=((0, 3),),
+        concrete_offsets=(((0, 1), (2, 3)),),
+    )
+
+    parameters = layout.reconstruct(np.arange(3.0), backend)
+
+    assert backend.target is target
+    assert backend.declaration is declaration
+    np.testing.assert_array_equal(backend.blocks[0], [0.0])
+    np.testing.assert_array_equal(backend.blocks[1], [2.0])
+    assert parameters["response"] is backend.blocks
+
+
 def test_variational_lowers_output_loss_with_control_input(
     variational_backend,
 ):
@@ -389,6 +411,78 @@ def test_variational_fits_bound_vector_parameter(variational_backend):
     np.testing.assert_allclose(solution.parameters["gain"], [0.5], atol=1e-2)
     assert not hasattr(solution, "parameter_blocks")
     assert not hasattr(solution, "parameter_solutions")
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("casadi") is None, reason="CasADi not available"
+)
+def test_casadi_initialises_shared_monotone_transfer_rate():
+    initial_sources = np.array([0.25, 0.5, 0.75, 1.0])
+    target_time = 0.8
+    target_receivers = initial_sources - 1 / np.sqrt(
+        1 / initial_sources**2 + 2 * target_time
+    )
+    rate = FunctionSpace(
+        "rate",
+        arguments=[Scalar("source")],
+        output=[Scalar("rate")],
+    )
+    basis = np.eye(initial_sources.size)
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(rate,),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (
+                np.concatenate(
+                    (initial_sources, np.zeros_like(initial_sources))
+                ),
+                None,
+            ),
+            dynamics=lambda _t, state, _z, _u, p: np.concatenate(
+                (
+                    -sum(
+                        p[0](state[index]) * state[index] * basis[index]
+                        for index in range(initial_sources.size)
+                    ),
+                    sum(
+                        p[0](state[index]) * state[index] * basis[index]
+                        for index in range(initial_sources.size)
+                    ),
+                )
+            ),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, _p, _q: state,
+            quadratures=Noop(),
+        ),
+        backend="casadi",
+    )
+    knots = np.linspace(0.0, 1.0, 15)
+    increments = np.diff(np.concatenate(([0.0], knots**2)))
+    declaration = MonotonePiecewiseLinear(
+        domain_knots=knots,
+        lower_bound=0.0,
+        upper_bound=1.0,
+        guess=np.log(np.maximum(increments, 1e-4) * 1_000.0),
+        name="rate",
+    )
+    problem = VariationalProblem(
+        system=system,
+        t_final=target_time,
+        parameters=[declaration],
+        loss=lambda solution, _p: sum(
+            (solution(target_time, _p)[initial_sources.size + index] - target)
+            for index, target in enumerate(target_receivers)
+        ),
+        backend="casadi",
+    )
+
+    solution = problem()
+
+    assert solution.solve_info.success
+    assert solution.cost < 1e-4
+    fitted = solution.parameters["rate"]
+    assert fitted(0.0) < 1e-3
 
 
 @pytest.mark.skipif(
@@ -464,6 +558,9 @@ def test_dense_layer_declares_and_evaluates_scalar_parameters():
     assert isinstance(bias, UnboundedVariable)
     assert weight.name == "response_weight"
     assert bias.name == "response_bias"
+    assert weight.guess == 1.0
+    assert bias.guess == 0.0
+
     assert declaration.validate_target(target) is target
     assert declaration.evaluate((2.0, -1.0), 3.0) == 5.0
     assert declaration.build_function(target, "numpy")(3.0, 2.0, -1.0) == 5.0
@@ -491,6 +588,8 @@ def test_dense_layer_declares_and_evaluates_vector_parameters():
     assert weights.shape == (2, 2)
     assert bias.name == "response_bias"
     assert bias.shape == (2,)
+    np.testing.assert_array_equal(weights.guess, np.eye(2))
+    np.testing.assert_array_equal(bias.guess, np.zeros(2))
     assert declaration.validate_target(target) is target
 
     parameters = (
@@ -679,7 +778,7 @@ def _function_parameter_system(rate: FunctionSpace, backend: str):
         ),
     ],
 )
-@pytest.mark.parametrize("source", ("callable", "function", "fitted"))
+@pytest.mark.parametrize("source", ("callable", "function"))
 def test_system_integrates_function_valued_parameter(
     integration_backend, source
 ):
@@ -696,28 +795,15 @@ def test_system_integrates_function_valued_parameter(
     def affine_integral(time):
         return 3 * time + time**2 / 2
 
-    def constant_integral(time):
-        return 3 * time
-
     if source == "callable":
         rate_value = affine_rate
-        integral = affine_integral
-    elif source == "function":
+    else:
         rate_value = function(
             [Scalar("time")],
             affine_rate,
             backend=integration_backend,
         )
-        integral = affine_integral
-    else:
-        rate_value = get_backend_by_name(
-            "numpy", set_current=False
-        ).fit_function_parameter(
-            RadialBasisFunction(centers=[0.0], width=1.0),
-            rate,
-            [0.0, 1.0],
-        )
-        integral = constant_integral
+    integral = affine_integral
 
     timeline = np.array([0.0, 0.5, 1.0])
     trajectory = system(timeline, 2.0, rate_value)

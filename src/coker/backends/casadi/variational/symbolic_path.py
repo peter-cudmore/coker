@@ -62,7 +62,9 @@ class CasadiSolutionAssembler:
             free_parameters, dtype=float
         ).reshape((-1,))
         public_parameters = (
-            self.problem.parameter_layout.reconstruct(system_parameters)
+            self.problem.parameter_layout.reconstruct(
+                system_parameters, self.factory.casadi
+            )
             if self.problem.parameter_layout is not None
             else {
                 name: float(free_parameters[index, 0])
