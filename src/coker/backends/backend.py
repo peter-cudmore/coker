@@ -22,7 +22,6 @@ from coker.algebra.ops import OP, SelectOP
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
-    ResultBundleDimension,
     Scalar,
     VectorSpace,
 )
@@ -34,31 +33,18 @@ ArrayLike = Any
 def create_native_symbol_entry(
     target: Callable[..., Any],
     function_space: FunctionSpace,
-    result_dimension: (
-        Dimension | FunctionSpace | ResultBundleDimension | None
-    ) = None,
     *,
     name: str | None = None,
 ) -> SymbolEntry:
     """Describe a backend-native target for opaque tape interning."""
-    if result_dimension is None:
-        output_dimensions = function_space.output_dimensions()
-        if len(output_dimensions) != 1:
-            raise ValueError(
-                "Native symbols require one result or an explicit result "
-                "dimension"
-            )
-        (result_dimension,) = output_dimensions
     return SymbolEntry(
         target,
         function_space,
-        result_dimension,
         name,
         (
             "native",
             id(target),
             id(function_space),
-            id(result_dimension),
             name,
         ),
     )
@@ -75,23 +61,6 @@ def append_native_outputs(
 ) -> list[Tracer | None]:
     """Emit one backend-native evaluation and select its public outputs."""
 
-    def result_output_dimension(
-        shape: Dimension | FunctionSpace | Scalar | VectorSpace | None,
-    ) -> Dimension | FunctionSpace | None:
-        if shape is None or isinstance(shape, (Dimension, FunctionSpace)):
-            return shape
-        if isinstance(shape, Scalar):
-            return Dimension.scalar()
-        if isinstance(shape, VectorSpace):
-            return Dimension(shape.dimension)
-        raise TypeError(f"Unsupported native output shape {shape!r}")
-
-    result_dimension = ResultBundleDimension(
-        tuple(
-            result_output_dimension(output_spec.shape)
-            for output_spec in output_specs
-        )
-    )
     output_spaces = [
         (
             output_spec.shape.to_space(output_spec.name)
@@ -99,7 +68,6 @@ def append_native_outputs(
             else output_spec.shape
         )
         for output_spec in output_specs
-        if output_spec.shape is not None
     ]
     function_space = FunctionSpace(
         f"{backend}_native",
@@ -110,16 +78,20 @@ def append_native_outputs(
         create_native_symbol_entry(
             native,
             function_space,
-            result_dimension,
             name=name,
         )
     )
-    bundle = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
+    result = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
+    multiple_outputs = len(output_specs) != 1
     return [
         (
             None
             if output_spec.shape is None
-            else Tracer(tape, tape.append(SelectOP(output_index), bundle))
+            else (
+                Tracer(tape, tape.append(SelectOP(output_index), result))
+                if multiple_outputs
+                else result
+            )
         )
         for output_index, output_spec in enumerate(output_specs)
     ]

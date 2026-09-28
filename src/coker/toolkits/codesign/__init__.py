@@ -13,7 +13,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.function import BoundCallable, SymbolicCallable, function
 from coker.algebra.graph import Tape, TraceContext, Tracer
-from coker.algebra.ops import OP
+from coker.algebra.ops import OP, SelectOP
 from coker.backends.backend import Backend, create_native_symbol_entry
 
 from .optimisation import (
@@ -212,30 +212,34 @@ class MathematicalProgram(SymbolicCallable):
             for i, dim in enumerate(self.input_shape)
         ]
         result_dimensions = self.result_shape
-        result_space = VectorSpace(
-            "program_result",
-            sum(dimension.flat() for dimension in result_dimensions),
+        capture_dimensions = tuple(
+            block.dim
+            for capture in self._parameter_captures
+            for block in capture.blocks
         )
-        function_space = FunctionSpace("program", arguments, [result_space])
+        function_space = FunctionSpace(
+            "program",
+            arguments,
+            [
+                dimension.to_space(f"result_{index}")
+                for index, dimension in enumerate(
+                    (*result_dimensions, *capture_dimensions)
+                )
+            ],
+        )
         symbol = tape.intern_symbol(
             create_native_symbol_entry(
                 self,
                 function_space,
-                function_space.output_dimensions()[0],
             )
         )
-        packed = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
-        offset = 0
-        results = []
-        for dim in result_dimensions:
-            if dim.is_scalar():
-                results.append(packed[offset])
-            else:
-                results.append(
-                    np.reshape(packed[offset : offset + dim.flat()], dim.dim)
-                )
-            offset += dim.flat()
-        return tuple(results)
+        result = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
+        if len(function_space.output) == 1:
+            return (result,)
+        return tuple(
+            Tracer(tape, tape.append(SelectOP(index), result))
+            for index in range(len(result_dimensions))
+        )
 
     def __call__(self, *args):
         """Call symbolically for tracer arguments and numerically otherwise."""

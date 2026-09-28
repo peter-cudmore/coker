@@ -92,7 +92,12 @@ class FunctionSymbolResolver:
     def resolve(self, symbol: FunctionSymbol) -> Callable[..., Any]:
         target = symbol.target
         if self.is_native(symbol):
-            return _NativeCallable(target, symbol.result_dimension)
+            return _NativeCallable(
+                target,
+                ResultBundleDimension(
+                    tuple(symbol.function_space.output_dimensions())
+                ),
+            )
 
         try:
             lowered = self._lowered_function_targets[target]
@@ -105,8 +110,10 @@ class FunctionSymbolResolver:
         )
         output_indices = tuple(
             index
-            for index, output_spec in enumerate(target.signature.outputs)
-            if output_spec.shape is not None
+            for index, dimension in enumerate(
+                symbol.function_space.output_dimensions()
+            )
+            if dimension is not None
         )
         input_count = sum(
             input_space is not None and not isinstance(input_space, Noop)
@@ -131,9 +138,11 @@ class FunctionSymbolResolver:
                     supplied_index += 1
 
             outputs = lowered.execute(target_inputs)
-            if len(output_indices) == 1:
-                return outputs[output_indices[0]]
-            return tuple(outputs[index] for index in output_indices)
+            return (
+                outputs[output_indices[0]]
+                if len(output_indices) == 1
+                else tuple(outputs[index] for index in output_indices)
+            )
 
         return invoke
 

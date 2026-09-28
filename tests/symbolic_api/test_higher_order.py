@@ -98,10 +98,9 @@ def test_bound_callable_emits_base_symbol_and_bind_capture_dependency():
     assert bind_position == 1
     assert symbol.target is target
     assert symbol.function_space.arguments == [Scalar("t"), Scalar("a")]
-    assert symbol.result_dimension == Dimension.scalar()
     assert entry.target is target
     assert entry.target is not bound
-    assert function_value.dim.function_space.arguments == [Scalar("t")]
+    assert function_value.dim.arguments == [Scalar("t")]
     assert tape.depends_on(function_value, captured_a)
 
 
@@ -198,16 +197,16 @@ def test_bound_callable_uses_one_bind_node_per_capture():
     ]
     assert first_bind_op is OP.BIND
     assert second_bind_op is OP.BIND
-    assert base_value.dim.function_space.arguments == [
+    assert base_value.dim.arguments == [
         Scalar("t"),
         Scalar("a"),
         Scalar("b"),
     ]
-    assert first_bound_value.dim.function_space.arguments == [
+    assert first_bound_value.dim.arguments == [
         Scalar("t"),
         Scalar("b"),
     ]
-    assert function_value.dim.function_space.arguments == [Scalar("t")]
+    assert function_value.dim.arguments == [Scalar("t")]
     assert first_capture.tape is tape
     assert first_capture.index == captured_a.index
     assert first_position == 1
@@ -252,7 +251,30 @@ def test_bind_validates_position_and_argument_dimension():
             tape,
             tape.append(OP.BIND, signed_value, x, 0),
         )
-        assert reduced_value.dim.function_space.signature == (2,)
+        assert reduced_value.dim.signature == (2,)
+
+
+def test_bind_accepts_function_valued_input():
+    mapped_space = FunctionSpace(
+        "mapped",
+        arguments=[Scalar("x")],
+        output=[Scalar("value")],
+    )
+    target = function(
+        [mapped_space, Scalar("x")],
+        lambda mapped, x: mapped(x),
+    )
+
+    with TraceContext() as tape:
+        mapped_input = tape.input(mapped_space)
+        target_value = tape.insert_symbol_value(target)
+        bound_value = Tracer(
+            tape,
+            tape.append(OP.BIND, target_value, mapped_input, 0),
+        )
+
+    assert bound_value.dim.arguments == [Scalar("x")]
+    assert bound_value.dim.output_dimensions() == [Dimension.scalar()]
 
 
 def test_bound_callable_counts_only_present_target_inputs():
@@ -275,7 +297,7 @@ def test_bound_callable_counts_only_present_target_inputs():
         function_value.index
     ]
     assert bind_op is OP.BIND
-    assert base_value.dim.function_space.arguments == [
+    assert base_value.dim.arguments == [
         Scalar("x"),
         Scalar("a"),
     ]
@@ -284,7 +306,7 @@ def test_bound_callable_counts_only_present_target_inputs():
     assert bind_position == 1
 
 
-def test_function_symbols_exclude_absent_target_signature_values():
+def test_function_symbols_preserve_absent_target_signature_values():
     target = function(
         [Scalar("x"), None, Noop()],
         lambda x, _absent, _noop: (x + 1, None),
@@ -319,17 +341,14 @@ def test_function_symbols_exclude_absent_target_signature_values():
         None,
     ]
     assert symbol.function_space.arguments == [Scalar("x")]
-    assert symbol.function_space.output == [Scalar("output_0")]
-    assert symbol.result_dimension == Dimension.scalar()
+    assert symbol.function_space.output == [Scalar("output_0"), None]
     assert entry.target is target
-    assert (
-        tape.dim[function_value.index].function_space is symbol.function_space
-    )
+    assert tape.dim[function_value.index] is symbol.function_space
     assert native_symbol.target is native
 
     wrapper = function(
         [symbol.function_space, Scalar("wrapper_x")],
-        lambda target_value, x: target_value(x),
+        lambda target_value, x: target_value(x)[0],
     )
     composed = function(
         [Scalar("x")],

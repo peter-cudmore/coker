@@ -6,7 +6,6 @@ from coker.algebra.exceptions import InvalidShape, InvalidArgument
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
-    FunctionValueDimension,
     ResultBundleDimension,
 )
 from typing_extensions import final
@@ -265,44 +264,30 @@ def register_shape(*ops: OP):
 
 @register_shape(OP.BIND)
 def bind_shape(
-    function_value: FunctionValueDimension,
-    argument: Dimension | FunctionSpace | FunctionValueDimension,
+    function_value: FunctionSpace,
+    argument: Dimension | FunctionSpace,
     position: int,
-) -> FunctionValueDimension:
-    if not isinstance(function_value, FunctionValueDimension):
+) -> FunctionSpace:
+    if not isinstance(function_value, FunctionSpace):
         raise InvalidShape("BIND requires a function value")
-    return FunctionValueDimension(
-        function_value.function_space.bind_argument(argument, position),
-        function_value.result_dimension,
-    )
+    return function_value.bind_argument(argument, position)
 
 
 @register_shape(OP.EVALUATE)
 def evaluate_shape(
-    function_value: FunctionSpace | FunctionValueDimension,
-    *args: Dimension,
-) -> Dimension | FunctionSpace | ResultBundleDimension:
-    function_sig = (
-        function_value.function_space
-        if isinstance(function_value, FunctionValueDimension)
-        else function_value
-    )
-    if len(args) != len(function_sig.arguments):
+    function_value: FunctionSpace,
+    *args: Dimension | FunctionSpace,
+) -> Dimension | FunctionSpace | ResultBundleDimension | None:
+    if not isinstance(function_value, FunctionSpace):
+        raise InvalidShape("EVALUATE requires a function value")
+    if len(args) != len(function_value.arguments):
         raise InvalidShape(
-            f"Expected {len(function_sig.arguments)} arguments, got "
+            f"Expected {len(function_value.arguments)} arguments, got "
             f"{len(args)}"
         )
     for index, argument in enumerate(args):
-        function_sig.validate_argument(argument, index)
-    if isinstance(function_value, FunctionValueDimension):
-        return function_value.result_dimension
-    try:
-        (result_dimension,) = function_sig.output_dimensions()
-    except ValueError as ex:
-        raise InvalidShape(
-            "EVALUATE requires a function with one declared result"
-        ) from ex
-    return result_dimension
+        function_value.validate_argument(argument, index)
+    return function_value.evaluation_dimension()
 
 
 __componentwise_ops = [

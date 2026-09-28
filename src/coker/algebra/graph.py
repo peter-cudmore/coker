@@ -14,7 +14,6 @@ from typing import Any, Iterable, List, Set, Tuple
 from coker.algebra.dimensions import (
     Dimension,
     FunctionSpace,
-    FunctionValueDimension,
     ResultBundleDimension,
     Scalar,
     VectorSpace,
@@ -25,6 +24,7 @@ from coker.algebra.ops import (
     Noop,
     Operator,
     ReshapeOP,
+    SelectOP,
     numpy_atomics,
     numpy_composites,
 )
@@ -204,7 +204,6 @@ class SymbolEntry:
 
     target: Any
     function_space: FunctionSpace
-    result_dimension: Dimension | FunctionSpace | ResultBundleDimension
     name: str | None
     _identity: tuple[Any, ...] = dataclasses.field(repr=False, compare=False)
 
@@ -236,12 +235,6 @@ class FunctionSymbol:
     @property
     def function_space(self) -> FunctionSpace:
         return self._entry.function_space
-
-    @property
-    def result_dimension(
-        self,
-    ) -> Dimension | FunctionSpace | ResultBundleDimension:
-        return self._entry.result_dimension
 
     @property
     def symbol_name(self) -> str:
@@ -464,12 +457,7 @@ class Tape:
 
         index = len(self.dim)
         self.nodes.push_op(OP.FUNCTION, value)
-        self.dim.append(
-            FunctionValueDimension(
-                value.function_space,
-                value.result_dimension,
-            )
-        )
+        self.dim.append(value.function_space)
         self._node_hashmap[node_hash] = index
         return Tracer(self, index)
 
@@ -493,7 +481,11 @@ class Tape:
             size = 1
         elif isinstance(v, FunctionSpace):
             self.dim.append(v)
-            size = sum([d.flat() for d in v.output_dimensions()])
+            size = sum(
+                dimension.flat()
+                for dimension in v.output_dimensions()
+                if isinstance(dimension, Dimension)
+            )
         else:
             assert False, f"Invalid input type {v}: of {type(v)} "
 
@@ -908,7 +900,17 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         return self._emit(OP.CASE, norm == 0, self, self / norm)
 
     def __call__(self, *args):
-        return self._emit(OP.EVALUATE, self, *args)
+        result = self._emit(OP.EVALUATE, self, *args)
+        if not isinstance(result.dim, ResultBundleDimension):
+            return result
+        return tuple(
+            (
+                None
+                if output_dimension is None
+                else result._emit(SelectOP(index), result)
+            )
+            for index, output_dimension in enumerate(result.dim.outputs)
+        )
 
 
 def strip_symbols_from_array(array: np.ndarray, float_type=float):

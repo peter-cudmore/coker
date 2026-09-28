@@ -14,7 +14,7 @@ from coker.algebra.ops import (
     ReshapeOP,
     SelectOP,
 )
-from coker.algebra.dimensions import FunctionSpace
+from coker.algebra.dimensions import FunctionSpace, ResultBundleDimension
 from coker.backends.evaluator import _NativeCallable, bind_callable
 
 
@@ -57,23 +57,19 @@ class _CasadiFunctionTableTarget:
             result = self._target(*target_arguments)
 
         output_specs = self._function.signature.outputs
-        present_outputs = tuple(
-            output_spec
-            for output_spec in output_specs
-            if output_spec.shape is not None
-        )
-        if not present_outputs:
-            return ()
         if isinstance(self._target, ca.Function):
-            return result
-
-        values = (result,) if self._function.is_single else tuple(result)
-        values = tuple(
-            value
-            for value, output_spec in zip(values, output_specs)
-            if output_spec.shape is not None
-        )
-        return values[0] if len(values) == 1 else values
+            present_count = sum(
+                output_spec.shape is not None for output_spec in output_specs
+            )
+            values = (result,) if present_count == 1 else tuple(result)
+            values = iter(values)
+            result = tuple(
+                (None if output_spec.shape is None else next(values))
+                for output_spec in output_specs
+            )
+        else:
+            result = (result,) if self._function.is_single else tuple(result)
+        return result[0] if len(output_specs) == 1 else result
 
 
 class _PartiallyLoweredFunctionTarget:
@@ -112,7 +108,12 @@ class _FunctionTableResolver:
     def resolve(self, symbol: FunctionSymbol) -> Callable[..., Any]:
         target = symbol.target
         if not isinstance(target, coker.Function):
-            return _NativeCallable(target, symbol.result_dimension)
+            return _NativeCallable(
+                target,
+                ResultBundleDimension(
+                    tuple(symbol.function_space.output_dimensions())
+                ),
+            )
         try:
             return self._targets[target]
         except KeyError:

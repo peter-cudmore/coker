@@ -4,7 +4,11 @@ from coker import Scalar, function
 from coker.backends import get_backend_by_name
 from coker.algebra.ops import OP
 from coker.algebra.graph import FunctionSymbol
-from coker.algebra.dimensions import FunctionValueDimension
+from coker.algebra.dimensions import (
+    Dimension,
+    FunctionSpace,
+    ResultBundleDimension,
+)
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -79,7 +83,7 @@ def test_native_result_bundle_rejects_wrong_result_count():
         imported(3.0)
 
 
-def test_native_function_space_excludes_absent_outputs():
+def test_native_function_space_preserves_absent_outputs():
     signature = FunctionSignature(
         inputs=(FunctionInputSpec("x", Scalar("x")),),
         outputs=(
@@ -101,15 +105,17 @@ def test_native_function_space_excludes_absent_outputs():
         if isinstance(node, tuple) and node[0] == OP.EVALUATE
     )
 
-    assert native_symbol.function_space.output == [Scalar("present")]
+    assert native_symbol.function_space.output == [Scalar("present"), None]
     assert type(native_symbol) is FunctionSymbol
     assert evaluate_node[1].index == function_value_index
-    assert isinstance(
-        imported.tape.dim[function_value_index], FunctionValueDimension
-    )
+    assert isinstance(imported.tape.dim[function_value_index], FunctionSpace)
     assert (
-        imported.tape.dim[function_value_index].result_dimension
-        == imported.tape.dim[evaluate_index]
+        imported.tape.dim[function_value_index] is native_symbol.function_space
+    )
+    assert isinstance(imported.tape.dim[evaluate_index], ResultBundleDimension)
+    assert imported.tape.dim[evaluate_index].outputs == (
+        Dimension.scalar(),
+        None,
     )
 
 

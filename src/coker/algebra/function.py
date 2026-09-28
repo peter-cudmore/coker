@@ -10,7 +10,6 @@ from coker.algebra.dimensions import (
     Dimension,
     Element,
     FunctionSpace,
-    ResultBundleDimension,
     Scalar,
     VectorSpace,
 )
@@ -141,24 +140,16 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                     output_spec.shape
                     if isinstance(
                         output_spec.shape,
-                        (Scalar, VectorSpace, FunctionSpace),
+                        (Scalar, VectorSpace, FunctionSpace, type(None)),
                     )
                     else output_spec.shape.to_space(output_spec.name)
                 )
                 for output_spec in self.signature.outputs
-                if output_spec.shape is not None
             ],
-        )
-        output_dimensions = tuple(function_space.output_dimensions())
-        result_dimension = (
-            output_dimensions[0]
-            if len(output_dimensions) == 1
-            else ResultBundleDimension(output_dimensions)
         )
         return SymbolEntry(
             self,
             function_space,
-            result_dimension,
             self.name,
             ("coker", id(self)),
         )
@@ -188,24 +179,17 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             tape,
             tape.append(OP.EVALUATE, symbol, *arguments),
         )
-        present_output_count = sum(
-            output.shape is not None for output in self.signature.outputs
-        )
         result: list[Tracer | None] = []
-        output_index = 0
-        for output in self.signature.outputs:
+        multiple_outputs = len(self.signature.outputs) != 1
+        for output_index, output in enumerate(self.signature.outputs):
             if output.shape is None:
                 result.append(None)
             else:
                 result.append(
-                    bundle
-                    if present_output_count == 1
-                    else Tracer(
-                        tape,
-                        tape.append(SelectOP(output_index), bundle),
-                    )
+                    Tracer(tape, tape.append(SelectOP(output_index), bundle))
+                    if multiple_outputs
+                    else bundle
                 )
-                output_index += 1
         return result
 
     def _prepare_argument(self, arg, index):

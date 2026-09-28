@@ -148,7 +148,7 @@ class Dimension:
 
 @dataclasses.dataclass(frozen=True)
 class ResultBundleDimension:
-    """Ordered dimensions returned by one multi-output native call."""
+    """Ordered dimensions returned by one multi-output callable."""
 
     outputs: tuple[Dimension | FunctionSpace | None, ...]
 
@@ -165,12 +165,10 @@ class FunctionSpace:
 
     Attributes:
         name (str): The name of the function space.
-        arguments (List[Scalar | VectorSpace]): A list specifying the
-            input arguments of the function, where each argument can be
-            either a scalar or a vector space.
-        output (List[Scalar | VectorSpace]): A list specifying the
-            output of the function, where each element can be either a
-            scalar or a vector space.
+        arguments (List[Scalar | VectorSpace | FunctionSpace]): A list
+            specifying the input arguments.
+        output (List[Scalar | VectorSpace | FunctionSpace | None]): A list
+            specifying ordered outputs; ``None`` preserves an absent output.
         signature (Optional[Tuple[int]]): Optional list of integers
             denoting the degree of differentiability for each argument.
             If not provided, the default is smooth (infinitely
@@ -179,8 +177,8 @@ class FunctionSpace:
     """
 
     name: str
-    arguments: List[Scalar | VectorSpace]
-    output: List[Scalar | VectorSpace | FunctionSpace]
+    arguments: List[Scalar | VectorSpace | FunctionSpace]
+    output: List[Scalar | VectorSpace | FunctionSpace | None] | None
     signature: Optional[Tuple[int]] = None
     """Optional list of integers specifying the degree of
     differentiability for each argument.
@@ -202,13 +200,13 @@ class FunctionSpace:
             for arg in self.arguments
         ]
 
-    def output_dimensions(self):
+    def output_dimensions(self) -> list[Dimension | FunctionSpace | None]:
         if self.output is None:
-            return (None,)
+            return [None]
         return [
             (
                 out
-                if isinstance(out, FunctionSpace)
+                if isinstance(out, (FunctionSpace, type(None)))
                 else (
                     Dimension.scalar()
                     if isinstance(out, Scalar)
@@ -230,7 +228,7 @@ class FunctionSpace:
 
     def validate_argument(
         self,
-        argument_dimension: Dimension | FunctionSpace | FunctionValueDimension,
+        argument_dimension: Dimension | FunctionSpace,
         position: int,
         *,
         operation: str | None = None,
@@ -248,11 +246,7 @@ class FunctionSpace:
                 f"{position} is outside the callable signature with "
                 f"{len(input_dimensions)} arguments"
             )
-        actual_dimension = (
-            argument_dimension.function_space
-            if isinstance(argument_dimension, FunctionValueDimension)
-            else argument_dimension
-        )
+        actual_dimension = argument_dimension
         expected_dimension = input_dimensions[position]
         if isinstance(actual_dimension, FunctionSpace) and isinstance(
             expected_dimension, FunctionSpace
@@ -277,7 +271,7 @@ class FunctionSpace:
 
     def bind_argument(
         self,
-        argument_dimension: Dimension | FunctionSpace | FunctionValueDimension,
+        argument_dimension: Dimension | FunctionSpace,
         position: int,
     ) -> FunctionSpace:
         """Return this callable signature with one argument bound."""
@@ -304,9 +298,24 @@ class FunctionSpace:
             self.input_dimensions()
         ) and tuple(value.output_shape()) == tuple(self.output_dimensions())
 
+    def evaluation_dimension(
+        self,
+    ) -> Dimension | FunctionSpace | ResultBundleDimension | None:
+        """Return the graph result shape declared by this callable."""
+        output_dimensions = self.output_dimensions()
+        return (
+            output_dimensions[0]
+            if len(output_dimensions) == 1
+            else ResultBundleDimension(tuple(output_dimensions))
+        )
+
     def is_scalar(self):
         output_dimensions = self.output_dimensions()
-        return len(output_dimensions) == 1 and output_dimensions[0].is_scalar()
+        return (
+            len(output_dimensions) == 1
+            and isinstance(output_dimensions[0], Dimension)
+            and output_dimensions[0].is_scalar()
+        )
 
     @staticmethod
     def create_scalar_function_space(
@@ -318,14 +327,6 @@ class FunctionSpace:
             output=[Scalar(f"{name}_output")],
             signature=continuity_index,
         )
-
-
-@dataclasses.dataclass(frozen=True)
-class FunctionValueDimension:
-    """Complete declaration retained by a callable graph value."""
-
-    function_space: FunctionSpace
-    result_dimension: Dimension | FunctionSpace | ResultBundleDimension
 
 
 @dataclasses.dataclass
