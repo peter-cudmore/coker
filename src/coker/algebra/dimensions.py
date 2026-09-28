@@ -227,21 +227,15 @@ class FunctionSpace:
         self,
         argument_dimension: Dimension | FunctionSpace,
         position: int,
-        *,
-        operation: str | None = None,
     ) -> None:
         """Validate one argument against this callable's declared input."""
         if type(position) is not int:
-            raise InvalidArgument(
-                f"{operation + ' ' if operation else ''}argument position "
-                "must be an integer"
-            )
+            raise InvalidArgument("argument position must be an integer")
         input_dimensions = self.input_dimensions()
         if position < 0 or position >= len(input_dimensions):
             raise InvalidArgument(
-                f"{operation + ' ' if operation else ''}argument position "
-                f"{position} is outside the callable signature with "
-                f"{len(input_dimensions)} arguments"
+                f"argument position {position} is outside the callable "
+                f"signature with {len(input_dimensions)} arguments"
             )
         actual_dimension = argument_dimension
         expected_dimension = input_dimensions[position]
@@ -258,12 +252,9 @@ class FunctionSpace:
         else:
             dimensions_match = False
         if not dimensions_match:
-            argument_name = (
-                f"{operation} argument" if operation else "Argument"
-            )
             raise InvalidShape(
-                f"{argument_name} {position} has dimension "
-                f"{actual_dimension!r}, expected {expected_dimension!r}"
+                f"argument {position} has dimension {actual_dimension!r}, "
+                f"expected {expected_dimension!r}"
             )
 
     def bind_argument(
@@ -272,7 +263,12 @@ class FunctionSpace:
         position: int,
     ) -> FunctionSpace:
         """Return this callable signature with one argument bound."""
-        self.validate_argument(argument_dimension, position, operation="BIND")
+        try:
+            self.validate_argument(argument_dimension, position)
+        except InvalidShape as exc:
+            raise InvalidShape(f"BIND {exc}") from exc
+        except InvalidArgument as exc:
+            raise InvalidArgument(f"BIND {exc}") from exc
         signature = self.signature
         if signature is not None:
             signature = signature[:position] + signature[position + 1 :]

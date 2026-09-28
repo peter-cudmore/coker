@@ -32,6 +32,8 @@ Prefer explicit interfaces and direct attribute access. Do not use `getattr` or
 `hasattr` for normal control flow; add or use a defined protocol instead.
 Avoid string arguments except for names; use typed values, enums, or dedicated
 objects for behavioral choices.
+Do not pass strings through functions solely to improve diagnostics; catch the
+relevant exception and attach context when re-raising.
 Do not use `typing.Protocol`. Prefer a local abstract base class or metaclass
 when an interface is required. Keep inheritance shallow: one interface or base
 class and one child class unless additional depth is necessary.
