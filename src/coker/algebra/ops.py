@@ -68,7 +68,9 @@ class Noop:
 
     @staticmethod
     def cast_to_function_space(arguments=None):
-        return FunctionSpace("noop", arguments, None)
+        return FunctionSpace(
+            "noop", [] if arguments is None else arguments, []
+        )
 
 
 class Operator:

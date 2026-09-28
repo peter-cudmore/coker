@@ -175,13 +175,19 @@ class FunctionSpace:
 
     name: str
     arguments: List[Scalar | VectorSpace | FunctionSpace]
-    output: List[Scalar | VectorSpace | FunctionSpace] | None
+    output: List[Scalar | VectorSpace | FunctionSpace]
     signature: Optional[Tuple[int]] = None
     """Optional list of integers specifying the degree of
     differentiability for each argument.
 
     Defaults to infinite (that is, smooth functions).
     """
+
+    def __post_init__(self) -> None:
+        if self.output is None or any(
+            output is None for output in self.output
+        ):
+            raise TypeError("FunctionSpace output spaces must not be None")
 
     def input_dimensions(self):
         return [
@@ -198,8 +204,6 @@ class FunctionSpace:
         ]
 
     def output_dimensions(self) -> list[Dimension | FunctionSpace]:
-        if self.output is None:
-            return []
         return [
             (
                 out
@@ -279,7 +283,7 @@ class FunctionSpace:
                 for index, argument in enumerate(self.arguments)
                 if index != position
             ],
-            output=list(self.output) if self.output is not None else None,
+            output=list(self.output),
             signature=signature,
         )
 
