@@ -18,13 +18,10 @@ from coker.backends.lowered import (
 
 from coker.algebra.ops import (
     OP,
-    Noop,
     ConcatenateOP,
     NormOP,
     ReshapeOP,
     SelectOP,
-    invoke_callable,
-    normalize_evaluate_result,
 )
 from coker.algebra.dimensions import (
     Dimension,
@@ -33,7 +30,12 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.graph import CallableReference, Tracer
+from coker.algebra.graph import FunctionSymbol, Tracer
+from coker.backends.evaluator import (
+    FunctionSymbolResolver,
+    _cast_outputs,
+    bind_callable,
+)
 from coker.backends.sympy.shape import reshape
 
 MatrixType = (sp.Matrix, sp.ImmutableMatrix)
@@ -157,9 +159,7 @@ impls = {
     OP.CASE: lambda cond, t, f: t if cond else f,
     OP.ARCTAN2: sp.atan2,
     OP.LOG: sp.log,
-    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
+    OP.EVALUATE: lambda callable_value, *args: callable_value(*args),
 }
 
 
@@ -197,112 +197,30 @@ class _SymbolicVectorFunction:
         return sp.Array(values, shape=self._output.shape)
 
 
-class _SympyFunctionTableTarget:
-    """A reusable SymPy implementation for one pure function-table target."""
+class _SympyFunctionSymbolResolver(FunctionSymbolResolver):
+    """Render imported native symbols as undefined SymPy functions."""
 
-    def __init__(self, target: Function, backend, resolver) -> None:
-        self._target = target
-        self._backend = backend
-        self._resolver = resolver
-
-    def __call__(self, *supplied_arguments):
-        present_input_count = sum(
-            input_spec.space is not None
-            and not isinstance(input_spec.space, Noop)
-            for input_spec in self._target.signature.inputs
-        )
-        if len(supplied_arguments) != present_input_count:
-            raise TypeError(
-                f"Expected {present_input_count} present inputs, got "
-                f"{len(supplied_arguments)}"
-            )
-
-        arguments = iter(supplied_arguments)
-        target_arguments = tuple(
-            (
-                None
-                if input_spec.space is None
-                else (
-                    Noop()
-                    if isinstance(input_spec.space, Noop)
-                    else next(arguments)
-                )
-            )
-            for input_spec in self._target.signature.inputs
-        )
-        outputs = _evaluate_sympy_tape(
-            self._target.tape,
-            target_arguments,
-            self._target.output,
-            self._backend,
-            {},
-            function_table_resolver=self._resolver,
-        )
-        values = tuple(
-            output
-            for output, output_spec in zip(
-                outputs, self._target.signature.outputs
-            )
-            if output_spec.shape is not None
-        )
-        if not values:
-            return ()
-        return values[0] if len(values) == 1 else values
+    def resolve(self, symbol: FunctionSymbol):
+        if isinstance(self._backend, _SymbolicSympyBackend) and not isinstance(
+            symbol.target, Function
+        ):
+            return _SymbolicNativeCallable(symbol)
+        return super().resolve(symbol)
 
 
-class _SympyFunctionTableValue:
-    """A reusable target bound to evaluated function-value captures."""
+class _SymbolicNativeCallable:
+    """Represent an imported native callable without executing it."""
 
-    def __init__(self, target, captures) -> None:
-        self._target = target
-        self._captures = tuple(captures)
+    def __init__(self, symbol: FunctionSymbol) -> None:
+        self._symbol_name = symbol.symbol_name
 
-    def __call__(self, *public_arguments):
-        return self._target(*public_arguments, *self._captures)
-
-
-class _SympyFunctionTableResolver:
-    """Cache native targets by pure table target, not binding data."""
-
-    def __init__(self, backend) -> None:
-        self._backend = backend
-        self._targets: dict[Function, _SympyFunctionTableTarget] = {}
-
-    def resolve(self, target: Function, captures):
-        try:
-            native_target = self._targets[target]
-        except KeyError:
-            native_target = _SympyFunctionTableTarget(
-                target, self._backend, self
-            )
-            self._targets[target] = native_target
-        return _SympyFunctionTableValue(native_target, captures)
-
-
-_FUNCTION_TABLE_RESOLVER_KEY = object()
-
-
-def _get_function_table_resolver(
-    workspace, backend, resolver: _SympyFunctionTableResolver | None = None
-) -> _SympyFunctionTableResolver:
-    if resolver is not None:
-        return resolver
-    try:
-        return workspace[_FUNCTION_TABLE_RESOLVER_KEY]
-    except KeyError:
-        resolver = _SympyFunctionTableResolver(backend)
-        workspace[_FUNCTION_TABLE_RESOLVER_KEY] = resolver
-        return resolver
+    def __call__(self, *arguments):
+        return sp.Function(self._symbol_name)(*arguments)
 
 
 def _is_sympy_callable(value) -> bool:
-    return isinstance(
-        value,
-        (
-            SymbolicCallable,
-            CallableReference,
-            _SympyFunctionTableValue,
-        ),
+    return isinstance(value, (SymbolicCallable, FunctionSymbol)) or callable(
+        value
     )
 
 
@@ -313,13 +231,14 @@ def _evaluate_sympy_tape(
     backend,
     workspace,
     *,
-    function_table_resolver: _SympyFunctionTableResolver | None = None,
+    function_symbol_resolver: FunctionSymbolResolver | None = None,
 ):
-    """Interpret a tape while resolving typed function-table values."""
-    function_table_resolver = _get_function_table_resolver(
-        workspace, backend, function_table_resolver
+    """Interpret a tape while resolving typed function symbols."""
+    function_symbol_resolver = (
+        _SympyFunctionSymbolResolver(backend)
+        if function_symbol_resolver is None
+        else function_symbol_resolver
     )
-    from coker.backends.evaluator import _cast_outputs
 
     workspace[-1] = None
     for index, value in zip(tape.input_indicies, inputs):
@@ -335,8 +254,10 @@ def _evaluate_sympy_tape(
 
         op, *nodes = tape.nodes[index]
         arguments = []
-        for node in nodes:
-            if isinstance(node, Tracer):
+        for argument_index, node in enumerate(nodes):
+            if op == OP.BIND and argument_index == 2:
+                arguments.append(node)
+            elif isinstance(node, Tracer):
                 arguments.append(
                     workspace[node.index] if node.tape is tape else node
                 )
@@ -347,24 +268,17 @@ def _evaluate_sympy_tape(
 
         if op == OP.VALUE:
             (value,) = arguments
-        elif op == OP.FUNCTION_VALUE:
-            reference, *captures = arguments
-            value = (
-                function_table_resolver.resolve(reference.target, captures)
-                if reference.is_function_reference
-                else reference
-            )
+        elif op == OP.FUNCTION:
+            value = function_symbol_resolver.resolve(arguments[0])
+        elif op == OP.BIND:
+            value = bind_callable(*arguments)
         else:
             value = backend.call(op, *arguments)
 
-        if op == OP.EVALUATE and isinstance(
-            arguments[0], (CallableReference, _SympyFunctionTableValue)
-        ):
-            value = normalize_evaluate_result(value, tape.dim[index])
         workspace[index] = (
             value
-            if op == OP.FUNCTION_VALUE
-            or isinstance(value, (Tracer, SymbolicCallable, CallableReference))
+            if op in {OP.FUNCTION, OP.BIND}
+            or _is_sympy_callable(value)
             or isinstance(tape.dim[index], ResultBundleDimension)
             else backend.reshape(value, tape.dim[index])
         )
@@ -378,7 +292,7 @@ class SympyLoweredFunction(LoweredFunction):
     def __init__(self, backend: SympyBackend, function: Function) -> None:
         self._backend = backend
         self._function = function
-        self._function_table_resolver = _SympyFunctionTableResolver(backend)
+        self._function_symbol_resolver = _SympyFunctionSymbolResolver(backend)
 
     @property
     def backend_name(self) -> str:
@@ -403,7 +317,7 @@ class SympyLoweredFunction(LoweredFunction):
                 self._function.output,
                 self._backend,
                 {},
-                function_table_resolver=self._function_table_resolver,
+                function_symbol_resolver=self._function_symbol_resolver,
             )
         )
 
@@ -571,15 +485,6 @@ class SympyBackend(Backend):
         return self.to_backend_array(result)
 
     def call(self, op, *args):
-        if op == OP.EVALUATE:
-            callable_value, *arguments = args
-            if (
-                isinstance(callable_value, CallableReference)
-                and callable_value.is_function_reference
-            ):
-                return _SympyFunctionTableResolver(self).resolve(
-                    callable_value.target, ()
-                )(*arguments)
         if op in impls:
             result = impls[op](*args)
             return result
@@ -728,15 +633,6 @@ class SympyBackend(Backend):
 
 class _SymbolicSympyBackend(SympyBackend):
     """Lower external calls to undefined SymPy functions."""
-
-    def call(self, op, *args):
-        if (
-            op == OP.EVALUATE
-            and isinstance(args[0], CallableReference)
-            and not args[0].is_function_reference
-        ):
-            return sp.Function(args[0].symbol_name)(*args[1:])
-        return super().call(op, *args)
 
 
 register_backend("sympy", SympyBackend)

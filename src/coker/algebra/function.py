@@ -100,19 +100,6 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             out_shape = f"{self.output}"
         return f"{name}:{self.input_shape()} -> {out_shape}"
 
-    def to_space(self, name):
-        return FunctionSpace(
-            name,
-            arguments=[
-                dim.to_space("input_{i}") if dim else None
-                for i, dim in enumerate(self.input_shape())
-            ],
-            output=[
-                dim.to_space("output_{i}") if dim else None
-                for i, dim in enumerate(self.input_shape())
-            ],
-        )
-
     def input_spaces(self) -> list[Scalar | VectorSpace | FunctionSpace]:
         """Return the argument spaces of this function as a list.
 
@@ -181,7 +168,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             arguments=list(input_spaces),
             output=output_spaces,
         )
-        native_ref = tape._create_native_callable_reference(
+        native_symbol = tape._create_native_function_symbol(
             native,
             function_space,
             result_dimension,
@@ -191,7 +178,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             tape,
             tape.append(
                 OP.EVALUATE,
-                native_ref,
+                native_symbol,
                 *args,
             ),
         )
@@ -401,17 +388,13 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         self.public_space = public_space
         self.bound_arguments = bound_arguments
 
-    def expand_call(self, *arguments: Any) -> tuple[Function, tuple[Any, ...]]:
+    def __call__(self, *arguments: Any) -> Any:
         if len(arguments) != len(self.public_space.arguments):
             raise TypeError(
                 f"Expected {len(self.public_space.arguments)} arguments, "
                 f"got {len(arguments)}"
             )
-        return self.target, (*arguments, *self.bound_arguments)
-
-    def __call__(self, *arguments: Any) -> Any:
-        target, expanded_arguments = self.expand_call(*arguments)
-        return target(*expanded_arguments)
+        return self.target(*arguments, *self.bound_arguments)
 
     def lower(self, options=None) -> LoweredFunction:
         return self.target.lower(options)

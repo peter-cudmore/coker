@@ -5,11 +5,10 @@ from typing import Mapping, Sequence
 
 import torch
 
-from coker.algebra.function import Function
 from coker.algebra.dimensions import ResultBundleDimension
-from coker.algebra.ops import Noop, OP
-from coker.algebra.graph import CallableReference, Tracer
-from coker.backends.evaluator import _normalize_evaluate_result
+from coker.algebra.ops import OP
+from coker.algebra.graph import FunctionSymbol, Tracer
+from coker.backends.evaluator import FunctionSymbolResolver, bind_callable
 from coker.backends.backend import get_backend_by_name
 from coker.backends.optimisation import (
     build_initial_guess,
@@ -174,7 +173,7 @@ class _PytorchOptimisationProblem:
             dtype=self.dtype,
         )
         self._function_backend.name = backend.name
-        self._lowered_function_targets: dict[Function, object] = {}
+        self._function_symbols = FunctionSymbolResolver(self._function_backend)
         self._warm_start_decision = None
         self._warm_start_multipliers = None
         self.last_solve_info: SolveInfo | None = None
@@ -566,104 +565,46 @@ class _PytorchOptimisationProblem:
             for i in self.tape.input_indicies
         ]
 
-    def _resolve_function_reference(self, reference: CallableReference):
-        if not reference.is_function_reference:
-            return reference
-
-        target = reference.target
-        try:
-            lowered = self._lowered_function_targets[target]
-        except KeyError:
-            lowered = self._function_backend.lower(target)
-            self._lowered_function_targets[target] = lowered
-
-        input_spaces = tuple(
-            input_spec.space for input_spec in target.signature.inputs
-        )
-        output_indices = tuple(
-            index
-            for index, output_spec in enumerate(target.signature.outputs)
-            if output_spec.shape is not None
-        )
-        input_count = sum(
-            input_space is not None and not isinstance(input_space, Noop)
-            for input_space in input_spaces
-        )
-
-        def invoke(*arguments):
-            if len(arguments) != input_count:
-                raise TypeError(
-                    f"Expected {input_count} present inputs, got "
-                    f"{len(arguments)}"
-                )
-            supplied_index = 0
-            target_inputs = []
-            for input_space in input_spaces:
-                if input_space is None:
-                    target_inputs.append(None)
-                elif isinstance(input_space, Noop):
-                    target_inputs.append(Noop())
-                else:
-                    target_inputs.append(arguments[supplied_index])
-                    supplied_index += 1
-
-            outputs = lowered.execute(target_inputs)
-            if len(output_indices) == 1:
-                return outputs[output_indices[0]]
-            return tuple(outputs[index] for index in output_indices)
-
-        return invoke
-
-    def _bind_function_reference(
-        self, reference: CallableReference, *captures
-    ):
-        target = self._resolve_function_reference(reference)
-        if not reference.is_function_reference or not captures:
-            return target
-
-        def invoke(*arguments):
-            return target(*arguments, *captures)
-
-        return invoke
-
     def _evaluate_tracers(self, tracers, decision, runtime_args):
         inputs = self._materialise_inputs(decision, runtime_args)
         workspace = {-1: None}
         for index, value in zip(self.tape.input_indicies, inputs):
-            workspace[index] = _to_backend_array(value, self.device)
+            workspace[index] = (
+                value
+                if isinstance(value, FunctionSymbol) or callable(value)
+                else _to_backend_array(value, self.device)
+            )
         for index in range(len(self.tape.nodes)):
             if index in workspace:
                 continue
             op, *nodes = self.tape.nodes[index]
-            args = [
-                (
-                    workspace[node.index]
-                    if isinstance(node, Tracer) and node.tape == self.tape
-                    else (
-                        node
-                        if isinstance(node, CallableReference)
-                        else _to_backend_array(node, self.device)
-                    )
-                )
-                for node in nodes
-            ]
+            args = []
+            for argument_index, node in enumerate(nodes):
+                if op == OP.BIND and argument_index == 2:
+                    args.append(node)
+                elif isinstance(node, Tracer) and node.tape == self.tape:
+                    args.append(workspace[node.index])
+                elif isinstance(node, FunctionSymbol) or callable(node):
+                    args.append(node)
+                else:
+                    args.append(_to_backend_array(node, self.device))
             if op == OP.VALUE:
                 (value,) = args
-            elif op == OP.FUNCTION_VALUE:
-                value = self._bind_function_reference(*args)
+            elif op == OP.FUNCTION:
+                value = self._function_symbols.resolve(args[0])
+            elif op == OP.BIND:
+                value = bind_callable(*args)
             elif op in impls:
                 value = impls[op](*args)
             elif op in parameterised_impls:
                 value = call_parameterised_op(op, *args)
             else:
                 raise NotImplementedError(f"{op} is not implemented")
-            value = _normalize_evaluate_result(
-                op, args, value, self.tape.dim[index]
-            )
             workspace[index] = (
                 value
-                if op == OP.FUNCTION_VALUE
+                if op in {OP.FUNCTION, OP.BIND}
                 or isinstance(value, Tracer)
+                or callable(value)
                 or isinstance(self.tape.dim[index], ResultBundleDimension)
                 else _reshape(value, self.tape.dim[index])
             )

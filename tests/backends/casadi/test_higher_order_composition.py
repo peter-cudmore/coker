@@ -228,7 +228,7 @@ def test_casadi_inner_with_functionspace_called_from_casadi_outer():
     assert abs(result - 11.0) < 1e-9, f"Expected 11.0, got {result}"
 
 
-def test_bound_callable_expands_captures_as_target_arguments():
+def test_bound_callable_appends_captures_to_target_arguments():
     target = function(
         [Scalar("t"), Scalar("a")],
         lambda t, a: a * t,
@@ -241,13 +241,8 @@ def test_bound_callable_expands_captures_as_target_arguments():
     )
     with TraceContext(backend="casadi") as tape:
         captured_a = tape.input(Scalar("a"))
-        bound = BoundCallable(target, public_space, (captured_a,))
+        result = BoundCallable(target, public_space, (captured_a,))(3.0)
 
-        expanded_target, arguments = bound.expand_call(3.0)
-        result = bound(3.0)
-
-    assert expanded_target is target
-    assert arguments == (3.0, captured_a)
     assert isinstance(result, Tracer)
     assert tape.depends_on(result, captured_a)
 

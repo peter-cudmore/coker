@@ -9,7 +9,6 @@ from coker.algebra.ops import (
     NormOP,
     ReshapeOP,
     SelectOP,
-    invoke_callable,
 )
 
 
@@ -64,9 +63,7 @@ impls = {
         else true_branch if condition else false_branch
     ),
     OP.LOG: np.log,
-    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
+    OP.EVALUATE: lambda callable_value, *args: callable_value(*args),
 }
 
 parameterised_impls = {

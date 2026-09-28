@@ -63,7 +63,7 @@ def get_projection(dimension: Dimension, slc: slice):
 def get_dim_by_class(arg):
     if isinstance(arg, scalar_types):
         return Dimension.scalar()
-    if isinstance(arg, CallableReference):
+    if isinstance(arg, FunctionSymbol):
         return arg.function_space
     try:
         d = Dimension(arg.shape)
@@ -103,21 +103,17 @@ class TapeInner:
     INNER_REF = -1
     CONSTANT_REF = -2
     FUNCTION_REF = -3
-    FUNCTION_TABLE_REF = -4
 
     def __init__(self, tape_ref: Tape):
         self._nodes = []
         self._constants = []
         self._constant_hashmap = {}
-        self._native_callable_archive = []
-        self._native_callable_hashmap = {}
         self._function_table = []
         self._function_hashmap = {}
         self.tape_ref = weakref.ref(tape_ref)
         assert self.INNER_REF not in OP.__members__.values()
         assert self.CONSTANT_REF not in OP.__members__.values()
         assert self.FUNCTION_REF not in OP.__members__.values()
-        assert self.FUNCTION_TABLE_REF not in OP.__members__.values()
 
     @staticmethod
     def constant_hash(value) -> int:
@@ -173,21 +169,9 @@ class TapeInner:
                 self._constants.append(value)
 
             self._nodes.append((self.CONSTANT_REF, value_idx))
-        elif op == OP.FUNCTION_VALUE:
-            reference, *captures = args
-            if isinstance(reference, _FunctionValueBinding):
-                self._nodes.append(
-                    (
-                        self.FUNCTION_TABLE_REF,
-                        reference._archive_index,
-                        reference.function_space,
-                        *captures,
-                    )
-                )
-            else:
-                self._nodes.append(
-                    (self.FUNCTION_REF, reference._archive_index)
-                )
+        elif op == OP.FUNCTION:
+            (symbol,) = args
+            self._nodes.append((self.FUNCTION_REF, symbol._archive_index))
         else:
             self._nodes.append((op, *args))
         return idx
@@ -208,59 +192,38 @@ class TapeInner:
             return OP.VALUE, self._constants[value_idx]
         if op == self.FUNCTION_REF:
             (archive_index,) = args
-            return OP.FUNCTION_VALUE, CallableReference(
-                self.tape_ref(), archive_index
-            )
-        if op == self.FUNCTION_TABLE_REF:
-            table_index, function_space, *captures = args
-            binding = _FunctionValueBinding(
-                self.tape_ref(),
-                table_index,
-                function_space,
-                tuple(captures),
-            )
-            return OP.FUNCTION_VALUE, binding, *captures
+            return OP.FUNCTION, FunctionSymbol(self.tape_ref(), archive_index)
         return op, *args
 
     def __len__(self):
         return len(self._nodes)
 
 
-@dataclasses.dataclass
-class _NativeCallableArchiveEntry:
-    """Native callable and its input/output declaration stored by a tape."""
+@dataclasses.dataclass(frozen=True)
+class _FunctionSymbolEntry:
+    """Immutable target and declaration for one callable symbol."""
 
-    callable_value: Callable
+    target: Any
     function_space: FunctionSpace
     result_dimension: Dimension | FunctionSpace | ResultBundleDimension
     name: str | None
 
 
-@dataclasses.dataclass
-class _FunctionTableEntry:
-    """A pure Coker function target stored by a tape."""
-
-    target: Any
-
-
-class CallableReference:
-    """A reference to a native callable archive entry owned by a tape."""
+class FunctionSymbol:
+    """Opaque handle to a callable target declared in one tape."""
 
     def __init__(self, tape: Tape, archive_index: int):
         self._tape = weakref.ref(tape)
         self._archive_index = archive_index
 
     @property
-    def _entry(self) -> _NativeCallableArchiveEntry:
-        return self._tape().nodes._native_callable_archive[self._archive_index]
+    def _entry(self) -> _FunctionSymbolEntry:
+        return self._tape().nodes._function_table[self._archive_index]
 
     @property
-    def is_function_reference(self) -> bool:
-        return False
-
-    @property
-    def capture_dependencies(self) -> tuple[Tracer, ...]:
-        return ()
+    def target(self) -> Any:
+        """Return the target interpreted by a backend."""
+        return self._entry.target
 
     @property
     def function_space(self) -> FunctionSpace:
@@ -276,65 +239,6 @@ class CallableReference:
     def symbol_name(self) -> str:
         """Return the stable name used for symbolic external calls."""
         return self._entry.name or f"function_{self._archive_index}"
-
-    def __call__(self, *args):
-        return self._entry.callable_value(*args)
-
-
-class _FunctionValueBinding(CallableReference):
-    """A pure function-table target with binding data at one value site."""
-
-    def __init__(
-        self,
-        tape: Tape,
-        table_index: int,
-        function_space: FunctionSpace,
-        capture_dependencies: tuple[Tracer, ...],
-    ) -> None:
-        super().__init__(tape, table_index)
-        self._function_space = function_space
-        self._capture_dependencies = capture_dependencies
-
-    @property
-    def _entry(self) -> _FunctionTableEntry:
-        return self._tape().nodes._function_table[self._archive_index]
-
-    @property
-    def is_function_reference(self) -> bool:
-        return True
-
-    @property
-    def target(self) -> Any:
-        """Return the pure Coker target retained by this table entry."""
-        return self._entry.target
-
-    @property
-    def capture_dependencies(self) -> tuple[Tracer, ...]:
-        return self._capture_dependencies
-
-    @property
-    def function_space(self) -> FunctionSpace:
-        return self._function_space
-
-    @property
-    def result_dimension(
-        self,
-    ) -> Dimension | FunctionSpace | ResultBundleDimension:
-        output_dimensions = tuple(self.function_space.output_dimensions())
-        return (
-            output_dimensions[0]
-            if len(output_dimensions) == 1
-            else ResultBundleDimension(output_dimensions)
-        )
-
-    @property
-    def symbol_name(self) -> str:
-        return self.target.name or f"function_table_{self._archive_index}"
-
-    def __call__(self, *args):
-        raise TypeError(
-            "Function-table references must be resolved by a backend"
-        )
 
 
 class Tape:
@@ -368,7 +272,30 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def _create_native_callable_reference(
+    def _store_function_symbol(
+        self,
+        target: Any,
+        function_space: FunctionSpace,
+        result_dimension: Dimension | FunctionSpace | ResultBundleDimension,
+        *,
+        name: str | None = None,
+        key: tuple[Any, ...],
+    ) -> FunctionSymbol:
+        archive_index = self._inner._function_hashmap.get(key)
+        if archive_index is None:
+            archive_index = len(self._inner._function_table)
+            self._inner._function_hashmap[key] = archive_index
+            self._inner._function_table.append(
+                _FunctionSymbolEntry(
+                    target,
+                    function_space,
+                    result_dimension,
+                    name,
+                )
+            )
+        return FunctionSymbol(self, archive_index)
+
+    def _create_native_function_symbol(
         self,
         callable_value: Callable[..., Any],
         function_space: FunctionSpace,
@@ -377,93 +304,68 @@ class Tape:
         ) = None,
         *,
         name: str | None = None,
-    ) -> CallableReference:
+    ) -> FunctionSymbol:
         if result_dimension is None:
             output_dimensions = function_space.output_dimensions()
             if len(output_dimensions) != 1:
                 raise ValueError(
-                    "Callable references require one result or an explicit "
+                    "Function symbols require one result or an explicit "
                     "result dimension"
                 )
             (result_dimension,) = output_dimensions
+        return self._store_function_symbol(
+            callable_value,
+            function_space,
+            result_dimension,
+            name=name,
+            key=(
+                "native",
+                id(callable_value),
+                id(function_space),
+                id(result_dimension),
+                name,
+            ),
+        )
 
-        key = (id(callable_value), name)
-        archive_index = self._inner._native_callable_hashmap.get(key)
-        if archive_index is None:
-            archive_index = len(self._inner._native_callable_archive)
-            self._inner._native_callable_hashmap[key] = archive_index
-            self._inner._native_callable_archive.append(
-                _NativeCallableArchiveEntry(
-                    callable_value,
-                    function_space,
-                    result_dimension,
-                    name,
-                )
-            )
-        return CallableReference(self, archive_index)
-
-    def _create_function_reference(
-        self, function_value: Any
-    ) -> CallableReference:
-        """Create a function-value binding over a pure table target."""
-        from coker.algebra.function import BoundCallable, Function
-
-        if isinstance(function_value, BoundCallable):
-            target = function_value.target
-            captures = function_value.bound_arguments
-            function_space = function_value.public_space
-        elif isinstance(function_value, Function):
-            target = function_value
-            captures = ()
-            function_space = FunctionSpace(
-                target.name or "function",
-                arguments=[
-                    input_spec.space
-                    for input_spec in target.signature.inputs
-                    if input_spec.space is not None
-                    and not isinstance(input_spec.space, Noop)
-                ],
-                output=[
-                    (
-                        output_spec.shape
-                        if isinstance(
-                            output_spec.shape,
-                            (Scalar, VectorSpace, FunctionSpace),
-                        )
-                        else output_spec.shape.to_space(output_spec.name)
-                    )
-                    for output_spec in target.signature.outputs
-                    if output_spec.shape is not None
-                ],
-            )
-        else:
-            raise TypeError(
-                "Function table entries require a Function or BoundCallable"
-            )
+    def _create_function_symbol(self, target: Any) -> FunctionSymbol:
+        """Create a base symbol for an unbound Coker function target."""
+        from coker.algebra.function import Function
 
         if not isinstance(target, Function):
-            raise TypeError("BoundCallable targets must be Coker Functions")
-
-        if not all(isinstance(capture, Tracer) for capture in captures):
-            raise TypeError(
-                "BoundCallable captures must be tracer dependencies"
-            )
-        invalid_captures = [
-            capture for capture in captures if capture.tape is not self
-        ]
-        if invalid_captures:
-            raise DanglingTracerError(tracers=invalid_captures)
-
-        table_index = self._inner._function_hashmap.get(id(target))
-        if table_index is None:
-            table_index = len(self._inner._function_table)
-            self._inner._function_hashmap[id(target)] = table_index
-            self._inner._function_table.append(_FunctionTableEntry(target))
-        return _FunctionValueBinding(
-            self,
-            table_index,
+            raise TypeError("Function symbols require a Coker Function target")
+        function_space = FunctionSpace(
+            target.name or "function",
+            arguments=[
+                input_spec.space
+                for input_spec in target.signature.inputs
+                if input_spec.space is not None
+                and not isinstance(input_spec.space, Noop)
+            ],
+            output=[
+                (
+                    output_spec.shape
+                    if isinstance(
+                        output_spec.shape,
+                        (Scalar, VectorSpace, FunctionSpace),
+                    )
+                    else output_spec.shape.to_space(output_spec.name)
+                )
+                for output_spec in target.signature.outputs
+                if output_spec.shape is not None
+            ],
+        )
+        output_dimensions = tuple(function_space.output_dimensions())
+        result_dimension = (
+            output_dimensions[0]
+            if len(output_dimensions) == 1
+            else ResultBundleDimension(output_dimensions)
+        )
+        return self._store_function_symbol(
+            target,
             function_space,
-            tuple(captures),
+            result_dimension,
+            name=target.name,
+            key=("coker", id(target)),
         )
 
     def append_function_call(
@@ -477,34 +379,15 @@ class Tape:
                 f"Expected {len(function.tape.input_indicies)} inputs, got "
                 f"{len(inputs)}"
             )
-
-        from coker.algebra.function import BoundCallable, Function
-
-        arguments = []
-        for value, spec in zip(inputs, function.signature.inputs):
-            expected_space = spec.space
-            if expected_space is None or isinstance(expected_space, Noop):
-                continue
-            if isinstance(value, BoundCallable):
-                arguments.append(self._create_function_reference(value))
-                continue
-            if not isinstance(value, Function):
-                arguments.append(value)
-                continue
-            if isinstance(expected_space, FunctionSpace) and (
-                len(expected_space.arguments)
-                == sum(
-                    input_spec.space is not None
-                    and not isinstance(input_spec.space, Noop)
-                    for input_spec in value.signature.inputs
-                )
-            ):
-                value = BoundCallable(value, expected_space, ())
-            arguments.append(self._create_function_reference(value))
-        reference = self._create_function_reference(function)
+        arguments = [
+            value
+            for value, spec in zip(inputs, function.signature.inputs)
+            if spec.space is not None and not isinstance(spec.space, Noop)
+        ]
+        symbol = self._create_function_symbol(function)
         bundle = Tracer(
             self,
-            self.append(OP.EVALUATE, reference, *arguments),
+            self.append(OP.EVALUATE, symbol, *arguments),
         )
         present_output_count = sum(
             output.shape is not None for output in function.signature.outputs
@@ -591,6 +474,15 @@ class Tape:
                 yield Tracer(self, index)
 
     def _compute_shape(self, op: OP | Operator, *args):
+        if op == OP.BIND:
+            function_value, argument, position = args
+            assert isinstance(function_value, Tracer)
+            assert isinstance(argument, Tracer)
+            return op.compute_shape(
+                function_value.dim,
+                argument.dim,
+                position,
+            )
         dims = []
         for arg in args:
             if arg is None:
@@ -606,6 +498,19 @@ class Tape:
         *args,
     ) -> int:
         args = [strip_symbols_from_array(a) for a in args]
+        if op == OP.FUNCTION:
+            if len(args) != 1:
+                raise TypeError(
+                    "FUNCTION requires exactly one function symbol"
+                )
+            return self.insert_function_value(args[0]).index
+        if op == OP.BIND:
+            if len(args) != 3:
+                raise TypeError(
+                    "BIND requires a function, argument, and position"
+                )
+            if type(args[2]) is not int:
+                raise TypeError("BIND argument position must be an integer")
 
         if self._substitutions:
             args = [
@@ -623,17 +528,20 @@ class Tape:
         if invalid_tracers:
             raise DanglingTracerError(tracers=invalid_tracers)
 
+        from coker.algebra.function import BoundCallable, Function
+
+        def insert_argument(index: int, argument: Any):
+            if op == OP.BIND and index == 2:
+                return argument
+            if isinstance(argument, Tracer):
+                return argument.copy()
+            if isinstance(argument, (FunctionSymbol, BoundCallable, Function)):
+                return self.insert_function_value(argument)
+            return self.insert_value(argument)
+
         args = [
-            (
-                a.copy()
-                if isinstance(a, Tracer)
-                else (
-                    self.insert_function_value(a)
-                    if isinstance(a, CallableReference)
-                    else self.insert_value(a)
-                )
-            )
-            for a in args
+            insert_argument(index, argument)
+            for index, argument in enumerate(args)
         ]
 
         node_hash = hash((op, *args))
@@ -663,33 +571,49 @@ class Tape:
         self._node_hashmap[node_hash] = idx
         return Tracer(self, idx)
 
-    def insert_function_value(self, reference: CallableReference) -> Tracer:
-        if reference._tape() is not self:
-            raise ValueError("Callable references must belong to this tape")
+    def insert_function_value(self, function_value: Any) -> Tracer:
+        """Insert a base symbol or a sequence of incremental bindings."""
+        from coker.algebra.function import BoundCallable, Function
 
-        captures = reference.capture_dependencies
-        node_hash = hash(
-            (
-                OP.FUNCTION_VALUE,
-                reference.is_function_reference,
-                reference._archive_index,
-                (
-                    id(reference.function_space)
-                    if reference.is_function_reference
-                    else None
-                ),
-                *captures,
+        if isinstance(function_value, BoundCallable):
+            captures = function_value.bound_arguments
+            if not all(isinstance(capture, Tracer) for capture in captures):
+                raise TypeError(
+                    "BoundCallable arguments must be tracer dependencies"
+                )
+            invalid_captures = [
+                capture for capture in captures if capture.tape is not self
+            ]
+            if invalid_captures:
+                raise DanglingTracerError(tracers=invalid_captures)
+            value = self.insert_function_value(function_value.target)
+            position = len(function_value.public_space.arguments)
+            for capture in captures:
+                value = Tracer(
+                    self, self.append(OP.BIND, value, capture, position)
+                )
+            return value
+
+        if isinstance(function_value, Function):
+            function_value = self._create_function_symbol(function_value)
+        if not isinstance(function_value, FunctionSymbol):
+            raise TypeError(
+                "Function values require a FunctionSymbol, Function, or "
+                "BoundCallable"
             )
-        )
+        if function_value._tape() is not self:
+            raise ValueError("Function symbols must belong to this tape")
+
+        node_hash = hash((OP.FUNCTION, function_value._archive_index))
         if node_hash in self._node_hashmap:
             return Tracer(self, self._node_hashmap[node_hash])
 
         index = len(self.dim)
-        self.nodes.push_op(OP.FUNCTION_VALUE, reference, *captures)
+        self.nodes.push_op(OP.FUNCTION, function_value)
         self.dim.append(
             FunctionValueDimension(
-                reference.function_space,
-                reference.result_dimension,
+                function_value.function_space,
+                function_value.result_dimension,
             )
         )
         self._node_hashmap[node_hash] = index

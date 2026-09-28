@@ -5,6 +5,7 @@ from coker import function, Scalar, VectorSpace, FunctionSpace, Dimension
 from coker.algebra.function import BoundCallable, Function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import Noop, OP
+from coker.algebra.exceptions import InvalidArgument, InvalidShape
 from ..util import is_close
 
 
@@ -43,7 +44,7 @@ def test_functional(backend):
     assert is_close(f_coker_result, np.array([3, 2], dtype=float))
 
 
-def test_bound_callable_capture_is_retained_in_function_value():
+def test_bound_callable_emits_base_symbol_and_bind_capture_dependency():
     target = function(
         [Scalar("t"), Scalar("a")],
         lambda t, a: a * t,
@@ -56,34 +57,38 @@ def test_bound_callable_capture_is_retained_in_function_value():
 
     with TraceContext() as tape:
         captured_a = tape.input(Scalar("a"))
-        reference = tape._create_function_reference(
+        function_value = tape.insert_function_value(
             BoundCallable(target, public_space, (captured_a,))
         )
-        function_value = tape.insert_function_value(reference)
 
+    bind_op, base_value, bind_capture, bind_position = tape.nodes[
+        function_value.index
+    ]
+    function_op, symbol = tape.nodes[base_value.index]
     entry = tape.nodes._function_table[0]
-    op, node_reference, node_capture = tape.nodes[function_value.index]
-    assert reference.is_function_reference
-    assert reference.target is target
-    assert reference.capture_dependencies == (captured_a,)
-    assert reference.function_space is public_space
-    assert reference.result_dimension == Dimension.scalar()
+    assert function_op is OP.FUNCTION
+    assert bind_op is OP.BIND
+    assert bind_capture.tape is tape
+    assert bind_capture.index == captured_a.index
+    assert bind_position == 1
+    assert symbol.target is target
+    assert symbol.function_space.arguments == [Scalar("t"), Scalar("a")]
+    assert symbol.result_dimension == Dimension.scalar()
+    assert tuple(vars(entry)) == (
+        "target",
+        "function_space",
+        "result_dimension",
+        "name",
+    )
     assert entry.target is target
-    assert tuple(vars(entry)) == ("target",)
-    assert op is OP.FUNCTION_VALUE
-    assert node_reference.is_function_reference
-    assert node_reference.target is target
-    assert node_reference.capture_dependencies == (captured_a,)
-    assert node_capture is captured_a
+    assert function_value.dim.function_space.arguments == [Scalar("t")]
     assert tape.depends_on(function_value, captured_a)
 
-    with pytest.raises(TypeError, match="Function or BoundCallable"):
-        tape._create_function_reference(lambda t: t)
+    with pytest.raises(TypeError, match="Coker Function target"):
+        tape._create_function_symbol(lambda t: t)
 
 
-def test_bound_callable_bindings_share_pure_target_and_evaluate(
-    backend,
-):
+def test_bound_callable_captures_share_symbol_and_evaluate(backend):
     target = function(
         [Scalar("t"), Scalar("a")],
         lambda t, a: a * t,
@@ -99,14 +104,12 @@ def test_bound_callable_bindings_share_pure_target_and_evaluate(
     captured_b = tape.input(Scalar("b"))
     x = tape.input(Scalar("x"))
 
-    first = tape._create_function_reference(
+    first_value = tape.insert_function_value(
         BoundCallable(target, public_space, (captured_a,))
     )
-    second = tape._create_function_reference(
+    second_value = tape.insert_function_value(
         BoundCallable(target, public_space, (captured_b,))
     )
-    first_value = tape.insert_function_value(first)
-    second_value = tape.insert_function_value(second)
     first_result = Tracer(tape, tape.append(OP.EVALUATE, first_value, x))
     second_result = Tracer(tape, tape.append(OP.EVALUATE, second_value, x))
     composed = Function(
@@ -117,14 +120,120 @@ def test_bound_callable_bindings_share_pure_target_and_evaluate(
 
     assert len(tape.nodes._function_table) == 1
     assert tape.nodes._function_table[0].target is target
-    assert tuple(vars(tape.nodes._function_table[0])) == ("target",)
-    assert first._archive_index == second._archive_index == 0
-    assert tape.depends_on(first_value, captured_a)
-    assert tape.depends_on(second_value, captured_b)
+    assert (
+        sum(
+            isinstance(tape.nodes[index], tuple)
+            and tape.nodes[index][0] is OP.FUNCTION
+            for index in range(len(tape.nodes))
+        )
+        == 1
+    )
+    bound_nodes = [
+        tape.nodes[function_value.index]
+        for function_value in (first_value, second_value)
+    ]
+    assert bound_nodes[0][1].index == bound_nodes[1][1].index
+    for (
+        (op, base_value, bind_capture, position),
+        function_value,
+        capture,
+    ) in zip(
+        bound_nodes,
+        (first_value, second_value),
+        (captured_a, captured_b),
+    ):
+        assert op is OP.BIND
+        assert tape.op(base_value.index) is OP.FUNCTION
+        assert bind_capture.tape is tape
+        assert bind_capture.index == capture.index
+        assert position == 1
+        assert tape.depends_on(base_value, capture) is False
+        assert tape.depends_on(function_value, capture)
 
-    first_value, second_value = composed(2.0, 5.0, 3.0)
-    assert float(first_value) == 6.0
-    assert float(second_value) == 15.0
+    first_result, second_result = composed(2.0, 5.0, 3.0)
+    assert float(first_result) == 6.0
+    assert float(second_result) == 15.0
+
+
+def test_bound_callable_uses_one_bind_node_per_capture():
+    target = function(
+        [Scalar("t"), Scalar("a"), Scalar("b")],
+        lambda t, a, b: a * t + b,
+    )
+    public_space = FunctionSpace(
+        "affine",
+        arguments=[Scalar("t")],
+        output=[Scalar("value")],
+    )
+
+    with TraceContext() as tape:
+        captured_a = tape.input(Scalar("a"))
+        captured_b = tape.input(Scalar("b"))
+        function_value = tape.insert_function_value(
+            BoundCallable(target, public_space, (captured_a, captured_b))
+        )
+
+    second_bind_op, first_bound_value, second_capture, second_position = (
+        tape.nodes[function_value.index]
+    )
+    first_bind_op, base_value, first_capture, first_position = tape.nodes[
+        first_bound_value.index
+    ]
+    assert first_bind_op is OP.BIND
+    assert second_bind_op is OP.BIND
+    assert base_value.dim.function_space.arguments == [
+        Scalar("t"),
+        Scalar("a"),
+        Scalar("b"),
+    ]
+    assert first_bound_value.dim.function_space.arguments == [
+        Scalar("t"),
+        Scalar("b"),
+    ]
+    assert function_value.dim.function_space.arguments == [Scalar("t")]
+    assert first_capture.tape is tape
+    assert first_capture.index == captured_a.index
+    assert first_position == 1
+    assert second_capture.tape is tape
+    assert second_capture.index == captured_b.index
+    assert second_position == 1
+    assert tape.depends_on(function_value, captured_a)
+    assert tape.depends_on(function_value, captured_b)
+
+
+def test_bind_validates_position_and_argument_dimension():
+    target = function(
+        [Scalar("x"), Scalar("a")],
+        lambda x, a: a * x,
+    )
+    with TraceContext() as tape:
+        x = tape.input(Scalar("x"))
+        vector = tape.input(VectorSpace("v", 2))
+        function_value = tape.insert_function_value(target)
+
+        with pytest.raises(InvalidArgument, match="outside the callable"):
+            tape.append(OP.BIND, function_value, x, -1)
+        with pytest.raises(InvalidArgument, match="outside the callable"):
+            tape.append(OP.BIND, function_value, x, 2)
+        with pytest.raises(TypeError, match="must be an integer"):
+            tape.append(OP.BIND, function_value, x, 0.0)
+        with pytest.raises(InvalidShape, match="BIND argument 0"):
+            tape.append(OP.BIND, function_value, vector, 0)
+        signed_symbol = tape._create_native_function_symbol(
+            lambda x, a: a * x,
+            FunctionSpace(
+                "signed",
+                arguments=[Scalar("x"), Scalar("a")],
+                output=[Scalar("value")],
+                signature=(1, 2),
+            ),
+        )
+        signed_value = tape.insert_function_value(signed_symbol)
+        reduced_value = Tracer(
+            tape,
+            tape.append(OP.BIND, signed_value, x, 0),
+        )
+        assert reduced_value.dim.function_space.signature == (2,)
 
 
 def test_bound_callable_counts_only_present_target_inputs():
@@ -141,27 +250,36 @@ def test_bound_callable_counts_only_present_target_inputs():
     with TraceContext() as tape:
         captured_a = tape.input(Scalar("a"))
         bound = BoundCallable(target, public_space, (captured_a,))
-        reference = tape._create_function_reference(bound)
+        function_value = tape.insert_function_value(bound)
 
-    bound_target, bound_arguments = bound.expand_call(2.0)
-    assert bound_target is target
-    assert bound_arguments == (2.0, captured_a)
-    assert reference.capture_dependencies == (captured_a,)
-    assert reference.function_space is public_space
+    bind_op, base_value, bind_capture, bind_position = tape.nodes[
+        function_value.index
+    ]
+    assert bind_op is OP.BIND
+    assert base_value.dim.function_space.arguments == [
+        Scalar("x"),
+        Scalar("a"),
+    ]
+    assert bind_capture.tape is tape
+    assert bind_capture.index == captured_a.index
+    assert bind_position == 1
 
 
-def test_function_reference_excludes_absent_target_signature_values():
+def test_function_symbols_exclude_absent_target_signature_values():
     target = function(
         [Scalar("x"), None, Noop()],
         lambda x, _absent, _noop: (x + 1, None),
         name="optional_target",
     )
 
+    def native(x):
+        return x + 1
+
     with TraceContext() as tape:
-        reference = tape._create_function_reference(target)
-        function_value = tape.insert_function_value(reference)
-        raw_reference = tape._create_native_callable_reference(
-            lambda x: x + 1,
+        symbol = tape._create_function_symbol(target)
+        function_value = tape.insert_function_value(symbol)
+        native_symbol = tape._create_native_function_symbol(
+            native,
             FunctionSpace(
                 "raw",
                 arguments=[Scalar("x")],
@@ -179,24 +297,17 @@ def test_function_reference_excludes_absent_target_signature_values():
         Dimension.scalar(),
         None,
     ]
-    assert reference.function_space.arguments == [Scalar("x")]
-    assert reference.function_space.output == [Scalar("output_0")]
-    assert reference.result_dimension == Dimension.scalar()
+    assert symbol.function_space.arguments == [Scalar("x")]
+    assert symbol.function_space.output == [Scalar("output_0")]
+    assert symbol.result_dimension == Dimension.scalar()
     assert entry.target is target
     assert (
-        tape.dim[function_value.index].function_space
-        is reference.function_space
+        tape.dim[function_value.index].function_space is symbol.function_space
     )
-    bound = BoundCallable(target, reference.function_space, ())
-    bound_target, bound_arguments = bound.expand_call(2.0)
-    assert bound_target is target
-    assert bound_arguments == (2.0,)
-    bound_reference = tape._create_function_reference(bound)
-    assert bound_reference.target is target
-    assert bound_reference.function_space is reference.function_space
+    assert native_symbol.target is native
 
     wrapper = function(
-        [reference.function_space, Scalar("wrapper_x")],
+        [symbol.function_space, Scalar("wrapper_x")],
         lambda target_value, x: target_value(x),
     )
     composed = function(
@@ -204,10 +315,6 @@ def test_function_reference_excludes_absent_target_signature_values():
         lambda x: wrapper(target, x),
     )
     assert composed(2.0) == 3.0
-
-    with pytest.raises(TypeError, match="resolved by a backend"):
-        reference(2.0)
-    assert raw_reference(2.0) == 3.0
 
 
 def test_function_composition(backend):

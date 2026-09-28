@@ -5,6 +5,7 @@ from functools import reduce
 from operator import mul
 from typing import List, Optional, Tuple, Union
 from coker.interfaces import FunctionSignatureValue
+from coker.algebra.exceptions import InvalidArgument, InvalidShape
 
 
 @dataclasses.dataclass
@@ -217,6 +218,84 @@ class FunctionSpace:
             for out in self.output
         ]
 
+    def matches_signature(self, other: FunctionSpace) -> bool:
+        """Return whether another function space has the same I/O shapes."""
+        return (
+            isinstance(other, FunctionSpace)
+            and tuple(self.input_dimensions())
+            == tuple(other.input_dimensions())
+            and tuple(self.output_dimensions())
+            == tuple(other.output_dimensions())
+        )
+
+    def validate_argument(
+        self,
+        argument_dimension: Dimension | FunctionSpace | FunctionValueDimension,
+        position: int,
+        *,
+        operation: str | None = None,
+    ) -> None:
+        """Validate one argument against this callable's declared input."""
+        if type(position) is not int:
+            raise InvalidArgument(
+                f"{operation + ' ' if operation else ''}argument position "
+                "must be an integer"
+            )
+        input_dimensions = self.input_dimensions()
+        if position < 0 or position >= len(input_dimensions):
+            raise InvalidArgument(
+                f"{operation + ' ' if operation else ''}argument position "
+                f"{position} is outside the callable signature with "
+                f"{len(input_dimensions)} arguments"
+            )
+        actual_dimension = (
+            argument_dimension.function_space
+            if isinstance(argument_dimension, FunctionValueDimension)
+            else argument_dimension
+        )
+        expected_dimension = input_dimensions[position]
+        if isinstance(actual_dimension, FunctionSpace) and isinstance(
+            expected_dimension, FunctionSpace
+        ):
+            dimensions_match = actual_dimension.matches_signature(
+                expected_dimension
+            )
+        elif isinstance(actual_dimension, Dimension) and isinstance(
+            expected_dimension, Dimension
+        ):
+            dimensions_match = actual_dimension == expected_dimension
+        else:
+            dimensions_match = False
+        if not dimensions_match:
+            argument_name = (
+                f"{operation} argument" if operation else "Argument"
+            )
+            raise InvalidShape(
+                f"{argument_name} {position} has dimension "
+                f"{actual_dimension!r}, expected {expected_dimension!r}"
+            )
+
+    def bind_argument(
+        self,
+        argument_dimension: Dimension | FunctionSpace | FunctionValueDimension,
+        position: int,
+    ) -> FunctionSpace:
+        """Return this callable signature with one argument bound."""
+        self.validate_argument(argument_dimension, position, operation="BIND")
+        signature = self.signature
+        if signature is not None:
+            signature = signature[:position] + signature[position + 1 :]
+        return FunctionSpace(
+            self.name,
+            arguments=[
+                argument
+                for index, argument in enumerate(self.arguments)
+                if index != position
+            ],
+            output=list(self.output) if self.output is not None else None,
+            signature=signature,
+        )
+
     def __contains__(self, value) -> bool:
         """Return whether a Coker function has this input/output signature."""
         if not isinstance(value, FunctionSignatureValue):
@@ -243,7 +322,7 @@ class FunctionSpace:
 
 @dataclasses.dataclass(frozen=True)
 class FunctionValueDimension:
-    """Complete declaration retained by a function-table value."""
+    """Complete declaration retained by a callable graph value."""
 
     function_space: FunctionSpace
     result_dimension: Dimension | FunctionSpace | ResultBundleDimension

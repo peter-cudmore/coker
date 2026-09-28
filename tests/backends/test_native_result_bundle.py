@@ -3,7 +3,7 @@ import pytest
 from coker import Scalar, function
 from coker.backends import get_backend_by_name
 from coker.algebra.ops import OP
-from coker.algebra.graph import CallableReference
+from coker.algebra.graph import FunctionSymbol
 from coker.algebra.dimensions import FunctionValueDimension
 from coker.backends.lowered import (
     FunctionInputSpec,
@@ -90,10 +90,10 @@ def test_native_function_space_excludes_absent_outputs():
     imported = get_backend_by_name("numpy").import_function(
         lambda x: (x, None), signature
     )
-    function_value_index, (_, native_ref) = next(
+    function_value_index, (_, native_symbol) = next(
         (index, node)
         for index, node in enumerate(imported.tape.nodes)
-        if isinstance(node, tuple) and node[0] == OP.FUNCTION_VALUE
+        if isinstance(node, tuple) and node[0] == OP.FUNCTION
     )
     evaluate_index, evaluate_node = next(
         (index, node)
@@ -101,8 +101,8 @@ def test_native_function_space_excludes_absent_outputs():
         if isinstance(node, tuple) and node[0] == OP.EVALUATE
     )
 
-    assert native_ref.function_space.output == [Scalar("present")]
-    assert type(native_ref) is CallableReference
+    assert native_symbol.function_space.output == [Scalar("present")]
+    assert type(native_symbol) is FunctionSymbol
     assert evaluate_node[1].index == function_value_index
     assert isinstance(
         imported.tape.dim[function_value_index], FunctionValueDimension

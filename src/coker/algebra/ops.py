@@ -1,5 +1,5 @@
 import enum
-from typing import Any, Callable, Dict, Sequence
+from typing import Any, Callable, Dict
 
 import numpy as np
 from coker.algebra.exceptions import InvalidShape, InvalidArgument
@@ -39,9 +39,10 @@ class OP(enum.Enum):
     ARCTAN2 = 23
     LESS_THAN = 24
     LESS_EQUAL = 25
-    FUNCTION_VALUE = 26
-    EVALUATE = 27
-    LOG = 28
+    FUNCTION = 26
+    BIND = 27
+    EVALUATE = 28
+    LOG = 29
 
     def compute_shape(self, *dims: Dimension) -> Dimension:
         return compute_shape[self](*dims)
@@ -156,16 +157,6 @@ def normalize_evaluate_result(
     return value
 
 
-def invoke_callable(callable_value: Any, *arguments: Any) -> Any:
-    """Invoke a callable, expanding explicit bound arguments first."""
-    from coker.algebra.function import BoundCallable
-
-    if isinstance(callable_value, BoundCallable):
-        target, expanded_arguments = callable_value.expand_call(*arguments)
-        return target(*expanded_arguments)
-    return callable_value(*arguments)
-
-
 class ConcatenateOP(Operator):
     __slots__ = ("axis",)
 
@@ -272,28 +263,18 @@ def register_shape(*ops: OP):
     return inner
 
 
-def validate_evaluate_inputs(
-    function_sig: FunctionSpace, args: Sequence[Dimension]
-) -> None:
-    if len(args) != len(function_sig.arguments):
-        raise InvalidShape(
-            f"Expected {len(function_sig.arguments)} arguments, got "
-            f"{len(args)}"
-        )
-
-    for i, (arg_dim, input_dim) in enumerate(
-        zip(args, function_sig.input_dimensions())
-    ):
-        actual_dim = (
-            arg_dim.function_space
-            if isinstance(arg_dim, FunctionValueDimension)
-            else arg_dim
-        )
-        if actual_dim != input_dim:
-            raise InvalidShape(
-                f"Argument {i} has dimension {actual_dim!r}, expected "
-                f"{input_dim!r}"
-            )
+@register_shape(OP.BIND)
+def bind_shape(
+    function_value: FunctionValueDimension,
+    argument: Dimension | FunctionSpace | FunctionValueDimension,
+    position: int,
+) -> FunctionValueDimension:
+    if not isinstance(function_value, FunctionValueDimension):
+        raise InvalidShape("BIND requires a function value")
+    return FunctionValueDimension(
+        function_value.function_space.bind_argument(argument, position),
+        function_value.result_dimension,
+    )
 
 
 @register_shape(OP.EVALUATE)
@@ -301,13 +282,22 @@ def evaluate_shape(
     function_value: FunctionSpace | FunctionValueDimension,
     *args: Dimension,
 ) -> Dimension | FunctionSpace | ResultBundleDimension:
+    function_sig = (
+        function_value.function_space
+        if isinstance(function_value, FunctionValueDimension)
+        else function_value
+    )
+    if len(args) != len(function_sig.arguments):
+        raise InvalidShape(
+            f"Expected {len(function_sig.arguments)} arguments, got "
+            f"{len(args)}"
+        )
+    for index, argument in enumerate(args):
+        function_sig.validate_argument(argument, index)
     if isinstance(function_value, FunctionValueDimension):
-        validate_evaluate_inputs(function_value.function_space, args)
         return function_value.result_dimension
-
-    validate_evaluate_inputs(function_value, args)
     try:
-        (result_dimension,) = function_value.output_dimensions()
+        (result_dimension,) = function_sig.output_dimensions()
     except ValueError as ex:
         raise InvalidShape(
             "EVALUATE requires a function with one declared result"

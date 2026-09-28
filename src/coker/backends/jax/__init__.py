@@ -14,17 +14,19 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.graph import CallableReference, Tracer
+from coker.algebra.graph import FunctionSymbol, Tracer
 from coker.algebra.ops import (
     ConcatenateOP,
     Noop,
     NormOP,
     ReshapeOP,
     SelectOP,
-    invoke_callable,
-    normalize_evaluate_result,
 )
-from coker.backends.evaluator import _cast_outputs
+from coker.backends.evaluator import (
+    FunctionSymbolResolver,
+    _cast_outputs,
+    bind_callable,
+)
 from coker.interfaces import SymbolicCallable
 
 from coker.backends.backend import (
@@ -67,7 +69,7 @@ def div(num, den):
 
 
 class _JaxFunctionTableTarget:
-    """A reusable JAX implementation for one pure function-table target."""
+    """Execute a Coker target without crossing JAX's public output boundary."""
 
     def __init__(self, target: Function, backend, resolver) -> None:
         self._target = target
@@ -107,7 +109,7 @@ class _JaxFunctionTableTarget:
             target_inputs,
             self._backend,
             workspace,
-            function_table_resolver=self._resolver,
+            function_symbol_resolver=self._resolver,
         )
         values = tuple(
             workspace[output.index]
@@ -121,55 +123,26 @@ class _JaxFunctionTableTarget:
         return values[0] if len(values) == 1 else values
 
 
-class _JaxFunctionTableValue:
-    """A reusable target bound to evaluated function-value captures."""
+class _JaxFunctionSymbolResolver(FunctionSymbolResolver):
+    """Resolve Coker targets without coercing JAX tracer results."""
 
-    def __init__(self, target, captures) -> None:
-        self._target = target
-        self._captures = tuple(captures)
-
-    def __call__(self, *public_arguments):
-        return self._target(*public_arguments, *self._captures)
-
-
-class _JaxFunctionTableResolver:
-    """Cache native targets by pure table target, not binding data."""
-
-    def __init__(self, backend) -> None:
-        self._backend = backend
-        self._targets: dict[Function, _JaxFunctionTableTarget] = {}
-
-    def resolve(self, target: Function, captures):
+    def resolve(self, symbol: FunctionSymbol):
+        target = symbol.target
+        if not isinstance(target, Function):
+            return super().resolve(symbol)
         try:
-            native_target = self._targets[target]
+            return self._lowered_function_targets[target]
         except KeyError:
             native_target = _JaxFunctionTableTarget(
                 target, self._backend, self
             )
-            self._targets[target] = native_target
-        return _JaxFunctionTableValue(native_target, captures)
-
-
-_FUNCTION_TABLE_RESOLVER_KEY = object()
-
-
-def _get_function_table_resolver(
-    workspace, backend, resolver: _JaxFunctionTableResolver | None = None
-) -> _JaxFunctionTableResolver:
-    if resolver is not None:
-        return resolver
-    try:
-        return workspace[_FUNCTION_TABLE_RESOLVER_KEY]
-    except KeyError:
-        resolver = _JaxFunctionTableResolver(backend)
-        workspace[_FUNCTION_TABLE_RESOLVER_KEY] = resolver
-        return resolver
+            self._lowered_function_targets[target] = native_target
+            return native_target
 
 
 def _is_jax_callable(value) -> bool:
-    return isinstance(
-        value,
-        (SymbolicCallable, CallableReference, _JaxFunctionTableValue),
+    return isinstance(value, (SymbolicCallable, FunctionSymbol)) or callable(
+        value
     )
 
 
@@ -179,11 +152,13 @@ def _evaluate_jax_tape(
     backend,
     workspace,
     *,
-    function_table_resolver: _JaxFunctionTableResolver | None = None,
+    function_symbol_resolver: FunctionSymbolResolver | None = None,
 ) -> None:
-    """Evaluate a tape while resolving typed function-table entries."""
-    function_table_resolver = _get_function_table_resolver(
-        workspace, backend, function_table_resolver
+    """Evaluate a tape while resolving typed function symbols."""
+    function_symbol_resolver = (
+        _JaxFunctionSymbolResolver(backend)
+        if function_symbol_resolver is None
+        else function_symbol_resolver
     )
     workspace[-1] = None
     for index, value in zip(tape.input_indicies, inputs):
@@ -201,8 +176,10 @@ def _evaluate_jax_tape(
 
         op, *nodes = tape.nodes[index]
         arguments = []
-        for node in nodes:
-            if isinstance(node, Tracer):
+        for argument_index, node in enumerate(nodes):
+            if op == OP.BIND and argument_index == 2:
+                arguments.append(node)
+            elif isinstance(node, Tracer):
                 arguments.append(
                     workspace[node.index] if node.tape is tape else node
                 )
@@ -213,21 +190,16 @@ def _evaluate_jax_tape(
 
         if op == OP.VALUE:
             (value,) = arguments
-        elif op == OP.FUNCTION_VALUE:
-            reference, *captures = arguments
-            value = (
-                function_table_resolver.resolve(reference.target, captures)
-                if reference.is_function_reference
-                else reference
-            )
+        elif op == OP.FUNCTION:
+            value = function_symbol_resolver.resolve(arguments[0])
+        elif op == OP.BIND:
+            value = bind_callable(*arguments)
         else:
             value = backend.call(op, *arguments)
 
-        if op == OP.EVALUATE and isinstance(arguments[0], CallableReference):
-            value = normalize_evaluate_result(value, tape.dim[index])
         workspace[index] = (
             value
-            if op == OP.FUNCTION_VALUE
+            if op in {OP.FUNCTION, OP.BIND}
             or _is_jax_callable(value)
             or isinstance(tape.dim[index], ResultBundleDimension)
             else backend.reshape(value, tape.dim[index])
@@ -260,9 +232,7 @@ impls = {
     OP.EQUAL: jnp.equal,
     OP.CASE: lambda c, t, f: t if c else f,
     OP.LOG: jnp.log,
-    OP.EVALUATE: lambda callable_value, *args: invoke_callable(
-        callable_value, *args
-    ),
+    OP.EVALUATE: lambda callable_value, *args: callable_value(*args),
 }
 
 parameterised_impls = {
@@ -296,7 +266,7 @@ class JaxLoweredFunction(LoweredFunction):
     def __init__(self, backend: JaxBackend, function) -> None:
         self._backend = backend
         self._function = function
-        self._function_table_resolver = _JaxFunctionTableResolver(backend)
+        self._function_symbol_resolver = _JaxFunctionSymbolResolver(backend)
 
     @property
     def backend_name(self) -> str:
@@ -321,7 +291,7 @@ class JaxLoweredFunction(LoweredFunction):
             inputs,
             self._backend,
             workspace,
-            function_table_resolver=self._function_table_resolver,
+            function_symbol_resolver=self._function_symbol_resolver,
         )
         return tuple(
             _cast_outputs(
@@ -446,15 +416,6 @@ class JaxBackend(Backend):
         return _cast_outputs(function.output, function.tape, workspace, self)
 
     def call(self, op, *args) -> ArrayLike:
-        if op == OP.EVALUATE:
-            callable_value, *arguments = args
-            if (
-                isinstance(callable_value, CallableReference)
-                and callable_value.is_function_reference
-            ):
-                return _JaxFunctionTableResolver(self).resolve(
-                    callable_value.target, ()
-                )(*arguments)
 
         try:
             result = impls[op](*args)

@@ -3,6 +3,7 @@ import pytest
 
 from coker import FunctionSpace, Scalar, function
 from coker.algebra.ops import Noop
+from coker.algebra.function import BoundCallable
 from coker.backends.casadi import CasadiBackend
 from coker.backends.lowered import (
     FunctionInputSpec,
@@ -161,3 +162,40 @@ def test_casadi_solution_reconstructs_native_function_parameter():
     fitted = solution.parameters["response"]
     assert isinstance(fitted, FittedFunction)
     assert fitted(0.25) == pytest.approx(0.25)
+
+
+def test_imported_casadi_function_supports_incremental_currying():
+    x = ca.MX.sym("x")
+    scale = ca.MX.sym("scale")
+    offset = ca.MX.sym("offset")
+    imported = CasadiBackend().import_function(
+        ca.Function(
+            "curried_affine",
+            [x, scale, offset],
+            [scale * x + offset],
+        ),
+        FunctionSignature(
+            inputs=(
+                FunctionInputSpec("x", Scalar("x")),
+                FunctionInputSpec("scale", Scalar("scale")),
+                FunctionInputSpec("offset", Scalar("offset")),
+            ),
+            outputs=(FunctionOutputSpec("value", Scalar("value")),),
+        ),
+    )
+    public_space = FunctionSpace(
+        "affine",
+        arguments=[Scalar("x")],
+        output=[Scalar("value")],
+    )
+    composed = function(
+        [Scalar("scale"), Scalar("offset"), Scalar("x")],
+        lambda captured_scale, captured_offset, argument: BoundCallable(
+            imported,
+            public_space,
+            (captured_scale, captured_offset),
+        )(argument),
+        backend="casadi",
+    )
+
+    assert composed(3.0, 4.0, 2.0) == pytest.approx(10.0)

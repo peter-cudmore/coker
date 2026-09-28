@@ -8,7 +8,7 @@ import torch
 from coker.algebra import Dimension
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function, create_function_from_native
-from coker.algebra.graph import CallableReference, Tape, Tracer
+from coker.algebra.graph import FunctionSymbol, Tape, Tracer
 from coker.algebra.ops import Noop
 from coker.backends.evaluator import GenericEvaluator
 from coker.backends.backend import (
@@ -224,7 +224,8 @@ class PytorchBackend(Backend):
         return any(
             not isinstance(node, Tracer)
             and any(
-                isinstance(argument, CallableReference)
+                isinstance(argument, FunctionSymbol)
+                and not isinstance(argument.target, Function)
                 for argument in node[1:]
             )
             for node in function.tape.nodes

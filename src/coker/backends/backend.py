@@ -116,12 +116,7 @@ class Backend(metaclass=ABCMeta):
     def evaluate(
         self, function: Function, inputs: Sequence[Any]
     ) -> list[Any | None]:
-        from coker.backends.evaluator import evaluate_inner
-
-        workspace: dict[int, Any] = {}
-        return evaluate_inner(
-            function.tape, inputs, function.output, self, workspace
-        )
+        return self.get_evaluator().evaluate(function, inputs)
 
     def append_native_call(
         self,
