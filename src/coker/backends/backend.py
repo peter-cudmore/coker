@@ -229,6 +229,7 @@ class Backend(metaclass=ABCMeta):
         declaration: Any,
         blocks: tuple[ArrayLike, ...],
     ) -> Any:
+        """Reconstruct one public parameter from native solver blocks."""
         raise NotImplementedError(
             f"{self.__class__.__name__} cannot materialize parameters"
         )
@@ -236,6 +237,7 @@ class Backend(metaclass=ABCMeta):
     def fit_function_parameter(
         self, declaration: Any, target: Any, values: ArrayLike
     ) -> Any:
+        """Reconstruct a fitted function from one flat native value."""
         raise NotImplementedError(
             f"{self.__class__.__name__} cannot materialize function parameters"
         )
@@ -243,6 +245,7 @@ class Backend(metaclass=ABCMeta):
     def create_variational_solver(
         self, problem: VariationalProblem
     ) -> VariationalSolver:
+        """Create this backend's solver for a variational problem."""
         raise NotImplementedError
 
     @abstractmethod
