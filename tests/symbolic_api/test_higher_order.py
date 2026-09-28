@@ -341,14 +341,14 @@ def test_function_symbols_preserve_absent_target_signature_values():
         None,
     ]
     assert symbol.function_space.arguments == [Scalar("x")]
-    assert symbol.function_space.output == [Scalar("output_0"), None]
+    assert symbol.function_space.output == [Scalar("output_0")]
     assert entry.target is target
     assert tape.dim[function_value.index] is symbol.function_space
     assert native_symbol.target is native
 
     wrapper = function(
         [symbol.function_space, Scalar("wrapper_x")],
-        lambda target_value, x: target_value(x)[0],
+        lambda target_value, x: target_value(x),
     )
     composed = function(
         [Scalar("x")],

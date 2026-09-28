@@ -61,6 +61,11 @@ def append_native_outputs(
 ) -> list[Tracer | None]:
     """Emit one backend-native evaluation and select its public outputs."""
 
+    output_indices = tuple(
+        index
+        for index, output_spec in enumerate(output_specs)
+        if output_spec.shape is not None
+    )
     output_spaces = [
         (
             output_spec.shape.to_space(output_spec.name)
@@ -68,7 +73,28 @@ def append_native_outputs(
             else output_spec.shape
         )
         for output_spec in output_specs
+        if output_spec.shape is not None
     ]
+
+    def compact_native(*native_args: Any) -> Any:
+        native_outputs = native(*native_args)
+        values = (
+            (native_outputs,)
+            if len(output_specs) == 1
+            else tuple(native_outputs)
+        )
+        if len(values) != len(output_specs):
+            raise ValueError(
+                f"Native callable returned {len(values)} results; expected "
+                f"{len(output_specs)}"
+            )
+        present_outputs = tuple(values[index] for index in output_indices)
+        return (
+            present_outputs[0]
+            if len(present_outputs) == 1
+            else present_outputs
+        )
+
     function_space = FunctionSpace(
         f"{backend}_native",
         arguments=list(input_spaces),
@@ -76,24 +102,24 @@ def append_native_outputs(
     )
     symbol = tape.intern_symbol(
         create_native_symbol_entry(
-            native,
+            compact_native,
             function_space,
             name=name,
         )
     )
     result = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
-    multiple_outputs = len(output_specs) != 1
-    return [
-        (
-            None
-            if output_spec.shape is None
-            else (
-                Tracer(tape, tape.append(SelectOP(output_index), result))
-                if multiple_outputs
-                else result
-            )
+    present_results = (
+        (result,)
+        if len(output_indices) == 1
+        else tuple(
+            Tracer(tape, tape.append(SelectOP(index), result))
+            for index in range(len(output_indices))
         )
-        for output_index, output_spec in enumerate(output_specs)
+    )
+    present_results_iter = iter(present_results)
+    return [
+        (None if output_spec.shape is None else next(present_results_iter))
+        for output_spec in output_specs
     ]
 
 

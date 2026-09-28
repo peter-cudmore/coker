@@ -904,12 +904,8 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
         if not isinstance(result.dim, ResultBundleDimension):
             return result
         return tuple(
-            (
-                None
-                if output_dimension is None
-                else result._emit(SelectOP(index), result)
-            )
-            for index, output_dimension in enumerate(result.dim.outputs)
+            result._emit(SelectOP(index), result)
+            for index in range(len(result.dim.outputs))
         )
 
 

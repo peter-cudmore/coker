@@ -69,7 +69,16 @@ class _CasadiFunctionTableTarget:
             )
         else:
             result = (result,) if self._function.is_single else tuple(result)
-        return result[0] if len(output_specs) == 1 else result
+        present_results = tuple(
+            value
+            for value, output_spec in zip(result, output_specs)
+            if output_spec.shape is not None
+        )
+        return (
+            present_results[0]
+            if len(present_results) == 1
+            else present_results
+        )
 
 
 class _PartiallyLoweredFunctionTarget:

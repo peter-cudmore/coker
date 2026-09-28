@@ -150,13 +150,10 @@ class Dimension:
 class ResultBundleDimension:
     """Ordered dimensions returned by one multi-output callable."""
 
-    outputs: tuple[Dimension | FunctionSpace | None, ...]
+    outputs: tuple[Dimension | FunctionSpace, ...]
 
     def select(self, index: int) -> Dimension | FunctionSpace:
-        output = self.outputs[index]
-        if output is None:
-            raise ValueError(f"Cannot select absent result {index}")
-        return output
+        return self.outputs[index]
 
 
 @dataclasses.dataclass
@@ -167,8 +164,8 @@ class FunctionSpace:
         name (str): The name of the function space.
         arguments (List[Scalar | VectorSpace | FunctionSpace]): A list
             specifying the input arguments.
-        output (List[Scalar | VectorSpace | FunctionSpace | None]): A list
-            specifying ordered outputs; ``None`` preserves an absent output.
+        output (List[Scalar | VectorSpace | FunctionSpace]): A list
+            specifying ordered outputs.
         signature (Optional[Tuple[int]]): Optional list of integers
             denoting the degree of differentiability for each argument.
             If not provided, the default is smooth (infinitely
@@ -178,7 +175,7 @@ class FunctionSpace:
 
     name: str
     arguments: List[Scalar | VectorSpace | FunctionSpace]
-    output: List[Scalar | VectorSpace | FunctionSpace | None] | None
+    output: List[Scalar | VectorSpace | FunctionSpace] | None
     signature: Optional[Tuple[int]] = None
     """Optional list of integers specifying the degree of
     differentiability for each argument.
@@ -200,13 +197,13 @@ class FunctionSpace:
             for arg in self.arguments
         ]
 
-    def output_dimensions(self) -> list[Dimension | FunctionSpace | None]:
+    def output_dimensions(self) -> list[Dimension | FunctionSpace]:
         if self.output is None:
-            return [None]
+            return []
         return [
             (
                 out
-                if isinstance(out, (FunctionSpace, type(None)))
+                if isinstance(out, FunctionSpace)
                 else (
                     Dimension.scalar()
                     if isinstance(out, Scalar)
@@ -296,11 +293,17 @@ class FunctionSpace:
             return False
         return tuple(value.input_shape()) == tuple(
             self.input_dimensions()
-        ) and tuple(value.output_shape()) == tuple(self.output_dimensions())
+        ) and tuple(
+            dimension
+            for dimension in value.output_shape()
+            if dimension is not None
+        ) == tuple(
+            self.output_dimensions()
+        )
 
     def evaluation_dimension(
         self,
-    ) -> Dimension | FunctionSpace | ResultBundleDimension | None:
+    ) -> Dimension | FunctionSpace | ResultBundleDimension:
         """Return the graph result shape declared by this callable."""
         output_dimensions = self.output_dimensions()
         return (

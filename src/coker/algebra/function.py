@@ -140,11 +140,12 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                     output_spec.shape
                     if isinstance(
                         output_spec.shape,
-                        (Scalar, VectorSpace, FunctionSpace, type(None)),
+                        (Scalar, VectorSpace, FunctionSpace),
                     )
                     else output_spec.shape.to_space(output_spec.name)
                 )
                 for output_spec in self.signature.outputs
+                if output_spec.shape is not None
             ],
         )
         return SymbolEntry(
@@ -179,18 +180,22 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             tape,
             tape.append(OP.EVALUATE, symbol, *arguments),
         )
-        result: list[Tracer | None] = []
-        multiple_outputs = len(self.signature.outputs) != 1
-        for output_index, output in enumerate(self.signature.outputs):
-            if output.shape is None:
-                result.append(None)
-            else:
-                result.append(
-                    Tracer(tape, tape.append(SelectOP(output_index), bundle))
-                    if multiple_outputs
-                    else bundle
-                )
-        return result
+        present_output_count = sum(
+            output.shape is not None for output in self.signature.outputs
+        )
+        present_results = (
+            (bundle,)
+            if present_output_count == 1
+            else tuple(
+                Tracer(tape, tape.append(SelectOP(index), bundle))
+                for index in range(present_output_count)
+            )
+        )
+        present_results_iter = iter(present_results)
+        return [
+            (None if output.shape is None else next(present_results_iter))
+            for output in self.signature.outputs
+        ]
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:
