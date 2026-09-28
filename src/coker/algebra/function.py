@@ -23,10 +23,14 @@ from coker.algebra.graph import (
     get_dim_by_class,
     strip_symbols_from_array,
 )
-from coker.algebra.ops import OP, Noop, SelectOP
+from coker.algebra.ops import OP, Noop
 from coker.algebra.tensor import SymbolicVector
 
-from coker.backends.backend import get_backend_by_name, get_current_backend
+from coker.backends.backend import (
+    _restore_output_slots,
+    get_backend_by_name,
+    get_current_backend,
+)
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -180,22 +184,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             tape,
             tape.append(OP.EVALUATE, symbol, *arguments),
         )
-        present_output_count = sum(
-            output.shape is not None for output in self.signature.outputs
-        )
-        present_results = (
-            (bundle,)
-            if present_output_count == 1
-            else tuple(
-                Tracer(tape, tape.append(SelectOP(index), bundle))
-                for index in range(present_output_count)
-            )
-        )
-        present_results_iter = iter(present_results)
-        return [
-            (None if output.shape is None else next(present_results_iter))
-            for output in self.signature.outputs
-        ]
+        return _restore_output_slots(tape, bundle, self.signature.outputs)
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:

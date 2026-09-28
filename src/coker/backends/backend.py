@@ -50,6 +50,30 @@ def create_native_symbol_entry(
     )
 
 
+def _restore_output_slots(
+    tape: Tape,
+    result: Tracer,
+    output_specs: Sequence[FunctionOutputSpec],
+) -> list[Tracer | None]:
+    """Expand compact graph outputs into their declared ABI slots."""
+    output_count = sum(
+        output_spec.shape is not None for output_spec in output_specs
+    )
+    present_results = (
+        (result,)
+        if output_count == 1
+        else tuple(
+            Tracer(tape, tape.append(SelectOP(index), result))
+            for index in range(output_count)
+        )
+    )
+    present_results_iter = iter(present_results)
+    return [
+        (None if output_spec.shape is None else next(present_results_iter))
+        for output_spec in output_specs
+    ]
+
+
 def append_native_outputs(
     tape: Tape,
     native: Callable[..., Any],
@@ -108,19 +132,7 @@ def append_native_outputs(
         )
     )
     result = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
-    present_results = (
-        (result,)
-        if len(output_indices) == 1
-        else tuple(
-            Tracer(tape, tape.append(SelectOP(index), result))
-            for index in range(len(output_indices))
-        )
-    )
-    present_results_iter = iter(present_results)
-    return [
-        (None if output_spec.shape is None else next(present_results_iter))
-        for output_spec in output_specs
-    ]
+    return _restore_output_slots(tape, result, output_specs)
 
 
 def import_native_function(
