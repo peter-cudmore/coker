@@ -7,7 +7,6 @@ import numpy as np
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
-from coker.backends.backend import get_backend_by_name
 from coker.dynamics import (
     DynamicsSpec,
     VariationalProblem,
@@ -87,16 +86,8 @@ def test_function_space_contains_matching_functions():
     incompatible = function(
         [VectorSpace("time", 2)], lambda time: time[0], backend="numpy"
     )
-    fitted = get_backend_by_name(
-        "numpy", set_current=False
-    ).fit_function_parameter(
-        RadialBasisFunction(centers=[0.0], width=1.0),
-        space,
-        [0.0, 1.0],
-    )
 
     assert matching in space
-    assert fitted in space
     assert incompatible not in space
 
 
@@ -107,7 +98,7 @@ def test_function_space_contains_bound_callable():
     assert bound in space
 
 
-def test_closure_parameter_binds_declared_scalar_decisions():
+def test_closure_parameter_retains_declared_scalar_decisions():
     closure = ClosureParameter.bind_callable(
         lambda gain, offset, value: gain * value + offset,
         [
@@ -117,20 +108,12 @@ def test_closure_parameter_binds_declared_scalar_decisions():
         [Scalar("value")],
         name="affine",
     )
-    target = FunctionSpace(
-        "forcing", arguments=[Scalar("time")], output=[Scalar("rate")]
-    )
-
-    fitted = get_backend_by_name(
-        "numpy", set_current=False
-    ).fit_function_parameter(closure, target, [2.0, -1.0])
 
     assert closure.name == "affine"
     assert closure.list_concrete_parameters() == (
         UnboundedVariable("gain", 0.0),
         UnboundedVariable("offset", 0.0),
     )
-    assert fitted(3.0) == 5.0
 
 
 def test_builder_specializes_function_parameter_to_numeric_decisions():
@@ -324,7 +307,7 @@ def test_parameter_layout_reconstructs_public_values():
 
 def test_parameter_layout_passes_disjoint_function_blocks_to_backend():
     class RecordingBackend:
-        def materialize_parameter(self, target, declaration, blocks):
+        def _materialize_parameter(self, target, declaration, blocks):
             self.target = target
             self.declaration = declaration
             self.blocks = blocks
@@ -795,7 +778,7 @@ def _function_parameter_system(rate: FunctionSpace, backend: str):
         ),
     ],
 )
-@pytest.mark.parametrize("source", ("callable", "function", "fitted"))
+@pytest.mark.parametrize("source", ("callable", "function"))
 def test_system_integrates_function_valued_parameter(
     integration_backend, source
 ):
@@ -812,28 +795,15 @@ def test_system_integrates_function_valued_parameter(
     def affine_integral(time):
         return 3 * time + time**2 / 2
 
-    def constant_integral(time):
-        return 3 * time
-
     if source == "callable":
         rate_value = affine_rate
-        integral = affine_integral
-    elif source == "function":
+    else:
         rate_value = function(
             [Scalar("time")],
             affine_rate,
             backend=integration_backend,
         )
-        integral = affine_integral
-    else:
-        rate_value = get_backend_by_name(
-            "numpy", set_current=False
-        ).fit_function_parameter(
-            RadialBasisFunction(centers=[0.0], width=1.0),
-            rate,
-            [0.0, 1.0],
-        )
-        integral = constant_integral
+    integral = affine_integral
 
     timeline = np.array([0.0, 0.5, 1.0])
     trajectory = system(timeline, 2.0, rate_value)

@@ -117,8 +117,7 @@ def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
 
 
 class CasadiBackend(Backend):
-    def materialize_parameter(self, target, declaration, blocks):
-        """Reconstruct a public parameter value from CasADi solver blocks."""
+    def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
             return self._fit_function_parameter(
@@ -138,14 +137,6 @@ class CasadiBackend(Backend):
             )
         raise TypeError(
             "parameter target must be a scalar, vector, or function space"
-        )
-
-    def fit_function_parameter(self, declaration, target, values):
-        """Materialize a fitted function from CasADi decision values."""
-        return self._fit_function_parameter(
-            declaration,
-            target,
-            self._concatenate_parameter_blocks((values,)),
         )
 
     def _fit_function_parameter(self, declaration, target, flat_values):

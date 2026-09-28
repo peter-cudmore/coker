@@ -237,8 +237,7 @@ class PytorchBackend(Backend):
         """Lower a function to an eager ``torch.nn.Module``."""
         return self.lower(function).as_module()
 
-    def materialize_parameter(self, target, declaration, blocks):
-        """Reconstruct a public parameter value from native solver blocks."""
+    def _materialize_parameter(self, target, declaration, blocks):
         flat_values = torch.cat(
             tuple(
                 (
@@ -252,7 +251,7 @@ class PytorchBackend(Backend):
             )
         )
         if isinstance(target, FunctionSpace):
-            return self.fit_function_parameter(
+            return self._fit_function_parameter(
                 declaration, target, flat_values
             )
         if isinstance(target, VectorSpace):
@@ -263,8 +262,7 @@ class PytorchBackend(Backend):
             "parameter target must be a scalar, vector, or function space"
         )
 
-    def fit_function_parameter(self, declaration, target, values):
-        """Build a PyTorch-native fitted function from solver decisions."""
+    def _fit_function_parameter(self, declaration, target, values):
         from coker.parameters.function_parameters import FittedFunction
 
         flat_values = self.to_backend_array(values).reshape(-1)

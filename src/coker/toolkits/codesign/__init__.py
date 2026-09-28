@@ -185,7 +185,7 @@ class MathematicalProgram(SymbolicCallable):
             self.backend or "numpy", set_current=False
         )
         return {
-            metadata.name: backend.materialize_parameter(
+            metadata.name: backend._materialize_parameter(
                 metadata.target, metadata.declaration, blocks
             )
             for metadata, blocks in zip(

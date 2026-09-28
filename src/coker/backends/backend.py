@@ -223,7 +223,7 @@ class Backend(metaclass=ABCMeta):
         """Wrap a backend solver for use as a numerical program module."""
         return implementation
 
-    def materialize_parameter(
+    def _materialize_parameter(
         self,
         target: Scalar | VectorSpace | FunctionSpace,
         declaration: Any,
@@ -232,14 +232,6 @@ class Backend(metaclass=ABCMeta):
         """Reconstruct one public parameter from native solver blocks."""
         raise NotImplementedError(
             f"{self.__class__.__name__} cannot materialize parameters"
-        )
-
-    def fit_function_parameter(
-        self, declaration: Any, target: Any, values: ArrayLike
-    ) -> Any:
-        """Reconstruct a fitted function from one flat native value."""
-        raise NotImplementedError(
-            f"{self.__class__.__name__} cannot materialize function parameters"
         )
 
     def create_variational_solver(

@@ -70,8 +70,7 @@ scalar_types = (
 
 
 class NumpyBackend(Backend):
-    def materialize_parameter(self, target, declaration, blocks):
-        """Reconstruct a public parameter value from NumPy solver blocks."""
+    def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
             return self._fit_function_parameter(
@@ -85,14 +84,6 @@ class NumpyBackend(Backend):
             return flat_values[0]
         raise TypeError(
             "parameter target must be a scalar, vector, or function space"
-        )
-
-    def fit_function_parameter(self, declaration, target, values):
-        """Materialize a fitted function from NumPy decision values."""
-        return self._fit_function_parameter(
-            declaration,
-            target,
-            np.asarray(values, dtype=float).reshape(-1),
         )
 
     @staticmethod

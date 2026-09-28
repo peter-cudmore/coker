@@ -47,7 +47,7 @@ class ParameterValueLayout:
                 )
             )
             result[self._name(target, declaration)] = (
-                backend.materialize_parameter(target, declaration, blocks)
+                backend._materialize_parameter(target, declaration, blocks)
             )
         return result
 
