@@ -110,10 +110,8 @@ class FunctionSymbolResolver:
         )
         output_indices = tuple(
             index
-            for index, dimension in enumerate(
-                symbol.function_space.output_dimensions()
-            )
-            if dimension is not None
+            for index, output_spec in enumerate(target.signature.outputs)
+            if output_spec.shape is not None
         )
         input_count = sum(
             input_space is not None and not isinstance(input_space, Noop)

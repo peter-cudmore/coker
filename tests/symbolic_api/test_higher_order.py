@@ -357,6 +357,23 @@ def test_function_symbols_preserve_absent_target_signature_values():
     assert composed(2.0) == 3.0
 
 
+def test_function_symbol_compacts_leading_absent_output():
+    target = function(
+        [Scalar("x")],
+        lambda x: (None, x + 1),
+        name="leading_absent_output",
+    )
+    function_space = target._symbol_entry().function_space
+    wrapper = function(
+        [function_space, Scalar("x")],
+        lambda target_value, x: target_value(x),
+    )
+    composed = function([Scalar("x")], lambda x: wrapper(target, x))
+
+    assert function_space.output == [Scalar("output_1")]
+    assert composed(2.0) == 3.0
+
+
 def test_function_composition(backend):
     sqr = function(
         arguments=[Scalar("x")], implementation=lambda x: x**2, backend=backend
