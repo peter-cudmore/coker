@@ -208,6 +208,26 @@ def test_pytorch_direct_shooting_optimises_scalar_closure_function_parameter(
     _assert_response(fitted, arguments, targets)
 
 
+def test_pytorch_direct_shooting_optimises_scalar_dense_function_parameter(
+    monkeypatch,
+):
+    _use_cpu_float64(monkeypatch)
+    arguments = (-1.0, 0.0, 1.0)
+    targets = (-0.5, 1.0, 2.5)
+    declaration = DenseLayer(
+        1,
+        _scalar_identity_activation(),
+        name="response",
+    )
+
+    with _scalar_response_problem(declaration, arguments, targets) as problem:
+        solution = problem.get_solver("pytorch").solve()
+
+    assert solution.solve_info.success
+    assert solution.cost < 1e-4
+    _assert_response(solution.parameters["response"], arguments, targets)
+
+
 def test_pytorch_direct_shooting_preserves_bounded_rbf_block_bounds(
     monkeypatch,
 ):
