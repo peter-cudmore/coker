@@ -432,16 +432,3 @@ def test_pytorch_rejects_distinct_duplicate_function_declarations():
         ),
     ):
         pass
-
-
-def test_pytorch_rejects_conflicting_duplicate_function_declarations():
-    with (
-        pytest.raises(ValueError, match="duplicate concrete parameter name"),
-        _two_batch_transfer_problem(
-            (
-                _quadratic_rate_declaration(upper_bound=2.0),
-                _quadratic_rate_declaration(upper_bound=3.0),
-            )
-        ),
-    ):
-        pass

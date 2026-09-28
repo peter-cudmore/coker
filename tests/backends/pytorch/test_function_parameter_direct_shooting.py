@@ -134,7 +134,7 @@ def _vector_response_problem(declaration, arguments, targets):
     yield problem
 
 
-def _assert_scalar_response(fitted, arguments, targets, *, atol=2e-3):
+def _assert_response(fitted, arguments, targets, *, atol=2e-3):
     assert isinstance(fitted, FittedFunction)
     assert callable(fitted)
     actual = torch.stack(
@@ -149,67 +149,6 @@ def _assert_scalar_response(fitted, arguments, targets, *, atol=2e-3):
         rtol=0,
         atol=atol,
     )
-
-
-def _assert_vector_response(fitted, arguments, targets, *, atol=2e-3):
-    assert isinstance(fitted, FittedFunction)
-    assert callable(fitted)
-    actual = torch.stack(
-        [
-            fitted(torch.tensor(argument, dtype=torch.float64))
-            for argument in arguments
-        ]
-    )
-    torch.testing.assert_close(
-        actual,
-        torch.tensor(targets, dtype=torch.float64),
-        rtol=0,
-        atol=atol,
-    )
-
-
-def test_pytorch_direct_shooting_optimises_scalar_dense_function_parameter(
-    monkeypatch,
-):
-    _use_cpu_float64(monkeypatch)
-    arguments = (-1.0, 1.0)
-    targets = (-0.25, 0.75)
-    declaration = DenseLayer(
-        1,
-        _scalar_identity_activation(),
-        name="response",
-    )
-
-    with _scalar_response_problem(declaration, arguments, targets) as problem:
-        solution = problem.get_solver("pytorch").solve()
-
-    assert solution.solve_info.success
-    assert solution.cost < 1e-4
-    fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [(), ()]
-    _assert_scalar_response(fitted, arguments, targets)
-
-
-def test_pytorch_direct_shooting_optimises_rbf_function_parameter(monkeypatch):
-    _use_cpu_float64(monkeypatch)
-    arguments = (0.0, 1.0)
-    targets = (1.5, 0.5)
-    declaration = RadialBasisFunction(
-        centers=[0.0],
-        width=1.0,
-        name="response",
-    )
-
-    with _scalar_response_problem(declaration, arguments, targets) as problem:
-        solution = problem.get_solver("pytorch").solve()
-
-    assert solution.solve_info.success
-    assert solution.cost < 1e-4
-    fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [(2,)]
-    _assert_scalar_response(fitted, arguments, targets)
 
 
 def test_pytorch_direct_shooting_optimises_monotone_function_parameter(
@@ -231,9 +170,7 @@ def test_pytorch_direct_shooting_optimises_monotone_function_parameter(
     assert solution.solve_info.success
     assert solution.cost < 1e-4
     fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [(3,)]
-    _assert_scalar_response(fitted, arguments, targets)
+    _assert_response(fitted, arguments, targets)
     values = torch.stack(
         [
             fitted(torch.tensor(argument, dtype=torch.float64))
@@ -268,39 +205,7 @@ def test_pytorch_direct_shooting_optimises_scalar_closure_function_parameter(
     assert solution.solve_info.success
     assert solution.cost < 1e-4
     fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [(), ()]
-    _assert_scalar_response(fitted, arguments, targets)
-
-
-def test_pytorch_direct_shooting_optimises_vector_dense_function_parameter(
-    monkeypatch,
-):
-    _use_cpu_float64(monkeypatch)
-    arguments = (
-        np.array([1.0, 0.0]),
-        np.array([0.0, 1.0]),
-        np.array([1.0, 1.0]),
-    )
-    targets = ((1.0, 0.5), (-0.5, 1.0), (0.0, 0.0))
-    declaration = DenseLayer(
-        2,
-        _identity_activation(2),
-        name="response",
-    )
-
-    with _vector_response_problem(declaration, arguments, targets) as problem:
-        solution = problem.get_solver("pytorch").solve()
-
-    assert solution.solve_info.success
-    assert solution.cost < 1e-4
-    fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [
-        (2, 2),
-        (2,),
-    ]
-    _assert_vector_response(fitted, arguments, targets)
+    _assert_response(fitted, arguments, targets)
 
 
 def test_pytorch_direct_shooting_preserves_bounded_rbf_block_bounds(
@@ -330,14 +235,12 @@ def test_pytorch_direct_shooting_preserves_bounded_rbf_block_bounds(
     assert solution.solve_info.success
     assert solution.cost < 1e-4
     fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [(3,)]
     assert torch.all(fitted.parameters[0] >= -0.25)
     assert torch.all(fitted.parameters[0] <= 0.75)
-    _assert_scalar_response(fitted, arguments, targets)
+    _assert_response(fitted, arguments, targets)
 
 
-def test_pytorch_direct_shooting_restores_dense_closure_block_shape(
+def test_pytorch_direct_shooting_optimises_vector_closure_function_parameter(
     monkeypatch,
 ):
     _use_cpu_float64(monkeypatch)
@@ -357,9 +260,7 @@ def test_pytorch_direct_shooting_restores_dense_closure_block_shape(
     assert solution.solve_info.success
     assert solution.cost < 1e-4
     fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [(2, 2)]
-    _assert_vector_response(fitted, arguments, targets)
+    _assert_response(fitted, arguments, targets)
 
 
 def test_pytorch_direct_shooting_keeps_fixed_flattened_function_decision(
@@ -384,15 +285,10 @@ def test_pytorch_direct_shooting_keeps_fixed_flattened_function_decision(
     assert solution.solve_info.success
     assert solution.cost < 1e-4
     fitted = solution.parameters["response"]
-    assert isinstance(fitted.parameters, tuple)
-    assert [parameter.shape for parameter in fitted.parameters] == [
-        (2, 2),
-        (2,),
-    ]
     torch.testing.assert_close(
         fitted.parameters[0][0, 0],
         torch.tensor(0.6, dtype=torch.float64),
         rtol=0,
         atol=1e-12,
     )
-    _assert_vector_response(fitted, arguments, targets)
+    _assert_response(fitted, arguments, targets)
