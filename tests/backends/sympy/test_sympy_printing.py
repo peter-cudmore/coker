@@ -137,6 +137,21 @@ def test_vector_lowering():
     assert all(sp.simplify(a - e) == 0 for a, e in zip(out_flat, expected))
 
 
+def test_scalar_norm_lowering():
+    scalar_norm = coker.function(
+        [coker.Scalar("x")],
+        lambda x: np.linalg.norm(x, ord=2),
+        backend="sympy",
+    )
+
+    backend = get_backend_by_name("sympy")
+    args, out = backend.lower_to_symbolic(scalar_norm)
+
+    x = sp.Symbol("x")
+    assert args == [x]
+    assert out == sp.Abs(x)
+
+
 def test_matrix_norm_lowering():
     matrix_norm = coker.function(
         [coker.VectorSpace("A", (2, 2))],

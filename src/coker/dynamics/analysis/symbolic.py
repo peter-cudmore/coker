@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from itertools import product
 from typing import Iterable, Sequence
 
+import numpy as np
 import sympy as sp
 from sympy.core.function import AppliedUndef
 
@@ -545,8 +546,8 @@ def _flatten(value: object) -> tuple[sp.Expr, ...]:
             for row in range(value.rows)
             for column in range(value.cols)
         )
-    shape = getattr(value, "shape", None)
-    if shape is not None:
+    if isinstance(value, (np.ndarray, sp.NDimArray)):
+        shape = value.shape
         if len(shape) == 0:
             return (sp.sympify(value),)
         return tuple(
@@ -555,4 +556,9 @@ def _flatten(value: object) -> tuple[sp.Expr, ...]:
         )
     if isinstance(value, (list, tuple)):
         return tuple(element for item in value for element in _flatten(item))
-    return (sp.sympify(value),)
+    try:
+        return (sp.sympify(value),)
+    except sp.SympifyError as exc:
+        raise UnsupportedSystemError(
+            "symbolic analysis received an unsupported symbolic value"
+        ) from exc

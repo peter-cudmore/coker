@@ -1,12 +1,15 @@
 import numpy as np
 import pytest
+from scipy.optimize import OptimizeResult
 
 from coker import Dimension, FunctionSpace, Scalar, VectorSpace, function
 from coker.toolkits.codesign import (
     MathematicalProgram,
     Minimise,
+    OptimisationModule,
     ProblemBuilder,
     SolveFailure,
+    SolveInfo,
     bounded,
     norm as codesign_norm,
 )
@@ -15,11 +18,39 @@ from coker.parameters.function_parameters import (
     FittedFunction,
     MonotonePiecewiseLinear,
 )
+from coker.toolkits.codesign.optimisation import (
+    solve_info_from_scipy_result,
+)
 
 
 def quadratic(x, p, z):
     # solution should be |x| = 0, |p| = 0 z = 0
     return x.T @ x + p.T @ p + z**2
+
+
+def test_scipy_solve_info_normalises_documented_result_fields():
+    solve_info = solve_info_from_scipy_result(
+        OptimizeResult(
+            success=True,
+            message="converged",
+            status=np.int64(1),
+            nit=np.int64(4),
+        )
+    )
+
+    assert solve_info.success
+    assert solve_info.return_status == "converged"
+    assert solve_info.unified_return_status == "1"
+    assert solve_info.iteration_count == 4
+
+
+def test_scipy_solve_info_defaults_missing_optional_result_fields():
+    solve_info = solve_info_from_scipy_result(OptimizeResult())
+
+    assert not solve_info.success
+    assert solve_info.return_status == "unknown"
+    assert solve_info.unified_return_status is None
+    assert solve_info.iteration_count is None
 
 
 def test_mathematical_program_composes_symbolically_and_compiles():
@@ -41,6 +72,49 @@ def test_mathematical_program_composes_symbolically_and_compiles():
     compiled = program.lower()
     assert compiled.backend == "numpy"
     assert compiled(3) == (9.0, 4.0)
+
+
+def test_optimisation_module_reports_solve_info_through_defined_interface():
+    solve_info = SolveInfo(
+        backend="test",
+        solver="test-solver",
+        success=True,
+        return_status="complete",
+    )
+
+    class Implementation(OptimisationModule):
+        last_solve_info = solve_info
+
+        def __call__(self, x):
+            return x**2, x + 1
+
+    program = MathematicalProgram._from_optimisation(
+        input_shape=(Dimension.scalar(),),
+        output_shape=(Dimension.scalar(),),
+        implementation=Implementation(),
+        backend="numpy",
+        captures=(),
+    )
+
+    assert program(3) == (9.0, 4.0)
+    assert program.solve_info is solve_info
+
+
+def test_problem_builder_uses_current_backend_when_unspecified(monkeypatch):
+    from coker.backends import get_backend_by_name
+
+    current_backend = get_backend_by_name("numpy", set_current=False)
+    monkeypatch.setattr(
+        "coker.backends.get_current_backend", lambda: current_backend
+    )
+
+    with ProblemBuilder() as builder:
+        x = builder.new_variable(name="x")
+        builder.objective = Minimise(x**2)
+        builder.outputs = [x]
+        problem = builder.build()
+
+    assert problem.backend == "numpy"
 
 
 def test_symbolic_program_results_share_one_invocation():

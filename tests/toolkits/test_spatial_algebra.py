@@ -27,6 +27,25 @@ def test_rotation_group_action_and_inverse():
     )
 
 
+def test_rotation_cast_accepts_only_numpy_vectors():
+    rotation = Rotation3.cast(E_Z)
+
+    assert np.allclose(rotation.as_vector(), E_Z)
+
+    class ShapeOnly:
+        shape = (3,)
+
+    for unsupported in (ShapeOnly(), np.zeros((3, 1))):
+        try:
+            Rotation3.cast(unsupported)
+        except NotImplementedError:
+            pass
+        else:
+            raise AssertionError(
+                "Rotation3.cast must reject non-vector inputs"
+            )
+
+
 def test_isometry_composition_inverse_and_homogeneous_action():
     transform = Isometry3(rotation=Rotation3(E_Z, np.pi / 2), translation=E_X)
     point = np.array([1.0, 0.0, 0.0])

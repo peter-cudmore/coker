@@ -63,7 +63,7 @@ class Noop:
         return None
 
     def __new__(cls, *args, **kwargs):
-        if not hasattr(cls, "instance"):
+        if "instance" not in cls.__dict__:
             cls.instance = super().__new__(cls)
         return cls.instance
 

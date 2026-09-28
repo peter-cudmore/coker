@@ -66,9 +66,7 @@ class Rotation3:
 
         if isinstance(other, UnitQuaternion):
             return Rotation3.from_quaterion(other)
-        if isinstance(other, Vec3):
-            return Rotation3.from_vector(other)
-        if hasattr(other, "shape") and other.shape == (3,):
+        if isinstance(other, np.ndarray) and other.shape == (3,):
             return Rotation3.from_vector(other)
 
         raise NotImplementedError(f"Cannot cast {other} to a rotation matrix")

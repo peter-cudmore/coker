@@ -40,6 +40,7 @@ from coker.backends.evaluator import (
 from coker.backends.sympy.shape import reshape
 
 MatrixType = (sp.Matrix, sp.ImmutableMatrix)
+SympyArrayType = (sp.MatrixBase, sp.NDimArray)
 
 
 def sympy_mul(x, y):
@@ -104,7 +105,7 @@ def sympy_dot(x, y):
 
 
 def sympy_norm(x, ord):
-    if not hasattr(x, "shape"):
+    if not isinstance(x, SympyArrayType):
         if ord in (None, 1, 2):
             return sp.Abs(x)
         raise NotImplementedError(f"Scalar norm ord={ord} is not supported")
@@ -435,7 +436,11 @@ class SympyBackend(Backend):
         try:
             value = sp.nsimplify(array, tolerance=1e-10)
             out = np.array(
-                value.tolist() if hasattr(value, "tolist") else value,
+                (
+                    value.tolist()
+                    if isinstance(value, (*SympyArrayType, np.ndarray))
+                    else value
+                ),
                 dtype=float,
             )
             if out.shape == ():

@@ -19,6 +19,7 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
+from coker.interfaces import SymbolicCallable
 from coker.algebra.ops import (
     OP,
     Noop,
@@ -410,9 +411,7 @@ class Tape:
                 return argument
             if isinstance(argument, Tracer):
                 return argument.copy()
-            if isinstance(argument, FunctionSymbol) or callable(
-                getattr(argument, "_emit_symbol_value", None)
-            ):
+            if isinstance(argument, (FunctionSymbol, SymbolicCallable)):
                 return self.insert_symbol_value(argument)
             return self.insert_value(argument)
 
@@ -450,14 +449,12 @@ class Tape:
 
     def insert_symbol_value(self, value: Any) -> Tracer:
         """Insert a symbol or delegate its value emission to the owner."""
+        if isinstance(value, SymbolicCallable):
+            return value._emit_symbol_value(self)
         if not isinstance(value, FunctionSymbol):
-            emit = getattr(value, "_emit_symbol_value", None)
-            if not callable(emit):
-                raise TypeError(
-                    "Symbol values must be a FunctionSymbol or implement "
-                    "_emit_symbol_value"
-                )
-            return emit(self)
+            raise TypeError(
+                "Symbol values must be a FunctionSymbol or SymbolicCallable"
+            )
         if value._tape() is not self:
             raise ValueError("Symbols must belong to this tape")
 

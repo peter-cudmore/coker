@@ -1,4 +1,5 @@
 import dataclasses
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, List, Optional, Tuple, cast
 
@@ -13,7 +14,7 @@ from coker.algebra.dimensions import (
 from coker.algebra.function import BoundCallable, SymbolicCallable, function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import OP
-from coker.backends.backend import create_native_symbol_entry
+from coker.backends.backend import Backend, create_native_symbol_entry
 
 from .optimisation import (
     BoundedConstraint,
@@ -58,6 +59,20 @@ class _ParameterCapture:
     blocks: tuple[Tracer, ...]
 
 
+class OptimisationModule(ABC):
+    """Numerical optimisation implementation with solve-result metadata.
+
+    Implementations set ``last_solve_info`` before returning from a solve and
+    before raising :class:`SolveFailure`.
+    """
+
+    last_solve_info: SolveInfo | None
+
+    @abstractmethod
+    def __call__(self, *args: Any) -> Any:
+        """Solve for runtime arguments and return objective and outputs."""
+
+
 class MathematicalProgram(SymbolicCallable):
     """An optimisation module that maps parameters to an objective and outputs.
 
@@ -70,13 +85,14 @@ class MathematicalProgram(SymbolicCallable):
         self,
         input_shape: Tuple[Dimension, ...],
         output_shape: Tuple[Dimension, ...],
-        implementation: Callable,
+        implementation: Callable[..., Any],
         backend: Optional[str] = None,
     ):
         self.input_shape = input_shape
         self.output_shape = output_shape
         self._impl = implementation
         self.backend = backend
+        self._optimisation_module: OptimisationModule | None = None
         self.solve_info = None
         self._parameter_captures: tuple[_ParameterCapture, ...] = ()
         self.parameters: dict[str, Any] = {}
@@ -86,11 +102,12 @@ class MathematicalProgram(SymbolicCallable):
         cls,
         input_shape: Tuple[Dimension, ...],
         output_shape: Tuple[Dimension, ...],
-        implementation: Callable,
+        implementation: OptimisationModule,
         backend: str,
         captures: Sequence[_ParameterCapture],
     ) -> "MathematicalProgram":
         program = cls(input_shape, output_shape, implementation, backend)
+        program._optimisation_module = implementation
         program._parameter_captures = tuple(captures)
         return program
 
@@ -118,7 +135,8 @@ class MathematicalProgram(SymbolicCallable):
         try:
             result = self._impl(*args)
         finally:
-            self.solve_info = getattr(self._impl, "last_solve_info", None)
+            if self._optimisation_module is not None:
+                self.solve_info = self._optimisation_module.last_solve_info
         if not isinstance(result, (list, tuple)):
             result = [result]
         capture_sizes = tuple(
@@ -380,14 +398,11 @@ class ProblemBuilder:
         assert self.outputs
         from coker.backends import get_backend_by_name, get_current_backend
 
-        backend_name = backend
-        if backend_name is None:
-            current = get_current_backend()
-            backend_name = getattr(current, "name", None)
-            if backend_name is None:
-                raise RuntimeError(
-                    "Current backend does not expose a stable backend name"
-                )
+        if backend is None:
+            current: Backend = get_current_backend()
+            backend_name = current.name
+        else:
+            backend_name = backend
         backend_impl = get_backend_by_name(backend_name)
 
         implementation = backend_impl.build_optimisation_problem(
@@ -406,7 +421,10 @@ class ProblemBuilder:
             self._normalise_initial_conditions(),
             options=self.solver_options,
         )
-        impl = backend_impl.make_optimisation_module(implementation)
+        impl = cast(
+            OptimisationModule,
+            backend_impl.make_optimisation_module(implementation),
+        )
 
         return MathematicalProgram._from_optimisation(
             self.input_shape,
@@ -430,7 +448,7 @@ def norm(arg, order=2):
 
 __all__ = [
     "BoundedConstraint",
-    "MathematicalProgram",
+    "OptimisationModule",
     "Minimise",
     "ProblemBuilder",
     "SolveFailure",

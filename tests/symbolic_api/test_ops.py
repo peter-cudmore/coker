@@ -12,8 +12,22 @@ from coker import (
 )
 from coker.algebra import get_projection
 from coker.algebra import zeros
+from coker.algebra.ops import Noop
+
 from coker.algebra.graph import Tape, TraceContext
 from ..util import is_close
+
+
+def test_noop_singleton_is_class_local():
+    class DerivedNoop(Noop):
+        pass
+
+    base = Noop()
+    derived = DerivedNoop()
+
+    assert derived is DerivedNoop()
+    assert derived is not base
+    assert type(derived) is DerivedNoop
 
 
 def test_repeated_unary_operation_reuses_tape_node():

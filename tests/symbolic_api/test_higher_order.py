@@ -4,6 +4,7 @@ import pytest
 from coker import function, Scalar, VectorSpace, FunctionSpace, Dimension
 from coker.algebra.function import BoundCallable, Function
 from coker.algebra.graph import Tape, TraceContext, Tracer
+from coker.interfaces import SymbolicCallable
 from coker.algebra.ops import Noop, OP
 from coker.algebra.exceptions import InvalidArgument, InvalidShape
 from coker.backends.backend import create_native_symbol_entry
@@ -44,6 +45,29 @@ def test_functional(backend):
 
     f_coker_result = f_coker(f_inner, np.array([2, 3], dtype=float))
     assert is_close(f_coker_result, np.array([3, 2], dtype=float))
+
+
+def test_symbol_emission_requires_symbolic_callable_base():
+    class DeclaredEmitter(SymbolicCallable):
+        def __call__(self, *args):
+            raise NotImplementedError
+
+        def lower(self):
+            raise NotImplementedError
+
+        def _emit_symbol_value(self, tape):
+            return tape.input(Scalar("emitted"))
+
+    class UndeclaredEmitter:
+        def _emit_symbol_value(self, tape):
+            return tape.input(Scalar("emitted"))
+
+    with TraceContext() as tape:
+        emitted = tape.insert_symbol_value(DeclaredEmitter())
+        with pytest.raises(TypeError, match="SymbolicCallable"):
+            tape.insert_symbol_value(UndeclaredEmitter())
+
+    assert emitted.dim == Dimension.scalar()
 
 
 def test_bound_callable_emits_base_symbol_and_bind_capture_dependency():
