@@ -16,6 +16,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.graph import (
     DanglingTracerError,
+    SymbolEntry,
     Tape,
     TraceContext,
     Tracer,
@@ -33,7 +34,6 @@ from coker.backends.lowered import (
     FunctionSignature,
     LoweredFunction,
     LoweringOptions,
-    OutputShape,
 )
 
 
@@ -127,72 +127,86 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         """Return each output shape in declaration order."""
         return tuple(o.dim if o is not None else None for o in self.output)
 
-    @staticmethod
-    def _append_native_outputs(
-        tape: Tape,
-        native: Callable[..., Any],
-        backend: str,
-        input_spaces: Sequence[Scalar | VectorSpace | FunctionSpace],
-        output_specs: Sequence[FunctionOutputSpec],
-        args: Sequence[Any],
-        name: str | None = None,
-    ) -> list[Tracer | None]:
-        def result_output_dimension(
-            shape: OutputShape,
-        ) -> Dimension | FunctionSpace | None:
-            if shape is None or isinstance(shape, (Dimension, FunctionSpace)):
-                return shape
-            if isinstance(shape, Scalar):
-                return Dimension.scalar()
-            if isinstance(shape, VectorSpace):
-                return Dimension(shape.dimension)
-            raise TypeError(f"Unsupported native output shape {shape!r}")
-
-        result_dimension = ResultBundleDimension(
-            tuple(
-                result_output_dimension(output_spec.shape)
-                for output_spec in output_specs
-            )
-        )
-        output_spaces = [
-            (
-                output_spec.shape.to_space(output_spec.name)
-                if isinstance(output_spec.shape, Dimension)
-                else output_spec.shape
-            )
-            for output_spec in output_specs
-            if output_spec.shape is not None
-        ]
+    def _symbol_entry(self) -> SymbolEntry:
         function_space = FunctionSpace(
-            f"{backend}_native",
-            arguments=list(input_spaces),
-            output=output_spaces,
+            self.name or "function",
+            arguments=[
+                input_spec.space
+                for input_spec in self.signature.inputs
+                if input_spec.space is not None
+                and not isinstance(input_spec.space, Noop)
+            ],
+            output=[
+                (
+                    output_spec.shape
+                    if isinstance(
+                        output_spec.shape,
+                        (Scalar, VectorSpace, FunctionSpace),
+                    )
+                    else output_spec.shape.to_space(output_spec.name)
+                )
+                for output_spec in self.signature.outputs
+                if output_spec.shape is not None
+            ],
         )
-        native_symbol = tape._create_native_function_symbol(
-            native,
+        output_dimensions = tuple(function_space.output_dimensions())
+        result_dimension = (
+            output_dimensions[0]
+            if len(output_dimensions) == 1
+            else ResultBundleDimension(output_dimensions)
+        )
+        return SymbolEntry(
+            self,
             function_space,
             result_dimension,
-            name=name,
+            self.name,
+            ("coker", id(self)),
         )
+
+    def _emit_symbol_value(self, tape: Tape) -> Tracer:
+        """Emit this unbound target as a symbol value on ``tape``."""
+        return tape.insert_symbol_value(
+            tape.intern_symbol(self._symbol_entry())
+        )
+
+    def _append_symbolic_call(
+        self, tape: Tape, inputs: Sequence[Any]
+    ) -> list[Tracer | None]:
+        """Record a call to this Coker target on ``tape``."""
+        if len(inputs) != len(self.tape.input_indicies):
+            raise TypeError(
+                f"Expected {len(self.tape.input_indicies)} inputs, got "
+                f"{len(inputs)}"
+            )
+        arguments = [
+            value
+            for value, spec in zip(inputs, self.signature.inputs)
+            if spec.space is not None and not isinstance(spec.space, Noop)
+        ]
+        symbol = tape.intern_symbol(self._symbol_entry())
         bundle = Tracer(
             tape,
-            tape.append(
-                OP.EVALUATE,
-                native_symbol,
-                *args,
-            ),
+            tape.append(OP.EVALUATE, symbol, *arguments),
         )
-        return [
-            (
-                None
-                if output_spec.shape is None
-                else Tracer(
-                    tape,
-                    tape.append(SelectOP(output_index), bundle),
+        present_output_count = sum(
+            output.shape is not None for output in self.signature.outputs
+        )
+        result: list[Tracer | None] = []
+        output_index = 0
+        for output in self.signature.outputs:
+            if output.shape is None:
+                result.append(None)
+            else:
+                result.append(
+                    bundle
+                    if present_output_count == 1
+                    else Tracer(
+                        tape,
+                        tape.append(SelectOP(output_index), bundle),
+                    )
                 )
-            )
-            for output_index, output_spec in enumerate(output_specs)
-        ]
+                output_index += 1
+        return result
 
     def _prepare_argument(self, arg, index):
         if index == Tape.MAP_TO_NONE:
@@ -292,7 +306,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             backend = get_backend_by_name(backend_name, set_current=False)
             output = backend.append_native_call(self, args, outer_tape)
             if output is None:
-                output = outer_tape.append_function_call(self, args)
+                output = self._append_symbolic_call(outer_tape, args)
         else:
             # Concrete evaluation: lower once per backend/options combination.
             lowered = self.lower()
@@ -387,6 +401,26 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         self.target = target
         self.public_space = public_space
         self.bound_arguments = bound_arguments
+
+    def _emit_symbol_value(self, tape: Tape) -> Tracer:
+        """Emit the target symbol followed by one BIND node per capture."""
+        captures = self.bound_arguments
+        if not all(isinstance(capture, Tracer) for capture in captures):
+            raise TypeError(
+                "BoundCallable arguments must be tracer dependencies"
+            )
+        invalid_captures = [
+            capture for capture in captures if capture.tape is not tape
+        ]
+        if invalid_captures:
+            raise DanglingTracerError(tracers=invalid_captures)
+        value = self.target._emit_symbol_value(tape)
+        position = len(self.public_space.arguments)
+        for capture in captures:
+            value = Tracer(
+                tape, tape.append(OP.BIND, value, capture, position)
+            )
+        return value
 
     def __call__(self, *arguments: Any) -> Any:
         if len(arguments) != len(self.public_space.arguments):
@@ -487,39 +521,3 @@ def function(
         output = implementation(*args)
         result = _normalise_result(output, tape)
         return Function(tape, result, backend, name)
-
-
-def create_function_from_native(
-    native: Callable[..., Any],
-    signature: FunctionSignature,
-    *,
-    backend: str,
-    name: str | None = None,
-) -> Function:
-    """Build a traceable Coker function around a backend-native callable."""
-
-    if not isinstance(signature, FunctionSignature):
-        raise TypeError("signature must be a FunctionSignature")
-
-    input_spaces = [spec.space for spec in signature.inputs]
-    with TraceContext(backend=backend) as tape:
-        args = [tape.input(space) for space in input_spaces]
-        outputs = Function._append_native_outputs(
-            tape,
-            native,
-            backend,
-            input_spaces,
-            signature.outputs,
-            args,
-            name=name,
-        )
-
-    result = Function(
-        tape,
-        outputs[0] if len(outputs) == 1 else outputs,
-        backend=backend,
-        name=name,
-        signature=signature,
-    )
-    result._native_callable = native
-    return result

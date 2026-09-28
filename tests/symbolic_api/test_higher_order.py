@@ -6,6 +6,8 @@ from coker.algebra.function import BoundCallable, Function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import Noop, OP
 from coker.algebra.exceptions import InvalidArgument, InvalidShape
+from coker.backends.backend import create_native_symbol_entry
+
 from ..util import is_close
 
 
@@ -57,15 +59,14 @@ def test_bound_callable_emits_base_symbol_and_bind_capture_dependency():
 
     with TraceContext() as tape:
         captured_a = tape.input(Scalar("a"))
-        function_value = tape.insert_function_value(
-            BoundCallable(target, public_space, (captured_a,))
-        )
+        bound = BoundCallable(target, public_space, (captured_a,))
+        function_value = tape.insert_symbol_value(bound)
 
     bind_op, base_value, bind_capture, bind_position = tape.nodes[
         function_value.index
     ]
     function_op, symbol = tape.nodes[base_value.index]
-    entry = tape.nodes._function_table[0]
+    entry = tape.nodes._symbol_table[0]
     assert function_op is OP.FUNCTION
     assert bind_op is OP.BIND
     assert bind_capture.tape is tape
@@ -74,18 +75,10 @@ def test_bound_callable_emits_base_symbol_and_bind_capture_dependency():
     assert symbol.target is target
     assert symbol.function_space.arguments == [Scalar("t"), Scalar("a")]
     assert symbol.result_dimension == Dimension.scalar()
-    assert tuple(vars(entry)) == (
-        "target",
-        "function_space",
-        "result_dimension",
-        "name",
-    )
     assert entry.target is target
+    assert entry.target is not bound
     assert function_value.dim.function_space.arguments == [Scalar("t")]
     assert tape.depends_on(function_value, captured_a)
-
-    with pytest.raises(TypeError, match="Coker Function target"):
-        tape._create_function_symbol(lambda t: t)
 
 
 def test_bound_callable_captures_share_symbol_and_evaluate(backend):
@@ -104,10 +97,10 @@ def test_bound_callable_captures_share_symbol_and_evaluate(backend):
     captured_b = tape.input(Scalar("b"))
     x = tape.input(Scalar("x"))
 
-    first_value = tape.insert_function_value(
+    first_value = tape.insert_symbol_value(
         BoundCallable(target, public_space, (captured_a,))
     )
-    second_value = tape.insert_function_value(
+    second_value = tape.insert_symbol_value(
         BoundCallable(target, public_space, (captured_b,))
     )
     first_result = Tracer(tape, tape.append(OP.EVALUATE, first_value, x))
@@ -118,8 +111,8 @@ def test_bound_callable_captures_share_symbol_and_evaluate(backend):
         backend=backend,
     )
 
-    assert len(tape.nodes._function_table) == 1
-    assert tape.nodes._function_table[0].target is target
+    assert len(tape.nodes._symbol_table) == 1
+    assert tape.nodes._symbol_table[0].target is target
     assert (
         sum(
             isinstance(tape.nodes[index], tuple)
@@ -169,7 +162,7 @@ def test_bound_callable_uses_one_bind_node_per_capture():
     with TraceContext() as tape:
         captured_a = tape.input(Scalar("a"))
         captured_b = tape.input(Scalar("b"))
-        function_value = tape.insert_function_value(
+        function_value = tape.insert_symbol_value(
             BoundCallable(target, public_space, (captured_a, captured_b))
         )
 
@@ -209,7 +202,7 @@ def test_bind_validates_position_and_argument_dimension():
     with TraceContext() as tape:
         x = tape.input(Scalar("x"))
         vector = tape.input(VectorSpace("v", 2))
-        function_value = tape.insert_function_value(target)
+        function_value = tape.insert_symbol_value(target)
 
         with pytest.raises(InvalidArgument, match="outside the callable"):
             tape.append(OP.BIND, function_value, x, -1)
@@ -219,16 +212,18 @@ def test_bind_validates_position_and_argument_dimension():
             tape.append(OP.BIND, function_value, x, 0.0)
         with pytest.raises(InvalidShape, match="BIND argument 0"):
             tape.append(OP.BIND, function_value, vector, 0)
-        signed_symbol = tape._create_native_function_symbol(
-            lambda x, a: a * x,
-            FunctionSpace(
-                "signed",
-                arguments=[Scalar("x"), Scalar("a")],
-                output=[Scalar("value")],
-                signature=(1, 2),
-            ),
+        signed_symbol = tape.intern_symbol(
+            create_native_symbol_entry(
+                lambda x, a: a * x,
+                FunctionSpace(
+                    "signed",
+                    arguments=[Scalar("x"), Scalar("a")],
+                    output=[Scalar("value")],
+                    signature=(1, 2),
+                ),
+            )
         )
-        signed_value = tape.insert_function_value(signed_symbol)
+        signed_value = tape.insert_symbol_value(signed_symbol)
         reduced_value = Tracer(
             tape,
             tape.append(OP.BIND, signed_value, x, 0),
@@ -250,7 +245,7 @@ def test_bound_callable_counts_only_present_target_inputs():
     with TraceContext() as tape:
         captured_a = tape.input(Scalar("a"))
         bound = BoundCallable(target, public_space, (captured_a,))
-        function_value = tape.insert_function_value(bound)
+        function_value = tape.insert_symbol_value(bound)
 
     bind_op, base_value, bind_capture, bind_position = tape.nodes[
         function_value.index
@@ -276,18 +271,20 @@ def test_function_symbols_exclude_absent_target_signature_values():
         return x + 1
 
     with TraceContext() as tape:
-        symbol = tape._create_function_symbol(target)
-        function_value = tape.insert_function_value(symbol)
-        native_symbol = tape._create_native_function_symbol(
-            native,
-            FunctionSpace(
-                "raw",
-                arguments=[Scalar("x")],
-                output=[Scalar("value")],
-            ),
+        symbol = tape.intern_symbol(target._symbol_entry())
+        function_value = tape.insert_symbol_value(symbol)
+        native_symbol = tape.intern_symbol(
+            create_native_symbol_entry(
+                native,
+                FunctionSpace(
+                    "raw",
+                    arguments=[Scalar("x")],
+                    output=[Scalar("value")],
+                ),
+            )
         )
 
-    entry = tape.nodes._function_table[0]
+    entry = tape.nodes._symbol_table[0]
     assert [input_spec.space for input_spec in target.signature.inputs] == [
         Scalar("x"),
         None,

@@ -6,7 +6,7 @@ from typing import Any, List
 import numpy as np
 import jax.numpy as jnp
 
-from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.function import Function
 from coker.algebra import Dimension, OP
 from coker.algebra.dimensions import (
     FunctionSpace,
@@ -33,6 +33,7 @@ from coker.backends.backend import (
     ArrayLike,
     Backend,
     Evaluator,
+    import_native_function,
     register_backend,
     split_function_parameter_values,
 )
@@ -443,7 +444,7 @@ class JaxBackend(Backend):
         name: str | None = None,
     ) -> Function:
         """Import a JAX-compatible callable as a Coker function."""
-        return create_function_from_native(
+        return import_native_function(
             implementation, signature, backend=self.name, name=name
         )
 

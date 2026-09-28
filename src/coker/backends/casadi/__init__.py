@@ -12,13 +12,14 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.function import Function
 from coker.algebra.graph import Tracer
 from coker.algebra.ops import Noop, ReshapeOP
 from coker.backends.backend import (
     ArrayLike,
     Backend,
     Evaluator,
+    import_native_function,
     register_backend,
     split_function_parameter_values,
 )
@@ -210,7 +211,7 @@ class CasadiBackend(Backend):
             if signature is None
             else signature
         )
-        return create_function_from_native(
+        return import_native_function(
             ca_function, signature, backend=self.name
         )
 

@@ -82,11 +82,16 @@ class FunctionSymbolResolver:
         self._backend = backend
         self._lowered_function_targets: dict[Function, Any] = {}
 
-    def resolve(self, symbol: FunctionSymbol) -> Callable[..., Any]:
+    @staticmethod
+    def is_native(symbol: FunctionSymbol) -> bool:
+        """Return whether a symbol resolves to a backend-native target."""
         from coker.algebra.function import Function
 
+        return not isinstance(symbol.target, Function)
+
+    def resolve(self, symbol: FunctionSymbol) -> Callable[..., Any]:
         target = symbol.target
-        if not isinstance(target, Function):
+        if self.is_native(symbol):
             return _NativeCallable(target, symbol.result_dimension)
 
         try:

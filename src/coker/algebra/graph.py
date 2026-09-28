@@ -3,14 +3,13 @@ from __future__ import annotations
 import dataclasses
 import weakref
 from collections import defaultdict
-from collections.abc import Sequence
 from types import FunctionType
 
 import threading
 
 import numpy as np
 import scipy as sp
-from typing import Any, Callable, Iterable, List, Set, Tuple
+from typing import Any, Iterable, List, Set, Tuple
 
 from coker.algebra.dimensions import (
     Dimension,
@@ -25,7 +24,6 @@ from coker.algebra.ops import (
     Noop,
     Operator,
     ReshapeOP,
-    SelectOP,
     numpy_atomics,
     numpy_composites,
 )
@@ -108,8 +106,8 @@ class TapeInner:
         self._nodes = []
         self._constants = []
         self._constant_hashmap = {}
-        self._function_table = []
-        self._function_hashmap = {}
+        self._symbol_table = []
+        self._symbol_hashmap = {}
         self.tape_ref = weakref.ref(tape_ref)
         assert self.INNER_REF not in OP.__members__.values()
         assert self.CONSTANT_REF not in OP.__members__.values()
@@ -200,13 +198,22 @@ class TapeInner:
 
 
 @dataclasses.dataclass(frozen=True)
-class _FunctionSymbolEntry:
-    """Immutable target and declaration for one callable symbol."""
+class SymbolEntry:
+    """Immutable metadata and target for one callable symbol."""
 
     target: Any
     function_space: FunctionSpace
     result_dimension: Dimension | FunctionSpace | ResultBundleDimension
     name: str | None
+    _identity: tuple[Any, ...] = dataclasses.field(repr=False, compare=False)
+
+    def __hash__(self) -> int:
+        return hash(self._identity)
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, SymbolEntry) and (
+            self._identity == other._identity
+        )
 
 
 class FunctionSymbol:
@@ -217,8 +224,8 @@ class FunctionSymbol:
         self._archive_index = archive_index
 
     @property
-    def _entry(self) -> _FunctionSymbolEntry:
-        return self._tape().nodes._function_table[self._archive_index]
+    def _entry(self) -> SymbolEntry:
+        return self._tape().nodes._symbol_table[self._archive_index]
 
     @property
     def target(self) -> Any:
@@ -272,142 +279,14 @@ class Tape:
     def __len__(self):
         return len(self.nodes)
 
-    def _store_function_symbol(
-        self,
-        target: Any,
-        function_space: FunctionSpace,
-        result_dimension: Dimension | FunctionSpace | ResultBundleDimension,
-        *,
-        name: str | None = None,
-        key: tuple[Any, ...],
-    ) -> FunctionSymbol:
-        archive_index = self._inner._function_hashmap.get(key)
+    def intern_symbol(self, entry: Any) -> FunctionSymbol:
+        """Allocate or retrieve a symbol for opaque entry metadata."""
+        archive_index = self._inner._symbol_hashmap.get(entry)
         if archive_index is None:
-            archive_index = len(self._inner._function_table)
-            self._inner._function_hashmap[key] = archive_index
-            self._inner._function_table.append(
-                _FunctionSymbolEntry(
-                    target,
-                    function_space,
-                    result_dimension,
-                    name,
-                )
-            )
+            archive_index = len(self._inner._symbol_table)
+            self._inner._symbol_hashmap[entry] = archive_index
+            self._inner._symbol_table.append(entry)
         return FunctionSymbol(self, archive_index)
-
-    def _create_native_function_symbol(
-        self,
-        callable_value: Callable[..., Any],
-        function_space: FunctionSpace,
-        result_dimension: (
-            Dimension | FunctionSpace | ResultBundleDimension | None
-        ) = None,
-        *,
-        name: str | None = None,
-    ) -> FunctionSymbol:
-        if result_dimension is None:
-            output_dimensions = function_space.output_dimensions()
-            if len(output_dimensions) != 1:
-                raise ValueError(
-                    "Function symbols require one result or an explicit "
-                    "result dimension"
-                )
-            (result_dimension,) = output_dimensions
-        return self._store_function_symbol(
-            callable_value,
-            function_space,
-            result_dimension,
-            name=name,
-            key=(
-                "native",
-                id(callable_value),
-                id(function_space),
-                id(result_dimension),
-                name,
-            ),
-        )
-
-    def _create_function_symbol(self, target: Any) -> FunctionSymbol:
-        """Create a base symbol for an unbound Coker function target."""
-        from coker.algebra.function import Function
-
-        if not isinstance(target, Function):
-            raise TypeError("Function symbols require a Coker Function target")
-        function_space = FunctionSpace(
-            target.name or "function",
-            arguments=[
-                input_spec.space
-                for input_spec in target.signature.inputs
-                if input_spec.space is not None
-                and not isinstance(input_spec.space, Noop)
-            ],
-            output=[
-                (
-                    output_spec.shape
-                    if isinstance(
-                        output_spec.shape,
-                        (Scalar, VectorSpace, FunctionSpace),
-                    )
-                    else output_spec.shape.to_space(output_spec.name)
-                )
-                for output_spec in target.signature.outputs
-                if output_spec.shape is not None
-            ],
-        )
-        output_dimensions = tuple(function_space.output_dimensions())
-        result_dimension = (
-            output_dimensions[0]
-            if len(output_dimensions) == 1
-            else ResultBundleDimension(output_dimensions)
-        )
-        return self._store_function_symbol(
-            target,
-            function_space,
-            result_dimension,
-            name=target.name,
-            key=("coker", id(target)),
-        )
-
-    def append_function_call(
-        self,
-        function: Any,
-        inputs: Sequence[Any],
-    ) -> list[Tracer | None]:
-        """Record a generic Coker function-table call on this tape."""
-        if len(inputs) != len(function.tape.input_indicies):
-            raise TypeError(
-                f"Expected {len(function.tape.input_indicies)} inputs, got "
-                f"{len(inputs)}"
-            )
-        arguments = [
-            value
-            for value, spec in zip(inputs, function.signature.inputs)
-            if spec.space is not None and not isinstance(spec.space, Noop)
-        ]
-        symbol = self._create_function_symbol(function)
-        bundle = Tracer(
-            self,
-            self.append(OP.EVALUATE, symbol, *arguments),
-        )
-        present_output_count = sum(
-            output.shape is not None for output in function.signature.outputs
-        )
-        result: list[Tracer | None] = []
-        output_index = 0
-        for output in function.signature.outputs:
-            if output.shape is None:
-                result.append(None)
-            else:
-                result.append(
-                    bundle
-                    if present_output_count == 1
-                    else Tracer(
-                        self,
-                        self.append(SelectOP(output_index), bundle),
-                    )
-                )
-                output_index += 1
-        return result
 
     def find_dependents(self, tracer: Tracer) -> Set[int]:
         if tracer is None or tracer is Noop():
@@ -500,14 +379,12 @@ class Tape:
         args = [strip_symbols_from_array(a) for a in args]
         if op == OP.FUNCTION:
             if len(args) != 1:
-                raise TypeError(
-                    "FUNCTION requires exactly one function symbol"
-                )
-            return self.insert_function_value(args[0]).index
+                raise TypeError("FUNCTION requires exactly one symbol")
+            return self.insert_symbol_value(args[0]).index
         if op == OP.BIND:
             if len(args) != 3:
                 raise TypeError(
-                    "BIND requires a function, argument, and position"
+                    "BIND requires a symbol value, argument, and position"
                 )
             if type(args[2]) is not int:
                 raise TypeError("BIND argument position must be an integer")
@@ -528,15 +405,15 @@ class Tape:
         if invalid_tracers:
             raise DanglingTracerError(tracers=invalid_tracers)
 
-        from coker.algebra.function import BoundCallable, Function
-
         def insert_argument(index: int, argument: Any):
             if op == OP.BIND and index == 2:
                 return argument
             if isinstance(argument, Tracer):
                 return argument.copy()
-            if isinstance(argument, (FunctionSymbol, BoundCallable, Function)):
-                return self.insert_function_value(argument)
+            if isinstance(argument, FunctionSymbol) or callable(
+                getattr(argument, "_emit_symbol_value", None)
+            ):
+                return self.insert_symbol_value(argument)
             return self.insert_value(argument)
 
         args = [
@@ -571,49 +448,29 @@ class Tape:
         self._node_hashmap[node_hash] = idx
         return Tracer(self, idx)
 
-    def insert_function_value(self, function_value: Any) -> Tracer:
-        """Insert a base symbol or a sequence of incremental bindings."""
-        from coker.algebra.function import BoundCallable, Function
-
-        if isinstance(function_value, BoundCallable):
-            captures = function_value.bound_arguments
-            if not all(isinstance(capture, Tracer) for capture in captures):
+    def insert_symbol_value(self, value: Any) -> Tracer:
+        """Insert a symbol or delegate its value emission to the owner."""
+        if not isinstance(value, FunctionSymbol):
+            emit = getattr(value, "_emit_symbol_value", None)
+            if not callable(emit):
                 raise TypeError(
-                    "BoundCallable arguments must be tracer dependencies"
+                    "Symbol values must be a FunctionSymbol or implement "
+                    "_emit_symbol_value"
                 )
-            invalid_captures = [
-                capture for capture in captures if capture.tape is not self
-            ]
-            if invalid_captures:
-                raise DanglingTracerError(tracers=invalid_captures)
-            value = self.insert_function_value(function_value.target)
-            position = len(function_value.public_space.arguments)
-            for capture in captures:
-                value = Tracer(
-                    self, self.append(OP.BIND, value, capture, position)
-                )
-            return value
+            return emit(self)
+        if value._tape() is not self:
+            raise ValueError("Symbols must belong to this tape")
 
-        if isinstance(function_value, Function):
-            function_value = self._create_function_symbol(function_value)
-        if not isinstance(function_value, FunctionSymbol):
-            raise TypeError(
-                "Function values require a FunctionSymbol, Function, or "
-                "BoundCallable"
-            )
-        if function_value._tape() is not self:
-            raise ValueError("Function symbols must belong to this tape")
-
-        node_hash = hash((OP.FUNCTION, function_value._archive_index))
+        node_hash = hash((OP.FUNCTION, value._archive_index))
         if node_hash in self._node_hashmap:
             return Tracer(self, self._node_hashmap[node_hash])
 
         index = len(self.dim)
-        self.nodes.push_op(OP.FUNCTION, function_value)
+        self.nodes.push_op(OP.FUNCTION, value)
         self.dim.append(
             FunctionValueDimension(
-                function_value.function_space,
-                function_value.result_dimension,
+                value.function_space,
+                value.result_dimension,
             )
         )
         self._node_hashmap[node_hash] = index

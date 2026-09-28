@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import sympy as sp
 import numpy as np
-from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.function import Function
 from coker.interfaces import SymbolicCallable
 from coker.backends.backend import (
     ArrayLike,
     Backend,
     Evaluator,
+    import_native_function,
     register_backend,
 )
 from coker.backends.lowered import (
@@ -513,7 +514,7 @@ class SympyBackend(Backend):
         name: str | None = None,
     ) -> Function:
         """Import a SymPy-compatible callable as a Coker function."""
-        return create_function_from_native(
+        return import_native_function(
             implementation, signature, backend=self.name, name=name
         )
 

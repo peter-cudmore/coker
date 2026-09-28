@@ -6,13 +6,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from coker.algebra.function import (
-    Function,
-    Tracer,
-    create_function_from_native,
-)
+from coker.algebra.function import Function, Tracer
 from coker.backends import get_backend_by_name
-from coker.backends.backend import VariationalSolver
+from coker.backends.backend import VariationalSolver, import_native_function
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
@@ -721,7 +717,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 ),
                 (FunctionOutputSpec("output", solution_space.output[0]),),
             )
-            solution = create_function_from_native(
+            solution = import_native_function(
                 output_native, signature, backend="pytorch"
             )
             args = [solution]

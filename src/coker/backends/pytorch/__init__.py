@@ -7,13 +7,15 @@ import torch
 
 from coker.algebra import Dimension
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
-from coker.algebra.function import Function, create_function_from_native
+from coker.algebra.function import Function
 from coker.algebra.graph import FunctionSymbol, Tape, Tracer
 from coker.algebra.ops import Noop
-from coker.backends.evaluator import GenericEvaluator
+from coker.backends.evaluator import FunctionSymbolResolver, GenericEvaluator
 from coker.backends.backend import (
     ArrayLike,
     Backend,
+    append_native_outputs,
+    import_native_function,
     split_function_parameter_values,
     register_backend,
 )
@@ -209,7 +211,7 @@ class PytorchBackend(Backend):
                 )
             )
 
-        return Function._append_native_outputs(
+        return append_native_outputs(
             outer_tape,
             execute,
             self.name,
@@ -225,7 +227,7 @@ class PytorchBackend(Backend):
             not isinstance(node, Tracer)
             and any(
                 isinstance(argument, FunctionSymbol)
-                and not isinstance(argument.target, Function)
+                and FunctionSymbolResolver.is_native(argument)
                 for argument in node[1:]
             )
             for node in function.tape.nodes
@@ -298,7 +300,7 @@ class PytorchBackend(Backend):
         name: str | None = None,
     ) -> Function:
         """Import a PyTorch-compatible callable as a Coker function."""
-        return create_function_from_native(
+        return import_native_function(
             implementation, signature, backend=self.name, name=name
         )
 

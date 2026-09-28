@@ -13,6 +13,8 @@ from coker.algebra.dimensions import (
 from coker.algebra.function import BoundCallable, SymbolicCallable, function
 from coker.algebra.graph import Tape, TraceContext, Tracer
 from coker.algebra.ops import OP
+from coker.backends.backend import create_native_symbol_entry
+
 from .optimisation import (
     BoundedConstraint,
     SolveFailure,
@@ -197,10 +199,12 @@ class MathematicalProgram(SymbolicCallable):
             sum(dimension.flat() for dimension in result_dimensions),
         )
         function_space = FunctionSpace("program", arguments, [result_space])
-        symbol = tape._create_native_function_symbol(
-            self,
-            function_space,
-            function_space.output_dimensions()[0],
+        symbol = tape.intern_symbol(
+            create_native_symbol_entry(
+                self,
+                function_space,
+                function_space.output_dimensions()[0],
+            )
         )
         packed = Tracer(tape, tape.append(OP.EVALUATE, symbol, *args))
         offset = 0
