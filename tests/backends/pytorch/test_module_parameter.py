@@ -6,7 +6,7 @@ from coker.parameters import DenseTensorVariable
 from coker.parameters.function_parameters import FunctionParameter
 
 
-def test_import_module_parameter_uses_stateless_dense_decisions():
+def test_import_as_parameter_uses_stateless_dense_decisions():
     backend = get_backend_by_name("pytorch", set_current=False)
     module = torch.nn.Linear(1, 1).double()
     with torch.no_grad():
@@ -18,7 +18,7 @@ def test_import_module_parameter_uses_stateless_dense_decisions():
     }
     input_space = VectorSpace("input", 1)
     output_space = VectorSpace("output", 1)
-    declaration = backend.import_module_parameter(
+    declaration = backend.import_as_parameter(
         module,
         input_space,
         output_space,
@@ -68,7 +68,7 @@ def test_import_module_parameter_uses_stateless_dense_decisions():
         torch.testing.assert_close(module.state_dict()[name], original)
 
 
-def test_import_module_parameter_supports_explicit_spaces_for_sequential():
+def test_import_as_parameter_supports_explicit_spaces_for_sequential():
     backend = get_backend_by_name("pytorch", set_current=False)
     module = torch.nn.Sequential(
         torch.nn.Linear(2, 3),
@@ -77,7 +77,7 @@ def test_import_module_parameter_supports_explicit_spaces_for_sequential():
     ).double()
     input_space = VectorSpace("input", 2)
     output_space = VectorSpace("output", 1)
-    declaration = backend.import_module_parameter(
+    declaration = backend.import_as_parameter(
         module,
         input_space,
         output_space,
@@ -110,7 +110,7 @@ def test_import_module_parameter_supports_explicit_spaces_for_sequential():
     assert all(decision.grad is not None for decision in decisions)
 
 
-def test_import_module_parameter_freezes_module_buffers():
+def test_import_as_parameter_freezes_module_buffers():
     class BufferedScale(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -129,7 +129,7 @@ def test_import_module_parameter_freezes_module_buffers():
     }
     input_space = VectorSpace("input", 1)
     output_space = VectorSpace("output", 1)
-    declaration = backend.import_module_parameter(
+    declaration = backend.import_as_parameter(
         module,
         input_space,
         output_space,
@@ -157,9 +157,9 @@ def test_import_module_parameter_freezes_module_buffers():
         torch.testing.assert_close(module.state_dict()[name], original)
 
 
-def test_import_module_parameter_defaults_to_a_specializable_name():
+def test_import_as_parameter_defaults_to_a_specializable_name():
     backend = get_backend_by_name("pytorch", set_current=False)
-    declaration = backend.import_module_parameter(
+    declaration = backend.import_as_parameter(
         torch.nn.Linear(1, 1),
         VectorSpace("input", 1),
         VectorSpace("output", 1),

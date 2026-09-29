@@ -315,7 +315,7 @@ class PytorchBackend(Backend):
             raise TypeError("module must be a torch.nn.Module")
         return self.import_function(module, signature)
 
-    def import_module_parameter(
+    def import_as_parameter(
         self,
         module: torch.nn.Module,
         input_space: Scalar | VectorSpace,

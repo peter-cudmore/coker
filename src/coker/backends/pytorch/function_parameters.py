@@ -47,30 +47,28 @@ class PytorchModuleParameter(FunctionParameter):
         parameter_items = tuple(prototype.named_parameters())
         if not parameter_items:
             raise ValueError(
-                "import_module_parameter requires at least one trainable "
-                "module parameter"
+                "import_as_parameter requires at least one trainable module "
+                "parameter"
             )
         buffer_items = tuple(prototype.named_buffers())
         if any(
             not isinstance(buffer, torch.Tensor) for _, buffer in buffer_items
         ):
             raise ValueError(
-                "import_module_parameter requires tensor module buffers"
+                "import_as_parameter requires tensor module buffers"
             )
         if any(
             not parameter.is_floating_point()
             for _, parameter in parameter_items
         ):
             raise ValueError(
-                "import_module_parameter requires floating-point module "
-                "parameters"
+                "import_as_parameter requires floating-point module parameters"
             )
         if len({id(parameter) for _, parameter in parameter_items}) != len(
             parameter_items
         ):
             raise ValueError(
-                "import_module_parameter does not support shared module "
-                "parameters"
+                "import_as_parameter does not support shared module parameters"
             )
 
         self.prototype = prototype
