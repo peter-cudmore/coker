@@ -11,6 +11,7 @@
 - SymPy symbolic lowering preserves named function parameters and external calls.
 - Symbolic local accessibility, observability, and structural identifiability analysis for supported ODE and semi-explicit index-one DAE systems.
 - Literal scalar and vector system parameters can be bound without solver decisions.
+- CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
 
 ### Changed
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
