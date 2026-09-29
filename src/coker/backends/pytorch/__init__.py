@@ -316,14 +316,24 @@ class PytorchBackend(Backend):
         return self.import_function(module, signature)
 
     def import_module_parameter(
-        self, module: torch.nn.Module, *, name: str | None = None
+        self,
+        module: torch.nn.Module,
+        input_space: Scalar | VectorSpace,
+        output_space: Scalar | VectorSpace,
+        *,
+        name: str | None = None,
     ) -> PytorchModuleParameter:
-        """Import a supported module with Coker-owned parameter decisions.
+        """Import a module with explicit spaces and Coker-owned decisions.
 
         Unlike :meth:`import_module`, this API evaluates the module
         statelessly with explicit solver decision blocks.
         """
-        return PytorchModuleParameter(module, name=name)
+        return PytorchModuleParameter(
+            module,
+            input_space,
+            output_space,
+            name=name,
+        )
 
     def create_variational_solver(self, problem):
         from .variational import create_variational_solver

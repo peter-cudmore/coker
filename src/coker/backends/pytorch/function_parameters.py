@@ -8,71 +8,62 @@ from typing import Any
 import torch
 
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
+from coker.algebra.function import Function
 from coker.backends.backend import import_native_function
 from coker.backends.lowered import (
     FunctionInputSpec,
     FunctionOutputSpec,
     FunctionSignature,
 )
-from coker.parameters import DenseTensorVariable, ParameterVariable
+from coker.parameters import (
+    DenseTensorVariable,
+    ParameterVariable,
+    UnboundedVariable,
+)
 from coker.parameters.function_parameters import FunctionParameter
 
 
 class PytorchModuleParameter(FunctionParameter):
-    """Realize a one-input :class:`torch.nn.Linear` as Coker decisions.
+    """Realize a one-input PyTorch module as Coker decisions.
 
-    The supplied module is retained as a prototype only. Evaluation supplies
-    every parameter through :func:`torch.func.functional_call`, so neither the
-    prototype parameters nor its buffers participate in optimization.
+    Every trainable module parameter becomes an unbounded Coker decision block.
+    Buffers are captured at construction and cloned for each functional
+    evaluation. This leaves prototype parameters and buffers unchanged.
     """
 
     def __init__(
-        self, prototype: torch.nn.Module, *, name: str | None = None
+        self,
+        prototype: torch.nn.Module,
+        input_space: Scalar | VectorSpace,
+        output_space: Scalar | VectorSpace,
+        *,
+        name: str | None = None,
     ) -> None:
         if not isinstance(prototype, torch.nn.Module):
             raise TypeError("prototype must be a torch.nn.Module")
-        if type(prototype) is not torch.nn.Linear:
-            raise ValueError(
-                "only torch.nn.Linear modules have a deterministically "
-                "derivable Coker function signature; provide a supported "
-                "module without external input metadata"
-            )
-        if prototype.in_features < 1 or prototype.out_features < 1:
-            raise ValueError("torch.nn.Linear feature counts must be positive")
-        if tuple(prototype.weight.shape) != (
-            prototype.out_features,
-            prototype.in_features,
-        ):
-            raise ValueError("torch.nn.Linear weight has an unsupported shape")
-        if prototype.bias is not None and tuple(prototype.bias.shape) != (
-            prototype.out_features,
-        ):
-            raise ValueError("torch.nn.Linear bias has an unsupported shape")
-        if tuple(prototype.named_buffers()):
-            raise ValueError(
-                "torch.nn.Linear modules with buffers are unsupported by "
-                "import_module_parameter"
-            )
+        _validate_space(input_space, "input_space")
+        _validate_space(output_space, "output_space")
 
         parameter_items = tuple(prototype.named_parameters())
-        expected_parameter_names = (
-            ("weight", "bias") if prototype.bias is not None else ("weight",)
-        )
-        if (
-            tuple(name for name, _ in parameter_items)
-            != expected_parameter_names
+        if not parameter_items:
+            raise ValueError(
+                "import_module_parameter requires at least one trainable "
+                "module parameter"
+            )
+        buffer_items = tuple(prototype.named_buffers())
+        if any(
+            not isinstance(buffer, torch.Tensor) for _, buffer in buffer_items
         ):
             raise ValueError(
-                "torch.nn.Linear parameters must have the standard weight "
-                "and optional bias layout"
+                "import_module_parameter requires tensor module buffers"
             )
         if any(
-            not parameter.is_floating_point() or parameter.ndim == 0
+            not parameter.is_floating_point()
             for _, parameter in parameter_items
         ):
             raise ValueError(
-                "import_module_parameter requires non-scalar floating-point "
-                "module parameters"
+                "import_module_parameter requires floating-point module "
+                "parameters"
             )
         if len({id(parameter) for _, parameter in parameter_items}) != len(
             parameter_items
@@ -83,27 +74,29 @@ class PytorchModuleParameter(FunctionParameter):
             )
 
         self.prototype = prototype
-        self.name = name
-        self._input_space = _feature_space("input", prototype.in_features)
-        self._output_space = _feature_space("output", prototype.out_features)
-        self.signature = FunctionSignature(
-            inputs=(FunctionInputSpec("input", self._input_space),),
-            outputs=(FunctionOutputSpec("output", self._output_space),),
+        self.name = name or "pytorch_module"
+        self._input_space = input_space
+        self._output_space = output_space
+        self._parameter_items = parameter_items
+        self._reference_parameter = parameter_items[0][1]
+        self._buffer_items = tuple(
+            (buffer_name, buffer.detach().clone())
+            for buffer_name, buffer in buffer_items
         )
-        prefix = name or "pytorch_module"
+        self.signature = FunctionSignature(
+            inputs=(FunctionInputSpec(input_space.name, input_space),),
+            outputs=(FunctionOutputSpec(output_space.name, output_space),),
+        )
+        prefix = self.name
         self.parameters = tuple(
-            DenseTensorVariable(
-                f"{prefix}_{parameter_name.replace('.', '_')}",
-                parameter.detach()
-                .to(dtype=torch.float64, device="cpu")
-                .numpy()
-                .copy(),
+            _parameter_declaration(
+                f"{prefix}_{parameter_name.replace('.', '_')}", parameter
             )
             for parameter_name, parameter in parameter_items
         )
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
-        """Require the target to match the derived module input and output."""
+        """Require the target to match the supplied module spaces."""
         if not isinstance(target, FunctionSpace):
             raise TypeError("target must be a FunctionSpace")
         expected = FunctionSpace(
@@ -113,13 +106,13 @@ class PytorchModuleParameter(FunctionParameter):
         )
         if not target.matches_signature(expected):
             raise ValueError(
-                "target must match the imported module's single input and "
-                "single output signature"
+                "target must match the imported module's supplied single "
+                "input and single output spaces"
             )
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        """Return one unbounded dense Coker block per module parameter."""
+        """Return one unbounded Coker block per module parameter."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
@@ -130,42 +123,47 @@ class PytorchModuleParameter(FunctionParameter):
                 "parameters"
             )
 
-        argument_tensor = _as_argument_tensor(argument, self.prototype.weight)
-        expected_input_shape = (
-            ()
-            if isinstance(self._input_space, Scalar)
-            else (self._input_space.size,)
-        )
+        argument_tensor = _as_tensor(argument, self._reference_parameter)
+        expected_input_shape = _space_shape(self._input_space)
         if tuple(argument_tensor.shape) != expected_input_shape:
             raise ValueError(
-                "module argument does not match the imported module input "
-                "shape"
+                "module argument does not match the supplied input space"
             )
-        native_argument = argument_tensor.reshape(self.prototype.in_features)
         parameter_values = {
             parameter_name: _as_parameter_tensor(
                 value,
                 prototype_value,
-                dtype=native_argument.dtype,
-                device=native_argument.device,
+                dtype=argument_tensor.dtype,
+                device=argument_tensor.device,
             )
             for (parameter_name, prototype_value), value in zip(
-                self.prototype.named_parameters(), parameters
+                self._parameter_items, parameters
             )
+        }
+        buffer_values = {
+            buffer_name: buffer.detach()
+            .clone()
+            .to(device=argument_tensor.device)
+            for buffer_name, buffer in self._buffer_items
         }
         result = torch.func.functional_call(
             self.prototype,
-            (parameter_values, {}),
-            (native_argument,),
+            (parameter_values, buffer_values),
+            (argument_tensor,),
             strict=True,
         )
-        return (
-            result.reshape(())
-            if isinstance(self._output_space, Scalar)
-            else result.reshape(self._output_space.size)
-        )
+        if not isinstance(result, torch.Tensor):
+            raise TypeError("imported module must return one torch.Tensor")
+        try:
+            return result.reshape(_space_shape(self._output_space))
+        except RuntimeError as ex:
+            raise ValueError(
+                "module result does not match the supplied output space"
+            ) from ex
 
-    def build_function(self, target: FunctionSpace, backend: str | None):
+    def build_function(
+        self, target: FunctionSpace, backend: str | None
+    ) -> Function:
         """Build a native PyTorch call with explicit Coker decision inputs."""
         target = self.validate_target(target)
         if backend not in (None, "pytorch"):
@@ -174,14 +172,12 @@ class PytorchModuleParameter(FunctionParameter):
                 "backend"
             )
         parameter_spaces = tuple(
-            VectorSpace(parameter.name, parameter.shape)
-            for parameter in self.parameters
+            _parameter_space(parameter) for parameter in self.parameters
         )
         signature = FunctionSignature(
             inputs=(
-                *(
-                    FunctionInputSpec(argument.name, argument)
-                    for argument in target.arguments
+                FunctionInputSpec(
+                    target.arguments[0].name, target.arguments[0]
                 ),
                 *(
                     FunctionInputSpec(parameter.name, space)
@@ -190,9 +186,8 @@ class PytorchModuleParameter(FunctionParameter):
                     )
                 ),
             ),
-            outputs=tuple(
-                FunctionOutputSpec(output.name, output)
-                for output in target.output
+            outputs=(
+                FunctionOutputSpec(target.output[0].name, target.output[0]),
             ),
         )
         return import_native_function(
@@ -203,21 +198,46 @@ class PytorchModuleParameter(FunctionParameter):
         )
 
 
-def _feature_space(name: str, size: int) -> Scalar | VectorSpace:
-    """Map a linear feature count to Coker's scalar/vector convention."""
-    return Scalar(name) if size == 1 else VectorSpace(name, size)
+def _validate_space(space: object, argument_name: str) -> None:
+    if not isinstance(space, (Scalar, VectorSpace)):
+        raise TypeError(f"{argument_name} must be a Scalar or VectorSpace")
 
 
-def _as_argument_tensor(
-    argument: Any, prototype_weight: torch.Tensor
-) -> torch.Tensor:
+def _space_shape(space: Scalar | VectorSpace) -> tuple[int, ...]:
+    if isinstance(space, Scalar):
+        return ()
+    return (
+        (space.dimension,)
+        if isinstance(space.dimension, int)
+        else tuple(space.dimension)
+    )
+
+
+def _parameter_declaration(
+    name: str, parameter: torch.Tensor
+) -> UnboundedVariable | DenseTensorVariable:
+    value = parameter.detach().to(dtype=torch.float64, device="cpu").numpy()
+    if parameter.ndim == 0:
+        return UnboundedVariable(name, guess=float(value))
+    return DenseTensorVariable(name, value.copy())
+
+
+def _parameter_space(
+    parameter: UnboundedVariable | DenseTensorVariable,
+) -> Scalar | VectorSpace:
+    if isinstance(parameter, UnboundedVariable):
+        return Scalar(parameter.name)
+    return VectorSpace(parameter.name, parameter.shape)
+
+
+def _as_tensor(argument: Any, reference: torch.Tensor) -> torch.Tensor:
     """Convert a direct argument without detaching an existing tensor."""
     if isinstance(argument, torch.Tensor):
         return argument
     return torch.as_tensor(
         argument,
-        dtype=prototype_weight.dtype,
-        device=prototype_weight.device,
+        dtype=reference.dtype,
+        device=reference.device,
     )
 
 
