@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from numbers import Real
 
 import numpy as np
 
@@ -28,6 +29,7 @@ class ParameterValueLayout:
     declarations: tuple[object, ...]
     offsets: tuple[tuple[int, int], ...]
     concrete_offsets: tuple[tuple[tuple[int, int], ...], ...] | None = None
+    literal_values: tuple[float | np.ndarray | None, ...] | None = None
 
     def reconstruct(
         self, values: object, backend: object | None = None
@@ -38,6 +40,14 @@ class ParameterValueLayout:
         for index, (target, declaration, (start, end)) in enumerate(
             zip(self.targets, self.declarations, self.offsets)
         ):
+            literal = (
+                None
+                if self.literal_values is None
+                else self.literal_values[index]
+            )
+            if literal is not None:
+                result[self._name(target, declaration)] = literal
+                continue
             blocks = (
                 (values[start:end],)
                 if self.concrete_offsets is None
@@ -125,6 +135,35 @@ def _flatten_declaration(
     )
 
 
+def _literal_value(
+    target: Scalar | VectorSpace, value: object
+) -> float | np.ndarray:
+    """Validate and normalize a numeric literal for one system parameter."""
+    if isinstance(target, Scalar):
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise TypeError("scalar parameter literals must be real numbers")
+        literal = float(value)
+        if not np.isfinite(literal):
+            raise ValueError("scalar parameter literals must be finite")
+        return literal
+
+    if not isinstance(value, (list, tuple, np.ndarray)):
+        raise TypeError("vector parameter literals must be numeric arrays")
+    literal = np.array(value, dtype=float, copy=True)
+    expected_shape = (
+        (target.dimension,)
+        if isinstance(target.dimension, int)
+        else target.dimension
+    )
+    if literal.shape != expected_shape:
+        raise ValueError(
+            "vector parameter literal shape does not match its declared space"
+        )
+    if not np.isfinite(literal).all():
+        raise ValueError("vector parameter literals must be finite")
+    return literal
+
+
 def _reconstruct_concrete_values(
     values: object,
     declarations: Sequence[
@@ -170,6 +209,7 @@ def specialize_system_parameters(
     offsets: list[tuple[int, int]] = []
     concrete_offsets: list[tuple[tuple[int, int], ...]] = []
     function_declarations: list[tuple[object, ...] | None] = []
+    literal_values: list[float | np.ndarray | None] = []
     concrete_blocks: dict[
         str,
         tuple[
@@ -193,7 +233,23 @@ def specialize_system_parameters(
                 declaration
             )
             function_declarations.append(concrete_declarations)
+            literal_values.append(None)
         else:
+            if not isinstance(
+                declaration,
+                (
+                    BoundedVariable,
+                    UnboundedVariable,
+                    BoundVector,
+                    DenseTensorVariable,
+                ),
+            ):
+                literal_values.append(_literal_value(target, declaration))
+                function_declarations.append(None)
+                concrete_offsets.append(())
+                offsets.append((width, width))
+                continue
+            literal_values.append(None)
             concrete_declarations = (declaration,)
             function_declarations.append(None)
 
@@ -258,13 +314,18 @@ def specialize_system_parameters(
             ranges,
             parameterization,
             concrete_declarations,
+            literal,
         ) in zip(
             space,
             declarations,
             concrete_offsets,
             parameterizations,
             function_declarations,
+            literal_values,
         ):
+            if literal is not None:
+                values.append(literal)
+                continue
             if parameterization is not None:
                 assert concrete_declarations is not None
                 values.append(
@@ -335,5 +396,6 @@ def specialize_system_parameters(
             tuple(declarations),
             tuple(offsets),
             tuple(concrete_offsets),
+            tuple(literal_values),
         ),
     )
