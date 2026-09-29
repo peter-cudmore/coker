@@ -32,6 +32,7 @@ from .constraint_preprocessing import (
     ConstraintRowProvenance,
     preprocess_constraint_rows,
 )
+from .constraint_preprocessing import reduce_affine_equality_rows
 from .loss import _lower_loss
 from .symbolic_path import (
     CallbackWrapper,
@@ -230,10 +231,17 @@ class _ConstraintAccumulator:
             assert lower.shape == value.shape == upper.shape
         self._add_rows(value, lower, upper, provenance)
 
-    def build(self):
+    def build(self, decision_variables):
         rows = preprocess_constraint_rows(
             self._rows, tolerance=self._factory.tolerance
         )
+        if self._factory.options.reduce_affine_equalities:
+            rows = reduce_affine_equality_rows(
+                rows,
+                decision_variables,
+                ca.DM.zeros(decision_variables.numel(), 1),
+                tolerance=self._factory.options.affine_rank_tolerance,
+            )
         return (
             ca.vertcat(*(row.residual for row in rows)),
             ca.DM([row.lower for row in rows]),
@@ -726,11 +734,10 @@ def _create_solver(
             validate_shape=True,
         )
 
-    g, lbg, ubg = constraints.build()
+    g, lbg, ubg = constraints.build(decision_variables)
 
     compilation = _compile_nlp(
         factory=factory,
-        layout=layout,
         poly_collection=poly_collection,
         projectors=projectors,
         path_symbols=path_symbols,

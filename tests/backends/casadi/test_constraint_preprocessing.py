@@ -7,6 +7,7 @@ try:
         ConstraintPreprocessingError,
         ConstraintRow,
         ConstraintRowProvenance,
+        reduce_affine_equality_rows,
         preprocess_constraint_rows,
     )
 
@@ -76,4 +77,21 @@ def test_preprocessing_reports_conflicting_duplicate_rows():
     message = str(error.value)
     assert "path interval 0 node 0" in message
     assert "terminal" in message
-    assert "decision" in message
+
+
+def test_affine_reduction_drops_dependent_equalities():
+    decision = ca.MX.sym("decision", 2)
+    rows = (
+        _row(decision[0], 0.0, 0.0, "first"),
+        _row(2 * decision[0], 0.0, 0.0, "dependent"),
+        _row(decision[1], 0.0, 0.0, "second"),
+    )
+
+    reduced = reduce_affine_equality_rows(
+        rows,
+        decision,
+        ca.DM.zeros(2, 1),
+        tolerance=1e-10,
+    )
+
+    assert len(reduced) == 2

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import casadi as ca
+import numpy as np
 
 
 _STRUCTURAL_COMPARISON_DEPTH = 1000
@@ -100,3 +101,63 @@ def preprocess_constraint_rows(
                 unique.append(row)
         retained.extend(unique)
     return tuple(retained)
+
+
+def reduce_affine_equality_rows(
+    rows: Iterable[ConstraintRow],
+    variables: ca.MX,
+    guess: ca.DM,
+    *,
+    tolerance: float,
+) -> tuple[ConstraintRow, ...]:
+    """Remove equality rows implied by an independent affine row basis."""
+    rows = tuple(rows)
+    equalities = [
+        row
+        for row in rows
+        if row.lower == row.upper and ca.is_linear(row.residual, variables)
+    ]
+    if len(equalities) < 2:
+        return rows
+    evaluate = ca.Function(
+        "affine_rows",
+        [variables],
+        [
+            ca.vertcat(*(row.residual for row in equalities)),
+            ca.jacobian(
+                ca.vertcat(*(row.residual for row in equalities)), variables
+            ),
+        ],
+    )
+    values, coefficients = evaluate(guess)
+    coefficients = np.asarray(coefficients, dtype=float)
+    constants = np.asarray(values, dtype=float).reshape(
+        -1
+    ) - coefficients @ np.asarray(guess, dtype=float).reshape(-1)
+    retained = []
+    coefficient_basis = np.empty((0, coefficients.shape[1]))
+    augmented_basis = np.empty((0, coefficients.shape[1] + 1))
+    for row, coefficient, constant in zip(equalities, coefficients, constants):
+        augmented = np.append(coefficient, constant - row.lower)
+        coefficient_candidate = np.vstack((coefficient_basis, coefficient))
+        augmented_candidate = np.vstack((augmented_basis, augmented))
+        if np.linalg.matrix_rank(
+            coefficient_candidate, tolerance
+        ) > np.linalg.matrix_rank(coefficient_basis, tolerance):
+            retained.append(row)
+            coefficient_basis = coefficient_candidate
+            augmented_basis = augmented_candidate
+        elif np.linalg.matrix_rank(
+            augmented_candidate, tolerance
+        ) > np.linalg.matrix_rank(augmented_basis, tolerance):
+            raise ConstraintPreprocessingError(
+                "Inconsistent affine equality row from "
+                f"{'; '.join(source.describe() for source in row.provenance)}"
+            )
+    retained_ids = {id(row) for row in retained}
+    equality_ids = {id(row) for row in equalities}
+    return tuple(
+        row
+        for row in rows
+        if id(row) not in equality_ids or id(row) in retained_ids
+    )
