@@ -23,6 +23,7 @@ from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from .dynamics import PytorchODESolverParameters, evaluate_integrals
 from .lower import PytorchLoweredFunction, PytorchModule
+from .function_parameters import PytorchModuleParameter
 from .optimisation import PytorchNLPSolverOptions, build_optimisation_problem
 from .ops import (
     call_parameterised_op,
@@ -313,6 +314,16 @@ class PytorchBackend(Backend):
         if not isinstance(module, torch.nn.Module):
             raise TypeError("module must be a torch.nn.Module")
         return self.import_function(module, signature)
+
+    def import_module_parameter(
+        self, module: torch.nn.Module, *, name: str | None = None
+    ) -> PytorchModuleParameter:
+        """Import a supported module with Coker-owned parameter decisions.
+
+        Unlike :meth:`import_module`, this API evaluates the module
+        statelessly with explicit solver decision blocks.
+        """
+        return PytorchModuleParameter(module, name=name)
 
     def create_variational_solver(self, problem):
         from .variational import create_variational_solver
