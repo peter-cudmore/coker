@@ -149,7 +149,7 @@ def _literal_value(
 
     if not isinstance(value, (list, tuple, np.ndarray)):
         raise TypeError("vector parameter literals must be numeric arrays")
-    literal = np.asarray(value, dtype=float)
+    literal = np.array(value, dtype=float, copy=True)
     expected_shape = (
         (target.dimension,)
         if isinstance(target.dimension, int)

@@ -905,9 +905,10 @@ def test_specialize_system_parameters_binds_numeric_literals():
         )
     )
 
+    offset = np.array([1.0, -1.0])
     specialized, solver_declarations, layout = specialize_system_parameters(
         system,
-        [2.0, np.array([1.0, -1.0])],
+        [2.0, offset],
     )
 
     assert solver_declarations == []
@@ -926,6 +927,21 @@ def test_specialize_system_parameters_binds_numeric_literals():
     reconstructed = layout.reconstruct(np.empty(0))
     assert reconstructed["gain"] == 2.0
     np.testing.assert_allclose(reconstructed["offset"], [1.0, -1.0])
+    offset[:] = 0.0
+    np.testing.assert_allclose(
+        specialized.dxdt(
+            0.0,
+            np.array([3.0, 4.0]),
+            None,
+            None,
+            np.empty(0),
+        ),
+        [7.0, 7.0],
+    )
+    np.testing.assert_allclose(
+        layout.reconstruct(np.empty(0))["offset"],
+        [1.0, -1.0],
+    )
 
 
 def test_specialize_system_parameters_omits_literals_from_solver_vector():
