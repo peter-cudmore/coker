@@ -85,12 +85,11 @@ def preprocess_constraint_rows(
     retained = []
     for group in groups:
         _validate_group(tuple(group), tolerance)
+        unique = []
         for row in group:
-            for index, existing in enumerate(retained):
-                if _same_residual(
-                    existing.residual, row.residual
-                ) and _same_bounds(existing, row):
-                    retained[index] = ConstraintRow(
+            for index, existing in enumerate(unique):
+                if _same_bounds(existing, row):
+                    unique[index] = ConstraintRow(
                         existing.residual,
                         existing.lower,
                         existing.upper,
@@ -98,5 +97,6 @@ def preprocess_constraint_rows(
                     )
                     break
             else:
-                retained.append(row)
+                unique.append(row)
+        retained.extend(unique)
     return tuple(retained)

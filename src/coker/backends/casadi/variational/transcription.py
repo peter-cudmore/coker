@@ -191,7 +191,6 @@ class _ConstraintAccumulator:
     def __init__(self, factory: _TranscriptionFactory):
         self._factory = factory
         self._rows: list[ConstraintRow] = []
-        self.provenance: tuple[ConstraintRowProvenance, ...] = ()
 
     def _add_rows(self, value, lower, upper, provenance) -> None:
         for component in range(int(value.numel())):
@@ -234,9 +233,6 @@ class _ConstraintAccumulator:
     def build(self):
         rows = preprocess_constraint_rows(
             self._rows, tolerance=self._factory.tolerance
-        )
-        self.provenance = tuple(
-            source for row in rows for source in row.provenance
         )
         return (
             ca.vertcat(*(row.residual for row in rows)),
