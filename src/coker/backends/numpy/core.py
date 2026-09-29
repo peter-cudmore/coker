@@ -105,7 +105,7 @@ class NumpyBackend(Backend):
         return FittedFunction(
             declaration,
             target,
-            lambda argument: native(argument, *parameters),
+            lambda *arguments: native(*arguments, *parameters),
             parameters,
         )
 

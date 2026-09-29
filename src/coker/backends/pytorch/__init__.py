@@ -23,6 +23,7 @@ from coker.backends.lowered import FunctionSignature, LoweringOptions
 
 from .dynamics import PytorchODESolverParameters, evaluate_integrals
 from .lower import PytorchLoweredFunction, PytorchModule
+from .function_parameters import PytorchModuleParameter
 from .optimisation import PytorchNLPSolverOptions, build_optimisation_problem
 from .ops import (
     call_parameterised_op,
@@ -313,6 +314,28 @@ class PytorchBackend(Backend):
         if not isinstance(module, torch.nn.Module):
             raise TypeError("module must be a torch.nn.Module")
         return self.import_function(module, signature)
+
+    def import_as_parameter(
+        self,
+        module: torch.nn.Module,
+        input_space: Scalar | VectorSpace,
+        output_space: Scalar | VectorSpace,
+        *,
+        name: str | None = None,
+    ) -> PytorchModuleParameter:
+        """Import a module as a Coker-owned function parameter.
+
+        ``input_space`` and ``output_space`` describe the module's one tensor
+        input and one tensor output. Floating-point module parameters become
+        unbounded solver decisions; buffers are frozen snapshots. Unlike
+        :meth:`import_module`, the caller's module state is never mutated.
+        """
+        return PytorchModuleParameter(
+            module,
+            input_space,
+            output_space,
+            name=name,
+        )
 
     def create_variational_solver(self, problem):
         from .variational import create_variational_solver

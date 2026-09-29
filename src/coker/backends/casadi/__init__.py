@@ -151,7 +151,10 @@ class CasadiBackend(Backend):
         return FittedFunction(
             declaration,
             declaration.validate_target(target),
-            lambda argument: declaration.evaluate(parameters, argument),
+            lambda *arguments: declaration.evaluate(
+                parameters,
+                arguments[0] if len(arguments) == 1 else arguments,
+            ),
             parameters,
         )
 
