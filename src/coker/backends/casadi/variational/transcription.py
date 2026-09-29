@@ -27,6 +27,12 @@ from coker.toolkits.codesign.optimisation import (
 )
 
 from .factory import _TranscriptionFactory, _resolve_options
+from .constraint_preprocessing import (
+    ConstraintRow,
+    ConstraintRowProvenance,
+    preprocess_constraint_rows,
+    reduce_affine_equality_rows,
+)
 from .loss import _lower_loss
 from .symbolic_path import (
     CallbackWrapper,
@@ -185,41 +191,60 @@ class _ConstraintAccumulator:
 
     def __init__(self, factory: _TranscriptionFactory):
         self._factory = factory
-        self._equality_values = []
-        self._equality_tolerances = []
-        self._ranged_values = []
-        self._ranged_lowers = []
-        self._ranged_uppers = []
+        self._rows: list[ConstraintRow] = []
 
-    def add_equality(self, value, tolerance) -> None:
+    def _add_rows(self, value, lower, upper, provenance) -> None:
+        for component in range(int(value.numel())):
+            self._rows.append(
+                ConstraintRow(
+                    value[component],
+                    float(lower[component]),
+                    float(upper[component]),
+                    (
+                        ConstraintRowProvenance(
+                            provenance[0],
+                            provenance[1],
+                            provenance[2],
+                            component,
+                        ),
+                    ),
+                )
+            )
+
+    def add_equality(self, value, tolerance, provenance) -> None:
         if value is not None:
-            self._equality_values.append(value)
-            self._equality_tolerances.append(tolerance)
+            size = int(value.numel())
+            self._add_rows(
+                value,
+                -tolerance * ca.DM.ones(size, 1),
+                tolerance * ca.DM.ones(size, 1),
+                provenance,
+            )
 
     def add_constraint(
-        self, constraint, args, *, validate_shape: bool = False
+        self, constraint, args, provenance, *, validate_shape: bool = False
     ) -> None:
         (value,) = self._factory.casadi.evaluate(constraint.residual, args)
         lower = self._factory.casadi.to_backend_array(constraint.lower_bound)
         upper = self._factory.casadi.to_backend_array(constraint.upper_bound)
         if validate_shape:
             assert lower.shape == value.shape == upper.shape
-        self._ranged_values.append(value)
-        self._ranged_lowers.append(lower)
-        self._ranged_uppers.append(upper)
+        self._add_rows(value, lower, upper, provenance)
 
-    def build(self):
-        equality_lowers = [
-            -tolerance * ca.DM.ones(value.shape[0], 1)
-            for value, tolerance in zip(
-                self._equality_values, self._equality_tolerances
+    def build(self, decision_variables):
+        rows = preprocess_constraint_rows(
+            self._rows, tolerance=self._factory.tolerance
+        )
+        if self._factory.options.reduce_affine_equalities:
+            rows = reduce_affine_equality_rows(
+                rows,
+                decision_variables,
+                tolerance=self._factory.options.affine_rank_tolerance,
             )
-        ]
-        equality_uppers = [-lower for lower in equality_lowers]
         return (
-            ca.vertcat(*self._equality_values, *self._ranged_values),
-            ca.vertcat(*equality_lowers, *self._ranged_lowers),
-            ca.vertcat(*equality_uppers, *self._ranged_uppers),
+            ca.vertcat(*(row.residual for row in rows)),
+            ca.DM([row.lower for row in rows]),
+            ca.DM([row.upper for row in rows]),
         )
 
 
@@ -556,14 +581,22 @@ def _create_solver(
     )
 
     constraints.add_equality(
-        factory.proj_x @ x0_symbol - x0_val, factory.tolerance
+        factory.proj_x @ x0_symbol - x0_val,
+        factory.tolerance,
+        ("initial state", None, None),
     )
     if factory.z_size > 0:
         constraints.add_equality(
-            factory.proj_z @ x0_symbol - z0_val, factory.tolerance
+            factory.proj_z @ x0_symbol - z0_val,
+            factory.tolerance,
+            ("initial algebraic state", None, None),
         )
     if factory.q_size > 0:
-        constraints.add_equality(factory.proj_q @ x0_symbol, factory.tolerance)
+        constraints.add_equality(
+            factory.proj_q @ x0_symbol,
+            factory.tolerance,
+            ("initial quadrature", None, None),
+        )
 
     q_initial = ca.DM.zeros(factory.q_size, 1)
     u_initial = factory.control_eval(t0)
@@ -576,12 +609,14 @@ def _create_solver(
         q_initial,
     )
     for constraint in problem.initial_constraints:
-        constraints.add_constraint(constraint, initial_args)
+        constraints.add_constraint(
+            constraint, initial_args, ("initial constraint", None, None)
+        )
 
     system_parameters = factory.proj_p @ factory.p
 
-    for poly in poly_collection.polys:
-        for t, v, dv in poly.knot_points():
+    for interval, poly in enumerate(poly_collection.polys):
+        for node, (t, v, dv) in enumerate(poly.knot_points()):
             physical_t = duration * t
             x = factory.proj_x @ v
             z = factory.proj_z @ v
@@ -597,6 +632,7 @@ def _create_solver(
             constraints.add_equality(
                 dx - duration * dynamics_ij,
                 factory.derivative_defect_tolerance,
+                ("dynamics defect", interval, node),
             )
 
             if factory.q_size > 0:
@@ -627,6 +663,7 @@ def _create_solver(
                 constraints.add_equality(
                     dq - quadrature_ij,
                     factory.derivative_defect_tolerance,
+                    ("quadrature defect", interval, node),
                 )
 
             if factory.z_size > 0:
@@ -637,11 +674,15 @@ def _create_solver(
                     control,
                     system_parameters,
                 )
-                constraints.add_equality(alg, factory.tolerance)
+                constraints.add_equality(
+                    alg,
+                    factory.tolerance,
+                    ("algebraic constraint", interval, node),
+                )
 
     # Path constraints apply at interval endpoints and collocation knots.
-    for poly in poly_collection.polys:
-        for t, v in (poly.start_point(), poly.end_point()):
+    for interval, poly in enumerate(poly_collection.polys):
+        for node, (t, v) in enumerate((poly.start_point(), poly.end_point())):
             physical_t = duration * t
             x = factory.proj_x @ v
             z = factory.proj_z @ v
@@ -655,7 +696,9 @@ def _create_solver(
                 q,
             )
             for constraint in problem.path_constraints:
-                constraints.add_constraint(constraint, args)
+                constraints.add_constraint(
+                    constraint, args, ("path constraint", interval, node)
+                )
 
     path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
     path_upper_bound = ca.DM.ones(poly_collection.size(), 1) * ca.inf
@@ -683,9 +726,14 @@ def _create_solver(
     )
 
     for constraint in problem.terminal_constraints:
-        constraints.add_constraint(constraint, end_args, validate_shape=True)
+        constraints.add_constraint(
+            constraint,
+            end_args,
+            ("terminal constraint", None, None),
+            validate_shape=True,
+        )
 
-    g, lbg, ubg = constraints.build()
+    g, lbg, ubg = constraints.build(decision_variables)
 
     compilation = _compile_nlp(
         factory=factory,

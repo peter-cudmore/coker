@@ -34,6 +34,10 @@ class CasadiVariationalOptions:
             the initial transcription solve.
         minimum_interval_duration: Smallest normalized interval width allowed
             when h-refinement splits an interval.
+        reduce_affine_equalities: Remove redundant affine equality rows before
+            IPOPT. Disabled by default.
+        affine_rank_tolerance: Numerical rank tolerance for optional affine
+            equality reduction.
     """
 
     verbose: bool = False
@@ -46,6 +50,8 @@ class CasadiVariationalOptions:
     maximum_degree: int = 12
     maximum_iterations: int = 8
     minimum_interval_duration: float = 1e-8
+    reduce_affine_equalities: bool = False
+    affine_rank_tolerance: float = 1e-10
 
     def __post_init__(self) -> None:
         """Validate refinement bounds before the solver builds a mesh."""
@@ -61,4 +67,11 @@ class CasadiVariationalOptions:
         ):
             raise ValueError(
                 "minimum_interval_duration must be finite and positive"
+            )
+        if (
+            not math.isfinite(self.affine_rank_tolerance)
+            or self.affine_rank_tolerance <= 0
+        ):
+            raise ValueError(
+                "affine_rank_tolerance must be finite and positive"
             )
