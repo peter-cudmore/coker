@@ -31,8 +31,8 @@ from .constraint_preprocessing import (
     ConstraintRow,
     ConstraintRowProvenance,
     preprocess_constraint_rows,
+    reduce_affine_equality_rows,
 )
-from .constraint_preprocessing import reduce_affine_equality_rows
 from .loss import _lower_loss
 from .symbolic_path import (
     CallbackWrapper,
@@ -239,7 +239,6 @@ class _ConstraintAccumulator:
             rows = reduce_affine_equality_rows(
                 rows,
                 decision_variables,
-                ca.DM.zeros(decision_variables.numel(), 1),
                 tolerance=self._factory.options.affine_rank_tolerance,
             )
         return (

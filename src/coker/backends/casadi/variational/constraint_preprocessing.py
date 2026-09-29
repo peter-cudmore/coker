@@ -106,7 +106,6 @@ def preprocess_constraint_rows(
 def reduce_affine_equality_rows(
     rows: Iterable[ConstraintRow],
     variables: ca.MX,
-    guess: ca.DM,
     *,
     tolerance: float,
 ) -> tuple[ConstraintRow, ...]:
@@ -119,21 +118,16 @@ def reduce_affine_equality_rows(
     ]
     if len(equalities) < 2:
         return rows
+
+    residuals = ca.vertcat(*(row.residual for row in equalities))
     evaluate = ca.Function(
         "affine_rows",
         [variables],
-        [
-            ca.vertcat(*(row.residual for row in equalities)),
-            ca.jacobian(
-                ca.vertcat(*(row.residual for row in equalities)), variables
-            ),
-        ],
+        [residuals, ca.jacobian(residuals, variables)],
     )
-    values, coefficients = evaluate(guess)
+    constants, coefficients = evaluate(ca.DM.zeros(variables.numel(), 1))
     coefficients = np.asarray(coefficients, dtype=float)
-    constants = np.asarray(values, dtype=float).reshape(
-        -1
-    ) - coefficients @ np.asarray(guess, dtype=float).reshape(-1)
+    constants = np.asarray(constants, dtype=float).reshape(-1)
     retained = []
     coefficient_basis = np.empty((0, coefficients.shape[1]))
     augmented_basis = np.empty((0, coefficients.shape[1] + 1))

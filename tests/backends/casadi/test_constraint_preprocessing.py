@@ -90,7 +90,6 @@ def test_affine_reduction_drops_dependent_equalities():
     reduced = reduce_affine_equality_rows(
         rows,
         decision,
-        ca.DM.zeros(2, 1),
         tolerance=1e-10,
     )
 

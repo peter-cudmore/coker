@@ -34,6 +34,10 @@ class CasadiVariationalOptions:
             the initial transcription solve.
         minimum_interval_duration: Smallest normalized interval width allowed
             when h-refinement splits an interval.
+        reduce_affine_equalities: Remove redundant affine equality rows before
+            IPOPT. Disabled by default.
+        affine_rank_tolerance: Numerical rank tolerance for optional affine
+            equality reduction.
     """
 
     verbose: bool = False
