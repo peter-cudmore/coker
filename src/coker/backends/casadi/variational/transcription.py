@@ -737,6 +737,7 @@ def _create_solver(
 
     compilation = _compile_nlp(
         factory=factory,
+        layout=layout,
         poly_collection=poly_collection,
         projectors=projectors,
         path_symbols=path_symbols,
