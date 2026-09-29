@@ -24,11 +24,18 @@ from coker.parameters.function_parameters import FunctionParameter
 
 
 class PytorchModuleParameter(FunctionParameter):
-    """Realize a one-input PyTorch module as Coker decisions.
+    """Expose a one-input, one-tensor-output module as solver decisions.
 
-    Every trainable module parameter becomes an unbounded Coker decision block.
-    Buffers are captured at construction and cloned for each functional
-    evaluation. This leaves prototype parameters and buffers unchanged.
+    Every floating-point module parameter becomes an unbounded Coker decision
+    block. The supplied input and output spaces define the native call
+    signature. Buffers are captured at construction and cloned for each
+    evaluation, leaving prototype parameters and buffers unchanged.
+
+    Args:
+        prototype: Native module evaluated without mutating its state.
+        input_space: Coker space for the module's one tensor input.
+        output_space: Coker space for the module's one tensor output.
+        name: Public parameter name and decision-block prefix.
     """
 
     def __init__(
@@ -114,7 +121,7 @@ class PytorchModuleParameter(FunctionParameter):
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
-        """Evaluate a module state supplied entirely by Coker decisions."""
+        """Evaluate with decision tensors and frozen buffer snapshots."""
         if len(parameters) != len(self.parameters):
             raise ValueError(
                 "module parameter values do not match imported module "
@@ -162,7 +169,7 @@ class PytorchModuleParameter(FunctionParameter):
     def build_function(
         self, target: FunctionSpace, backend: str | None
     ) -> Function:
-        """Build a native PyTorch call with explicit Coker decision inputs."""
+        """Build the native call used by PyTorch parameter specialization."""
         target = self.validate_target(target)
         if backend not in (None, "pytorch"):
             raise ValueError(

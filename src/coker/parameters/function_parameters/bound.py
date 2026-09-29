@@ -32,11 +32,15 @@ _BindingInput = (
 
 
 class BoundFunctionParameter(FunctionParameter):
-    """Realize a function parameter by binding selected source inputs.
+    """Bind selected Coker function inputs to solver decision declarations.
 
-    The source function keeps its original calling convention internally.
-    Bound inputs become concrete optimisation declarations, while every other
-    input becomes part of the public function target.
+    Args:
+        function: Source function whose selected inputs are solver decisions.
+        bindings: Mapping or sequence of ``(input_index, declaration)`` pairs.
+        name: Public function-parameter name. Defaults to ``function.name``.
+
+    Every unbound source input remains a public target input. The target output
+    space remains identical to the source function output space.
     """
 
     def __init__(
@@ -130,6 +134,7 @@ class BoundFunctionParameter(FunctionParameter):
         return tuple(sorted(normalised, key=lambda binding: binding[0]))
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate the function space formed by the unbound source inputs."""
         if not isinstance(target, FunctionSpace):
             raise TypeError("target must be a FunctionSpace")
 
@@ -148,6 +153,7 @@ class BoundFunctionParameter(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return declarations bound to the source function inputs."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:

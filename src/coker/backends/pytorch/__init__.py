@@ -323,10 +323,12 @@ class PytorchBackend(Backend):
         *,
         name: str | None = None,
     ) -> PytorchModuleParameter:
-        """Import a module with explicit spaces and Coker-owned decisions.
+        """Import a module as a Coker-owned function parameter.
 
-        Unlike :meth:`import_module`, this API evaluates the module
-        statelessly with explicit solver decision blocks.
+        ``input_space`` and ``output_space`` describe the module's one tensor
+        input and one tensor output. Floating-point module parameters become
+        unbounded solver decisions; buffers are frozen snapshots. Unlike
+        :meth:`import_module`, the caller's module state is never mutated.
         """
         return PytorchModuleParameter(
             module,
