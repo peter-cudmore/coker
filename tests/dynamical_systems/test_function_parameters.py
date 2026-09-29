@@ -19,7 +19,10 @@ from coker.parameters.function_parameters import (
     MonotonePiecewiseLinear,
     RadialBasisFunction,
 )
-from coker.dynamics.variational.function_binding import ParameterValueLayout
+from coker.dynamics.variational.function_binding import (
+    ParameterValueLayout,
+    specialize_system_parameters,
+)
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.dynamics.variables import ConstantControlVariable
 from coker.toolkits.codesign import Minimise
@@ -882,3 +885,76 @@ def test_direct_function_parameters_validate_the_declared_space():
         r"FunctionSpace 'rate'",
     ):
         system(1.0, 2.0, incompatible_rate)
+
+
+def test_specialize_system_parameters_binds_numeric_literals():
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(Scalar("gain"), VectorSpace("offset", 2)),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.zeros(2), None),
+            dynamics=lambda _t, state, _z, _u, parameters: (
+                parameters[0] * state + parameters[1]
+            ),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, parameters, _q: (
+                parameters[0] * state + parameters[1]
+            ),
+            quadratures=Noop(),
+        )
+    )
+
+    specialized, solver_declarations, layout = specialize_system_parameters(
+        system,
+        [2.0, np.array([1.0, -1.0])],
+    )
+
+    assert solver_declarations == []
+    assert specialized.parameters.dimension == 0
+    assert layout is not None
+    np.testing.assert_allclose(
+        specialized.dxdt(
+            0.0,
+            np.array([3.0, 4.0]),
+            None,
+            None,
+            np.empty(0),
+        ),
+        [7.0, 7.0],
+    )
+    reconstructed = layout.reconstruct(np.empty(0))
+    assert reconstructed["gain"] == 2.0
+    np.testing.assert_allclose(reconstructed["offset"], [1.0, -1.0])
+
+
+def test_specialize_system_parameters_omits_literals_from_solver_vector():
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=(Scalar("gain"), Scalar("offset")),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.zeros(1), None),
+            dynamics=lambda _t, state, _z, _u, parameters: (
+                parameters[0] * state + parameters[1]
+            ),
+            constraints=Noop(),
+            outputs=lambda _t, state, _z, _u, parameters, _q: (
+                parameters[0] * state + parameters[1]
+            ),
+            quadratures=Noop(),
+        )
+    )
+
+    specialized, solver_declarations, _ = specialize_system_parameters(
+        system,
+        [UnboundedVariable("gain", guess=1.0), 2.0],
+    )
+
+    assert [declaration.name for declaration in solver_declarations] == [
+        "gain"
+    ]
+    np.testing.assert_allclose(
+        specialized.dxdt(0.0, np.array([3.0]), None, None, np.array([4.0])),
+        [14.0],
+    )
