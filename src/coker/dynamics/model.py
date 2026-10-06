@@ -56,23 +56,22 @@ class DynamicsSpec:
             )
 
 
-@dataclass
-class DynamicalSystem:
-    inputs: FunctionSpace
-    parameters: ParameterDeclaration | tuple[ParameterDeclaration, ...] | None
+class _TrajectorySystem:
+    """Shared trajectory-evaluation interface for dynamical models."""
+
+    inputs: FunctionSpace | Noop
+    parameters: DynamicsParameters
     x0: Function
-    dxdt: Function
-    g: Optional[Function]
-    dqdt: Optional[Function]
     y: Function
-    solver_parameters: Optional[object] = field(default=None)
+    solver_parameters: object | None
 
-    def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
-        shapes = self.y.input_shape()
-        return shapes[1], shapes[2], shapes[-1]
+    def backend(self) -> str:
+        """Return the name of the backend used by the system callbacks."""
+        raise NotImplementedError
 
-    def backend(self):
-        return self.dxdt.backend
+    def _initial_quadrature(self) -> object | None:
+        """Return the initial quadrature value for trajectory integration."""
+        raise NotImplementedError
 
     def _prepare_backend_value(self, backend, value):
         return (
@@ -122,7 +121,7 @@ class DynamicalSystem:
             if self.parameters is None
             else (
                 self.parameters
-                if isinstance(self.parameters, tuple)
+                if isinstance(self.parameters, (tuple, list))
                 else (self.parameters,)
             )
         )
@@ -145,24 +144,21 @@ class DynamicalSystem:
         )
         return time, input_value, parameters if declarations else (None,)
 
-    def __call__(self, *args):
+    def _evaluate_integrals(self, integration_system, *args):
         from coker.backends import get_backend_by_name
 
         t, u, parameter_arguments = self._map_arguments(*args)
-        backend = get_backend_by_name(self.dxdt.backend)
+        backend = get_backend_by_name(self.backend())
         u = self._prepare_backend_value(backend, u)
         parameter_arguments = tuple(
             self._prepare_backend_value(backend, parameter)
             for parameter in parameter_arguments
         )
         x0, z0 = self.x0(0, u, *parameter_arguments)
-
-        if not isinstance(self.dqdt, Noop):
-            raise NotImplementedError
-        q0 = None
+        q0 = self._initial_quadrature()
 
         x, z, q = backend.evaluate_integrals(
-            [self.dxdt, self.g, self.dqdt],
+            integration_system,
             [x0, z0, q0],
             t,
             [u, *parameter_arguments],
@@ -190,7 +186,7 @@ class DynamicalSystem:
         args = [t.to_space("t")]
         if not isinstance(self.inputs, Noop):
             args.append(u if isinstance(u, FunctionSpace) else u.to_space("u"))
-        if isinstance(self.parameters, tuple):
+        if isinstance(self.parameters, (tuple, list)):
             for index, (element, shape) in enumerate(
                 zip(self.parameters, parameter_shapes)
             ):
@@ -203,3 +199,32 @@ class DynamicalSystem:
             (parameter_shape,) = parameter_shapes
             args.append(parameter_shape.to_space("p"))
         return FunctionSpace("y", args, [out.to_space("y")])
+
+
+@dataclass
+class DynamicalSystem(_TrajectorySystem):
+    inputs: FunctionSpace | Noop
+    parameters: DynamicsParameters
+    x0: Function
+    dxdt: Function
+    g: Optional[Function]
+    dqdt: Optional[Function]
+    y: Function
+    solver_parameters: object | None = field(default=None)
+
+    def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
+        shapes = self.y.input_shape()
+        return shapes[1], shapes[2], shapes[-1]
+
+    def backend(self) -> str:
+        return self.dxdt.backend
+
+    def _initial_quadrature(self) -> None:
+        if not isinstance(self.dqdt, Noop):
+            raise NotImplementedError
+        return None
+
+    def __call__(self, *args):
+        from coker.dynamics.residual import to_residual_dynamical_system
+
+        return self._evaluate_integrals(to_residual_dynamical_system(self), *args)

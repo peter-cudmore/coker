@@ -2,6 +2,26 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from coker import Dimension, Scalar, VectorSpace, function
+from coker.algebra.ops import Noop
+from coker.dynamics import ResidualDynamicalSystem, VariationalProblemBuilder
+from coker.parameters import BoundedVariable
+from coker.toolkits.codesign import Minimise
+from coker.dynamics.variational.solution import SegmentDefectDiagnostic
+
+
+def test_segment_defect_diagnostic_exposes_full_residual():
+    full_residual = np.array([0.25, -0.5])
+    diagnostic = SegmentDefectDiagnostic(
+        normalized_interval=(0.0, 1.0),
+        physical_interval=(0.0, 2.0),
+        degree=3,
+        tolerance=1e-6,
+        full_residual=full_residual,
+    )
+
+    assert diagnostic.full_residual is full_residual
+
 
 try:
 
@@ -206,3 +226,104 @@ def test_search_direction_too_small_requires_feasible_finite_result(
     assert cost == 1.0
     assert solve_info.success
     assert solve_info.return_status == "Search_Direction_Becomes_Too_Small"
+
+
+@pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
+def test_independent_coupled_residual_is_specialized_and_solved():
+    gain = 0.75
+    residual = ResidualDynamicalSystem(
+        inputs=Noop(),
+        parameters=(Scalar("gain"),),
+        x0=function(
+            [VectorSpace("initial_algebraic", 1), Noop(), Scalar("gain")],
+            lambda _z, _u, parameter: (
+                np.array([0.0]),
+                np.array([2.0 * parameter / 3.0]),
+            ),
+            backend="casadi",
+        ),
+        F=function(
+            [
+                Scalar("t"),
+                VectorSpace("w", 1),
+                VectorSpace("wdot", 1),
+                VectorSpace("z", 1),
+                Noop(),
+                Scalar("gain"),
+            ],
+            lambda _t, w, wdot, z, _u, parameter: np.array(
+                [
+                    wdot[0] + z[0] - parameter,
+                    w[0] + 2.0 * wdot[0] - z[0],
+                ]
+            ),
+            backend="casadi",
+        ),
+        y=function(
+            [
+                Scalar("t"),
+                VectorSpace("x", 1),
+                VectorSpace("z", 1),
+                Noop(),
+                Scalar("gain"),
+                None,
+            ],
+            lambda _t, x, _z, _u, _parameter, _q: x,
+            backend="casadi",
+        ),
+        differential=Dimension(1),
+        algebraic=Dimension(1),
+        quadrature=None,
+    )
+    declaration = BoundedVariable(
+        "gain", lower_bound=gain, upper_bound=gain, guess=gain
+    )
+    with VariationalProblemBuilder(
+        residual,
+        t_final=1.0,
+        parameters=[declaration],
+        backend="casadi",
+    ) as builder:
+        problem = builder.build(
+            Minimise(
+                (
+                    builder.output(builder.t_final)[0]
+                    - gain * (1.0 - np.exp(-1.0 / 3.0))
+                )
+                ** 2
+            )
+        )
+
+    assert isinstance(problem.system, ResidualDynamicalSystem)
+    np.testing.assert_allclose(
+        problem.system.F(
+            0.0,
+            np.array([0.1]),
+            np.array([0.2]),
+            np.array([0.3]),
+            None,
+            np.array([gain]),
+        ),
+        residual.F(
+            0.0,
+            np.array([0.1]),
+            np.array([0.2]),
+            np.array([0.3]),
+            None,
+            gain,
+        ),
+    )
+
+    solution = problem.get_solver("casadi").solve(gain=gain)
+
+    assert solution.solve_info.success
+    assert solution.parameters["gain"] == pytest.approx(gain)
+    assert solution.state(1.0)[0] == pytest.approx(
+        gain * (1.0 - np.exp(-1.0 / 3.0)), abs=2e-3
+    )
+
+    assert solution.segment_defects
+    assert all(
+        diagnostic.full_residual.shape == (2,)
+        for diagnostic in solution.segment_defects
+    )

@@ -1,5 +1,4 @@
 from typing import List
-from enum import Enum
 
 import numpy as np
 import scipy.sparse.csc
@@ -13,13 +12,11 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.function import Function
 from coker.algebra.graph import Tracer
-from coker.algebra.ops import Noop
 
 from coker.backends.evaluator import GenericEvaluator
 from coker.backends.backend import (
     ArrayLike,
     Backend,
-    SolverParameters,
     import_native_function,
     register_backend,
     split_function_parameter_values,
@@ -33,27 +30,7 @@ from coker.backends.numpy.evaluator import (
     parameterised_impls,
 )
 from coker.backends.numpy.optimisation import build_optimisation_problem
-
-
-class Solver(Enum):
-    RK45 = "RK45"
-    LSODA = "LSODA"
-    Radau = "Radau"
-    BDF = "BDF"
-
-
-class NumpySolverParameters(SolverParameters):
-    """SciPy ODE initial-value integration settings.
-
-    The ``solver`` attribute selects the method name passed to
-    :func:`scipy.integrate.solve_ivp`; tolerances and other method-specific
-    settings are currently controlled by the backend rather than this type.
-    """
-
-    solver: Solver
-
-    def __init__(self, solver: Solver = Solver.RK45):
-        self.solver = solver
+from coker.backends.numpy.dynamics import evaluate_integrals
 
 
 scalar_types = (
@@ -174,70 +151,13 @@ class NumpyBackend(Backend):
         inputs,
         solver_parameters=None,
     ):
-
-        dxdt, constraint, dqdt = functions
-        x0, z0, q0 = initial_conditions
-        u, *parameters = inputs
-        has_quadrature = not isinstance(dqdt, Noop)
-
-        if not isinstance(constraint, Noop):
-            raise NotImplementedError(
-                "Integrators with constraints are not implemented"
-            )
-
-        if not isinstance(x0, np.ndarray):
-            x0 = np.array([x0])
-
-        if isinstance(end_point, (float, int)):
-            if end_point == 0.0:
-                return x0, z0, q0
-            else:
-                t_eval = [end_point]
-                t_span = (0, end_point)
-        else:
-            t_eval = end_point
-            t_span = (0, end_point[-1])
-
-        if not has_quadrature:
-            y0 = x0
-
-            def f(t, x):
-                return dxdt(t, x, None, u, *parameters)
-
-        else:
-            y0 = (np.concatenate([x0, q0]),)
-
-            def f(t, x):
-                return np.concatenate(
-                    [
-                        dxdt(t, x, None, u, *parameters),
-                        dqdt(t, x, None, u, *parameters),
-                    ]
-                )
-
-        if isinstance(solver_parameters, NumpySolverParameters):
-            method = solver_parameters.solver.value
-        else:
-            method = Solver.RK45.value
-
-        sol = scp.integrate.solve_ivp(f, t_span, y0, method=method, t_eval=t_eval)
-
-        x_out = (
-            sol.y[: x0.shape[0], -1]
-            if not isinstance(end_point, np.ndarray)
-            else sol.y[: x0.shape[0], :]
+        return evaluate_integrals(
+            functions,
+            initial_conditions,
+            end_point,
+            inputs,
+            solver_parameters,
         )
-
-        if not has_quadrature:
-            q_out = None
-        else:
-            q_out = (
-                sol.y[x0.shape[0] :, -1]
-                if not isinstance(end_point, np.ndarray)
-                else sol.y[x0.shape[0] :, :]
-            )
-
-        return x_out, None, q_out
 
     def build_optimisation_problem(
         self,

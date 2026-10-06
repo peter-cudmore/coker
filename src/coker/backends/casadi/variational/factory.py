@@ -2,16 +2,20 @@
 
 from collections import OrderedDict
 from functools import lru_cache
-from typing import Tuple
 
 import casadi as ca
 import numpy as np
 
+from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
 from coker.backends.casadi.lower import lower as lower_casadi
 from coker.backends.casadi.variational.options import CasadiVariationalOptions
 from coker.dynamics import VariationalProblem, VariationalSolution
+from coker.dynamics.residual import (
+    ResidualDynamicalSystem,
+    to_residual_dynamical_system,
+)
 from coker.dynamics.transcription.collocation import (
     _build_reference_operators,
     lgr_points,
@@ -59,11 +63,16 @@ class _TranscriptionFactory:
         self.problem = problem
         self.casadi = get_backend_by_name("casadi")
         self.options = _resolve_options(problem)
-        x_dim, z_dim, q_dim = problem.system.get_state_dimensions()
+        self.residual = (
+            problem.system
+            if isinstance(problem.system, ResidualDynamicalSystem)
+            else to_residual_dynamical_system(problem.system)
+        )
+        x_dim, z_dim, q_dim = self.residual.get_state_dimensions()
         self.x_size = x_dim.flat()
         self.z_size = z_dim.flat() if z_dim else 0
-        self.q_size = (q_dim.flat() if q_dim else 0) + len(problem.quadratures)
-        self.has_state_quadrature = bool(q_dim)
+        self.system_quadrature_size = q_dim.flat() if q_dim else 0
+        self.q_size = self.system_quadrature_size + len(problem.quadratures)
         self.path_size = self.x_size + self.z_size + self.q_size
         self.tolerance = problem.transcription_options.absolute_tolerance
         self.segment_defect_tolerance = (
@@ -149,75 +158,100 @@ class _TranscriptionFactory:
             maxsize=_REFERENCE_OPERATOR_CACHE_SIZE
         )(_build_reference_operators)
 
-        self._defect_dynamics_maps: OrderedDict[int, ca.Function] = OrderedDict()
+        self._defect_residual_maps: OrderedDict[int, ca.Function] = OrderedDict()
         self._defect_nodes: OrderedDict[int, tuple[float, ...]] = OrderedDict()
-        self._defect_dynamics = self._build_defect_dynamics()
+        self._defect_residual = self._build_defect_residual()
 
-    def evaluate_dynamics(self, *args):
-        return self.casadi.evaluate(self.problem.system.dxdt, args)
+    def _residual_state(self, state, quadrature):
+        if self.system_quadrature_size == 0:
+            return state
+        return ca.vertcat(state, quadrature[: self.system_quadrature_size])
 
-    def evaluate_quadrature(self, *args):
-        if self.problem.system.dqdt is not None:
-            return self.casadi.evaluate(self.problem.system.dqdt, args)
-        return Noop()
+    def _residual_rate(self, state_rate, quadrature_rate):
+        if self.system_quadrature_size == 0:
+            return state_rate
+        return ca.vertcat(state_rate, quadrature_rate[: self.system_quadrature_size])
 
-    def evaluate_algebraic(self, *args):
-        if self.problem.system.g:
-            return self.casadi.evaluate(self.problem.system.g, args)
-        return Noop()
+    def evaluate_symbolic_residual(
+        self,
+        *,
+        time,
+        state,
+        state_rate,
+        algebraic,
+        quadrature,
+        quadrature_rate,
+        control,
+        parameters,
+    ):
+        residual_control = (
+            (lambda _time: control)
+            if isinstance(self.residual.inputs, FunctionSpace)
+            else control
+        )
+        (residual,) = self.casadi.evaluate(
+            self.residual.F,
+            (
+                time,
+                self._residual_state(state, quadrature),
+                self._residual_rate(state_rate, quadrature_rate),
+                algebraic,
+                residual_control,
+                parameters,
+            ),
+        )
+        return residual
 
-    def evaluate_registered_quadratures(self, args):
+    def evaluate_registered_quadratures(
+        self,
+        *,
+        time,
+        state,
+        algebraic,
+        control,
+        parameters,
+        quadrature,
+    ):
+        arguments = (time, state, algebraic, control, parameters, quadrature)
         values = []
         for spec in self.problem.quadratures:
-            workspace = dict(zip(spec.integrand.tape.input_indicies, args))
+            workspace = dict(zip(spec.integrand.tape.input_indicies, arguments))
             _, outputs = lower_casadi(spec.integrand.tape, [spec.integrand], workspace)
             values.append(outputs[0])
         return values
 
-    def _build_defect_dynamics(self) -> ca.Function:
+    def _build_defect_residual(self) -> ca.Function:
         time = ca.MX.sym("defect_time")
         state = ca.MX.sym("defect_state", self.x_size)
+        state_rate = ca.MX.sym("defect_state_rate", self.x_size)
         algebraic = ca.MX.sym("defect_algebraic", self.z_size)
         control = ca.MX.sym("defect_control", self.u_symbols.shape[0])
         parameters = ca.MX.sym("defect_parameters", self.proj_p.shape[0])
         quadrature = ca.MX.sym("defect_quadrature", self.q_size)
-
-        def control_law(_time):
-            return control
-
-        (dynamics,) = self.evaluate_dynamics(
-            time,
-            state,
-            algebraic,
-            control_law,
-            parameters,
-        )
-        quadrature_rates = []
-        if self.has_state_quadrature:
-            (base_rate,) = self.evaluate_quadrature(
-                time,
-                state,
-                algebraic,
-                control_law,
-                parameters,
-            )
-            quadrature_rates.append(base_rate)
-        quadrature_rates.extend(
-            self.evaluate_registered_quadratures(
-                (time, state, algebraic, control, parameters, quadrature)
-            )
+        quadrature_rate = ca.MX.sym("defect_quadrature_rate", self.q_size)
+        residual = self.evaluate_symbolic_residual(
+            time=time,
+            state=state,
+            state_rate=state_rate,
+            algebraic=algebraic,
+            quadrature=quadrature,
+            quadrature_rate=quadrature_rate,
+            control=control,
+            parameters=parameters,
         )
         return ca.Function(
-            "defect_dynamics",
-            [time, state, algebraic, control, parameters, quadrature],
+            "defect_residual",
             [
-                dynamics,
-                (
-                    ca.vertcat(*quadrature_rates)
-                    if quadrature_rates
-                    else ca.MX.zeros(0, 1)
-                ),
+                time,
+                state,
+                state_rate,
+                algebraic,
+                control,
+                parameters,
+                quadrature,
+                quadrature_rate,
             ],
+            [residual],
         )
 
     def get_defect_nodes(self, degree: int) -> np.ndarray:
@@ -231,55 +265,59 @@ class _TranscriptionFactory:
         self._defect_nodes[degree] = nodes
         return np.asarray(nodes, dtype=float)
 
-    def evaluate_defect_rates(
+    def evaluate_numeric_defect_residuals(
         self,
         times: np.ndarray,
         values: np.ndarray,
+        derivatives: np.ndarray,
         solution: VariationalSolution,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Evaluate diagnostic state and quadrature rates in a CasADi batch."""
+    ) -> np.ndarray:
+        """Evaluate the coupled model residual over a batch of path nodes."""
         times = np.asarray(times, dtype=float).reshape((1, -1))
         count = times.shape[1]
         values = np.asarray(values, dtype=float).reshape((self.path_size, count))
-        controls = (
-            np.column_stack(
-                [
-                    np.asarray(solution.control_law(float(time)), dtype=float).reshape(
-                        (-1,)
-                    )
-                    for time in times.flat
-                ]
-            )
-            if self.control_factory is not None
-            else np.zeros((0, count))
+        derivatives = np.asarray(derivatives, dtype=float).reshape(
+            (self.path_size, count)
         )
-        parameters = np.repeat(
-            solution._parameter_vector.reshape((-1, 1)),
-            count,
-            axis=1,
-        )
+        if self.control_factory is None:
+            controls = np.zeros((0, count))
+        else:
+            control_samples = [
+                np.asarray(solution.control_law(float(time)), dtype=float).reshape(
+                    (-1,)
+                )
+                for time in times.flat
+            ]
+            controls = np.column_stack(control_samples)
+        parameter_vector = solution._parameter_vector.reshape((-1, 1))
+        parameters = np.repeat(parameter_vector, count, axis=1)
         try:
-            evaluator = self._defect_dynamics_maps.pop(count)
+            evaluator = self._defect_residual_maps.pop(count)
         except KeyError:
-            evaluator = self._defect_dynamics.map(count)
-            if len(self._defect_dynamics_maps) == _DEFECT_EVALUATOR_CACHE_SIZE:
-                self._defect_dynamics_maps.popitem(last=False)
-        self._defect_dynamics_maps[count] = evaluator
-        state_rates, quadrature_rates = evaluator(
-            ca.DM(times * solution.t_final),
-            ca.DM(values[: self.x_size]),
-            ca.DM(values[self.x_size : self.x_size + self.z_size]),
+            evaluator = self._defect_residual.map(count)
+            if len(self._defect_residual_maps) == _DEFECT_EVALUATOR_CACHE_SIZE:
+                self._defect_residual_maps.popitem(last=False)
+        self._defect_residual_maps[count] = evaluator
+        physical_times = times * solution.t_final
+        state_values = values[: self.x_size]
+        state_derivatives = derivatives[: self.x_size]
+        algebraic_values = values[self.x_size : self.x_size + self.z_size]
+        quadrature_values = values[self.x_size + self.z_size :]
+        quadrature_derivatives = derivatives[self.x_size + self.z_size :]
+        residuals = evaluator(
+            ca.DM(physical_times),
+            ca.DM(state_values),
+            ca.DM(state_derivatives),
+            ca.DM(algebraic_values),
             ca.DM(controls),
             ca.DM(parameters),
-            ca.DM(values[self.x_size + self.z_size :]),
+            ca.DM(quadrature_values),
+            ca.DM(quadrature_derivatives),
         )
-        return (
-            np.asarray(state_rates, dtype=float),
-            np.asarray(quadrature_rates, dtype=float),
-        )
+        return np.asarray(residuals, dtype=float)
 
     def measure_interval_defect(self, poly, solution: VariationalSolution) -> float:
-        """Return the maximum scaled state defect for one solved polynomial."""
+        """Return the maximum absolute coupled residual over one interval."""
         reference_nodes = self.get_defect_nodes(poly.degree)
         times = poly.interval[0] + (reference_nodes + 1.0) * poly.width
         path_values = np.asarray(poly.values, dtype=float).reshape(
@@ -295,60 +333,48 @@ class _TranscriptionFactory:
         )
         interpolation = path_values @ np.asarray(poly.bases).T
         values = interpolation @ powers
-        derivatives = (
-            interpolation @ derivative_powers / (poly.width * solution.t_final)
+        physical_width = poly.width * solution.t_final
+        derivatives = interpolation @ derivative_powers / physical_width
+        residuals = self.evaluate_numeric_defect_residuals(
+            times, values, derivatives, solution
         )
-        model_dynamics, _ = self.evaluate_defect_rates(times, values, solution)
-        state_derivatives = derivatives[: self.x_size]
-        if state_derivatives.size == 0:
-            return 0.0
-        scale = np.maximum(1.0, np.abs(model_dynamics))
-        return float(np.max(np.abs(state_derivatives - model_dynamics) / scale))
+        return float(np.max(np.abs(residuals))) if residuals.size else 0.0
 
     def measure_interval_segment_defect(
         self, poly, solution: VariationalSolution
     ) -> SegmentDefectDiagnostic:
-        """Measure one collocation segment residual in physical units."""
-        state_rates = []
-        quadrature_rates = []
-        for time, value, _derivative in poly.knot_points():
-            dynamics, rates = self.evaluate_defect_rates(
-                np.asarray([time], dtype=float),
-                np.asarray(value, dtype=float).reshape((self.path_size, 1)),
-                solution,
-            )
-            state_rates.append(dynamics.reshape((-1,)))
-            if self.q_size > 0:
-                quadrature_rates.append(rates.reshape((-1,)))
-
+        """Measure one collocation segment's coupled residual."""
         weights = np.asarray(poly.weights, dtype=float).reshape((-1,))[:-1]
-        _, start_value = poly.start_point()
-        _, end_value = poly.end_point()
-        state_residual = (
-            np.asarray(end_value[: self.x_size], dtype=float).reshape((-1,))
-            - np.asarray(start_value[: self.x_size], dtype=float).reshape((-1,))
-            - solution.t_final * np.column_stack(state_rates) @ weights
-        )
-        if self.q_size == 0:
-            quadrature_residual = np.zeros((0,), dtype=float)
-        else:
-            quadrature_residual = (
-                np.asarray(end_value[self.x_size + self.z_size :], dtype=float).reshape(
-                    (-1,)
-                )
-                - np.asarray(
-                    start_value[self.x_size + self.z_size :], dtype=float
-                ).reshape((-1,))
-                - solution.t_final * np.column_stack(quadrature_rates) @ weights
+        full_residual = None
+        for weight, (time, value, derivative) in zip(weights, poly.knot_points()):
+            node_time = np.asarray([time], dtype=float)
+            node_values = np.asarray(value, dtype=float).reshape((self.path_size, 1))
+            node_derivatives = (
+                np.asarray(derivative, dtype=float).reshape((self.path_size, 1))
+                / solution.t_final
             )
+            residual = self.evaluate_numeric_defect_residuals(
+                node_time,
+                node_values,
+                node_derivatives,
+                solution,
+            ).reshape((-1,))
+            residual *= weight
+            if full_residual is None:
+                full_residual = residual
+            else:
+                full_residual += residual
+
+        assert full_residual is not None
+        full_residual *= solution.t_final
         normalized_interval = tuple(float(t) for t in poly.interval)
+        physical_interval = tuple(
+            solution.t_final * time for time in normalized_interval
+        )
         return SegmentDefectDiagnostic(
             normalized_interval=normalized_interval,
-            physical_interval=tuple(
-                solution.t_final * time for time in normalized_interval
-            ),
+            physical_interval=physical_interval,
             degree=poly.degree,
             tolerance=self.segment_defect_tolerance,
-            state_residual=state_residual,
-            quadrature_residual=quadrature_residual,
+            full_residual=full_residual,
         )

@@ -48,6 +48,7 @@ from coker.backends.casadi.variational.transcription import (
     create_variational_solver,
 )
 from coker.dynamics import VariationalProblem
+from coker.dynamics.residual import _normalise_direct_integration_functions
 
 __all__ = ["CasadiBackend", "CasadiVariationalOptions"]
 
@@ -356,10 +357,15 @@ class CasadiBackend(Backend):
         inputs,
         solver_parameters=None,
     ):
-        dxdt, g, dqdt = functions
-
-        is_dae = g is not Noop()
-        has_quadrature = dqdt is not Noop()
+        dxdt, g, dqdt = _normalise_direct_integration_functions(functions)
+        if g is None or isinstance(g, Noop):
+            algebraic_function = None
+        else:
+            algebraic_function = g
+        if dqdt is None or isinstance(dqdt, Noop):
+            quadrature_function = None
+        else:
+            quadrature_function = dqdt
         x0, z0, q0 = (self.to_backend_array(a) for a in initial_conditions)
         if isinstance(end_point, (int, float)):
             if end_point == 0:
@@ -376,9 +382,9 @@ class CasadiBackend(Backend):
 
         dx_sym = dxdt(t, x, z, u, *parameters)
 
-        if has_quadrature:
+        if quadrature_function is not None:
             q = ca.MX.sym("q", q0.shape)
-            dq_sym = dqdt(t, x, z, u, *parameters)
+            dq_sym = quadrature_function(t, x, z, u, *parameters)
             txq = ca.vertcat(t, x, q)
             txq0 = ca.vertcat(ca.DM(0), x0, q0)
             xq_to_x_q = ca.Function("txq_to_x_q", [txq], [x, q])
@@ -396,20 +402,19 @@ class CasadiBackend(Backend):
             "x": txq,
             "ode": dtxq,
         }
-        if is_dae:
+        if algebraic_function is not None:
             dae["z"] = z
-            dae["alg"] = g(t, x, z, u, *parameters)
+            dae["alg"] = algebraic_function(t, x, z, u, *parameters)
             initial_conditions["z0"] = z0
 
         solver = ca.integrator("solver", "idas", dae, 0, t_eval, {})
         xq_final = solver(**initial_conditions)
-
-        if has_quadrature:
+        if quadrature_function is not None:
             x_final, q_final = xq_to_x_q(xq_final["xf"])
         else:
             x_final = xq_to_x_q(xq_final["xf"])
             q_final = None
-        if is_dae:
+        if algebraic_function is not None:
             z_final = xq_final["zf"]
         else:
             z_final = None

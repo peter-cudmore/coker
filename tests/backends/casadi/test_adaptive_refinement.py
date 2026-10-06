@@ -108,7 +108,7 @@ def test_zero_defect_tolerances_omit_redundant_segment_rows():
     assert solution.solve_info.success
     assert len(solution.segment_defects) == 2
     assert all(
-        np.isfinite(diagnostic.state_residual).all()
+        np.isfinite(diagnostic.full_residual).all()
         and diagnostic.tolerance == 0.0
         for diagnostic in solution.segment_defects
     )
