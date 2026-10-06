@@ -77,8 +77,10 @@ class SparseMatrixBuilder:
         """Return the flat input space for this pattern's CSC data values."""
         return VectorSpace(name, self.nnz)
 
-    def matrix(self, data: Tracer | np.ndarray) -> np.ndarray | Tracer:
-        """Scatter CSC data into a matrix with this builder's fixed pattern."""
+    def matrix(
+        self, data: Tracer | np.ndarray
+    ) -> scipy.sparse.csc_array | np.ndarray | Tracer:
+        """Return a fixed matrix, retaining numeric values as SciPy CSC."""
         if isinstance(data, Tracer):
             if data.dim.flat() != self.nnz:
                 raise ValueError(
@@ -103,4 +105,4 @@ class SparseMatrixBuilder:
             )
         return scipy.sparse.csc_array(
             (values, self.indices, self.indptr), shape=self.shape
-        ).toarray()
+        )

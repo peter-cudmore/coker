@@ -3,19 +3,37 @@ import pytest
 
 import scipy.sparse
 
-from coker import SparseMatrixBuilder, function
+from coker import SparseMatrixBuilder, VectorSpace, function
 
 
-def test_sparse_matrix_builder_uses_csc_data_order():
+def test_sparse_matrix_builder_retains_numeric_csc_data_order():
     builder = SparseMatrixBuilder(
         np.array([[True, False, True], [True, True, False]])
     )
 
     assert builder.data_space("A_data").dimension == 4
+    matrix = builder.matrix(np.array([1.0, 2.0, 3.0, 4.0]))
+    assert isinstance(matrix, scipy.sparse.csc_array)
+    assert tuple(matrix.indptr) == builder.indptr
+    assert tuple(matrix.indices) == builder.indices
     assert np.array_equal(
-        builder.matrix(np.array([1.0, 2.0, 3.0, 4.0])),
+        matrix.toarray(),
         np.array([[1.0, 0.0, 4.0], [2.0, 3.0, 0.0]]),
     )
+
+
+def test_fixed_csc_matrix_multiplies_traced_vector():
+    builder = SparseMatrixBuilder(
+        np.array([[True, False, True], [True, True, False]])
+    )
+    matrix = builder.matrix(np.array([1.0, 2.0, 3.0, 4.0]))
+    apply = function(
+        [VectorSpace("vector", 3)],
+        lambda vector: matrix @ vector,
+        backend="numpy",
+    )
+
+    assert np.allclose(apply(np.array([2.0, -1.0, 0.5])), [4.0, 1.0])
 
 
 def test_sparse_matrix_builder_traces_csc_data():
