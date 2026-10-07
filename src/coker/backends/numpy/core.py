@@ -184,8 +184,9 @@ class NumpyBackend(Backend):
         dxdt, constraint, dqdt = functions
         x0, z0, q0 = initial_conditions
         u, *parameters = inputs
+        has_quadrature = not isinstance(dqdt, Noop)
 
-        if constraint is not Noop():
+        if not isinstance(constraint, Noop):
             raise NotImplementedError(
                 "Integrators with constraints are not implemented"
             )
@@ -203,7 +204,7 @@ class NumpyBackend(Backend):
             t_eval = end_point
             t_span = (0, end_point[-1])
 
-        if dqdt is Noop():
+        if not has_quadrature:
             y0 = x0
 
             def f(t, x):
@@ -235,7 +236,7 @@ class NumpyBackend(Backend):
             else sol.y[: x0.shape[0], :]
         )
 
-        if dqdt is None:
+        if not has_quadrature:
             q_out = None
         else:
             q_out = (

@@ -132,7 +132,7 @@ class DynamicalSystem:
                 else (self.parameters,)
             )
         )
-        has_inputs = self.inputs is not Noop()
+        has_inputs = not isinstance(self.inputs, Noop)
         expected_count = 1 + int(has_inputs) + len(declarations)
         if len(args) != expected_count:
             raise ValueError(
@@ -163,7 +163,7 @@ class DynamicalSystem:
         )
         x0, z0 = self.x0(0, u, *parameter_arguments)
 
-        if self.dqdt is not Noop():
+        if not isinstance(self.dqdt, Noop):
             raise NotImplementedError
         q0 = None
 
@@ -198,7 +198,7 @@ class DynamicalSystem:
         t, _x, _z, u, *parameter_shapes, _q = self.y.input_shape()
         (out,) = self.y.output_shape()
         args = [t.to_space("t")]
-        if self.inputs is not Noop():
+        if not isinstance(self.inputs, Noop):
             args.append(u if isinstance(u, FunctionSpace) else u.to_space("u"))
         if isinstance(self.parameters, tuple):
             for index, (element, shape) in enumerate(
