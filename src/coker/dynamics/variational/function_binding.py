@@ -348,7 +348,7 @@ def specialize_system_parameters(
         return values
 
     def bind_initial_conditions(original):
-        if original is Noop():
+        if isinstance(original, Noop):
             return Noop()
         spaces = original.input_spaces()
         return function(
@@ -358,7 +358,7 @@ def specialize_system_parameters(
         )
 
     def bind_dynamics(original):
-        if original is Noop():
+        if isinstance(original, Noop):
             return Noop()
         spaces = original.input_spaces()
         return function(

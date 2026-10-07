@@ -40,9 +40,9 @@ def evaluate_integrals(
     dxdt, constraint, dqdt = functions
     x0, z0, q0 = initial_conditions
     u, *parameters = inputs
-    has_quadrature = dqdt is not Noop()
+    has_quadrature = not isinstance(dqdt, Noop)
 
-    if constraint is not Noop():
+    if not isinstance(constraint, Noop):
         raise NotImplementedError(
             "Algebraic constraints are not implemented for the pytorch backend"
         )
