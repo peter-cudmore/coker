@@ -55,12 +55,12 @@ class CasadiSolutionAssembler:
         ) = self.output_function(decision_variables)
         path = self.poly_collection.to_fixed(np.array(path_coefficients))
         parameter_vector = np.array(parameters, dtype=float).reshape((-1, 1))
-        system_parameters = np.array(
-            self.proj_p @ ca.DM(parameter_vector)
-        ).reshape((-1,))
-        solver_parameter_vector = np.asarray(
-            free_parameters, dtype=float
-        ).reshape((-1,))
+        system_parameters = np.array(self.proj_p @ ca.DM(parameter_vector)).reshape(
+            (-1,)
+        )
+        solver_parameter_vector = np.asarray(free_parameters, dtype=float).reshape(
+            (-1,)
+        )
         public_parameters = (
             self.problem.parameter_layout.reconstruct(
                 system_parameters, self.factory.casadi
@@ -113,9 +113,7 @@ class SymbolicPoly(InterpolatingPoly):
     ):
         size = (degree + 1) * dimension
         values = ca.MX.sym(name, size) if values is None else values
-        self._decision_values = (
-            values if decision_values is None else decision_values
-        )
+        self._decision_values = values if decision_values is None else decision_values
         super().__init__(
             dimension,
             interval,
@@ -135,12 +133,8 @@ class SymbolicPoly(InterpolatingPoly):
         s = self._map_to_reference_coordinate(t)
         if not isinstance(s, (ca.SX, ca.MX)):
             try:
-                i = next(
-                    i for i, s_i in enumerate(self.s) if abs(s_i - s) < 1e-9
-                )
-                return self.values[
-                    i * self.dimension : (i + 1) * self.dimension
-                ]
+                i = next(i for i, s_i in enumerate(self.s) if abs(s_i - s) < 1e-9)
+                return self.values[i * self.dimension : (i + 1) * self.dimension]
             except StopIteration:
                 pass
         n = len(self.s)
@@ -171,9 +165,7 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
             or self._algebraic_size < 0
             or self._state_size + self._algebraic_size > dimension
         ):
-            raise ValueError(
-                "state_size and algebraic_size must fit path dimension"
-            )
+            raise ValueError("state_size and algebraic_size must fit path dimension")
         polys = []
         for i, (interval, degree) in enumerate(zip(intervals, degrees)):
             if i == 0:
@@ -216,9 +208,7 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
     def size(self):
         return self._symbol_size
 
-    def _boundary_values(
-        self, previous_end: ca.MX, algebraic_start: ca.MX
-    ) -> ca.MX:
+    def _boundary_values(self, previous_end: ca.MX, algebraic_start: ca.MX) -> ca.MX:
         algebraic_end = self._state_size + self._algebraic_size
         pieces = []
         if self._state_size:
@@ -237,10 +227,7 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
         for poly in self.polys[1:]:
             if self._algebraic_size:
                 pieces.append(
-                    value[
-                        self._state_size : self._state_size
-                        + self._algebraic_size
-                    ]
+                    value[self._state_size : self._state_size + self._algebraic_size]
                 )
             pieces.append(ca.repmat(value, poly.degree))
         return ca.vertcat(*pieces)
@@ -259,8 +246,7 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
             if self._algebraic_size:
                 pieces.append(
                     values[0][
-                        self._state_size : self._state_size
-                        + self._algebraic_size
+                        self._state_size : self._state_size + self._algebraic_size
                     ]
                 )
             pieces.extend(values[1:])
@@ -290,9 +276,7 @@ class SymbolicPolyCollection(InterpolatingPolyCollection):
                 if algebraic_end < self._dimension:
                     pieces.append(previous_end[algebraic_end:])
                 start = np.vstack(pieces)
-                values = np.vstack(
-                    (start, decision_values[self._algebraic_size :])
-                )
+                values = np.vstack((start, decision_values[self._algebraic_size :]))
             assert values.shape == (poly.size(), 1)
             fixed_values.append(values)
             polys.append(
@@ -326,9 +310,7 @@ class CallbackWrapper(ca.Callback):
         *,
         nx: int,
         ng: int,
-        assemble_solution: Callable[
-            [ca.DM, float, object], VariationalSolution
-        ],
+        assemble_solution: Callable[[ca.DM, float, object], VariationalSolution],
         unscale_objective: Callable[[float], float] = float,
         opts=None,
     ):

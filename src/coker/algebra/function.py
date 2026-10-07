@@ -67,9 +67,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         self.name = name
         self.tape = tape
         self.backend = backend
-        self._lowered_cache: dict[
-            tuple[int, LoweringOptions], LoweredFunction
-        ] = {}
+        self._lowered_cache: dict[tuple[int, LoweringOptions], LoweredFunction] = {}
         self.output: list[Tracer | None]
         if isinstance(outputs, Tracer) or outputs is None:
             self.output = [outputs]
@@ -161,9 +159,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
     def _emit_symbol_value(self, tape: Tape) -> Tracer:
         """Emit this unbound target as a symbol value on ``tape``."""
-        return tape.insert_symbol_value(
-            tape.intern_symbol(self._symbol_entry())
-        )
+        return tape.insert_symbol_value(tape.intern_symbol(self._symbol_entry()))
 
     def _append_symbolic_call(
         self, tape: Tape, inputs: Sequence[Any]
@@ -197,9 +193,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                 return arg
 
             try:
-                return function(
-                    self.tape.dim[index].arguments, arg, self.backend
-                )
+                return function(self.tape.dim[index].arguments, arg, self.backend)
             except DanglingTracerError as ex:
                 return self._lift_closure(
                     arg, self.tape.dim[index], ex
@@ -273,13 +267,9 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         if any(isinstance(a, Tracer) for a in args):
             outer_tape = TraceContext.get_local_tape()
             if outer_tape is None:
-                outer_tape = next(
-                    arg.tape for arg in args if isinstance(arg, Tracer)
-                )
+                outer_tape = next(arg.tape for arg in args if isinstance(arg, Tracer))
             backend_name = (
-                outer_tape.backend
-                or self.backend
-                or get_current_backend().name
+                outer_tape.backend or self.backend or get_current_backend().name
             )
             backend = get_backend_by_name(backend_name, set_current=False)
             output = backend.append_native_call(self, args, outer_tape)
@@ -318,9 +308,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         # self < other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
         dim = self.output_shape()[0]
-        assert dim.shape == get_dim_by_class(
-            other
-        ), "Arguments have different shapes"
+        assert dim.shape == get_dim_by_class(other), "Arguments have different shapes"
         ones = np.ones_like(other)
         return InequalityExpression(self, -np.inf * ones, other, is_equal=True)
 
@@ -328,9 +316,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         # self => other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
         (dim,) = self.output_shape()
-        assert dim == get_dim_by_class(
-            other
-        ), "Arguments have different shapes"
+        assert dim == get_dim_by_class(other), "Arguments have different shapes"
         ones = np.ones_like(other)
         return InequalityExpression(self, other, ones * np.inf, is_equal=True)
 
@@ -338,13 +324,9 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         # self <= other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
         (dim,) = self.output_shape()
-        assert dim == get_dim_by_class(
-            other
-        ), "Arguments have different shapes"
+        assert dim == get_dim_by_class(other), "Arguments have different shapes"
         ones = np.ones_like(other)
-        return InequalityExpression(
-            self, -np.inf * ones, other, is_equal=False
-        )
+        return InequalityExpression(self, -np.inf * ones, other, is_equal=False)
 
     def __gt__(self, other):
         # self > other
@@ -365,13 +347,10 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         bound_arguments: tuple[Tracer, ...],
     ) -> None:
         present_input_count = sum(
-            input_spec.space is not None
-            and not isinstance(input_spec.space, Noop)
+            input_spec.space is not None and not isinstance(input_spec.space, Noop)
             for input_spec in target.signature.inputs
         )
-        if present_input_count != (
-            len(public_space.arguments) + len(bound_arguments)
-        ):
+        if present_input_count != (len(public_space.arguments) + len(bound_arguments)):
             raise ValueError(
                 "Bound callable target signature does not match public and "
                 "bound arguments"
@@ -384,20 +363,14 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         """Emit the target symbol followed by one BIND node per capture."""
         captures = self.bound_arguments
         if not all(isinstance(capture, Tracer) for capture in captures):
-            raise TypeError(
-                "BoundCallable arguments must be tracer dependencies"
-            )
-        invalid_captures = [
-            capture for capture in captures if capture.tape is not tape
-        ]
+            raise TypeError("BoundCallable arguments must be tracer dependencies")
+        invalid_captures = [capture for capture in captures if capture.tape is not tape]
         if invalid_captures:
             raise DanglingTracerError(tracers=invalid_captures)
         value = self.target._emit_symbol_value(tape)
         position = len(self.public_space.arguments)
         for capture in captures:
-            value = Tracer(
-                tape, tape.append(OP.BIND, value, capture, position)
-            )
+            value = Tracer(tape, tape.append(OP.BIND, value, capture, position))
         return value
 
     def __call__(self, *arguments: Any) -> Any:

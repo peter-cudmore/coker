@@ -41,9 +41,7 @@ def _apply_parameter_roles(
     for symbol, declaration in zip(symbolic.parameters, declarations):
         if isinstance(declaration, (BoundedVariable, UnboundedVariable)):
             fitted.append(symbol)
-        elif isinstance(declaration, Real) and not isinstance(
-            declaration, bool
-        ):
+        elif isinstance(declaration, Real) and not isinstance(declaration, bool):
             replacements[symbol] = sp.sympify(declaration)
         else:
             raise UnsupportedSystemError(
@@ -56,18 +54,15 @@ def _apply_parameter_roles(
     fields = {
         "parameters": tuple(fitted),
         "dynamics": tuple(
-            expression.xreplace(replacements)
-            for expression in symbolic.dynamics
+            expression.xreplace(replacements) for expression in symbolic.dynamics
         ),
         "outputs": tuple(
-            expression.xreplace(replacements)
-            for expression in symbolic.outputs
+            expression.xreplace(replacements) for expression in symbolic.outputs
         ),
     }
     if isinstance(symbolic, SymbolicDAESystem):
         fields["constraints"] = tuple(
-            expression.xreplace(replacements)
-            for expression in symbolic.constraints
+            expression.xreplace(replacements) for expression in symbolic.constraints
         )
     return replace(symbolic, **fields)
 
@@ -75,9 +70,7 @@ def _apply_parameter_roles(
 def analyse_identifiability(
     system: object,
     *,
-    parameters: (
-        Sequence[BoundedVariable | UnboundedVariable | Real] | None
-    ) = None,
+    parameters: Sequence[BoundedVariable | UnboundedVariable | Real] | None = None,
     max_order: int | None = None,
 ) -> IdentifiabilityResult:
     """Analyse generic local identifiability by augmented observability."""
@@ -85,9 +78,7 @@ def analyse_identifiability(
         symbolic = normalize_symbolic_system(system)
         symbolic = _apply_parameter_roles(symbolic, parameters)
         tangent = (
-            geometry(symbolic)
-            if isinstance(symbolic, SymbolicDAESystem)
-            else None
+            geometry(symbolic) if isinstance(symbolic, SymbolicDAESystem) else None
         )
     except UnsupportedSystemError as error:
         return _rank.create_inconclusive(
@@ -104,9 +95,7 @@ def analyse_identifiability(
             required_rank=required_rank,
         )
     if max_order is not None and (
-        not isinstance(max_order, int)
-        or isinstance(max_order, bool)
-        or max_order < 0
+        not isinstance(max_order, int) or isinstance(max_order, bool) or max_order < 0
     ):
         return _rank.create_inconclusive(
             IdentifiabilityResult,
@@ -116,9 +105,7 @@ def analyse_identifiability(
 
     if tangent:
         algebraic_velocity = tangent.lift(sp.Matrix(symbolic.dynamics))
-        full_coordinates = (
-            symbolic.state + symbolic.algebraic + symbolic.parameters
-        )
+        full_coordinates = symbolic.state + symbolic.algebraic + symbolic.parameters
         vector_field = (
             symbolic.dynamics
             + tuple(algebraic_velocity)
@@ -127,9 +114,7 @@ def analyse_identifiability(
         gradients = tangent.restrict_gradient
     else:
         full_coordinates = coordinates
-        vector_field = symbolic.dynamics + (sp.S.Zero,) * len(
-            symbolic.parameters
-        )
+        vector_field = symbolic.dynamics + (sp.S.Zero,) * len(symbolic.parameters)
 
         def gradients(expression: sp.Expr) -> sp.Matrix:
             return compute_gradient(expression, coordinates)
@@ -147,6 +132,4 @@ def analyse_identifiability(
         f"maximum Lie-derivative order {max_order} reached before "
         "the augmented observability rank stabilized",
     )
-    return (
-        _rank.add_condition(outcome, tangent.condition) if tangent else outcome
-    )
+    return _rank.add_condition(outcome, tangent.condition) if tangent else outcome

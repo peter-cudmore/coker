@@ -211,9 +211,7 @@ class SymbolEntry:
         return hash(self._identity)
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, SymbolEntry) and (
-            self._identity == other._identity
-        )
+        return isinstance(other, SymbolEntry) and (self._identity == other._identity)
 
 
 class FunctionSymbol:
@@ -377,9 +375,7 @@ class Tape:
             return self.insert_symbol_value(args[0]).index
         if op == OP.BIND:
             if len(args) != 3:
-                raise TypeError(
-                    "BIND requires a symbol value, argument, and position"
-                )
+                raise TypeError("BIND requires a symbol value, argument, and position")
             if type(args[2]) is not int:
                 raise TypeError("BIND argument position must be an integer")
 
@@ -408,10 +404,7 @@ class Tape:
                 return self.insert_symbol_value(argument)
             return self.insert_value(argument)
 
-        args = [
-            insert_argument(index, argument)
-            for index, argument in enumerate(args)
-        ]
+        args = [insert_argument(index, argument) for index, argument in enumerate(args)]
 
         node_hash = hash((op, *args))
         if node_hash in self._node_hashmap:
@@ -677,9 +670,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             if isinstance(op, ReshapeOP) and op.order == "C":
                 (base,) = args
                 if base.dim.is_vector():
-                    flat = np.arange(np.prod(self.shape)).reshape(self.shape)[
-                        key
-                    ]
+                    flat = np.arange(np.prod(self.shape)).reshape(self.shape)[key]
                     if np.isscalar(flat):
                         return base[int(flat)]
                     flat = np.asarray(flat)
@@ -697,9 +688,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
                 if dimension.is_matrix():
                     dimension = Dimension((dimension.dim[0],))
                 assert dimension.is_vector(), "Tried to index a non-vector"
-                return tracer._emit(
-                    OP.MATMUL, get_projection(dimension, item), tracer
-                )
+                return tracer._emit(OP.MATMUL, get_projection(dimension, item), tracer)
             if isinstance(item, int):
                 if dimension.is_matrix():
                     rows = dimension.dim[0]
@@ -707,9 +696,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
                     return tracer._emit(OP.MATMUL, p, tracer).T
                 assert dimension.is_vector(), "Tried to index a non-vector"
                 return tracer._emit(OP.DOT, get_basis(dimension, item), tracer)
-            raise NotImplementedError(
-                f"Cannot get key {item}, not yet implemented"
-            )
+            raise NotImplementedError(f"Cannot get key {item}, not yet implemented")
 
         if not isinstance(key, tuple):
             return leading_item(self, key)
@@ -727,8 +714,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
     def __setitem__(self, key, value):
         if len(key) != len(self.shape):
             raise ValueError(
-                f"Cannot set item {key} = {value} on {self} with shape "
-                f"{self.shape}"
+                f"Cannot set item {key} = {value} on {self} with shape " f"{self.shape}"
             )
 
         # when we set an item, we need to do 2 things.
@@ -805,13 +791,9 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             def clip_scalar(item, item_lower, item_upper):
                 result = item
                 if item_upper is not None:
-                    result = if_then_else(
-                        item <= item_upper, result, item_upper
-                    )
+                    result = if_then_else(item <= item_upper, result, item_upper)
                 if item_lower is not None:
-                    result = if_then_else(
-                        item <= item_lower, item_lower, result
-                    )
+                    result = if_then_else(item <= item_lower, item_lower, result)
                 return result
 
             if isinstance(value, Tracer) and value.dim.is_vector():
@@ -847,9 +829,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             if order in (None, 2):
                 return np.sqrt(np.dot(value, value))
             if order == 1:
-                return sum(
-                    abs(value[index]) for index in range(value.shape[0])
-                )
+                return sum(abs(value[index]) for index in range(value.shape[0]))
             raise NotImplementedError(
                 f"np.linalg.norm order {order!r} is not supported"
             )
@@ -866,9 +846,7 @@ class Tracer(np.lib.mixins.NDArrayOperatorsMixin):
             ]
             result = column_norms[0]
             for column_norm in column_norms[1:]:
-                result = if_then_else(
-                    result <= column_norm, column_norm, result
-                )
+                result = if_then_else(result <= column_norm, column_norm, result)
             return result
 
         try:
@@ -1018,9 +996,7 @@ def if_then_else(expression, true_branch, false_branch):
                 "expression must result from a comparison operator "
                 f"(==, <, <=), got {cond_op}"
             )
-        index = expression.tape.append(
-            OP.CASE, expression, true_branch, false_branch
-        )
+        index = expression.tape.append(OP.CASE, expression, true_branch, false_branch)
         return Tracer(expression.tape, index)
 
     try:

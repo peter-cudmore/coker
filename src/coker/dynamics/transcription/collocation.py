@@ -98,10 +98,7 @@ class _ReferenceCollocationOperators:
             np.asarray(row, dtype=float) / time_scaling_factor
             for row in self.derivative_matrix
         ]
-        weights = (
-            np.asarray(self.quadrature_weights, dtype=float)
-            * time_scaling_factor
-        )
+        weights = np.asarray(self.quadrature_weights, dtype=float) * time_scaling_factor
         return (
             np.asarray(self.nodes, dtype=float),
             t,
@@ -130,9 +127,7 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
         bases[:, i] = basis_i.c[::-1]
         dbasis_i = np.polyder(basis_i)
 
-        derivative_matrix[:, i] = [
-            dbasis_i(tau_j) for tau_j in collocation_times
-        ]
+        derivative_matrix[:, i] = [dbasis_i(tau_j) for tau_j in collocation_times]
 
     # See https://mathworld.wolfram.com/RadauQuadrature.html.
     quadrature_weights = np.array(
@@ -153,9 +148,7 @@ def _build_reference_operators(n: int) -> _ReferenceCollocationOperators:
     )
 
 
-def generate_discritisation_operators(
-    interval: Tuple[float, float], n: int
-) -> Tuple[
+def generate_discritisation_operators(interval: Tuple[float, float], n: int) -> Tuple[
     List[float],
     Callable[[float], float],
     List[np.ndarray],
@@ -166,9 +159,7 @@ def generate_discritisation_operators(
     return _build_reference_operators(n).scale_to_interval(interval)
 
 
-def _predict_refined_degree(
-    error: float, tolerance: float, degree: int
-) -> int:
+def _predict_refined_degree(error: float, tolerance: float, degree: int) -> int:
     """Predict the p-refined degree from the local error estimate."""
     if not math.isfinite(error) or error <= 0:
         raise ValueError("error must be finite and positive")
@@ -178,9 +169,7 @@ def _predict_refined_degree(
         raise ValueError("degree must be greater than one")
     if error <= tolerance:
         return degree
-    increment = math.ceil(
-        (math.log(error) - math.log(tolerance)) / math.log(degree)
-    )
+    increment = math.ceil((math.log(error) - math.log(tolerance)) / math.log(degree))
     return degree + increment
 
 
@@ -201,13 +190,8 @@ def _split_refined_interval(
         raise ValueError("maximum_degree must be positive")
     if minimum_degree < 1:
         raise ValueError("minimum_degree must be positive")
-    if (
-        not math.isfinite(minimum_interval_duration)
-        or minimum_interval_duration <= 0
-    ):
-        raise ValueError(
-            "minimum_interval_duration must be finite and positive"
-        )
+    if not math.isfinite(minimum_interval_duration) or minimum_interval_duration <= 0:
+        raise ValueError("minimum_interval_duration must be finite and positive")
     if predicted_degree <= maximum_degree:
         return (interval,), (predicted_degree,)
 
@@ -296,9 +280,7 @@ class InterpolatingPoly:
             else _build_reference_operators(degree)
         )
         op_values = self._reference_operators.scale_to_interval(interval)
-        self.s, self.s_to_interval, bases, derivatives, self.weights = (
-            op_values
-        )
+        self.s, self.s_to_interval, bases, derivatives, self.weights = op_values
         self.width = (self.interval[1] - self.interval[0]) / 2
         size = len(self.s) * dimension
         if len(values.shape) == 1:
@@ -312,8 +294,7 @@ class InterpolatingPoly:
             [np.reshape(np.array(base), (1, len(self.s))) for base in bases]
         )
         self.derivatives = [
-            np.reshape(np.array(d[:-1]), (1, len(self.s) - 1))
-            for d in derivatives
+            np.reshape(np.array(d[:-1]), (1, len(self.s) - 1)) for d in derivatives
         ]
 
     def size(self) -> int:

@@ -30,13 +30,9 @@ def _parameter_callback(callback, heterogeneous, adapter):
     return adapter(callback) if heterogeneous else callback
 
 
-def create_dynamics_from_spec(
-    spec: DynamicsSpec, backend="numpy"
-) -> DynamicalSystem:
+def create_dynamics_from_spec(spec: DynamicsSpec, backend="numpy") -> DynamicalSystem:
     heterogeneous = isinstance(spec.parameters, tuple)
-    parameter_arguments = (
-        list(spec.parameters) if heterogeneous else [spec.parameters]
-    )
+    parameter_arguments = list(spec.parameters) if heterogeneous else [spec.parameters]
     x0 = function(
         arguments=[spec.algebraic, spec.inputs, *parameter_arguments],
         implementation=_parameter_callback(
@@ -64,9 +60,7 @@ def create_dynamics_from_spec(
     ]
     xdot = function(
         arguments,
-        _parameter_callback(
-            spec.dynamics, heterogeneous, _dynamics_parameters
-        ),
+        _parameter_callback(spec.dynamics, heterogeneous, _dynamics_parameters),
         backend,
     )
     assert len(xdot.output) == 1, "Dynamics must return a single vector"
@@ -84,9 +78,7 @@ def create_dynamics_from_spec(
     constraint = (
         function(
             arguments,
-            _parameter_callback(
-                spec.constraints, heterogeneous, _dynamics_parameters
-            ),
+            _parameter_callback(spec.constraints, heterogeneous, _dynamics_parameters),
             backend,
         )
         if spec.algebraic is not None
@@ -95,9 +87,7 @@ def create_dynamics_from_spec(
     quadrature = (
         function(
             arguments,
-            _parameter_callback(
-                spec.quadratures, heterogeneous, _dynamics_parameters
-            ),
+            _parameter_callback(spec.quadratures, heterogeneous, _dynamics_parameters),
             backend,
         )
         if spec.quadratures is not Noop()
@@ -109,9 +99,7 @@ def create_dynamics_from_spec(
         ), "Quadratures must be a scalar or vector space"
         q = quadrature.output[0]
         arguments.append(
-            VectorSpace("q", q.dim.flat())
-            if not q.dim.is_scalar()
-            else Scalar("q")
+            VectorSpace("q", q.dim.flat()) if not q.dim.is_scalar() else Scalar("q")
         )
     else:
         arguments.append(None)
@@ -130,9 +118,7 @@ def create_control_system(
     xdot: Callable[[float, np.ndarray, np.ndarray, np.ndarray], np.ndarray],
     control: FunctionSpace,
     parameters: Optional[Scalar | VectorSpace] = None,
-    output: Callable[
-        [Scalar, np.ndarray, np.ndarray, np.ndarray], np.ndarray
-    ] = None,
+    output: Callable[[Scalar, np.ndarray, np.ndarray, np.ndarray], np.ndarray] = None,
     backend: str = "numpy",
     p_init: np.ndarray = None,
     u_init: Callable[[float], np.ndarray] = None,
@@ -347,15 +333,11 @@ class CompositionOperator:
             else:
                 dim = space.size
                 output.append(next_slice[:dim])
-                next_slice = (
-                    next_slice[dim:] if dim < next_slice.shape[0] else []
-                )
+                next_slice = next_slice[dim:] if dim < next_slice.shape[0] else []
         return output
 
     def __call__(self, *args):
-        output = [
-            a for a, space in zip(args, self.spaces) if space is not None
-        ]
+        output = [a for a, space in zip(args, self.spaces) if space is not None]
         if not output:
             return None
 
@@ -463,9 +445,7 @@ def _parameter_spaces(system):
 
 
 def _compose_direct_sum(systems, backend, partition):
-    x_dim, z_dim, q_dim = zip(
-        *[system.get_state_dimensions() for system in systems]
-    )
+    x_dim, z_dim, q_dim = zip(*[system.get_state_dimensions() for system in systems])
     proj_x = CompositionOperator.from_dimensions("x", *x_dim)
     proj_z = CompositionOperator.from_dimensions("z", *z_dim)
     proj_q = CompositionOperator.from_dimensions("q", *q_dim)
@@ -473,11 +453,7 @@ def _compose_direct_sum(systems, backend, partition):
         "y", *[system.y.output_shape()[0] for system in systems]
     )
     u_range = [
-        (
-            system.inputs.output_dimensions()[0]
-            if system.inputs is not Noop()
-            else None
-        )
+        (system.inputs.output_dimensions()[0] if system.inputs is not Noop() else None)
         for system in systems
     ]
     proj_u = CompositionOperator.from_dimensions("u", *u_range)
@@ -504,9 +480,7 @@ def _compose_direct_sum(systems, backend, partition):
         x, z = zip(*values)
         return proj_x(*x), proj_z(*z)
 
-    def component_call(
-        component, t, x_outer, z_outer, u_outer, p_outer, projection
-    ):
+    def component_call(component, t, x_outer, z_outer, u_outer, p_outer, projection):
         groups = partition.split(p_outer)
         x, z = proj_x.inverse(x_outer), proj_z.inverse(z_outer)
 

@@ -184,9 +184,7 @@ class FunctionSpace:
     """
 
     def __post_init__(self) -> None:
-        if self.output is None or any(
-            output is None for output in self.output
-        ):
+        if self.output is None or any(output is None for output in self.output):
             raise TypeError("FunctionSpace output spaces must not be None")
 
     def input_dimensions(self):
@@ -221,10 +219,8 @@ class FunctionSpace:
         """Return whether another function space has the same I/O shapes."""
         return (
             isinstance(other, FunctionSpace)
-            and tuple(self.input_dimensions())
-            == tuple(other.input_dimensions())
-            and tuple(self.output_dimensions())
-            == tuple(other.output_dimensions())
+            and tuple(self.input_dimensions()) == tuple(other.input_dimensions())
+            and tuple(self.output_dimensions()) == tuple(other.output_dimensions())
         )
 
     def validate_argument(
@@ -246,9 +242,7 @@ class FunctionSpace:
         if isinstance(actual_dimension, FunctionSpace) and isinstance(
             expected_dimension, FunctionSpace
         ):
-            dimensions_match = actual_dimension.matches_signature(
-                expected_dimension
-            )
+            dimensions_match = actual_dimension.matches_signature(expected_dimension)
         elif isinstance(actual_dimension, Dimension) and isinstance(
             expected_dimension, Dimension
         ):
@@ -291,15 +285,9 @@ class FunctionSpace:
         """Return whether a Coker function has this input/output signature."""
         if not isinstance(value, FunctionSignatureValue):
             return False
-        return tuple(value.input_shape()) == tuple(
-            self.input_dimensions()
-        ) and tuple(
-            dimension
-            for dimension in value.output_shape()
-            if dimension is not None
-        ) == tuple(
-            self.output_dimensions()
-        )
+        return tuple(value.input_shape()) == tuple(self.input_dimensions()) and tuple(
+            dimension for dimension in value.output_shape() if dimension is not None
+        ) == tuple(self.output_dimensions())
 
     def evaluation_dimension(
         self,

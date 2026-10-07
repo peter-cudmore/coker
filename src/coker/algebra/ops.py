@@ -68,9 +68,7 @@ class Noop:
 
     @staticmethod
     def cast_to_function_space(arguments=None):
-        return FunctionSpace(
-            "noop", [] if arguments is None else arguments, []
-        )
+        return FunctionSpace("noop", [] if arguments is None else arguments, [])
 
 
 class Operator:
@@ -98,9 +96,7 @@ class SelectOP(Operator):
     def __init__(self, index: int):
         self.index = index
 
-    def compute_shape(
-        self, bundle: ResultBundleDimension
-    ) -> Dimension | FunctionSpace:
+    def compute_shape(self, bundle: ResultBundleDimension) -> Dimension | FunctionSpace:
         if not isinstance(bundle, ResultBundleDimension):
             raise InvalidShape("SELECT expects a native-call result bundle")
         return bundle.select(self.index)
@@ -145,9 +141,7 @@ def normalize_evaluate_result(
         return value
 
     if isinstance(value, (list, tuple)):
-        value = np.concatenate(
-            [np.asarray(result).reshape(-1) for result in value]
-        )
+        value = np.concatenate([np.asarray(result).reshape(-1) for result in value])
     if isinstance(dimension, Dimension):
         result_array = np.asarray(value)
         if result_array.size != dimension.flat():
@@ -182,9 +176,7 @@ class ConcatenateOP(Operator):
         out_dims = list(dims[0].dim)
         for d in dims[1:]:
             assert all(
-                d.dim[i] == out_dims[i]
-                for i in range(len(out_dims))
-                if i != self.axis
+                d.dim[i] == out_dims[i] for i in range(len(out_dims)) if i != self.axis
             )
             out_dims[self.axis] += d.dim[self.axis]
 
@@ -284,8 +276,7 @@ def evaluate_shape(
         raise InvalidShape("EVALUATE requires a function value")
     if len(args) != len(function_value.arguments):
         raise InvalidShape(
-            f"Expected {len(function_value.arguments)} arguments, got "
-            f"{len(args)}"
+            f"Expected {len(function_value.arguments)} arguments, got " f"{len(args)}"
         )
     for index, argument in enumerate(args):
         function_value.validate_argument(argument, index)
@@ -366,9 +357,7 @@ def shape_mul(d_1: Dimension, d_2: Dimension):
 def shape_matmul(d_1: Dimension, d_2: Dimension):
 
     if d_1.is_scalar() or d_2.is_scalar():
-        raise InvalidArgument(
-            "Matrix multiplication is not defined for scalars"
-        )
+        raise InvalidArgument("Matrix multiplication is not defined for scalars")
 
     if d_1.is_vector():
         raise InvalidArgument("Cannot multiply vectors")
@@ -426,9 +415,7 @@ def dot_shape(d_1: Dimension, d_2: Dimension):
     if d_1.dim == d_2.dim and (d_1.is_vector() or d_1.is_covector()):
         return Dimension.scalar()
 
-    raise InvalidArgument(
-        "Dot product only defined for vectors from the same space."
-    )
+    raise InvalidArgument("Dot product only defined for vectors from the same space.")
 
 
 @register_shape(OP.TRANSPOSE)

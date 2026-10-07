@@ -55,9 +55,7 @@ class BoundFunctionParameter(FunctionParameter):
 
         self.function = function
         self.bindings = self._normalise_bindings(bindings)
-        self.parameters = tuple(
-            declaration for _, declaration in self.bindings
-        )
+        self.parameters = tuple(declaration for _, declaration in self.bindings)
         self.name = function.name if name is None else name
         self._unbound_indices = tuple(
             index
@@ -70,9 +68,7 @@ class BoundFunctionParameter(FunctionParameter):
     ) -> tuple[tuple[int, _ConcreteParameter], ...]:
         if isinstance(bindings, Mapping):
             values = tuple(bindings.items())
-        elif isinstance(bindings, Sequence) and not isinstance(
-            bindings, (str, bytes)
-        ):
+        elif isinstance(bindings, Sequence) and not isinstance(bindings, (str, bytes)):
             values = tuple(bindings)
         else:
             raise TypeError(
@@ -104,9 +100,7 @@ class BoundFunctionParameter(FunctionParameter):
                     f"signature with {len(input_shapes)} inputs"
                 )
             if index in seen_indices:
-                raise ValueError(
-                    f"duplicate binding for function input {index}"
-                )
+                raise ValueError(f"duplicate binding for function input {index}")
             if not isinstance(
                 declaration,
                 (
@@ -139,16 +133,11 @@ class BoundFunctionParameter(FunctionParameter):
             raise TypeError("target must be a FunctionSpace")
 
         expected_inputs = tuple(
-            self.function.input_shape()[index]
-            for index in self._unbound_indices
+            self.function.input_shape()[index] for index in self._unbound_indices
         )
         if tuple(target.input_dimensions()) != expected_inputs:
-            raise ValueError(
-                "target inputs must match the unbound function inputs"
-            )
-        if tuple(target.output_dimensions()) != tuple(
-            self.function.output_shape()
-        ):
+            raise ValueError("target inputs must match the unbound function inputs")
+        if tuple(target.output_dimensions()) != tuple(self.function.output_shape()):
             raise ValueError("target output must match the function output")
         return target
 
@@ -162,14 +151,11 @@ class BoundFunctionParameter(FunctionParameter):
             parameters, self._normalise_public_argument(argument)
         )
 
-    def build_function(
-        self, target: FunctionSpace, backend: str | None
-    ) -> Function:
+    def build_function(self, target: FunctionSpace, backend: str | None) -> Function:
         """Build the public target followed by bound concrete declarations."""
         target = self.validate_target(target)
         parameter_spaces = [
-            _concrete_parameter_space(declaration)
-            for declaration in self.parameters
+            _concrete_parameter_space(declaration) for declaration in self.parameters
         ]
         argument_count = len(target.arguments)
 
@@ -192,9 +178,7 @@ class BoundFunctionParameter(FunctionParameter):
             return ()
         if len(self._unbound_indices) == 1:
             return (argument,)
-        if not isinstance(argument, Sequence) or isinstance(
-            argument, (str, bytes)
-        ):
+        if not isinstance(argument, Sequence) or isinstance(argument, (str, bytes)):
             raise TypeError(
                 "a function with multiple public inputs requires an argument "
                 "sequence"
@@ -218,17 +202,12 @@ class BoundFunctionParameter(FunctionParameter):
             )
 
         bound_values = {
-            index: value
-            for (index, _), value in zip(self.bindings, parameters)
+            index: value for (index, _), value in zip(self.bindings, parameters)
         }
         public_values = iter(public_arguments)
         return self.function(
             *(
-                (
-                    bound_values[index]
-                    if index in bound_values
-                    else next(public_values)
-                )
+                (bound_values[index] if index in bound_values else next(public_values))
                 for index in range(len(self.function.input_spaces()))
             )
         )
@@ -237,7 +216,5 @@ class BoundFunctionParameter(FunctionParameter):
 def _space_dimension(space: Scalar | VectorSpace) -> Dimension:
     """Return the graph dimension represented by one concrete declaration."""
     return (
-        Dimension.scalar()
-        if isinstance(space, Scalar)
-        else Dimension(space.dimension)
+        Dimension.scalar() if isinstance(space, Scalar) else Dimension(space.dimension)
     )

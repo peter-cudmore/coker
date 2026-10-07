@@ -71,9 +71,7 @@ def _lower_loss(
         }
         (cost,) = substitute([problem.loss], workspace)
     elif factory.control_factory is None:
-        (cost,) = factory.casadi.evaluate(
-            problem.loss, [solution_proxy, factory.p]
-        )
+        (cost,) = factory.casadi.evaluate(problem.loss, [solution_proxy, factory.p])
     else:
         (cost,) = factory.casadi.evaluate(
             problem.loss,

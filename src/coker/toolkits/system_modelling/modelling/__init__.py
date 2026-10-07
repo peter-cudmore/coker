@@ -10,8 +10,7 @@ from coker.toolkits.system_modelling.modelling.coker_abc import (
 def get_component_registry():
 
     return {
-        item.__name__: inspect.getsourcefile(item)
-        for item in Block.__subclasses__()
+        item.__name__: inspect.getsourcefile(item) for item in Block.__subclasses__()
     }
 
 
@@ -103,17 +102,13 @@ class BlockContainer(CokerListableSubclasses):
 
         self.labels: Dict[(BlockIndex, PortIndex), str] = {}
 
-        self.components: List[
-            Union[Block, "BlockContainer", PortForwarder]
-        ] = []
+        self.components: List[Union[Block, "BlockContainer", PortForwarder]] = []
         self.add_models(self._inputs, self._outputs)
 
         self.parent = None
 
         """Dictionary of internal connections as input: output"""
-        self.connections: Dict[
-            (BlockIndex, PortIndex), (BlockIndex, PortIndex)
-        ] = {}
+        self.connections: Dict[(BlockIndex, PortIndex), (BlockIndex, PortIndex)] = {}
 
     def spec(self):
         return BlockSpec(
@@ -123,9 +118,7 @@ class BlockContainer(CokerListableSubclasses):
             state=self._state,
         )
 
-    def add_models(
-        self, *components: Union["Block", "BlockContainer", PortForwarder]
-    ):
+    def add_models(self, *components: Union["Block", "BlockContainer", PortForwarder]):
         for component in components:
             component.set_parent(self)
             self.components.append(component)
@@ -161,9 +154,7 @@ class BlockContainer(CokerListableSubclasses):
                 self.add_connection(port_in, port_out)
                 self.labels[port_out.resolve()] = name
 
-    def add_connection(
-        self, port_in: LazyInputHandle, port_out: LazyOutputHandle
-    ):
+    def add_connection(self, port_in: LazyInputHandle, port_out: LazyOutputHandle):
         in_port = port_in.resolve()
         out_port = port_out.resolve()
         assert in_port not in self.connections, (

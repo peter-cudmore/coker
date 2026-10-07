@@ -68,14 +68,12 @@ class _TranscriptionFactory:
         self.tolerance = problem.transcription_options.absolute_tolerance
         self.segment_defect_tolerance = (
             problem.transcription_options.segment_defect_tolerance
-            if problem.transcription_options.segment_defect_tolerance
-            is not None
+            if problem.transcription_options.segment_defect_tolerance is not None
             else self.tolerance
         )
         self.derivative_defect_tolerance = (
             problem.transcription_options.derivative_defect_tolerance
-            if problem.transcription_options.derivative_defect_tolerance
-            is not None
+            if problem.transcription_options.derivative_defect_tolerance is not None
             else self.tolerance
         )
         self.free_horizon = problem.horizon_decision is not None
@@ -106,9 +104,7 @@ class _TranscriptionFactory:
 
         control_variables = problem.control or []
         self.control_factory = (
-            ControlFactory(control_variables, 1.0)
-            if control_variables
-            else None
+            ControlFactory(control_variables, 1.0) if control_variables else None
         )
         if self.control_factory is None:
             self.u_symbols = ca.MX.zeros(0, 1)
@@ -142,14 +138,10 @@ class _TranscriptionFactory:
             else ca.DM.eye(self.p.shape[0])
         )
         self.horizon_symbol = (
-            ca.MX.sym(problem.horizon_decision.name)
-            if self.free_horizon
-            else None
+            ca.MX.sym(problem.horizon_decision.name) if self.free_horizon else None
         )
         self.duration = (
-            self.horizon_symbol
-            if self.free_horizon
-            else float(problem.t_final)
+            self.horizon_symbol if self.free_horizon else float(problem.t_final)
         )
         self.parameter_names = list(parameter_indices)
         self.parameter_indices = parameter_indices
@@ -157,9 +149,7 @@ class _TranscriptionFactory:
             maxsize=_REFERENCE_OPERATOR_CACHE_SIZE
         )(_build_reference_operators)
 
-        self._defect_dynamics_maps: OrderedDict[int, ca.Function] = (
-            OrderedDict()
-        )
+        self._defect_dynamics_maps: OrderedDict[int, ca.Function] = OrderedDict()
         self._defect_nodes: OrderedDict[int, tuple[float, ...]] = OrderedDict()
         self._defect_dynamics = self._build_defect_dynamics()
 
@@ -180,9 +170,7 @@ class _TranscriptionFactory:
         values = []
         for spec in self.problem.quadratures:
             workspace = dict(zip(spec.integrand.tape.input_indicies, args))
-            _, outputs = lower_casadi(
-                spec.integrand.tape, [spec.integrand], workspace
-            )
+            _, outputs = lower_casadi(spec.integrand.tape, [spec.integrand], workspace)
             values.append(outputs[0])
         return values
 
@@ -252,15 +240,13 @@ class _TranscriptionFactory:
         """Evaluate diagnostic state and quadrature rates in a CasADi batch."""
         times = np.asarray(times, dtype=float).reshape((1, -1))
         count = times.shape[1]
-        values = np.asarray(values, dtype=float).reshape(
-            (self.path_size, count)
-        )
+        values = np.asarray(values, dtype=float).reshape((self.path_size, count))
         controls = (
             np.column_stack(
                 [
-                    np.asarray(
-                        solution.control_law(float(time)), dtype=float
-                    ).reshape((-1,))
+                    np.asarray(solution.control_law(float(time)), dtype=float).reshape(
+                        (-1,)
+                    )
                     for time in times.flat
                 ]
             )
@@ -292,9 +278,7 @@ class _TranscriptionFactory:
             np.asarray(quadrature_rates, dtype=float),
         )
 
-    def measure_interval_defect(
-        self, poly, solution: VariationalSolution
-    ) -> float:
+    def measure_interval_defect(self, poly, solution: VariationalSolution) -> float:
         """Return the maximum scaled state defect for one solved polynomial."""
         reference_nodes = self.get_defect_nodes(poly.degree)
         times = poly.interval[0] + (reference_nodes + 1.0) * poly.width
@@ -307,8 +291,7 @@ class _TranscriptionFactory:
         )
         derivative_powers = np.zeros_like(powers)
         derivative_powers[1:] = (
-            np.arange(1, poly.bases.shape[0], dtype=float)[:, np.newaxis]
-            * powers[:-1]
+            np.arange(1, poly.bases.shape[0], dtype=float)[:, np.newaxis] * powers[:-1]
         )
         interpolation = path_values @ np.asarray(poly.bases).T
         values = interpolation @ powers
@@ -320,9 +303,7 @@ class _TranscriptionFactory:
         if state_derivatives.size == 0:
             return 0.0
         scale = np.maximum(1.0, np.abs(model_dynamics))
-        return float(
-            np.max(np.abs(state_derivatives - model_dynamics) / scale)
-        )
+        return float(np.max(np.abs(state_derivatives - model_dynamics) / scale))
 
     def measure_interval_segment_defect(
         self, poly, solution: VariationalSolution
@@ -345,24 +326,20 @@ class _TranscriptionFactory:
         _, end_value = poly.end_point()
         state_residual = (
             np.asarray(end_value[: self.x_size], dtype=float).reshape((-1,))
-            - np.asarray(start_value[: self.x_size], dtype=float).reshape(
-                (-1,)
-            )
+            - np.asarray(start_value[: self.x_size], dtype=float).reshape((-1,))
             - solution.t_final * np.column_stack(state_rates) @ weights
         )
         if self.q_size == 0:
             quadrature_residual = np.zeros((0,), dtype=float)
         else:
             quadrature_residual = (
-                np.asarray(
-                    end_value[self.x_size + self.z_size :], dtype=float
-                ).reshape((-1,))
+                np.asarray(end_value[self.x_size + self.z_size :], dtype=float).reshape(
+                    (-1,)
+                )
                 - np.asarray(
                     start_value[self.x_size + self.z_size :], dtype=float
                 ).reshape((-1,))
-                - solution.t_final
-                * np.column_stack(quadrature_rates)
-                @ weights
+                - solution.t_final * np.column_stack(quadrature_rates) @ weights
             )
         normalized_interval = tuple(float(t) for t in poly.interval)
         return SegmentDefectDiagnostic(

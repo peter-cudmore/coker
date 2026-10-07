@@ -49,21 +49,15 @@ def split_at_non_differentiable_points(
             start and end of an interval.
 
     """
-    interval_boundaries = (
-        set(additional_points) if additional_points else set()
-    )
+    interval_boundaries = set(additional_points) if additional_points else set()
     for d in control_variables:
         if isinstance(d, PiecewiseConstantVariable):
             assert d.sample_rate > 0, "Sample rate must be positive"
             steps = t_final * d.sample_rate
-            interval_boundaries |= {
-                i * t_final / steps for i in range(int(steps))
-            }
+            interval_boundaries |= {i * t_final / steps for i in range(int(steps))}
 
         if isinstance(d, SpikeVariable):
-            assert (
-                0 <= d.time < t_final
-            ), "Spike time must be within integration window"
+            assert 0 <= d.time < t_final, "Spike time must be within integration window"
 
             interval_boundaries.add(d.time)
 
@@ -77,14 +71,10 @@ def split_at_non_differentiable_points(
 
     sorted_boundaries.sort()
 
-    while (
-        len(sorted_boundaries) - 1 < transcription_options.minimum_n_intervals
-    ):
+    while len(sorted_boundaries) - 1 < transcription_options.minimum_n_intervals:
         intervals = [
             (stop - start, (stop + start) / 2)
-            for start, stop in zip(
-                sorted_boundaries[:-1], sorted_boundaries[1:]
-            )
+            for start, stop in zip(sorted_boundaries[:-1], sorted_boundaries[1:])
         ]
         max_length = max(length for length, _ in intervals)
 

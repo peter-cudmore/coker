@@ -39,9 +39,7 @@ class ClosureParameter(FunctionParameter):
             )
             for parameter in parameters
         ):
-            raise TypeError(
-                "parameters must be scalar or dense parameter declarations"
-            )
+            raise TypeError("parameters must be scalar or dense parameter declarations")
         self.function = function
         self.parameters = tuple(parameters)
         self.name = function.name
@@ -65,9 +63,7 @@ class ClosureParameter(FunctionParameter):
                 "function inputs must be the concrete parameters followed by "
                 "the target arguments"
             )
-        if tuple(self.function.output_shape()) != tuple(
-            target.output_dimensions()
-        ):
+        if tuple(self.function.output_shape()) != tuple(target.output_dimensions()):
             raise ValueError("function output must match the target output")
         return target
 
@@ -91,10 +87,7 @@ class ClosureParameter(FunctionParameter):
         return ClosureParameter(
             function(
                 [
-                    *(
-                        _concrete_parameter_space(parameter)
-                        for parameter in parameters
-                    ),
+                    *(_concrete_parameter_space(parameter) for parameter in parameters),
                     *inputs,
                 ],
                 implementation,

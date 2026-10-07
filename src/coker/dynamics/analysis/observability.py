@@ -33,9 +33,7 @@ def analyse_observability(
     try:
         symbolic = normalize_symbolic_system(system)
         tangent = (
-            geometry(symbolic)
-            if isinstance(symbolic, SymbolicDAESystem)
-            else None
+            geometry(symbolic) if isinstance(symbolic, SymbolicDAESystem) else None
         )
     except UnsupportedSystemError as error:
         return _rank.create_inconclusive(
@@ -45,9 +43,7 @@ def analyse_observability(
 
     state_dimension = len(symbolic.state)
     if max_order is not None and (
-        not isinstance(max_order, int)
-        or isinstance(max_order, bool)
-        or max_order < 0
+        not isinstance(max_order, int) or isinstance(max_order, bool) or max_order < 0
     ):
         return _rank.create_inconclusive(
             ObservabilityResult,
@@ -55,9 +51,7 @@ def analyse_observability(
             required_rank=state_dimension,
         )
 
-    affine_fields = extract_control_affine_fields(
-        symbolic.dynamics, symbolic.controls
-    )
+    affine_fields = extract_control_affine_fields(symbolic.dynamics, symbolic.controls)
     if affine_fields is None:
         return _rank.create_inconclusive(
             ObservabilityResult,
@@ -100,6 +94,4 @@ def analyse_observability(
         f"maximum Lie-derivative order {max_order} reached before "
         "the observability rank stabilized",
     )
-    return (
-        _rank.add_condition(outcome, tangent.condition) if tangent else outcome
-    )
+    return _rank.add_condition(outcome, tangent.condition) if tangent else outcome
