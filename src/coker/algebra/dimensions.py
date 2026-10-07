@@ -217,11 +217,15 @@ class FunctionSpace:
 
     def matches_signature(self, other: FunctionSpace) -> bool:
         """Return whether another function space has the same I/O shapes."""
-        return (
-            isinstance(other, FunctionSpace)
-            and tuple(self.input_dimensions()) == tuple(other.input_dimensions())
-            and tuple(self.output_dimensions()) == tuple(other.output_dimensions())
+        if not isinstance(other, FunctionSpace):
+            return False
+        input_dimensions_match = tuple(self.input_dimensions()) == tuple(
+            other.input_dimensions()
         )
+        output_dimensions_match = tuple(self.output_dimensions()) == tuple(
+            other.output_dimensions()
+        )
+        return input_dimensions_match and output_dimensions_match
 
     def validate_argument(
         self,
@@ -285,9 +289,13 @@ class FunctionSpace:
         """Return whether a Coker function has this input/output signature."""
         if not isinstance(value, FunctionSignatureValue):
             return False
-        return tuple(value.input_shape()) == tuple(self.input_dimensions()) and tuple(
+        input_dimensions_match = tuple(value.input_shape()) == tuple(
+            self.input_dimensions()
+        )
+        output_dimensions_match = tuple(
             dimension for dimension in value.output_shape() if dimension is not None
         ) == tuple(self.output_dimensions())
+        return input_dimensions_match and output_dimensions_match
 
     def evaluation_dimension(
         self,
@@ -302,11 +310,11 @@ class FunctionSpace:
 
     def is_scalar(self):
         output_dimensions = self.output_dimensions()
-        return (
-            len(output_dimensions) == 1
-            and isinstance(output_dimensions[0], Dimension)
-            and output_dimensions[0].is_scalar()
-        )
+        if len(output_dimensions) != 1:
+            return False
+        (output_dimension,) = output_dimensions
+        is_dimension = isinstance(output_dimension, Dimension)
+        return is_dimension and output_dimension.is_scalar()
 
     @staticmethod
     def create_scalar_function_space(
