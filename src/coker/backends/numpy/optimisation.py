@@ -57,14 +57,10 @@ class ConstraintFactory:
             )
 
         return optimize.NonlinearConstraint(
-            lambda decision_vector: self.evaluate(
-                decision_vector, runtime_args
-            ),
+            lambda decision_vector: self.evaluate(decision_vector, runtime_args),
             lower_bound,
             upper_bound,
-            jac=lambda decision_vector: self.jacobian(
-                decision_vector, runtime_args
-            ),
+            jac=lambda decision_vector: self.jacobian(decision_vector, runtime_args),
             hess=optimize.BFGS(),
         )
 
@@ -95,8 +91,7 @@ class TrustConstrProblem:
     def __call__(self, *runtime_args):
         runtime_args_tuple = self._normalise_runtime_args(runtime_args)
         scipy_constraints = [
-            constraint.build(runtime_args_tuple)
-            for constraint in self.constraints
+            constraint.build(runtime_args_tuple) for constraint in self.constraints
         ]
         solution = optimize.minimize(
             self._evaluate_cost,
@@ -145,13 +140,9 @@ class TrustConstrProblem:
         runtime_args: tuple[object, ...],
     ):
         tape_inputs = self._materialise_inputs(decision_vector, runtime_args)
-        return evaluate_inner(
-            self.tape, tape_inputs, list(tracers), self.backend, {}
-        )
+        return evaluate_inner(self.tape, tape_inputs, list(tracers), self.backend, {})
 
-    def _evaluate_cost(
-        self, decision_vector: np.ndarray, *runtime_args
-    ) -> float:
+    def _evaluate_cost(self, decision_vector: np.ndarray, *runtime_args) -> float:
         (cost_value,) = self._evaluate_tracers(
             [self.cost], decision_vector, tuple(runtime_args)
         )
@@ -176,9 +167,7 @@ class TrustConstrProblem:
     def _evaluate_outputs(
         self, decision_vector: np.ndarray, runtime_args: tuple[object, ...]
     ) -> list[object]:
-        return list(
-            self._evaluate_tracers(self.outputs, decision_vector, runtime_args)
-        )
+        return list(self._evaluate_tracers(self.outputs, decision_vector, runtime_args))
 
 
 def build_optimisation_problem(
@@ -263,20 +252,14 @@ def _build_constraint_factory(
         initial_guess=np.zeros(decision_dimension, dtype=float),
     )
 
-    def evaluate(
-        decision_vector: np.ndarray, runtime_args: tuple
-    ) -> np.ndarray:
+    def evaluate(decision_vector: np.ndarray, runtime_args: tuple) -> np.ndarray:
         (residual_value,) = problem._evaluate_tracers(
             [residual], decision_vector, runtime_args
         )
         return _coerce_vector(residual_value)
 
-    def jacobian(
-        decision_vector: np.ndarray, runtime_args: tuple
-    ) -> np.ndarray:
-        return _finite_difference_jacobian(
-            evaluate, decision_vector, runtime_args
-        )
+    def jacobian(decision_vector: np.ndarray, runtime_args: tuple) -> np.ndarray:
+        return _finite_difference_jacobian(evaluate, decision_vector, runtime_args)
 
     def evaluate_bound(bound: object, runtime_args: tuple) -> np.ndarray:
         if isinstance(bound, Tracer):
@@ -339,8 +322,7 @@ def _finite_difference_gradient(
         positive[axis] += step_size
         negative[axis] -= step_size
         gradient[axis] = (
-            function(positive, *runtime_args)
-            - function(negative, *runtime_args)
+            function(positive, *runtime_args) - function(negative, *runtime_args)
         ) / (2.0 * step_size)
     return gradient
 
@@ -363,9 +345,7 @@ def _finite_difference_jacobian(
         negative[axis] -= step_size
         positive_value = function(positive, runtime_args)
         negative_value = function(negative, runtime_args)
-        jacobian[:, axis] = (positive_value - negative_value) / (
-            2.0 * step_size
-        )
+        jacobian[:, axis] = (positive_value - negative_value) / (2.0 * step_size)
     return jacobian
 
 
@@ -374,9 +354,7 @@ def _finite_difference_hessian(
     decision_vector: np.ndarray,
     runtime_args: tuple,
 ) -> np.ndarray:
-    hessian = np.zeros(
-        (decision_vector.size, decision_vector.size), dtype=float
-    )
+    hessian = np.zeros((decision_vector.size, decision_vector.size), dtype=float)
     if decision_vector.size == 0:
         return hessian
 
@@ -388,9 +366,7 @@ def _finite_difference_hessian(
         negative[axis] -= step_size
         positive_gradient = gradient_function(positive, *runtime_args)
         negative_gradient = gradient_function(negative, *runtime_args)
-        hessian[:, axis] = (positive_gradient - negative_gradient) / (
-            2.0 * step_size
-        )
+        hessian[:, axis] = (positive_gradient - negative_gradient) / (2.0 * step_size)
     return 0.5 * (hessian + hessian.T)
 
 

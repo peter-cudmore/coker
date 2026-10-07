@@ -88,11 +88,7 @@ ControlSolution = (
     SpikeControlSolution | PiecewiseControlSolution | ConstantControlSolution
 )
 ControlLaw = Callable[[Scalar], _ValueType]
-ControlVariable = (
-    ConstantControlVariable | PiecewiseConstantVariable | SpikeVariable
-)
+ControlVariable = ConstantControlVariable | PiecewiseConstantVariable | SpikeVariable
 
-Solution = (
-    "DynamicalSystem" | Callable[[Scalar, ControlLaw, _ValueType], Scalar]
-)
+Solution = "DynamicalSystem" | Callable[[Scalar, ControlLaw, _ValueType], Scalar]
 LossFunction = Callable[[Solution, ControlLaw, _ValueType], Scalar]

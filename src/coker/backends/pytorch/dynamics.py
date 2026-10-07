@@ -48,8 +48,7 @@ def evaluate_integrals(
         )
     if z0 is not None:
         raise ValueError(
-            "PyTorch ODE integration requires a None algebraic "
-            "initial condition"
+            "PyTorch ODE integration requires a None algebraic " "initial condition"
         )
     if has_quadrature != (q0 is not None):
         raise ValueError(
@@ -80,9 +79,7 @@ def evaluate_integrals(
     times, is_scalar_endpoint, drop_initial = _build_time_grid(end_point, x0)
     if times is None:
         q_initial = (
-            q0
-            if is_scalar_endpoint
-            else q0.unsqueeze(-1) if has_quadrature else None
+            q0 if is_scalar_endpoint else q0.unsqueeze(-1) if has_quadrature else None
         )
         return x0 if is_scalar_endpoint else x0.unsqueeze(-1), None, q_initial
 
@@ -116,9 +113,7 @@ def evaluate_integrals(
     )
     x_solution = solution[..., :x_size].reshape(-1, *x0.shape)
     q_solution = (
-        solution[..., x_size:].reshape(-1, *q0.shape)
-        if has_quadrature
-        else None
+        solution[..., x_size:].reshape(-1, *q0.shape) if has_quadrature else None
     )
     if is_scalar_endpoint:
         return x_solution[-1], None, q_solution[-1] if has_quadrature else None
@@ -139,18 +134,14 @@ def _build_time_grid(end_point, state):
         if end_point == 0:
             return None, True, False
         return (
-            torch.tensor(
-                [0, end_point], dtype=state.dtype, device=state.device
-            ),
+            torch.tensor([0, end_point], dtype=state.dtype, device=state.device),
             True,
             False,
         )
 
     times = torch.as_tensor(end_point, dtype=state.dtype, device=state.device)
     if times.ndim != 1:
-        raise ValueError(
-            "ODE evaluation times must be a one-dimensional tensor"
-        )
+        raise ValueError("ODE evaluation times must be a one-dimensional tensor")
     if times.numel() == 0:
         raise ValueError("ODE evaluation times must not be empty")
     if times.numel() == 1 and bool(times[0] == 0):

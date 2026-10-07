@@ -113,9 +113,7 @@ class DynamicalSystem:
                 f"FunctionSpace {declaration.name!r}"
             )
         if not callable(value):
-            raise TypeError(
-                f"Function-valued parameter {index} must be callable"
-            )
+            raise TypeError(f"Function-valued parameter {index} must be callable")
 
         prepared = function(declaration.arguments, value, backend=self.backend)
         if prepared not in declaration:
@@ -125,9 +123,7 @@ class DynamicalSystem:
             )
         return prepared
 
-    def _map_arguments(
-        self, *args
-    ) -> tuple[object, object, tuple[object, ...]]:
+    def _map_arguments(self, *args) -> tuple[object, object, tuple[object, ...]]:
         declarations = (
             ()
             if self.parameters is None
@@ -189,15 +185,11 @@ class DynamicalSystem:
             q_i = q[:, index] if q is not None else None
             return x_i, z_i, u, *parameter_arguments, q_i
 
-        if self.y.output_shape()[0].is_scalar() or self.y.output_shape()[
-            0
-        ].dim == (1,):
+        if self.y.output_shape()[0].is_scalar() or self.y.output_shape()[0].dim == (1,):
             return np.concatenate(
                 [self.y(t_i, *map_args(index)) for index, t_i in enumerate(t)]
             )
-        return np.vstack(
-            [self.y(t_i, *map_args(index)) for index, t_i in enumerate(t)]
-        )
+        return np.vstack([self.y(t_i, *map_args(index)) for index, t_i in enumerate(t)])
 
     def output_as_function_space(self) -> FunctionSpace:
         t, _x, _z, u, *parameter_shapes, _q = self.y.input_shape()

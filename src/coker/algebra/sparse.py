@@ -50,9 +50,7 @@ class SparseMatrixBuilder:
         else:
             dense = np.asarray(pattern)
             if dense.ndim != 2 or dense.dtype != bool:
-                raise TypeError(
-                    "pattern must be a two-dimensional boolean matrix"
-                )
+                raise TypeError("pattern must be a two-dimensional boolean matrix")
             compressed = scipy.sparse.csc_array(dense)
         compressed.eliminate_zeros()
         compressed.sort_indices()
@@ -62,9 +60,7 @@ class SparseMatrixBuilder:
         flat_indices = [
             row * self.shape[1] + column
             for column in range(self.shape[1])
-            for row in self.indices[
-                self.indptr[column] : self.indptr[column + 1]
-            ]
+            for row in self.indices[self.indptr[column] : self.indptr[column + 1]]
         ]
         self._flat_indices = np.asarray(flat_indices, dtype=np.intp)
 
@@ -100,9 +96,7 @@ class SparseMatrixBuilder:
 
         values = np.asarray(data)
         if values.shape != (self.nnz,):
-            raise ValueError(
-                f"expected data shape ({self.nnz},), got {values.shape}"
-            )
+            raise ValueError(f"expected data shape ({self.nnz},), got {values.shape}")
         return scipy.sparse.csc_array(
             (values, self.indices, self.indptr), shape=self.shape
         )

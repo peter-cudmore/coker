@@ -114,8 +114,7 @@ def sympy_norm(x, ord):
         matrix = to_matrix(x)
     except (NotImplementedError, ValueError) as ex:
         raise NotImplementedError(
-            "Norm is only implemented for scalars, vectors, and "
-            f"matrices, got {x}"
+            "Norm is only implemented for scalars, vectors, and " f"matrices, got {x}"
         ) from ex
 
     rows, cols = matrix.shape
@@ -191,9 +190,9 @@ class _SymbolicVectorFunction:
 
     def __call__(self, *arguments):
         values = [
-            sp.Function(
-                f"{self._name}_{'_'.join(str(value) for value in index)}"
-            )(*arguments)
+            sp.Function(f"{self._name}_{'_'.join(str(value) for value in index)}")(
+                *arguments
+            )
             for index in self._output.index_iterator(row_major=True)
         ]
         return sp.Array(values, shape=self._output.shape)
@@ -221,9 +220,7 @@ class _SymbolicNativeCallable:
 
 
 def _is_sympy_callable(value) -> bool:
-    return isinstance(value, (SymbolicCallable, FunctionSymbol)) or callable(
-        value
-    )
+    return isinstance(value, (SymbolicCallable, FunctionSymbol)) or callable(value)
 
 
 def _evaluate_sympy_tape(
@@ -245,9 +242,7 @@ def _evaluate_sympy_tape(
     workspace[-1] = None
     for index, value in zip(tape.input_indicies, inputs):
         workspace[index] = (
-            value
-            if _is_sympy_callable(value)
-            else backend.to_backend_array(value)
+            value if _is_sympy_callable(value) else backend.to_backend_array(value)
         )
 
     for index in range(len(tape.nodes)):
@@ -260,9 +255,7 @@ def _evaluate_sympy_tape(
             if op == OP.BIND and argument_index == 2:
                 arguments.append(node)
             elif isinstance(node, Tracer):
-                arguments.append(
-                    workspace[node.index] if node.tape is tape else node
-                )
+                arguments.append(workspace[node.index] if node.tape is tape else node)
             elif _is_sympy_callable(node):
                 arguments.append(node)
             else:
@@ -328,20 +321,14 @@ class SympyBackend(Backend):
     def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
-            return self._fit_function_parameter(
-                declaration, target, flat_values
-            )
+            return self._fit_function_parameter(declaration, target, flat_values)
         if isinstance(target, VectorSpace):
-            return self._reshape_parameter_values(
-                flat_values, target.dimension
-            )
+            return self._reshape_parameter_values(flat_values, target.dimension)
         if isinstance(target, Scalar):
             if flat_values.rows != 1:
                 raise ValueError("scalar parameter must have one solver value")
             return flat_values[0]
-        raise TypeError(
-            "parameter target must be a scalar, vector, or function space"
-        )
+        raise TypeError("parameter target must be a scalar, vector, or function space")
 
     def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters import BoundedVariable, UnboundedVariable
@@ -350,15 +337,12 @@ class SympyBackend(Backend):
         parameters = []
         offset = 0
         for concrete in declaration.list_concrete_parameters():
-            is_scalar = isinstance(
-                concrete, (BoundedVariable, UnboundedVariable)
-            )
+            is_scalar = isinstance(concrete, (BoundedVariable, UnboundedVariable))
             size = 1 if is_scalar else concrete.size
             block = flat_values[offset : offset + size, :]
             if block.rows != size:
                 raise ValueError(
-                    "solver decisions do not match function parameter "
-                    "declarations"
+                    "solver decisions do not match function parameter " "declarations"
                 )
             parameters.append(
                 block[0]
@@ -384,18 +368,14 @@ class SympyBackend(Backend):
         if not blocks:
             raise ValueError("parameter blocks must not be empty")
         return sp.ImmutableMatrix(
-            sp.Matrix.vstack(
-                *(self._as_parameter_column(block) for block in blocks)
-            )
+            sp.Matrix.vstack(*(self._as_parameter_column(block) for block in blocks))
         )
 
     def _as_parameter_column(self, block):
         value = self.to_backend_array(block)
         if isinstance(value, MatrixType):
             return sp.ImmutableMatrix(value.rows * value.cols, 1, list(value))
-        if isinstance(
-            value, (sp.ImmutableDenseNDimArray, sp.MutableDenseNDimArray)
-        ):
+        if isinstance(value, (sp.ImmutableDenseNDimArray, sp.MutableDenseNDimArray)):
             return sp.ImmutableMatrix(len(value), 1, list(value))
         return sp.ImmutableMatrix([value])
 
@@ -449,9 +429,7 @@ class SympyBackend(Backend):
             array = array.toarray()
         if isinstance(array, np.ndarray):
             if len(array.shape) == 1:
-                return to_matrix(
-                    sp.Array(array.tolist(), shape=(array.shape[0], 1))
-                )
+                return to_matrix(sp.Array(array.tolist(), shape=(array.shape[0], 1)))
             elif len(array.shape) == 2:
                 return to_matrix(sp.Array(array.tolist(), shape=array.shape))
             return sp.Array(array.tolist(), shape=array.shape)
@@ -462,9 +440,7 @@ class SympyBackend(Backend):
                 return sp.Array(array)
         if isinstance(array, np.float64):
             return sp.Float(float(array))
-        if isinstance(
-            array, (sp.ImmutableDenseNDimArray, sp.MutableDenseNDimArray)
-        ):
+        if isinstance(array, (sp.ImmutableDenseNDimArray, sp.MutableDenseNDimArray)):
             if len(array.shape) == 1:
                 array = array.reshape(*array.shape, 1)
             if len(array.shape) == 2:
@@ -516,9 +492,7 @@ class SympyBackend(Backend):
 
     def evaluate(self, function: Function, inputs: ArrayLike):
 
-        results = _evaluate_sympy_tape(
-            function.tape, inputs, function.output, self, {}
-        )
+        results = _evaluate_sympy_tape(function.tape, inputs, function.output, self, {})
 
         def eval(x):
             if x is None:
@@ -593,16 +567,11 @@ class SympyBackend(Backend):
             else:
                 shape = dim.shape
                 if len(shape) == 1:
-                    sym = sp.Array(
-                        [sp.Symbol(f"{name}_{i}") for i in range(shape[0])]
-                    )
+                    sym = sp.Array([sp.Symbol(f"{name}_{i}") for i in range(shape[0])])
                 else:
                     sym = sp.Array(
                         [
-                            [
-                                sp.Symbol(f"{name}_{i}_{j}")
-                                for j in range(shape[1])
-                            ]
+                            [sp.Symbol(f"{name}_{i}_{j}") for j in range(shape[1])]
                             for i in range(shape[0])
                         ]
                     )
