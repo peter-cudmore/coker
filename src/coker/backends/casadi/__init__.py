@@ -120,33 +120,25 @@ class CasadiBackend(Backend):
     def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
-            return self._fit_function_parameter(
-                declaration, target, flat_values
-            )
+            return self._fit_function_parameter(declaration, target, flat_values)
         if isinstance(target, VectorSpace):
-            return np.asarray(
-                self.to_numpy_array(flat_values), dtype=float
-            ).reshape(target.dimension)
+            return np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(
+                target.dimension
+            )
         if isinstance(target, Scalar):
             if flat_values.numel() != 1:
                 raise ValueError("scalar parameter must have one solver value")
             return float(
-                np.asarray(
-                    self.to_numpy_array(flat_values), dtype=float
-                ).reshape(-1)[0]
+                np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(-1)[0]
             )
-        raise TypeError(
-            "parameter target must be a scalar, vector, or function space"
-        )
+        raise TypeError("parameter target must be a scalar, vector, or function space")
 
     def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters.function_parameters import FittedFunction
 
         parameters = split_function_parameter_values(
             declaration,
-            np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(
-                -1
-            ),
+            np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(-1),
         )
         return FittedFunction(
             declaration,
@@ -161,15 +153,11 @@ class CasadiBackend(Backend):
     def _concatenate_parameter_blocks(self, blocks):
         if not blocks:
             raise ValueError("parameter blocks must not be empty")
-        return ca.vertcat(
-            *(self._as_parameter_column(block) for block in blocks)
-        )
+        return ca.vertcat(*(self._as_parameter_column(block) for block in blocks))
 
     @staticmethod
     def _as_parameter_column(block):
-        value = (
-            block if isinstance(block, (ca.DM, ca.MX, ca.SX)) else ca.DM(block)
-        )
+        value = block if isinstance(block, (ca.DM, ca.MX, ca.SX)) else ca.DM(block)
         return ca.reshape(value, value.numel(), 1)
 
     @staticmethod
@@ -179,9 +167,7 @@ class CasadiBackend(Backend):
             return ca.reshape(values, shape[0], 1)
         if len(shape) == 2:
             return ca.reshape(values, shape[1], shape[0]).T
-        raise ValueError(
-            "CasADi parameter tensors must have one or two dimensions"
-        )
+        raise ValueError("CasADi parameter tensors must have one or two dimensions")
 
     name = "casadi"
 
@@ -197,17 +183,13 @@ class CasadiBackend(Backend):
         declaration instead of the native function's interface.
         """
         if not isinstance(ca_function, ca.Function):
-            raise TypeError(
-                "CasadiBackend.import_function expects a casadi.Function"
-            )
+            raise TypeError("CasadiBackend.import_function expects a casadi.Function")
         signature = (
             _signature_from_casadi_function(ca_function)
             if signature is None
             else signature
         )
-        return import_native_function(
-            ca_function, signature, backend=self.name
-        )
+        return import_native_function(ca_function, signature, backend=self.name)
 
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         return to_numpy_array(array)
@@ -296,26 +278,19 @@ class CasadiBackend(Backend):
     ) -> CasadiLoweredFunction:
 
         if any(
-            isinstance(shape, FunctionSpace)
-            for shape in function.input_shape()
+            isinstance(shape, FunctionSpace) for shape in function.input_shape()
         ) or any(output is None for output in function.output):
             return CasadiLoweredFunction(self, function)
 
-        ca_inputs, ca_outputs = _lower_to_casadi(
-            function.tape, function.output
-        )
+        ca_inputs, ca_outputs = _lower_to_casadi(function.tape, function.output)
         return CasadiLoweredFunction(
             self, function, ca.Function("f", ca_inputs, ca_outputs)
         )
 
-    def evaluate(
-        self, function: Function, inputs: Sequence[Any]
-    ) -> list[Any | None]:
+    def evaluate(self, function: Function, inputs: Sequence[Any]) -> list[Any | None]:
         workspace: dict[int, Any] = {}
 
-        for idx, (space, arg) in enumerate(
-            zip(function.input_shape(), inputs)
-        ):
+        for idx, (space, arg) in enumerate(zip(function.input_shape(), inputs)):
             assert not isinstance(arg, Tracer)
             index = function.tape.input_indicies[idx]
             if isinstance(arg, np.ndarray):

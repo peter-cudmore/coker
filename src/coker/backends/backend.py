@@ -56,9 +56,7 @@ def _restore_output_slots(
     output_specs: Sequence[FunctionOutputSpec],
 ) -> list[Tracer | None]:
     """Expand compact graph outputs into their declared ABI slots."""
-    output_count = sum(
-        output_spec.shape is not None for output_spec in output_specs
-    )
+    output_count = sum(output_spec.shape is not None for output_spec in output_specs)
     present_results = (
         (result,)
         if output_count == 1
@@ -102,22 +100,14 @@ def append_native_outputs(
 
     def compact_native(*native_args: Any) -> Any:
         native_outputs = native(*native_args)
-        values = (
-            (native_outputs,)
-            if len(output_specs) == 1
-            else tuple(native_outputs)
-        )
+        values = (native_outputs,) if len(output_specs) == 1 else tuple(native_outputs)
         if len(values) != len(output_specs):
             raise ValueError(
                 f"Native callable returned {len(values)} results; expected "
                 f"{len(output_specs)}"
             )
         present_outputs = tuple(values[index] for index in output_indices)
-        return (
-            present_outputs[0]
-            if len(present_outputs) == 1
-            else present_outputs
-        )
+        return present_outputs[0] if len(present_outputs) == 1 else present_outputs
 
     function_space = FunctionSpace(
         f"{backend}_native",
@@ -186,9 +176,7 @@ def split_function_parameter_values(declaration: Any, flat_values: Any):
             raise ValueError(
                 "solver decisions do not match function parameter declarations"
             )
-        parameters.append(
-            block[0] if is_scalar else block.reshape(concrete.shape)
-        )
+        parameters.append(block[0] if is_scalar else block.reshape(concrete.shape))
         offset += size
     if offset != flat_values.shape[0]:
         raise ValueError(
@@ -256,9 +244,7 @@ class Backend(metaclass=ABCMeta):
     def get_evaluator(self) -> Evaluator:
         """Return this backend's compiled-plan evaluator."""
 
-    def evaluate(
-        self, function: Function, inputs: Sequence[Any]
-    ) -> list[Any | None]:
+    def evaluate(self, function: Function, inputs: Sequence[Any]) -> list[Any | None]:
         return self.get_evaluator().evaluate(function, inputs)
 
     def append_native_call(
@@ -268,10 +254,7 @@ class Backend(metaclass=ABCMeta):
         outer_tape: Tape,
     ) -> list[Tracer | None] | None:
         """Append a backend-specific native call, if this backend owns it."""
-        if (
-            function._native_callable is not None
-            and function.backend != self.name
-        ):
+        if function._native_callable is not None and function.backend != self.name:
             raise RuntimeError(
                 "Cannot compose native callable for backend "
                 f"{function.backend!r} into {self.name!r} trace"
@@ -305,9 +288,7 @@ class VariationalSolver:
     @property
     def parameters(self) -> List[str]:
         """List the free optimisation parameter names."""
-        raise NotImplementedError(
-            "Subclasses must implement parameters property"
-        )
+        raise NotImplementedError("Subclasses must implement parameters property")
 
     def solve(self, **kwargs):
         """Solve the variational problem.

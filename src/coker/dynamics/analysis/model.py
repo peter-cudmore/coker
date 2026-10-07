@@ -116,9 +116,7 @@ def compute_rank_closure(
     """Compute the rank closure of scalar generator expressions."""
     current = generators
     rows = [compute_gradient(expression) for expression in current]
-    matrix = (
-        sp.Matrix.vstack(*rows) if rows else empty_matrix(0, required_rank)
-    )
+    matrix = sp.Matrix.vstack(*rows) if rows else empty_matrix(0, required_rank)
     previous_rank: int | None = None
     order = 0
 
@@ -160,6 +158,4 @@ def compute_rank_closure(
 
 def add_condition(result: Result, condition: sp.Expr) -> Result:
     """Add a DAE regularity condition to a rank result."""
-    return replace(
-        result, rank_conditions=(condition, *result.rank_conditions)
-    )
+    return replace(result, rank_conditions=(condition, *result.rank_conditions))

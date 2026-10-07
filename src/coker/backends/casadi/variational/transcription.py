@@ -62,9 +62,7 @@ class CasadiVariationalSolver(VariationalSolver):
         parameters: List[str],
         map_arguments: Callable[..., Dict[str, ca.DM]],
         solver: ca.Function,
-        assemble_solution: Callable[
-            [ca.DM, float, object], VariationalSolution
-        ],
+        assemble_solution: Callable[[ca.DM, float, object], VariationalSolution],
         initialiser: Optional[ca.Function] = None,
         warm_start: bool = False,
         unscale_objective: Callable[[float], float] = float,
@@ -99,9 +97,7 @@ class CasadiVariationalSolver(VariationalSolver):
         **fixed_parameters,
     ) -> VariationalSolution:
         """Solve one fixed transcription without adaptive mesh dispatch."""
-        solver_arguments = self._map_arguments(
-            fixed_parameters, previous_solution
-        )
+        solver_arguments = self._map_arguments(fixed_parameters, previous_solution)
         x0 = solver_arguments["x0"]
         solver_kwargs = {
             "lbx": solver_arguments["lbx"],
@@ -133,9 +129,7 @@ class CasadiVariationalSolver(VariationalSolver):
             )
             x0 = initialised["x"]
             initial_cost = float(initialised["f"])
-            assert (
-                initial_cost <= ca.inf
-            ), f"Cost at guess {initial_cost} is not finite"
+            assert initial_cost <= ca.inf, f"Cost at guess {initial_cost} is not finite"
 
         result = self._solver(
             x0=x0,
@@ -145,23 +139,16 @@ class CasadiVariationalSolver(VariationalSolver):
         if not solve_info.success:
             objective = float(result["f"])
             constraints = np.asarray(result["g"], dtype=float).reshape(-1)
-            decision_variables = np.asarray(result["x"], dtype=float).reshape(
-                -1
-            )
-            lower_bounds = np.asarray(
-                solver_arguments["lbg"], dtype=float
-            ).reshape(-1)
-            upper_bounds = np.asarray(
-                solver_arguments["ubg"], dtype=float
-            ).reshape(-1)
+            decision_variables = np.asarray(result["x"], dtype=float).reshape(-1)
+            lower_bounds = np.asarray(solver_arguments["lbg"], dtype=float).reshape(-1)
+            upper_bounds = np.asarray(solver_arguments["ubg"], dtype=float).reshape(-1)
             maximum_constraint_violation = max(
                 0.0,
                 float(np.max(lower_bounds - constraints, initial=0.0)),
                 float(np.max(constraints - upper_bounds, initial=0.0)),
             )
             accepts_small_search_direction = (
-                solve_info.return_status
-                == "Search_Direction_Becomes_Too_Small"
+                solve_info.return_status == "Search_Direction_Becomes_Too_Small"
                 and math.isfinite(objective)
                 and np.isfinite(constraints).all()
                 and np.isfinite(decision_variables).all()
@@ -232,9 +219,7 @@ class _ConstraintAccumulator:
         self._add_rows(value, lower, upper, provenance)
 
     def build(self, decision_variables):
-        rows = preprocess_constraint_rows(
-            self._rows, tolerance=self._factory.tolerance
-        )
+        rows = preprocess_constraint_rows(self._rows, tolerance=self._factory.tolerance)
         if self._factory.options.reduce_affine_equalities:
             rows = reduce_affine_equality_rows(
                 rows,
@@ -312,9 +297,7 @@ def _scale_nlp(
         normalized_cost = ca.substitute(
             cost, raw_decision_variables, physical_variables
         )
-        normalized_g = ca.substitute(
-            g, raw_decision_variables, physical_variables
-        )
+        normalized_g = ca.substitute(g, raw_decision_variables, physical_variables)
         objective_scale = _derive_objective_scale(
             float(
                 ca.Function("nominal_cost", [raw_decision_variables], [cost])(
@@ -767,9 +750,7 @@ def _create_solver(
     parameter_offset = layout.parameter_slice.start
     path_offset = layout.horizon_size
     path_slice = slice(path_offset, path_offset + layout.path_size)
-    control_slice = slice(
-        path_slice.stop, path_slice.stop + layout.control_size
-    )
+    control_slice = slice(path_slice.stop, path_slice.stop + layout.control_size)
 
     def interpolate_path_guess(previous_path) -> ca.DM:
         return poly_collection.collect_guess(previous_path)
@@ -781,9 +762,7 @@ def _create_solver(
         if len(previous_controls) != len(factory.control_factory.sizes):
             return None
         values = []
-        for control, size in zip(
-            previous_controls, factory.control_factory.sizes
-        ):
+        for control, size in zip(previous_controls, factory.control_factory.sizes):
             value = np.asarray(control.value, dtype=float).reshape((-1,))
             if value.size != size:
                 return None
@@ -794,9 +773,7 @@ def _create_solver(
         fixed_parameters: Dict[str, ParameterVariable],
         previous_solution: Optional[VariationalSolution] = None,
     ) -> Dict[str, ca.DM]:
-        unknown = sorted(
-            set(fixed_parameters) - set(factory.parameter_indices)
-        )
+        unknown = sorted(set(fixed_parameters) - set(factory.parameter_indices))
         if unknown:
             raise KeyError(f"Unknown solver parameters: {', '.join(unknown)}")
 
@@ -806,9 +783,7 @@ def _create_solver(
         p_guess = ca.DM(factory.p_guess_base)
 
         if previous_solution is not None:
-            physical_x0[path_slice] = interpolate_path_guess(
-                previous_solution.path
-            )
+            physical_x0[path_slice] = interpolate_path_guess(previous_solution.path)
             if factory.free_horizon:
                 physical_x0[layout.horizon_slice] = previous_solution.t_final
             control_guess = compatible_control_guess(previous_solution)
@@ -844,21 +819,15 @@ def _create_solver(
             ubx = physical_ubx
         else:
             x0 = ca.DM(variable_scaling.encode(physical_x0))
-            lbx, ubx = variable_scaling.encode_bounds(
-                physical_lbx, physical_ubx
-            )
+            lbx, ubx = variable_scaling.encode_bounds(physical_lbx, physical_ubx)
         init_control_guess = physical_x0[control_slice]
         init_horizon_guess = (
             physical_x0[layout.horizon_slice]
             if factory.free_horizon
             else ca.DM.zeros(0, 1)
         )
-        init_lbg = ca.vertcat(
-            lbg, p_guess, init_control_guess, init_horizon_guess
-        )
-        init_ubg = ca.vertcat(
-            ubg, p_guess, init_control_guess, init_horizon_guess
-        )
+        init_lbg = ca.vertcat(lbg, p_guess, init_control_guess, init_horizon_guess)
+        init_ubg = ca.vertcat(ubg, p_guess, init_control_guess, init_horizon_guess)
         return {
             "x0": x0,
             "lbx": lbx,
@@ -890,16 +859,10 @@ def create_variational_solver(
     options = _resolve_options(problem)
     if (
         options.refinement_enabled
-        and options.maximum_degree
-        < problem.transcription_options.minimum_degree
+        and options.maximum_degree < problem.transcription_options.minimum_degree
     ):
-        raise ValueError(
-            "maximum_degree must be at least transcription minimum_degree"
-        )
-    if (
-        options.refinement_enabled
-        and problem.transcription_options.minimum_degree <= 1
-    ):
+        raise ValueError("maximum_degree must be at least transcription minimum_degree")
+    if options.refinement_enabled and problem.transcription_options.minimum_degree <= 1:
         raise ValueError(
             "transcription minimum_degree must be greater than one "
             "for adaptive refinement"
@@ -968,9 +931,7 @@ def create_variational_solver(
 
             new_intervals = []
             new_degrees = []
-            for (start, stop), degree, error in zip(
-                intervals, degrees, errors
-            ):
+            for (start, stop), degree, error in zip(intervals, degrees, errors):
                 if error <= options.mesh_tolerance:
                     new_intervals.append((start, stop))
                     new_degrees.append(degree)
@@ -989,9 +950,7 @@ def create_variational_solver(
                 new_degrees.extend(refined_degrees)
             previous_solution = solution
             intervals, degrees = new_intervals, new_degrees
-        raise RuntimeError(
-            "CasADi adaptive refinement terminated unexpectedly"
-        )
+        raise RuntimeError("CasADi adaptive refinement terminated unexpectedly")
 
     initial_solver._adaptive_solve = solve_adaptive
     return initial_solver

@@ -59,15 +59,12 @@ class FunctionParameter(ABC):
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         """Evaluate the declared function from structured parameter values."""
 
-    def build_function(
-        self, target: FunctionSpace, backend: str | None
-    ) -> Function:
+    def build_function(self, target: FunctionSpace, backend: str | None) -> Function:
         """Build a function of the target argument and concrete blocks."""
         target = self.validate_target(target)
         declarations = self.list_concrete_parameters()
         parameter_spaces = [
-            _concrete_parameter_space(declaration)
-            for declaration in declarations
+            _concrete_parameter_space(declaration) for declaration in declarations
         ]
         argument_count = len(target.arguments)
         return function(
@@ -87,6 +84,4 @@ def _concrete_parameter_space(
         return Scalar(declaration.name)
     if isinstance(declaration, (BoundVector, DenseTensorVariable)):
         return VectorSpace(declaration.name, declaration.shape)
-    raise TypeError(
-        "function parameter declarations must be scalar or dense variables"
-    )
+    raise TypeError("function parameter declarations must be scalar or dense variables")

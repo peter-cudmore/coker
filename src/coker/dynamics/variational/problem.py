@@ -109,9 +109,7 @@ class ConstraintSpec:
     upper_bound: object
 
     @classmethod
-    def from_expression(
-        cls, constraint: InequalityExpression
-    ) -> "ConstraintSpec":
+    def from_expression(cls, constraint: InequalityExpression) -> "ConstraintSpec":
         return cls(
             residual=constraint.value,
             lower_bound=constraint.lower,
@@ -154,19 +152,13 @@ class VariationalProblem:
     )
     backend: Optional[str] = "casadi"
     path_constraints: List[InequalityExpression] = field(default_factory=list)
-    terminal_constraints: List[InequalityExpression] = field(
-        default_factory=list
-    )
-    initial_constraints: List[InequalityExpression] = field(
-        default_factory=list
-    )
+    terminal_constraints: List[InequalityExpression] = field(default_factory=list)
+    initial_constraints: List[InequalityExpression] = field(default_factory=list)
 
     @property
     def horizon_decision(self) -> Optional[BoundedVariable]:
         """Return the duration declaration when duration is optimized."""
-        return (
-            self.t_final if isinstance(self.t_final, BoundedVariable) else None
-        )
+        return self.t_final if isinstance(self.t_final, BoundedVariable) else None
 
     @property
     def decision_declarations(self) -> List[ParameterMixin]:
@@ -187,20 +179,12 @@ class VariationalProblem:
                 self.system,
                 self.parameters,
                 self.parameter_layout,
-            ) = specialize_system_parameters(
-                self.system, self.parameters or []
-            )
+            ) = specialize_system_parameters(self.system, self.parameters or [])
         self.path_constraints = _normalize_constraints(self.path_constraints)
-        self.terminal_constraints = _normalize_constraints(
-            self.terminal_constraints
-        )
-        self.initial_constraints = _normalize_constraints(
-            self.initial_constraints
-        )
+        self.terminal_constraints = _normalize_constraints(self.terminal_constraints)
+        self.initial_constraints = _normalize_constraints(self.initial_constraints)
         system_space = self.system.parameters
-        system_width = (
-            _space_size(system_space) if system_space is not None else 0
-        )
+        system_width = _space_size(system_space) if system_space is not None else 0
         declaration_width = len(self.parameters or [])
         if self.system_parameter_map is not None:
             expected_shape = (system_width, declaration_width)
@@ -239,9 +223,7 @@ class VariationalProblem:
         from coker.backends import get_backend_by_name
 
         backend_name = self.backend if backend is None else backend
-        return get_backend_by_name(backend_name).create_variational_solver(
-            self
-        )
+        return get_backend_by_name(backend_name).create_variational_solver(self)
 
     def __call__(self) -> VariationalSolution:
         return self.get_solver().solve()

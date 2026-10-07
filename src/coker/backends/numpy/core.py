@@ -73,27 +73,21 @@ class NumpyBackend(Backend):
     def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
-            return self._fit_function_parameter(
-                declaration, target, flat_values
-            )
+            return self._fit_function_parameter(declaration, target, flat_values)
         if isinstance(target, VectorSpace):
             return flat_values.reshape(target.dimension)
         if isinstance(target, Scalar):
             if flat_values.size != 1:
                 raise ValueError("scalar parameter must have one solver value")
             return flat_values[0]
-        raise TypeError(
-            "parameter target must be a scalar, vector, or function space"
-        )
+        raise TypeError("parameter target must be a scalar, vector, or function space")
 
     @staticmethod
     def _concatenate_parameter_blocks(blocks):
         if not blocks:
             raise ValueError("parameter blocks must not be empty")
         return np.concatenate(
-            tuple(
-                np.asarray(block, dtype=float).reshape(-1) for block in blocks
-            )
+            tuple(np.asarray(block, dtype=float).reshape(-1) for block in blocks)
         )
 
     def _fit_function_parameter(self, declaration, target, flat_values):
@@ -226,9 +220,7 @@ class NumpyBackend(Backend):
         else:
             method = Solver.RK45.value
 
-        sol = scp.integrate.solve_ivp(
-            f, t_span, y0, method=method, t_eval=t_eval
-        )
+        sol = scp.integrate.solve_ivp(f, t_span, y0, method=method, t_eval=t_eval)
 
         x_out = (
             sol.y[: x0.shape[0], -1]
@@ -258,9 +250,7 @@ class NumpyBackend(Backend):
         options=None,
     ):
         if options is not None:
-            raise TypeError(
-                "NumPy optimisation does not support solver options"
-            )
+            raise TypeError("NumPy optimisation does not support solver options")
         return build_optimisation_problem(
             self, cost, constraints, arguments, outputs, initial_conditions
         )

@@ -39,9 +39,7 @@ class BoundedConstraint:
         return self.residual, self.lower_bound, self.upper_bound
 
 
-def bounded(
-    residual: Any, lower_bound: Any, upper_bound: Any
-) -> BoundedConstraint:
+def bounded(residual: Any, lower_bound: Any, upper_bound: Any) -> BoundedConstraint:
     """Constrain a residual within explicit lower and upper bounds."""
     return BoundedConstraint(residual, lower_bound, upper_bound)
 

@@ -58,16 +58,9 @@ class PytorchModuleParameter(FunctionParameter):
                 "parameter"
             )
         buffer_items = tuple(prototype.named_buffers())
-        if any(
-            not isinstance(buffer, torch.Tensor) for _, buffer in buffer_items
-        ):
-            raise ValueError(
-                "import_as_parameter requires tensor module buffers"
-            )
-        if any(
-            not parameter.is_floating_point()
-            for _, parameter in parameter_items
-        ):
+        if any(not isinstance(buffer, torch.Tensor) for _, buffer in buffer_items):
+            raise ValueError("import_as_parameter requires tensor module buffers")
+        if any(not parameter.is_floating_point() for _, parameter in parameter_items):
             raise ValueError(
                 "import_as_parameter requires floating-point module parameters"
             )
@@ -124,16 +117,13 @@ class PytorchModuleParameter(FunctionParameter):
         """Evaluate with decision tensors and frozen buffer snapshots."""
         if len(parameters) != len(self.parameters):
             raise ValueError(
-                "module parameter values do not match imported module "
-                "parameters"
+                "module parameter values do not match imported module " "parameters"
             )
 
         argument_tensor = _as_tensor(argument, self._reference_parameter)
         expected_input_shape = _space_shape(self._input_space)
         if tuple(argument_tensor.shape) != expected_input_shape:
-            raise ValueError(
-                "module argument does not match the supplied input space"
-            )
+            raise ValueError("module argument does not match the supplied input space")
         parameter_values = {
             parameter_name: _as_parameter_tensor(
                 value,
@@ -146,9 +136,7 @@ class PytorchModuleParameter(FunctionParameter):
             )
         }
         buffer_values = {
-            buffer_name: buffer.detach()
-            .clone()
-            .to(device=argument_tensor.device)
+            buffer_name: buffer.detach().clone().to(device=argument_tensor.device)
             for buffer_name, buffer in self._buffer_items
         }
         result = torch.func.functional_call(
@@ -166,34 +154,25 @@ class PytorchModuleParameter(FunctionParameter):
                 "module result does not match the supplied output space"
             ) from ex
 
-    def build_function(
-        self, target: FunctionSpace, backend: str | None
-    ) -> Function:
+    def build_function(self, target: FunctionSpace, backend: str | None) -> Function:
         """Build the native call used by PyTorch parameter specialization."""
         target = self.validate_target(target)
         if backend not in (None, "pytorch"):
             raise ValueError(
-                "PytorchModuleParameter can only be built for the pytorch "
-                "backend"
+                "PytorchModuleParameter can only be built for the pytorch " "backend"
             )
         parameter_spaces = tuple(
             _parameter_space(parameter) for parameter in self.parameters
         )
         signature = FunctionSignature(
             inputs=(
-                FunctionInputSpec(
-                    target.arguments[0].name, target.arguments[0]
-                ),
+                FunctionInputSpec(target.arguments[0].name, target.arguments[0]),
                 *(
                     FunctionInputSpec(parameter.name, space)
-                    for parameter, space in zip(
-                        self.parameters, parameter_spaces
-                    )
+                    for parameter, space in zip(self.parameters, parameter_spaces)
                 ),
             ),
-            outputs=(
-                FunctionOutputSpec(target.output[0].name, target.output[0]),
-            ),
+            outputs=(FunctionOutputSpec(target.output[0].name, target.output[0]),),
         )
         return import_native_function(
             lambda argument, *parameters: self.evaluate(parameters, argument),
@@ -263,7 +242,6 @@ def _as_parameter_tensor(
     )
     if tuple(tensor.shape) != tuple(prototype_value.shape):
         raise ValueError(
-            "module parameter value does not match imported module parameter "
-            "shape"
+            "module parameter value does not match imported module parameter " "shape"
         )
     return tensor.to(dtype=dtype, device=device)

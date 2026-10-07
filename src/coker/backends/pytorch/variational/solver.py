@@ -64,9 +64,7 @@ class PytorchVariationalSolverOptions(SolverOptions):
         if not isinstance(self.ode, PytorchODESolverParameters):
             raise TypeError("ode must be PytorchODESolverParameters")
         if self.optimiser_method not in _OPTIMISER_TYPES:
-            raise ValueError(
-                f"Unsupported PyTorch optimiser {self.optimiser_method!r}"
-            )
+            raise ValueError(f"Unsupported PyTorch optimiser {self.optimiser_method!r}")
         if not isinstance(self.optimiser_options, Mapping):
             raise TypeError("optimiser_options must be a mapping")
 
@@ -75,9 +73,7 @@ class PytorchVariationalSolverOptions(SolverOptions):
 class _ParameterBlock:
     """One original declaration represented in the flat solver vector."""
 
-    declaration: (
-        BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
-    )
+    declaration: BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable
     offset: int
     shape: tuple[int, ...]
     names: tuple[str, ...]
@@ -90,9 +86,7 @@ class _ParameterBlock:
 class PytorchVariationalSolver(VariationalSolver):
     """Fixed-horizon, bound-only neural-ODE parameter fitter."""
 
-    def __init__(
-        self, problem, options: PytorchVariationalSolverOptions | None = None
-    ):
+    def __init__(self, problem, options: PytorchVariationalSolverOptions | None = None):
         self.problem = problem
         self._options = options or PytorchVariationalSolverOptions()
         backend = get_backend_by_name("pytorch", set_current=False)
@@ -111,16 +105,13 @@ class PytorchVariationalSolver(VariationalSolver):
         self._loss = self._backend.lower(loss)
         self._quadratures = tuple(
             self._backend.lower(
-                Function(
-                    spec.integrand.tape, spec.integrand, backend="pytorch"
-                )
+                Function(spec.integrand.tape, spec.integrand, backend="pytorch")
             )
             for spec in problem.quadratures
         )
         if problem.horizon_decision is not None:
             raise NotImplementedError(
-                "Optimized horizons are not supported by "
-                "PyTorch variational solving"
+                "Optimized horizons are not supported by " "PyTorch variational solving"
             )
         if problem.control:
             raise NotImplementedError(
@@ -139,8 +130,7 @@ class PytorchVariationalSolver(VariationalSolver):
         _, z_dim, q_dim = problem.system.get_state_dimensions()
         if z_dim is not None:
             raise NotImplementedError(
-                "Algebraic states are not supported by "
-                "PyTorch variational solving"
+                "Algebraic states are not supported by " "PyTorch variational solving"
             )
         self._system_quadrature_size = q_dim.flat() if q_dim else 0
         self._system_x0 = self._backend.lower(problem.system.x0)
@@ -152,13 +142,9 @@ class PytorchVariationalSolver(VariationalSolver):
         )
         self._system_y = self._backend.lower(problem.system.y)
         self._blocks = self._collect_parameter_blocks()
-        self._names = tuple(
-            name for block in self._blocks for name in block.names
-        )
+        self._names = tuple(name for block in self._blocks for name in block.names)
         if len(set(self._names)) != len(self._names):
-            raise ValueError(
-                "PyTorch variational parameter names must be unique"
-            )
+            raise ValueError("PyTorch variational parameter names must be unique")
         self._parameter_indices = {
             name: index for index, name in enumerate(self._names)
         }
@@ -173,12 +159,12 @@ class PytorchVariationalSolver(VariationalSolver):
             & torch.isfinite(self._upper_bounds)
             & ~self._bound_fixed_coordinates
         )
-        self._lower_only_bounds = torch.isfinite(
-            self._lower_bounds
-        ) & ~torch.isfinite(self._upper_bounds)
-        self._upper_only_bounds = ~torch.isfinite(
-            self._lower_bounds
-        ) & torch.isfinite(self._upper_bounds)
+        self._lower_only_bounds = torch.isfinite(self._lower_bounds) & ~torch.isfinite(
+            self._upper_bounds
+        )
+        self._upper_only_bounds = ~torch.isfinite(self._lower_bounds) & torch.isfinite(
+            self._upper_bounds
+        )
         self._has_two_sided_bounds = bool(self._two_sided_bounds.any())
         self._has_lower_only_bounds = bool(self._lower_only_bounds.any())
         self._has_upper_only_bounds = bool(self._upper_only_bounds.any())
@@ -192,9 +178,7 @@ class PytorchVariationalSolver(VariationalSolver):
             if problem.system_parameter_map is not None
             else None
         )
-        self._t_initial = torch.zeros(
-            (), device=self._device, dtype=self._dtype
-        )
+        self._t_initial = torch.zeros((), device=self._device, dtype=self._dtype)
         self._t_final = torch.tensor(
             float(problem.t_final), device=self._device, dtype=self._dtype
         )
@@ -208,10 +192,7 @@ class PytorchVariationalSolver(VariationalSolver):
         layout = self.problem.parameter_layout
         entries: list[
             tuple[
-                BoundedVariable
-                | UnboundedVariable
-                | BoundVector
-                | DenseTensorVariable,
+                BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable,
                 int,
                 int,
             ]
@@ -219,19 +200,14 @@ class PytorchVariationalSolver(VariationalSolver):
         offset = 0
         if layout is None:
             declarations = (
-                (declaration, None)
-                for declaration in self.problem.parameters or []
+                (declaration, None) for declaration in self.problem.parameters or []
             )
             concrete_offsets = None
         else:
             concrete_offsets = layout.concrete_offsets
             declarations = zip(
                 layout.declarations,
-                (
-                    layout.offsets
-                    if concrete_offsets is None
-                    else concrete_offsets
-                ),
+                (layout.offsets if concrete_offsets is None else concrete_offsets),
             )
 
         for declaration, layout_offsets in declarations:
@@ -241,9 +217,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 else (declaration,)
             )
             if concrete_offsets is None:
-                block_end = (
-                    offset if layout_offsets is None else layout_offsets[0]
-                )
+                block_end = offset if layout_offsets is None else layout_offsets[0]
             elif len(layout_offsets) != len(concrete):
                 raise ValueError(
                     "Function parameter layout does not match its declarations"
@@ -301,8 +275,7 @@ class PytorchVariationalSolver(VariationalSolver):
             for _, block_start, block_end in entries:
                 if block_start != offset:
                     raise ValueError(
-                        "Function parameter layout does not match its "
-                        "declarations"
+                        "Function parameter layout does not match its " "declarations"
                     )
                 offset = block_end
 
@@ -317,9 +290,7 @@ class PytorchVariationalSolver(VariationalSolver):
             names = tuple(
                 (
                     declaration.name
-                    if isinstance(
-                        declaration, (BoundedVariable, UnboundedVariable)
-                    )
+                    if isinstance(declaration, (BoundedVariable, UnboundedVariable))
                     else f"{declaration.name}_{index}"
                 )
                 for declaration, start, end in entries
@@ -335,9 +306,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 start,
                 (
                     ()
-                    if isinstance(
-                        declaration, (BoundedVariable, UnboundedVariable)
-                    )
+                    if isinstance(declaration, (BoundedVariable, UnboundedVariable))
                     else declaration.shape
                 ),
                 names[start:end],
@@ -368,26 +337,18 @@ class PytorchVariationalSolver(VariationalSolver):
             upper_blocks.append(upper)
             guess_blocks.append(guess)
 
-        lower_values = (
-            np.concatenate(lower_blocks) if lower_blocks else np.zeros(0)
-        )
-        upper_values = (
-            np.concatenate(upper_blocks) if upper_blocks else np.zeros(0)
-        )
+        lower_values = np.concatenate(lower_blocks) if lower_blocks else np.zeros(0)
+        upper_values = np.concatenate(upper_blocks) if upper_blocks else np.zeros(0)
         guesses = np.concatenate(guess_blocks) if guess_blocks else np.zeros(0)
         if not np.all(np.isfinite(guesses)):
-            raise ValueError(
-                "PyTorch variational parameter guesses must be finite"
-            )
+            raise ValueError("PyTorch variational parameter guesses must be finite")
         if (
             np.any(np.isnan(lower_values))
             or np.any(np.isnan(upper_values))
             or np.any(np.isposinf(lower_values))
             or np.any(np.isneginf(upper_values))
         ):
-            raise ValueError(
-                "PyTorch variational parameter bounds are invalid"
-            )
+            raise ValueError("PyTorch variational parameter bounds are invalid")
         finite_lower = np.isfinite(lower_values)
         finite_upper = np.isfinite(upper_values)
         if np.any(finite_lower & finite_upper & (lower_values > upper_values)):
@@ -399,16 +360,11 @@ class PytorchVariationalSolver(VariationalSolver):
             | (finite_upper & (guesses > upper_values))
         ):
             raise ValueError(
-                "PyTorch variational parameter guesses are outside their "
-                "bounds"
+                "PyTorch variational parameter guesses are outside their " "bounds"
             )
         return (
-            torch.as_tensor(
-                lower_values, device=self._device, dtype=self._dtype
-            ),
-            torch.as_tensor(
-                upper_values, device=self._device, dtype=self._dtype
-            ),
+            torch.as_tensor(lower_values, device=self._device, dtype=self._dtype),
+            torch.as_tensor(upper_values, device=self._device, dtype=self._dtype),
             torch.as_tensor(guesses, device=self._device, dtype=self._dtype),
             torch.as_tensor(
                 finite_lower & finite_upper & (lower_values == upper_values),
@@ -420,18 +376,14 @@ class PytorchVariationalSolver(VariationalSolver):
     def _check_fixed(self, fixed_parameters):
         unknown = set(fixed_parameters) - set(self._names)
         if unknown:
-            raise ValueError(
-                f"Unknown variational parameter(s): {sorted(unknown)}"
-            )
+            raise ValueError(f"Unknown variational parameter(s): {sorted(unknown)}")
         for name, fixed_value in fixed_parameters.items():
             value = float(fixed_value)
             index = self._parameter_indices[name]
             lower = self._lower_bounds[index]
             upper = self._upper_bounds[index]
             if not np.isfinite(value) or value < lower or value > upper:
-                raise ValueError(
-                    f"Fixed parameter {name!r} is outside its bounds"
-                )
+                raise ValueError(f"Fixed parameter {name!r} is outside its bounds")
 
     def _system_parameters(self, values):
         if values.numel() == 0 or self._system_parameter_map is None:
@@ -448,9 +400,7 @@ class PytorchVariationalSolver(VariationalSolver):
             dtype=self._dtype,
         )
 
-    def _trace_arguments(
-        self, signature, time, state, parameters, quadratures
-    ):
+    def _trace_arguments(self, signature, time, state, parameters, quadratures):
         def state_trajectory(_time):
             return state
 
@@ -474,9 +424,7 @@ class PytorchVariationalSolver(VariationalSolver):
             }
         )
         try:
-            return [
-                arguments[input_spec.name] for input_spec in signature.inputs
-            ]
+            return [arguments[input_spec.name] for input_spec in signature.inputs]
         except KeyError as ex:
             raise NotImplementedError(
                 f"Unsupported quadrature input {ex.args[0]!r}"
@@ -490,12 +438,9 @@ class PytorchVariationalSolver(VariationalSolver):
         x0, z0 = self._system_x0.execute((0.0, None, parameters))
         if z0 is not None:
             raise NotImplementedError(
-                "Algebraic states are not supported by "
-                "PyTorch variational solving"
+                "Algebraic states are not supported by " "PyTorch variational solving"
             )
-        x0 = torch.as_tensor(
-            x0, device=self._device, dtype=self._dtype
-        ).reshape(-1)
+        x0 = torch.as_tensor(x0, device=self._device, dtype=self._dtype).reshape(-1)
         system_q0 = torch.zeros(
             self._system_quadrature_size,
             device=self._device,
@@ -510,8 +455,7 @@ class PytorchVariationalSolver(VariationalSolver):
             from torchdiffeq import odeint
         except ImportError as ex:
             raise RuntimeError(
-                "PyTorch variational solving requires "
-                "`pip install coker[pytorch]`"
+                "PyTorch variational solving requires " "`pip install coker[pytorch]`"
             ) from ex
 
         def rhs(time, integrated):
@@ -519,16 +463,16 @@ class PytorchVariationalSolver(VariationalSolver):
             system_q_end = state_end + self._system_quadrature_size
             state = integrated[:state_end]
             registered_quadratures = integrated[system_q_end:]
-            dx = self._system_dxdt.execute(
-                (time, state, None, None, parameters)
-            )[0].reshape(-1)
+            dx = self._system_dxdt.execute((time, state, None, None, parameters))[
+                0
+            ].reshape(-1)
             derivatives = [dx]
             if self._system_quadrature_size:
                 assert self._system_dqdt is not None
                 derivatives.append(
-                    self._system_dqdt.execute(
-                        (time, state, None, None, parameters)
-                    )[0].reshape(-1)
+                    self._system_dqdt.execute((time, state, None, None, parameters))[
+                        0
+                    ].reshape(-1)
                 )
             if self._quadratures:
                 derivatives.append(
@@ -575,12 +519,8 @@ class PytorchVariationalSolver(VariationalSolver):
         system = self.problem.system
 
         def output_native(*args):
-            time = torch.as_tensor(
-                args[0], device=self._device, dtype=self._dtype
-            )
-            parameter_values = (args[-1] if len(args) > 1 else values).reshape(
-                -1
-            )
+            time = torch.as_tensor(args[0], device=self._device, dtype=self._dtype)
+            parameter_values = (args[-1] if len(args) > 1 else values).reshape(-1)
             parameters = self._system_parameters(parameter_values)
             if parameter_values.numel() == 0 and system.parameters is None:
                 parameters = None
@@ -594,9 +534,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 state = state[-1]
                 system_q = system_q[-1] if system_q is not None else None
             elif bool(time == 0):
-                state, system_q, _ = self._integrate(
-                    parameter_values, time.reshape(1)
-                )
+                state, system_q, _ = self._integrate(parameter_values, time.reshape(1))
                 state = state[0]
                 system_q = system_q[0] if system_q is not None else None
             else:
@@ -637,20 +575,14 @@ class PytorchVariationalSolver(VariationalSolver):
             ratio = (guesses[mask] - self._lower_bounds[mask]) / (
                 self._upper_bounds[mask] - self._lower_bounds[mask]
             )
-            raw[mask] = torch.logit(
-                torch.clamp(ratio, min=epsilon, max=1 - epsilon)
-            )
+            raw[mask] = torch.logit(torch.clamp(ratio, min=epsilon, max=1 - epsilon))
         if self._has_lower_only_bounds:
             mask = self._lower_only_bounds
-            delta = torch.clamp(
-                guesses[mask] - self._lower_bounds[mask], min=epsilon
-            )
+            delta = torch.clamp(guesses[mask] - self._lower_bounds[mask], min=epsilon)
             raw[mask] = delta + torch.log(-torch.expm1(-delta))
         if self._has_upper_only_bounds:
             mask = self._upper_only_bounds
-            delta = torch.clamp(
-                self._upper_bounds[mask] - guesses[mask], min=epsilon
-            )
+            delta = torch.clamp(self._upper_bounds[mask] - guesses[mask], min=epsilon)
             raw[mask] = delta + torch.log(-torch.expm1(-delta))
         return raw
 
@@ -666,14 +598,14 @@ class PytorchVariationalSolver(VariationalSolver):
             ) * torch.sigmoid(raw_values[mask])
         if self._has_lower_only_bounds:
             mask = self._lower_only_bounds
-            values[mask] = self._lower_bounds[
-                mask
-            ] + torch.nn.functional.softplus(raw_values[mask])
+            values[mask] = self._lower_bounds[mask] + torch.nn.functional.softplus(
+                raw_values[mask]
+            )
         if self._has_upper_only_bounds:
             mask = self._upper_only_bounds
-            values[mask] = self._upper_bounds[
-                mask
-            ] - torch.nn.functional.softplus(raw_values[mask])
+            values[mask] = self._upper_bounds[mask] - torch.nn.functional.softplus(
+                raw_values[mask]
+            )
         return values
 
     def solve(self, **fixed_parameters):
@@ -735,9 +667,7 @@ class PytorchVariationalSolver(VariationalSolver):
                     optimizer.zero_grad()
                     cost_value = objective()
                     if not torch.isfinite(cost_value):
-                        raise FloatingPointError(
-                            "non-finite variational objective"
-                        )
+                        raise FloatingPointError("non-finite variational objective")
                     cost_value.backward()
                     return cost_value
 
@@ -753,9 +683,7 @@ class PytorchVariationalSolver(VariationalSolver):
                 str(ex),
                 iteration_count=None,
             )
-            raise SolveFailure(
-                "PyTorch variational solve failed", info
-            ) from ex
+            raise SolveFailure("PyTorch variational solve failed", info) from ex
         values = values_from_raw().detach()
         times = self._trajectory_times()
         states, system_q, registered_q = self._integrate(values, times)
@@ -766,9 +694,7 @@ class PytorchVariationalSolver(VariationalSolver):
             if quadrature is not None
         ]
         all_quadrature_values = (
-            np.concatenate(quadrature_values, axis=1)
-            if quadrature_values
-            else None
+            np.concatenate(quadrature_values, axis=1) if quadrature_values else None
         )
         path_values = (
             np.concatenate((state_values, all_quadrature_values), axis=1)
@@ -781,12 +707,8 @@ class PytorchVariationalSolver(VariationalSolver):
             len(times) - 1,
             path_values.reshape(-1, 1),
         )
-        state_projector = np.zeros(
-            (state_values.shape[1], path_values.shape[1])
-        )
-        state_projector[:, : state_values.shape[1]] = np.eye(
-            state_values.shape[1]
-        )
+        state_projector = np.zeros((state_values.shape[1], path_values.shape[1]))
+        state_projector[:, : state_values.shape[1]] = np.eye(state_values.shape[1])
         quadrature_projector = None
         if all_quadrature_values is not None:
             quadrature_projector = np.zeros(

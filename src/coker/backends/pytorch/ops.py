@@ -18,17 +18,13 @@ scalar_types = (float, complex, int, bool, np.number)
 def div(num, den):
     """Divide while retaining Coker's explicit all-zero 0/0 result."""
     if isinstance(num, torch.Tensor) or isinstance(den, torch.Tensor):
-        num_tensor = (
-            num if isinstance(num, torch.Tensor) else torch.as_tensor(num)
-        )
+        num_tensor = num if isinstance(num, torch.Tensor) else torch.as_tensor(num)
         den_tensor = (
             den
             if isinstance(den, torch.Tensor)
             else torch.as_tensor(den, device=num_tensor.device)
         )
-        if bool(torch.all(den_tensor == 0)) and bool(
-            torch.all(num_tensor == 0)
-        ):
+        if bool(torch.all(den_tensor == 0)) and bool(torch.all(num_tensor == 0)):
             return num
         return torch.divide(num, den)
     if num == 0 and den == 0:
@@ -40,9 +36,7 @@ def _promoted_linear(fn, *args):
     tensors = [arg for arg in args if isinstance(arg, torch.Tensor)]
     if len(tensors) > 1:
         dtype = tensors[0].dtype
-        devices = {
-            tensor.device for tensor in tensors if tensor.device.type != "cpu"
-        }
+        devices = {tensor.device for tensor in tensors if tensor.device.type != "cpu"}
         if len(devices) > 1:
             devices_text = ", ".join(sorted(map(str, devices)))
             raise ValueError(

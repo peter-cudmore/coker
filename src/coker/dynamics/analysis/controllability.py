@@ -26,9 +26,7 @@ def _matrix_from_fields(fields, state_dimension: int) -> sp.ImmutableMatrix:
 
 
 def _append_if_independent(fields, rank: int, candidate, state_dimension: int):
-    candidate_rank = _matrix_from_fields(
-        (*fields, candidate), state_dimension
-    ).rank()
+    candidate_rank = _matrix_from_fields((*fields, candidate), state_dimension).rank()
     if candidate_rank <= rank:
         return fields, rank, False
     return (*fields, candidate), candidate_rank, True
@@ -57,9 +55,7 @@ def analyse_controllability(
     try:
         symbolic = normalize_symbolic_system(system)
         tangent = (
-            geometry(symbolic)
-            if isinstance(symbolic, SymbolicDAESystem)
-            else None
+            geometry(symbolic) if isinstance(symbolic, SymbolicDAESystem) else None
         )
     except UnsupportedSystemError as error:
         return _rank.create_inconclusive(
@@ -85,9 +81,7 @@ def analyse_controllability(
             matrix=_rank.empty_matrix(state_dimension, 0, immutable=True),
         )
 
-    affine_fields = extract_control_affine_fields(
-        symbolic.dynamics, symbolic.controls
-    )
+    affine_fields = extract_control_affine_fields(symbolic.dynamics, symbolic.controls)
     if affine_fields is None:
         return _rank.create_inconclusive(
             ControllabilityResult,
@@ -98,9 +92,7 @@ def analyse_controllability(
     drift, controls = affine_fields
     base_fields = (drift, *controls)
     algebraic_fields = (
-        {field: tangent.lift(field) for field in base_fields}
-        if tangent
-        else {}
+        {field: tangent.lift(field) for field in base_fields} if tangent else {}
     )
     fields = ()
     rank = 0
@@ -125,9 +117,7 @@ def analyse_controllability(
                 matrix_rank=rank,
             )
             return (
-                _rank.add_condition(outcome, tangent.condition)
-                if tangent
-                else outcome
+                _rank.add_condition(outcome, tangent.condition) if tangent else outcome
             )
         if not frontier:
             outcome = _rank.create_result(
@@ -139,9 +129,7 @@ def analyse_controllability(
                 matrix_rank=rank,
             )
             return (
-                _rank.add_condition(outcome, tangent.condition)
-                if tangent
-                else outcome
+                _rank.add_condition(outcome, tangent.condition) if tangent else outcome
             )
         if max_order is not None and order >= max_order:
             return _rank.create_inconclusive(
@@ -182,9 +170,7 @@ def analyse_controllability(
                 matrix_rank=rank,
             )
             return (
-                _rank.add_condition(outcome, tangent.condition)
-                if tangent
-                else outcome
+                _rank.add_condition(outcome, tangent.condition) if tangent else outcome
             )
         frontier = next_frontier
         order += 1

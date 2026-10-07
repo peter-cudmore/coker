@@ -124,8 +124,7 @@ class MathematicalProgram(SymbolicCallable):
         for index, (arg, expected) in enumerate(zip(args, self.input_shape)):
             if isinstance(arg, Tracer) and arg.dim != expected:
                 raise ValueError(
-                    f"Argument {index} has shape {arg.dim}, "
-                    f"expected {expected}"
+                    f"Argument {index} has shape {arg.dim}, " f"expected {expected}"
                 )
 
     def _call_numeric(self, *args):
@@ -156,9 +155,7 @@ class MathematicalProgram(SymbolicCallable):
         captured_blocks = []
         offset = 0
         for size in capture_sizes:
-            captured_blocks.append(
-                tuple(captured_values[offset : offset + size])
-            )
+            captured_blocks.append(tuple(captured_values[offset : offset + size]))
             offset += size
         self.parameters = self._reconstruct_parameters(captured_blocks)
         objective_array = np.asarray(objective)
@@ -181,16 +178,12 @@ class MathematicalProgram(SymbolicCallable):
         """Rebuild public decision values from private solver captures."""
         from coker.backends import get_backend_by_name
 
-        backend = get_backend_by_name(
-            self.backend or "numpy", set_current=False
-        )
+        backend = get_backend_by_name(self.backend or "numpy", set_current=False)
         return {
             metadata.name: backend._materialize_parameter(
                 metadata.target, metadata.declaration, blocks
             )
-            for metadata, blocks in zip(
-                self._parameter_captures, captured_blocks
-            )
+            for metadata, blocks in zip(self._parameter_captures, captured_blocks)
         }
 
     def _call_symbolic(self, *args):
@@ -199,8 +192,7 @@ class MathematicalProgram(SymbolicCallable):
         tape = TraceContext.get_local_tape()
         if tape is None:
             raise RuntimeError(
-                "symbolic program calls require an active Coker "
-                "tracing context"
+                "symbolic program calls require an active Coker " "tracing context"
             )
         if self.backend is not None and tape.backend != self.backend:
             raise ValueError(
@@ -208,8 +200,7 @@ class MathematicalProgram(SymbolicCallable):
                 f"but the enclosing graph uses {tape.backend!r}"
             )
         arguments = [
-            dim.to_space(f"input_{i}")
-            for i, dim in enumerate(self.input_shape)
+            dim.to_space(f"input_{i}") for i, dim in enumerate(self.input_shape)
         ]
         result_dimensions = self.result_shape
         capture_dimensions = tuple(
@@ -256,8 +247,7 @@ class MathematicalProgram(SymbolicCallable):
         get_backend_by_name(backend_name, set_current=False)
         return function(
             arguments=[
-                dim.to_space(f"input_{i}")
-                for i, dim in enumerate(self.input_shape)
+                dim.to_space(f"input_{i}") for i, dim in enumerate(self.input_shape)
             ],
             implementation=cast(Callable, self._call_symbolic),
             backend=backend_name,
@@ -272,9 +262,7 @@ class ProblemBuilder:
         solver_options: SolverOptions | None = None,
     ):
         self.tape: Optional[Tape] = Tape()
-        self.arguments = (
-            [self.tape.input(a) for a in arguments] if arguments else []
-        )
+        self.arguments = [self.tape.input(a) for a in arguments] if arguments else []
         self.objective = None
         self.constraints = []
         self.outputs = []
@@ -290,9 +278,7 @@ class ProblemBuilder:
         else:
             variable = self.tape.input(VectorSpace(name, shape))
             initial_value = (
-                np.zeros(shape=shape)
-                if initial_value is None
-                else initial_value
+                np.zeros(shape=shape) if initial_value is None else initial_value
             )
         self.initial_conditions[variable.index] = initial_value
         return variable
@@ -320,9 +306,7 @@ class ProblemBuilder:
         if not isinstance(declaration, FunctionParameter):
             raise TypeError("declaration must implement FunctionParameter")
         if not isinstance(declaration.name, str) or not declaration.name:
-            raise ValueError(
-                "function parameter name must be a non-empty string"
-            )
+            raise ValueError("function parameter name must be a non-empty string")
         target = declaration.validate_target(target)
         concrete_declarations = declaration.list_concrete_parameters()
         concrete_values = []
@@ -332,9 +316,7 @@ class ProblemBuilder:
                     "concrete parameter declaration name must be non-empty"
                 )
             if isinstance(concrete, (BoundedVariable, UnboundedVariable)):
-                value = self._add_decision(
-                    concrete.name, initial_value=concrete.guess
-                )
+                value = self._add_decision(concrete.name, initial_value=concrete.guess)
             elif isinstance(concrete, (BoundVector, DenseTensorVariable)):
                 value = self._add_decision(
                     concrete.name,

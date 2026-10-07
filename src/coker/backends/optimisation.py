@@ -44,9 +44,7 @@ def build_problem_bindings(
     parameter_index_list = list(parameter_indices)
     parameter_index_set = set(parameter_index_list)
     decision_indices = [
-        index
-        for index in tape.input_indicies
-        if index not in parameter_index_set
+        index for index in tape.input_indicies if index not in parameter_index_set
     ]
     return ProblemBindings(
         tape=tape,
@@ -63,9 +61,7 @@ def make_bindings(indices: Iterable[int], tape: Tape) -> list[InputBinding]:
         dim = tape.dim[index]
         flat_size = dim.flat()
         bindings.append(
-            InputBinding(
-                index=index, dim=dim, start=offset, stop=offset + flat_size
-            )
+            InputBinding(index=index, dim=dim, start=offset, stop=offset + flat_size)
         )
         offset += flat_size
     return bindings
@@ -82,8 +78,7 @@ def build_initial_guess(
     for binding in decision_bindings:
         if binding.index not in initial_conditions:
             raise ValueError(
-                "Missing initial condition for decision "
-                f"variable {binding.index}"
+                "Missing initial condition for decision " f"variable {binding.index}"
             )
         flat_slices.append(
             flatten_value(initial_conditions[binding.index], binding.dim)
@@ -120,8 +115,7 @@ def materialise_tape_inputs(
         for binding in decision_bindings
     }
     parameter_values = {
-        binding.index: value
-        for binding, value in zip(parameter_bindings, runtime_args)
+        binding.index: value for binding, value in zip(parameter_bindings, runtime_args)
     }
 
     tape_inputs = []
@@ -180,9 +174,7 @@ def decision_degree(
             )
             continue
         if op == OP.VALUE:
-            degree = decision_degree(
-                arguments[0], tape, decision_indices, memo
-            )
+            degree = decision_degree(arguments[0], tape, decision_indices, memo)
         elif op.is_linear():
             degree = max(
                 (memo[dependency.index] for dependency in dependencies),
@@ -191,9 +183,7 @@ def decision_degree(
         elif op.is_bilinear():
             degree = sum(memo[dependency.index] for dependency in dependencies)
         else:
-            argument_degrees = [
-                memo[dependency.index] for dependency in dependencies
-            ]
+            argument_degrees = [memo[dependency.index] for dependency in dependencies]
             degree = 0 if all(value == 0 for value in argument_degrees) else 3
         memo[index] = degree
     return memo[tracer.index]
@@ -228,9 +218,7 @@ def normalise_value(value: object, dim: Dimension) -> object:
             )
         return float(array.reshape(-1)[0])
     if array.shape != dim.dim:
-        raise ValueError(
-            f"Expected value with shape {dim.dim}, got {array.shape}"
-        )
+        raise ValueError(f"Expected value with shape {dim.dim}, got {array.shape}")
     return array
 
 

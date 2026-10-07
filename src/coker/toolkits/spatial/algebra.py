@@ -102,9 +102,7 @@ class Rotation3:
 
     def as_quaternion(self):
         if self._quaternion is None:
-            self._quaternion = UnitQuaternion.from_axis_angle(
-                self._axis, self._angle
-            )
+            self._quaternion = UnitQuaternion.from_axis_angle(self._axis, self._angle)
         return self._quaternion
 
     @staticmethod
@@ -149,9 +147,7 @@ class Isometry3:
     ):
 
         self.rotation = (
-            Rotation3.zero()
-            if rotation is None
-            else (Rotation3.cast(rotation))
+            Rotation3.zero() if rotation is None else (Rotation3.cast(rotation))
         )
 
         self.translation = (
@@ -163,9 +159,7 @@ class Isometry3:
         )
 
     def __repr__(self):
-        return (
-            f"Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})"
-        )
+        return f"Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})"
 
     def __eq__(self, other):
         return (
@@ -192,10 +186,7 @@ class Isometry3:
             )
             return Isometry3(rotation, translation)
         elif isinstance(other, np.ndarray) and other.shape == (3,):
-            return (
-                self.rotation.as_quaternion().conjugate(other)
-                + self.translation
-            )
+            return self.rotation.as_quaternion().conjugate(other) + self.translation
         elif isinstance(other, np.ndarray) and other.shape == (4, 1):
             result = np.reshape(
                 self.rotation.as_quaternion().conjugate(other[0:3, 0])
@@ -208,9 +199,7 @@ class Isometry3:
 
     def apply(self, other):
         assert other.shape == (3,)
-        return (
-            self.rotation.as_quaternion().conjugate(other) + self.translation
-        )
+        return self.rotation.as_quaternion().conjugate(other) + self.translation
 
     def transpose(self):
         q = self.rotation.inverse()
@@ -256,9 +245,7 @@ class Screw:
         translation: Optional[Vec3] = None,
         magnitude: float = 1,
     ):
-        self.rotation = (
-            rotation if rotation is not None else np.array([0, 0, 0])
-        )
+        self.rotation = rotation if rotation is not None else np.array([0, 0, 0])
         self.translation = (
             translation if translation is not None else np.array([0, 0, 0])
         )
@@ -307,9 +294,7 @@ class Screw:
         return Screw(rotation / mag, translation / mag, mag)
 
     def to_array(self) -> np.ndarray:
-        return (
-            np.concatenate([self.rotation, self.translation]) * self.magnitude
-        )
+        return np.concatenate([self.rotation, self.translation]) * self.magnitude
 
     @staticmethod
     def from_array(array):
@@ -365,10 +350,7 @@ class Screw:
         else:
             alpha = angle
 
-        if (
-            isinstance(self.rotation, np.ndarray)
-            and (self.rotation == 0).all()
-        ):
+        if isinstance(self.rotation, np.ndarray) and (self.rotation == 0).all():
             return Isometry3(
                 rotation=Rotation3.zero(), translation=self.translation * alpha
             )
@@ -494,9 +476,9 @@ class SE3CoAdjoint:
         p = self.transform.translation
 
         translation = q_inv.conjugate(zeta.translation)
-        rotation = -q_inv.conjugate(
-            hat(p) @ zeta.translation
-        ) + q_inv.conjugate(zeta.rotation)
+        rotation = -q_inv.conjugate(hat(p) @ zeta.translation) + q_inv.conjugate(
+            zeta.rotation
+        )
 
         return Screw(
             rotation=rotation,
@@ -570,6 +552,4 @@ def se3_bracket(left: Screw, right: Screw) -> Screw:
         right.rotation, left.translation
     )
 
-    return Screw(
-        translation=v, rotation=w, angle=right.magnitude * left.magnitude
-    )
+    return Screw(translation=v, rotation=w, angle=right.magnitude * left.magnitude)

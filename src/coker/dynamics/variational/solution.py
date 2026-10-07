@@ -60,9 +60,7 @@ class SegmentDefectDiagnostic:
 class VariationalSolution:
     cost: float
     path: InterpolatingPolyCollection
-    projectors: Tuple[
-        Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
-    ]
+    projectors: Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]
     control_solutions: List[ControlSolution]
     parameters: Mapping[str, object]
     output: Callable[
@@ -74,12 +72,8 @@ class VariationalSolution:
     adaptive_refinement_rounds: Optional[int] = None
     adaptive_maximum_defect: Optional[float] = None
     segment_defects: Tuple[SegmentDefectDiagnostic, ...] = ()
-    path_constraint_exprs: List[InequalityExpression] = field(
-        default_factory=list
-    )
-    terminal_constraint_exprs: List[InequalityExpression] = field(
-        default_factory=list
-    )
+    path_constraint_exprs: List[InequalityExpression] = field(default_factory=list)
+    terminal_constraint_exprs: List[InequalityExpression] = field(default_factory=list)
     _parameter_vector: np.ndarray = field(
         default_factory=lambda: np.zeros((0,)), init=False, repr=False
     )
@@ -129,9 +123,7 @@ class VariationalSolution:
                 [] if path_constraint_exprs is None else path_constraint_exprs
             ),
             terminal_constraint_exprs=(
-                []
-                if terminal_constraint_exprs is None
-                else terminal_constraint_exprs
+                [] if terminal_constraint_exprs is None else terminal_constraint_exprs
             ),
         )
         solution._parameter_vector = parameter_vector
@@ -174,10 +166,7 @@ class VariationalSolution:
         return np.concatenate(violations) if violations else np.zeros((0,))
 
     def as_raw(self) -> np.ndarray:
-        points = [
-            np.vstack([np.array([t]), x])
-            for t, x, _ in self.path.knot_points()
-        ]
+        points = [np.vstack([np.array([t]), x]) for t, x, _ in self.path.knot_points()]
         return np.hstack(points)
 
     def state(self, t):
@@ -211,16 +200,8 @@ class VariationalSolution:
 
         def f(t, v):
             x = self.projectors[0] @ v
-            z = (
-                self.projectors[1] @ v
-                if self.projectors[1] is not None
-                else None
-            )
-            q = (
-                self.projectors[2] @ v
-                if self.projectors[2] is not None
-                else None
-            )
+            z = self.projectors[1] @ v if self.projectors[1] is not None else None
+            q = self.projectors[2] @ v if self.projectors[2] is not None else None
             u = self.control_law(t)
             return self.output(t, x, z, u, self.parameters, q)
 

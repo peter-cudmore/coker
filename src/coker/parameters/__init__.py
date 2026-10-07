@@ -10,11 +10,7 @@ from .scalar import (
 )
 
 ParameterVariable = (
-    BoundedVariable
-    | UnboundedVariable
-    | BoundVector
-    | DenseTensorVariable
-    | Constant
+    BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable | Constant
 )
 
 __all__ = [

@@ -18,9 +18,7 @@ from coker.parameters import (
 from .base import FunctionParameter
 
 
-def _concrete_parameter_name(
-    name: str | None, fallback: str, suffix: str
-) -> str:
+def _concrete_parameter_name(name: str | None, fallback: str, suffix: str) -> str:
     prefix = name if isinstance(name, str) and name else fallback
     return f"{prefix}_{suffix}"
 
@@ -28,9 +26,7 @@ def _concrete_parameter_name(
 def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
     if not isinstance(target, FunctionSpace):
         raise TypeError("target must be a FunctionSpace")
-    if len(target.arguments) != 1 or not isinstance(
-        target.arguments[0], Scalar
-    ):
+    if len(target.arguments) != 1 or not isinstance(target.arguments[0], Scalar):
         raise ValueError("target must have exactly one scalar argument")
     if len(target.output) != 1 or not isinstance(target.output[0], Scalar):
         raise ValueError("target must have exactly one scalar output")
@@ -48,9 +44,7 @@ def _validate_basis_values(
     if lower_bound is None:
         lower = upper = None
     else:
-        if not isinstance(lower_bound, Real) or not isinstance(
-            upper_bound, Real
-        ):
+        if not isinstance(lower_bound, Real) or not isinstance(upper_bound, Real):
             raise TypeError("bounds must be real scalars")
         lower, upper = float(lower_bound), float(upper_bound)
         if np.isnan(lower) or np.isnan(upper) or lower >= upper:
@@ -66,9 +60,7 @@ def _validate_basis_values(
             raise ValueError(f"guess must have exactly {size} values")
         if not np.all(np.isfinite(values)):
             raise ValueError("guess must contain only finite values")
-    if lower is not None and (
-        np.any(values < lower) or np.any(values > upper)
-    ):
+    if lower is not None and (np.any(values < lower) or np.any(values > upper)):
         raise ValueError("guess must lie within the declared bounds")
     return tuple(float(value) for value in values), lower, upper
 
@@ -99,11 +91,7 @@ class RadialBasisFunction(FunctionParameter):
             raise TypeError(
                 "centers must be a one-dimensional numeric sequence"
             ) from exc
-        if (
-            centers.ndim != 1
-            or centers.size == 0
-            or not np.all(np.isfinite(centers))
-        ):
+        if centers.ndim != 1 or centers.size == 0 or not np.all(np.isfinite(centers)):
             raise ValueError("centers must be a non-empty finite vector")
         if not isinstance(self.width, Real) or not np.isfinite(self.width):
             raise TypeError("width must be a finite real scalar")
@@ -115,18 +103,12 @@ class RadialBasisFunction(FunctionParameter):
             lower_bound,
             upper_bound,
         )
-        object.__setattr__(
-            self, "centers", tuple(float(center) for center in centers)
-        )
+        object.__setattr__(self, "centers", tuple(float(center) for center in centers))
         object.__setattr__(self, "width", float(self.width))
-        name = _concrete_parameter_name(
-            self.name, "radial_basis", "coefficients"
-        )
+        name = _concrete_parameter_name(self.name, "radial_basis", "coefficients")
         parameter: ParameterVariable
         if lower is None:
-            parameter = DenseTensorVariable(
-                name, np.asarray(guess, dtype=float)
-            )
+            parameter = DenseTensorVariable(name, np.asarray(guess, dtype=float))
         else:
             parameter = BoundVector(
                 name,
