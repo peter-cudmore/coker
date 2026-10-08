@@ -14,7 +14,7 @@ from coker.dynamics import (
 from coker.dynamics.system import create_dynamics_from_spec
 
 
-def _residual_model(*, F=None, x0=None, y=None):
+def _residual_model(backend, *, F=None, x0=None, y=None):
     if F is None:
         F = function(
             [
@@ -26,19 +26,19 @@ def _residual_model(*, F=None, x0=None, y=None):
                 None,
             ],
             lambda _t, _w, _wdot, _z, _u, _p: np.zeros(1),
-            backend="numpy",
+            backend=backend,
         )
     if x0 is None:
         x0 = function(
             [None, Noop(), None],
             lambda _z, _u, _p: (np.array([1.0]), None),
-            backend="numpy",
+            backend=backend,
         )
     if y is None:
         y = function(
             [Scalar("t"), VectorSpace("x", 1), None, Noop(), None, None],
             lambda _t, x, _z, _u, _p, _q: x,
-            backend="numpy",
+            backend=backend,
         )
     return ResidualDynamicalSystem(
         inputs=Noop(),
@@ -52,7 +52,7 @@ def _residual_model(*, F=None, x0=None, y=None):
     )
 
 
-def test_residual_ode_rows_are_state_rate_minus_public_dynamics():
+def test_residual_ode_rows_are_state_rate_minus_public_dynamics(backend):
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
@@ -63,7 +63,8 @@ def test_residual_ode_rows_are_state_rate_minus_public_dynamics():
             constraints=Noop(),
             outputs=lambda _t, x, _z, _u, _p, _q: x,
             quadratures=Noop(),
-        )
+        ),
+        backend=backend,
     )
 
     residual = to_residual_dynamical_system(system)
@@ -81,7 +82,7 @@ def test_residual_ode_rows_are_state_rate_minus_public_dynamics():
     )
 
 
-def test_residual_rejects_invalid_residual_arity():
+def test_residual_rejects_invalid_residual_arity(backend):
     callback = function(
         [
             Scalar("t"),
@@ -91,16 +92,16 @@ def test_residual_rejects_invalid_residual_arity():
             Noop(),
         ],
         lambda _t, _w, _wdot, _z, _u: np.zeros(1),
-        backend="numpy",
+        backend=backend,
     )
 
     with pytest.raises(TypeError, match="residual callback has 5 inputs; expected 6"):
-        replace(_residual_model(), F=callback)
+        replace(_residual_model(backend), F=callback)
 
 
 def test_numpy_validates_initial_condition_dimensions_at_evaluation():
     residual = replace(
-        _residual_model(),
+        _residual_model("numpy"),
         x0=function(
             [None, Noop(), None],
             lambda _z, _u, _p: (np.zeros(2), None),
@@ -117,7 +118,7 @@ def test_numpy_validates_initial_condition_dimensions_at_evaluation():
 
 def test_numpy_defers_residual_row_count_validation_to_evaluation():
     residual = replace(
-        _residual_model(),
+        _residual_model("numpy"),
         F=function(
             [
                 Scalar("t"),
@@ -141,7 +142,7 @@ def test_numpy_defers_residual_row_count_validation_to_evaluation():
         )
 
 
-def test_residual_lowers_function_valued_controls_on_demand():
+def test_residual_lowers_function_valued_controls_on_demand(backend):
     control = FunctionSpace(
         "u", arguments=[Scalar("time")], output=[VectorSpace("value", 1)]
     )
@@ -155,7 +156,8 @@ def test_residual_lowers_function_valued_controls_on_demand():
             constraints=Noop(),
             outputs=lambda _t, x, _z, _u, _p, _q: x,
             quadratures=Noop(),
-        )
+        ),
+        backend=backend,
     )
 
     residual = to_residual_dynamical_system(system)
@@ -238,7 +240,7 @@ def test_residual_lowers_native_casadi_function_parameter_symbolically():
     assert float(residual_function(0.0, 0.0, 5.0, 3.0)) == pytest.approx(3.5)
 
 
-def test_residual_preserves_scalar_quadrature_rate_row_shape():
+def test_residual_preserves_scalar_quadrature_rate_row_shape(backend):
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
@@ -249,7 +251,8 @@ def test_residual_preserves_scalar_quadrature_rate_row_shape():
             constraints=Noop(),
             outputs=lambda _t, x, _z, _u, _p, _q: x,
             quadratures=lambda t, x, _z, _u, _p: x[0] - t,
-        )
+        ),
+        backend=backend,
     )
 
     residual = to_residual_dynamical_system(system)
@@ -266,7 +269,7 @@ def test_residual_preserves_scalar_quadrature_rate_row_shape():
     np.testing.assert_allclose(actual, np.array([16.75, 25.25, 37.25]))
 
 
-def test_residual_orders_state_quadrature_and_algebraic_rows():
+def test_residual_orders_state_quadrature_and_algebraic_rows(backend):
     def initial(z, _u, p):
         return np.array([p, 2.0 * p]), z
 
@@ -292,7 +295,8 @@ def test_residual_orders_state_quadrature_and_algebraic_rows():
             constraints=constraints,
             outputs=output,
             quadratures=quadrature,
-        )
+        ),
+        backend=backend,
     )
     residual = to_residual_dynamical_system(system)
 
