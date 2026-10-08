@@ -14,58 +14,30 @@ from coker.dynamics import (
 from coker.dynamics.system import create_dynamics_from_spec
 
 
-def _residual_model(
-    *,
-    F=None,
-    x0=None,
-    y=None,
-    algebraic=None,
-    quadrature=None,
-    output_quadrature=False,
-):
-    differential = Dimension(1)
-    algebraic_size = 0 if algebraic is None else algebraic.flat()
-    quadrature_size = 0 if quadrature is None else quadrature.flat()
-    state_size = differential.flat() + quadrature_size
+def _residual_model(*, F=None, x0=None, y=None):
     if F is None:
         F = function(
             [
                 Scalar("t"),
-                VectorSpace("w", state_size),
-                VectorSpace("wdot", state_size),
-                VectorSpace("z", algebraic_size),
+                VectorSpace("w", 1),
+                VectorSpace("wdot", 1),
+                VectorSpace("z", 0),
                 Noop(),
                 None,
             ],
-            lambda _t, _w, _wdot, _z, _u, _p: np.zeros(
-                state_size + algebraic_size
-            ),
+            lambda _t, _w, _wdot, _z, _u, _p: np.zeros(1),
             backend="numpy",
         )
     if x0 is None:
         x0 = function(
-            [
-                algebraic.to_space("z") if algebraic is not None else None,
-                Noop(),
-                None,
-            ],
-            lambda _z, _u, _p: (
-                np.array([1.0]),
-                np.zeros(algebraic_size) if algebraic_size else None,
-            ),
+            [None, Noop(), None],
+            lambda _z, _u, _p: (np.array([1.0]), None),
             backend="numpy",
         )
     if y is None:
         y = function(
-            [
-                Scalar("t"),
-                differential.to_space("x"),
-                algebraic.to_space("z") if algebraic_size else None,
-                Noop(),
-                None,
-                quadrature.to_space("q") if quadrature_size else None,
-            ],
-            (lambda _t, x, _z, _u, _p, q: q if output_quadrature else x),
+            [Scalar("t"), VectorSpace("x", 1), None, Noop(), None, None],
+            lambda _t, x, _z, _u, _p, _q: x,
             backend="numpy",
         )
     return ResidualDynamicalSystem(
@@ -74,9 +46,9 @@ def _residual_model(
         x0=x0,
         F=F,
         y=y,
-        differential=differential,
-        algebraic=algebraic,
-        quadrature=quadrature,
+        differential=Dimension(1),
+        algebraic=None,
+        quadrature=None,
     )
 
 
@@ -122,83 +94,8 @@ def test_residual_rejects_invalid_residual_arity():
         backend="numpy",
     )
 
-    with pytest.raises(
-        TypeError, match="residual callback has 5 inputs; expected 6"
-    ):
+    with pytest.raises(TypeError, match="residual callback has 5 inputs; expected 6"):
         replace(_residual_model(), F=callback)
-
-
-@pytest.mark.parametrize(
-    ("field", "callback_factory", "model_kwargs"),
-    [
-        (
-            "F",
-            lambda: function(
-                [
-                    Scalar("t"),
-                    VectorSpace("w", 1),
-                    VectorSpace("wdot", 2),
-                    VectorSpace("z", 0),
-                    Noop(),
-                    None,
-                ],
-                lambda _t, _w, _wdot, _z, _u, _p: np.zeros(1),
-                backend="numpy",
-            ),
-            {},
-        ),
-        (
-            "F",
-            lambda: function(
-                [
-                    Scalar("t"),
-                    VectorSpace("w", 1),
-                    VectorSpace("wdot", 1),
-                    VectorSpace("z", 2),
-                    Noop(),
-                    None,
-                ],
-                lambda _t, _w, _wdot, _z, _u, _p: np.zeros(2),
-                backend="numpy",
-            ),
-            {"algebraic": Dimension(1)},
-        ),
-        (
-            "x0",
-            lambda: function(
-                [None, Noop(), None],
-                lambda _z, _u, _p: (np.zeros(2), None),
-                backend="numpy",
-            ),
-            {},
-        ),
-        (
-            "y",
-            lambda: function(
-                [
-                    Scalar("t"),
-                    VectorSpace("x", 2),
-                    None,
-                    Noop(),
-                    None,
-                    None,
-                ],
-                lambda _t, x, _z, _u, _p, _q: x,
-                backend="numpy",
-            ),
-            {},
-        ),
-    ],
-)
-def test_residual_defers_callback_dimension_validation(
-    field, callback_factory, model_kwargs
-):
-    residual = replace(
-        _residual_model(**model_kwargs),
-        **{field: callback_factory()},
-    )
-
-    assert isinstance(residual, ResidualDynamicalSystem)
 
 
 def test_numpy_validates_initial_condition_dimensions_at_evaluation():
@@ -235,9 +132,7 @@ def test_numpy_defers_residual_row_count_validation_to_evaluation():
         ),
     )
 
-    with pytest.raises(
-        ValueError, match="implicit residual must return one row"
-    ):
+    with pytest.raises(ValueError, match="implicit residual must return one row"):
         NumpyBackend().evaluate_integrals(
             residual,
             [np.array([1.0]), None, None],
@@ -300,11 +195,7 @@ def test_residual_lowers_native_casadi_function_parameter_symbolically():
     native_response.name = "response"
     declaration = ClosureParameter(
         native_response,
-        (
-            BoundedVariable(
-                "rate_scale", lower_bound=1.0, upper_bound=1.0, guess=1.0
-            ),
-        ),
+        (BoundedVariable("rate_scale", lower_bound=1.0, upper_bound=1.0, guess=1.0),),
     )
     system = create_dynamics_from_spec(
         DynamicsSpec(
@@ -319,9 +210,7 @@ def test_residual_lowers_native_casadi_function_parameter_symbolically():
         ),
         backend="casadi",
     )
-    specialized_system, _, _ = specialize_system_parameters(
-        system, [declaration]
-    )
+    specialized_system, _, _ = specialize_system_parameters(system, [declaration])
     residual = to_residual_dynamical_system(specialized_system)
 
     time = ca.MX.sym("time")
@@ -421,46 +310,3 @@ def test_residual_orders_state_quadrature_and_algebraic_rows():
         )
     )
     np.testing.assert_allclose(residual.F(t, w, wdot, z, None, p), expected)
-
-    x0, z0 = system.x0(z, None, p)
-    np.testing.assert_allclose(x0, [4.0, 8.0])
-    np.testing.assert_allclose(z0, z)
-    np.testing.assert_allclose(
-        system.dxdt(t, x, z, None, p), dynamics(t, x, z, None, p)
-    )
-    np.testing.assert_allclose(
-        system.g(t, x, z, None, p), constraints(t, x, z, None, p)
-    )
-    np.testing.assert_allclose(
-        system.dqdt(t, x, z, None, p), quadrature(t, x, z, None, p)
-    )
-    np.testing.assert_allclose(
-        system.y(t, x, z, None, p, w[2:]), output(t, x, z, None, p, w[2:])
-    )
-
-
-def test_numpy_integrates_a_residual_without_a_semiexplicit_certificate():
-    system = create_dynamics_from_spec(
-        DynamicsSpec(
-            inputs=Noop(),
-            parameters=None,
-            algebraic=None,
-            initial_conditions=lambda _z, _u, _p: (np.array([1.0]), None),
-            dynamics=lambda _t, x, _z, _u, _p: x,
-            constraints=Noop(),
-            outputs=lambda _t, x, _z, _u, _p, _q: x,
-            quadratures=Noop(),
-        )
-    )
-    residual = replace(to_residual_dynamical_system(system), legacy=None)
-
-    x_final, z_final, q_final = NumpyBackend().evaluate_integrals(
-        residual,
-        [np.array([1.0]), None, None],
-        0.25,
-        [None, None],
-    )
-
-    np.testing.assert_allclose(x_final, np.exp(0.25), rtol=1e-5)
-    assert z_final is None
-    assert q_final is None

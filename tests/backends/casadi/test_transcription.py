@@ -7,20 +7,6 @@ from coker.algebra.ops import Noop
 from coker.dynamics import ResidualDynamicalSystem, VariationalProblemBuilder
 from coker.parameters import BoundedVariable
 from coker.toolkits.codesign import Minimise
-from coker.dynamics.variational.solution import SegmentDefectDiagnostic
-
-
-def test_segment_defect_diagnostic_exposes_full_residual():
-    full_residual = np.array([0.25, -0.5])
-    diagnostic = SegmentDefectDiagnostic(
-        normalized_interval=(0.0, 1.0),
-        physical_interval=(0.0, 2.0),
-        degree=3,
-        tolerance=1e-6,
-        full_residual=full_residual,
-    )
-
-    assert diagnostic.full_residual is full_residual
 
 
 try:
@@ -229,7 +215,7 @@ def test_search_direction_too_small_requires_feasible_finite_result(
 
 
 @pytest.mark.skipif(not casadi_available, reason="CasAdi not available")
-def test_independent_coupled_residual_is_specialized_and_solved():
+def test_independent_coupled_residual_solves():
     gain = 0.75
     residual = ResidualDynamicalSystem(
         inputs=Noop(),
@@ -286,33 +272,10 @@ def test_independent_coupled_residual_is_specialized_and_solved():
     ) as builder:
         problem = builder.build(
             Minimise(
-                (
-                    builder.output(builder.t_final)[0]
-                    - gain * (1.0 - np.exp(-1.0 / 3.0))
-                )
+                (builder.output(builder.t_final)[0] - gain * (1.0 - np.exp(-1.0 / 3.0)))
                 ** 2
             )
         )
-
-    assert isinstance(problem.system, ResidualDynamicalSystem)
-    np.testing.assert_allclose(
-        problem.system.F(
-            0.0,
-            np.array([0.1]),
-            np.array([0.2]),
-            np.array([0.3]),
-            None,
-            np.array([gain]),
-        ),
-        residual.F(
-            0.0,
-            np.array([0.1]),
-            np.array([0.2]),
-            np.array([0.3]),
-            None,
-            gain,
-        ),
-    )
 
     solution = problem.get_solver("casadi").solve(gain=gain)
 

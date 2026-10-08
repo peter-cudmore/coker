@@ -101,9 +101,7 @@ def _coupled_continuous_values(times):
         (np.array([0.0, -0.25, -0.5]), (1, 3)),
     ],
 )
-def test_numpy_solves_coupled_residual_as_implicit_state_steps(
-    end_point, shape
-):
+def test_numpy_solves_coupled_residual_as_implicit_state_steps(end_point, shape):
     x, z, q = NumpyBackend().evaluate_integrals(
         _coupled_residual_system(),
         [np.array([0.0]), np.array([2.0 / 3.0]), np.array([0.0])],
@@ -175,9 +173,7 @@ def test_numpy_rejects_nonzero_implicit_state_step_residuals():
         (np.array([0.0, 0.25, 0.25]), "must be strictly monotonic"),
     ],
 )
-def test_numpy_validates_implicit_residual_evaluation_times(
-    end_point, message
-):
+def test_numpy_validates_implicit_residual_evaluation_times(end_point, message):
     system = _state_residual_system(
         lambda _t, _w, wdot, _z, _u, _p: np.array([wdot[0] - 1.0])
     )

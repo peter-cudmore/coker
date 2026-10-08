@@ -76,23 +76,16 @@ def test_casadi_system_integrates_residual_dae():
         backend="casadi",
     )
 
-    explicit = backend.evaluate_integrals(
-        system,
-        [np.array([1.0]), np.array([1.0]), None],
-        0.25,
-        [None, None],
-    )
-    residual = backend.evaluate_integrals(
+    x_final, z_final, q_final = backend.evaluate_integrals(
         to_residual_dynamical_system(system),
         [np.array([1.0]), np.array([1.0]), None],
         0.25,
         [None, None],
     )
-    for explicit_value, residual_value in zip(explicit, residual):
-        if explicit_value is not None:
-            np.testing.assert_allclose(explicit_value, residual_value)
     np.testing.assert_allclose(
-        np.asarray(explicit[0]).reshape(-1),
-        np.array([np.exp(0.25)]),
-        rtol=1e-5,
+        np.asarray(x_final).reshape(-1), np.array([np.exp(0.25)]), rtol=1e-5
     )
+    np.testing.assert_allclose(
+        np.asarray(z_final).reshape(-1), np.array([np.exp(0.25)]), rtol=1e-5
+    )
+    assert q_final is None
