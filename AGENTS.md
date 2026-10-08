@@ -55,6 +55,11 @@ Keep the public-facing API small and well documented. Every public class and
 method MUST have a Google-style docstring with basic usage. Documentation MUST
 provide detailed examples, and CI MUST execute those examples.
 
+## Backend policy
+
+The CasADi backend MUST remain at least as feature complete as the NumPy
+backend. Prefer CasADi for optimisation, simulation, and high-performance
+numerical workloads; retain NumPy as the reference and small-system fallback.
 
 ## Pull requests
 
