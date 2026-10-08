@@ -27,6 +27,23 @@ jobs:
       - name: Run default test suite
         run: uv run pytest -m "not perf"
 
+
+  docs:
+    name: Test documentation examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install documentation dependencies
+        run: uv sync --frozen --group ci --group docs
+      - name: Run documentation examples
+        run: uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
+      - name: Build documentation
+        run: uv run sphinx-build docs/ docs/_build/html -W --keep-going
   perf:
     name: Run perf tests
     if: github.event_name == 'workflow_dispatch'

@@ -49,6 +49,13 @@ Function and method names MUST use an active verb, omit context apparent from
 their module or owning type, and remain concise. Abbreviations are allowed when
 they are established, consistent conventions in the existing codebase.
 
+## Public API documentation
+
+Keep the public-facing API small and well documented. Every public class and
+method MUST have a Google-style docstring with basic usage. Documentation MUST
+provide detailed examples, and CI MUST execute those examples.
+
+
 ## Pull requests
 
 Pull requests SHOULD be squash-merged by default. Their descriptions MUST

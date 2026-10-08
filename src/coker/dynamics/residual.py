@@ -30,13 +30,33 @@ class LegacyFormCertificate:
 
 @dataclass(frozen=True)
 class ResidualDynamicalSystem:
-    """Dynamical system defined by one implicit residual function.
+    """Define a trajectory through an implicit differential-algebraic residual.
 
     ``F`` receives time, differential variables, their rates, algebraic
-    variables, inputs, and parameters.  The dimension declarations describe
-    how the public initial-condition and output functions partition those
-    variables; they do not impose a semi-explicit form on ``F``.  A declared
+    variables, inputs, and parameters. The dimension declarations partition
+    those values; they do not impose a semi-explicit form on ``F``. A declared
     nonempty quadrature starts at zero for trajectory evaluation.
+
+    Args:
+        inputs: Declared input space, or :class:`~coker.algebra.ops.Noop`.
+        parameters: Optional scalar, vector, or function-valued parameter
+            declarations.
+        x0: Initial-condition function returning differential and algebraic
+            values.
+        F: Residual function ``F(t, w, wdot, z, u, p)``.
+        y: Output function evaluated from the integrated trajectory.
+        differential: Dimension of the differential state.
+        algebraic: Optional dimension of the algebraic state.
+        quadrature: Optional dimension of the integrated quadrature state.
+        solver_parameters: Backend-specific integration settings.
+        legacy: Internal semi-explicit certificate. Leave at its default.
+
+    Examples:
+        Convert an existing explicit system when a residual representation is
+        required::
+
+            residual = to_residual_dynamical_system(explicit_system)
+            output = residual(1.0)
     """
 
     inputs: FunctionSpace | Noop
@@ -56,15 +76,56 @@ class ResidualDynamicalSystem:
     def get_state_dimensions(
         self,
     ) -> tuple[Dimension, Dimension | None, Dimension | None]:
+        """Return the differential, algebraic, and quadrature dimensions.
+
+        Returns:
+            A ``(differential, algebraic, quadrature)`` dimension tuple.
+
+        Examples:
+            >>> differential, algebraic, quadrature = residual.get_state_dimensions()
+        """
         return self.differential, self.algebraic, self.quadrature
 
     def backend(self) -> str:
+        """Return the backend used by the residual callback.
+
+        Returns:
+            Registered backend name for this model.
+
+        Examples:
+            >>> residual.backend()
+            'numpy'
+        """
         return self.F.backend
 
     def output_as_function_space(self) -> FunctionSpace:
+        """Return the public output function space.
+
+        Returns:
+            Function space accepting time, declared input, and declared
+            parameters and returning the model output.
+
+        Examples:
+            >>> output_space = residual.output_as_function_space()
+        """
         return _output_function_space(self.y, self.inputs, self.parameters)
 
     def __call__(self, *args):
+        """Evaluate the trajectory at a time or one-dimensional time grid.
+
+        Args:
+            *args: Time followed by the declared input, when present, and
+                declared parameter values.
+
+        Returns:
+            Model output at one time, or outputs stacked over the requested
+            time grid.
+
+        Examples:
+            Evaluate a no-input, no-parameter model at its final time::
+
+                output = residual(1.0)
+        """
         return _evaluate_residual_trajectory(self, *args)
 
 
@@ -287,7 +348,19 @@ def _compose_residual_callback(callback: Function, *arguments: Any) -> Any:
 def to_residual_dynamical_system(
     system: DynamicalSystem,
 ) -> ResidualDynamicalSystem:
-    """Convert a semi-explicit system into an equivalent residual system."""
+    """Convert a semi-explicit system into an equivalent residual model.
+
+    Args:
+        system: Explicit or semi-explicit dynamical system to convert.
+
+    Returns:
+        Residual model with rows ordered as differential-rate, quadrature-rate,
+        then algebraic residuals.
+
+    Examples:
+        >>> residual = to_residual_dynamical_system(explicit_system)
+        >>> residual.F(time, state, state_rate, algebraic, inputs, parameters)
+    """
     x_dim, z_dim, q_dim = system.get_state_dimensions()
     state_size = x_dim.flat()
     quadrature_size = 0 if q_dim is None else q_dim.flat()

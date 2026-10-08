@@ -460,10 +460,10 @@ def function(
         >>> from coker import function, VectorSpace
         >>> A = np.eye(3)
         >>> f = function(
-            ...     [VectorSpace("x", 3)],
-            ...     lambda x: A @ x,
-            ...     backend="numpy",
-            ... )
+        ...     [VectorSpace("x", 3)],
+        ...     lambda x: A @ x,
+        ...     backend="numpy",
+        ... )
         >>> f(np.array([1.0, 0.0, 0.0]))
         array([1., 0., 0.])
     """
