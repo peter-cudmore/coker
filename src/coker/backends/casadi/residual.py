@@ -22,11 +22,6 @@ from coker.dynamics.transcription.collocation import _build_reference_operators
 
 __all__ = ["evaluate_residual_integrals"]
 
-# A short fixed mesh makes the feasibility transcription accurate enough for
-# trajectory evaluation without exposing another public integration policy.
-_COLLOCATION_DEGREE = 3
-_MAXIMUM_INTERVAL_DURATION = 0.1
-
 
 def evaluate_residual_integrals(
     system: ResidualDynamicalSystem,
@@ -42,6 +37,8 @@ def evaluate_residual_integrals(
     any system quadrature, so the returned values retain the backend's public
     ``(x, z, q)`` partition.
     """
+    collocation_degree = 3
+    maximum_interval_duration = 0.1
 
     x_size, z_size, q_size = residual_sizes(system)
     state_size = x_size + q_size
@@ -74,6 +71,7 @@ def evaluate_residual_integrals(
         residual,
         state_size=state_size,
         algebraic_size=z_size,
+        collocation_degree=collocation_degree,
         solver_parameters=solver_parameters,
     )
     state_columns = []
@@ -90,7 +88,7 @@ def evaluate_residual_integrals(
                 algebraic_columns.append(current_algebraic)
             continue
         step_count = max(
-            1, int(np.ceil(abs(interval_duration) / _MAXIMUM_INTERVAL_DURATION))
+            1, int(np.ceil(abs(interval_duration) / maximum_interval_duration))
         )
         step_duration = interval_duration / step_count
         for _ in range(step_count):
@@ -102,6 +100,7 @@ def evaluate_residual_integrals(
                 current_algebraic,
                 state_size=state_size,
                 algebraic_size=z_size,
+                collocation_degree=collocation_degree,
             )
             current_time += step_duration
         state_columns.append(current_state)
@@ -118,52 +117,6 @@ def evaluate_residual_integrals(
     x = states[:x_size, :]
     q = states[x_size:, :] if q_size else None
     return x, algebraic, q
-
-
-def _validate_initial_conditions(initial_conditions, x_size, z_size, q_size):
-    if (
-        not isinstance(initial_conditions, Sequence)
-        or isinstance(initial_conditions, (str, bytes))
-        or len(initial_conditions) != 3
-    ):
-        raise ValueError(
-            "implicit residual integration requires initial conditions for x, z, and q"
-        )
-    x0_raw, z0_raw, q0_raw = initial_conditions
-    x0 = _numeric_column(x0_raw, x_size, "differential")
-    if z_size:
-        z0 = _numeric_column(z0_raw, z_size, "algebraic")
-    elif z0_raw is not None:
-        raise ValueError("implicit residual integration has no algebraic variables")
-    else:
-        z0 = ca.DM.zeros(0, 1)
-    if q_size:
-        q0 = _numeric_column(q0_raw, q_size, "quadrature")
-    elif q0_raw is not None:
-        raise ValueError("implicit residual integration has no quadrature variables")
-    else:
-        q0 = ca.DM.zeros(0, 1)
-    return x0, z0, q0
-
-
-def _numeric_column(value, size, name):
-    if value is None:
-        raise ValueError(
-            f"implicit residual integration requires a {name} initial condition"
-        )
-    try:
-        result = ca.DM(value)
-    except (RuntimeError, TypeError, ValueError) as error:
-        raise ValueError(
-            f"{name} initial condition must be a numeric CasADi-compatible value"
-        ) from error
-    if result.numel() != size:
-        raise ValueError(
-            f"{name} initial condition has {result.numel()} values; expected {size}"
-        )
-    if not result.is_regular():
-        raise ValueError(f"{name} initial condition must be finite")
-    return ca.reshape(result, size, 1)
 
 
 def _integration_times(end_point):
@@ -256,9 +209,10 @@ def _build_collocation_solver(
     *,
     state_size,
     algebraic_size,
+    collocation_degree,
     solver_parameters,
 ):
-    operators = _build_reference_operators(_COLLOCATION_DEGREE)
+    operators = _build_reference_operators(collocation_degree)
     nodes = operators.nodes
     derivative = operators.derivative_matrix
     degree = len(nodes) - 1
@@ -315,7 +269,9 @@ def _solver_options(solver_parameters):
             "CasADi residual collocation solver_parameters must be a mapping of "
             "CasADi IPOPT options"
         )
-    return quiet_ipopt_options(solver_parameters)
+    options = quiet_ipopt_options()
+    options.update(solver_parameters)
+    return options
 
 
 def _solve_collocation_step(
@@ -327,8 +283,9 @@ def _solve_collocation_step(
     *,
     state_size,
     algebraic_size,
+    collocation_degree,
 ):
-    degree = _COLLOCATION_DEGREE
+    degree = collocation_degree
     initial_guess = ca.vertcat(
         ca.vec(ca.repmat(start_state, 1, degree)),
         ca.vec(ca.repmat(start_algebraic, 1, degree)),

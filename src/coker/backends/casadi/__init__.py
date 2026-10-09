@@ -40,6 +40,17 @@ from coker.backends.casadi.optimiser import (
     CasadiNLPSolverOptions,
     build_optimisation_problem,
 )
+from coker.backends.casadi.residual import (
+    evaluate_residual_integrals as evaluate_collocation_residual_integrals,
+)
+from coker.backends.casadi.residual_options import (
+    CasadiResidualSolver,
+    CasadiResidualSolverOptions,
+)
+from coker.backends.casadi.sundials import (
+    evaluate_residual_integrals as evaluate_idas_residual_integrals,
+    is_available as idas_is_available,
+)
 from coker.backends.casadi.lowered import CasadiLoweredFunction
 from coker.backends.casadi.variational.options import (  # noqa: F401
     CasadiVariationalOptions,
@@ -53,7 +64,12 @@ from coker.dynamics.residual import (
 )
 from coker.dynamics.variational.problem import VariationalProblem
 
-__all__ = ["CasadiBackend", "CasadiVariationalOptions"]
+__all__ = [
+    "CasadiBackend",
+    "CasadiResidualSolver",
+    "CasadiResidualSolverOptions",
+    "CasadiVariationalOptions",
+]
 
 scalar_types = (float, int)
 
@@ -361,25 +377,30 @@ class CasadiBackend(Backend):
         solver_parameters=None,
     ):
         if isinstance(functions, ResidualDynamicalSystem) and functions.legacy is None:
-            from coker.backends.casadi import sundials
-
-            if sundials.is_available():
-                return sundials.evaluate_residual_integrals(
-                    functions,
-                    initial_conditions,
-                    end_point,
-                    inputs,
-                    solver_parameters,
+            if isinstance(solver_parameters, CasadiResidualSolverOptions):
+                evaluator = (
+                    evaluate_idas_residual_integrals
+                    if solver_parameters.solver is CasadiResidualSolver.IDAS
+                    else evaluate_collocation_residual_integrals
                 )
-
-            from coker.backends.casadi.residual import evaluate_residual_integrals
-
-            return evaluate_residual_integrals(
+                options = (
+                    solver_parameters.idas_options
+                    if solver_parameters.solver is CasadiResidualSolver.IDAS
+                    else solver_parameters.variational_options
+                )
+            else:
+                evaluator = (
+                    evaluate_idas_residual_integrals
+                    if idas_is_available()
+                    else evaluate_collocation_residual_integrals
+                )
+                options = solver_parameters
+            return evaluator(
                 functions,
                 initial_conditions,
                 end_point,
                 inputs,
-                solver_parameters,
+                options,
             )
 
         dxdt, g, dqdt = _normalise_direct_integration_functions(functions)

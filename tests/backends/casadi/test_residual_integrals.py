@@ -217,3 +217,29 @@ def test_casadi_binds_scalar_parameter_for_independent_residual(casadi_backend):
     np.testing.assert_allclose(np.asarray(x), [[0.5, 1.5]], rtol=1e-5, atol=1e-7)
     assert z is None
     assert q is None
+
+
+def test_casadi_selects_variational_residual_solver(casadi_backend):
+    from coker.backends.casadi import (
+        CasadiResidualSolver,
+        CasadiResidualSolverOptions,
+    )
+
+    x, z, q = casadi_backend.evaluate_integrals(
+        _coupled_residual_system(),
+        [np.array([0.0]), np.array([2.0 / 3.0]), np.array([0.0])],
+        0.75,
+        [None, None],
+        CasadiResidualSolverOptions(CasadiResidualSolver.VARIATIONAL),
+    )
+
+    expected_x, expected_z, expected_q = _coupled_continuous_values([0.75])
+    np.testing.assert_allclose(
+        np.asarray(x), expected_x.reshape((1, 1)), rtol=1e-5, atol=1e-7
+    )
+    np.testing.assert_allclose(
+        np.asarray(z), expected_z.reshape((1, 1)), rtol=1e-5, atol=1e-7
+    )
+    np.testing.assert_allclose(
+        np.asarray(q), expected_q.reshape((1, 1)), rtol=1e-5, atol=1e-7
+    )
