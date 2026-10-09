@@ -6,7 +6,6 @@ from functools import lru_cache
 import casadi as ca
 import numpy as np
 
-from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
 from coker.backends.casadi.lower import lower as lower_casadi
