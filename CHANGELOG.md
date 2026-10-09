@@ -14,6 +14,7 @@
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
 
 ### Changed
+- Trim collocation implementation types and `DynamicsSpec` from the `coker.dynamics` root API.
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
 - Rename generic rank witnesses on analysis results to `rank_conditions`.
 - Let identifiability analysis classify each flattened scalar parameter as an optimisation variable or a known numeric constant.
