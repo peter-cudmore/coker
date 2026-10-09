@@ -13,11 +13,16 @@ from collections.abc import Mapping
 from numbers import Real
 from typing import Any
 
+import casadi as ca
 import numpy as np
 
+from coker.backends import get_backend_by_name
+from coker.backends.casadi.residual_support import (
+    lower_residual,
+    prepare_initial_conditions,
+    residual_sizes,
+)
 from coker.dynamics.residual import ResidualDynamicalSystem
-
-import casadi as ca
 
 
 _IDAS_PLUGIN = "idas"
@@ -52,19 +57,16 @@ def evaluate_residual_integrals(
             "plugin, which is not available in this CasADi installation"
         )
 
-    x_size = system.differential.flat()
-    z_size = 0 if system.algebraic is None else system.algebraic.flat()
-    q_size = 0 if system.quadrature is None else system.quadrature.flat()
+    x_size, z_size, q_size = residual_sizes(system)
     w_size = x_size + q_size
     if w_size == 0:
         raise NotImplementedError(
             "IDA residual integration requires a differential or quadrature state"
         )
 
-    x0, z0, q0 = initial_conditions
-    x_initial = _initial_value(x0, x_size, "differential")
-    z_initial = _optional_initial_value(z0, z_size, "algebraic")
-    q_initial = _optional_initial_value(q0, q_size, "quadrature")
+    x_initial, z_initial, q_initial = prepare_initial_conditions(
+        initial_conditions, x_size, z_size, q_size
+    )
     w_initial = ca.vertcat(x_initial, q_initial)
 
     output_times, scalar_end_point = _output_times(end_point)
@@ -76,7 +78,15 @@ def evaluate_residual_integrals(
     state = ca.MX.sym("residual_state", w_size)
     state_rate = ca.MX.sym("residual_state_rate", w_size)
     algebraic = ca.MX.sym("residual_algebraic", z_size)
-    residual = system.F(time, state, state_rate, algebraic, *inputs)
+    residual = lower_residual(
+        get_backend_by_name("casadi"),
+        system,
+        time,
+        state,
+        state_rate,
+        algebraic,
+        inputs,
+    )
     expected_rows = w_size + z_size
     if residual.numel() != expected_rows:
         raise ValueError(

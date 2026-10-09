@@ -11,6 +11,7 @@ from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
 from coker.backends.casadi.lower import lower as lower_casadi
 from coker.backends.casadi.variational.options import CasadiVariationalOptions
+from coker.backends.casadi.residual_support import lower_residual
 from coker.dynamics import VariationalProblem, VariationalSolution
 from coker.dynamics.residual import (
     ResidualDynamicalSystem,
@@ -184,23 +185,15 @@ class _TranscriptionFactory:
         control,
         parameters,
     ):
-        residual_control = (
-            (lambda _time: control)
-            if isinstance(self.residual.inputs, FunctionSpace)
-            else control
+        return lower_residual(
+            self.casadi,
+            self.residual,
+            time,
+            self._residual_state(state, quadrature),
+            self._residual_rate(state_rate, quadrature_rate),
+            algebraic,
+            (control, parameters),
         )
-        (residual,) = self.casadi.evaluate(
-            self.residual.F,
-            (
-                time,
-                self._residual_state(state, quadrature),
-                self._residual_rate(state_rate, quadrature_rate),
-                algebraic,
-                residual_control,
-                parameters,
-            ),
-        )
-        return residual
 
     def evaluate_registered_quadratures(
         self,

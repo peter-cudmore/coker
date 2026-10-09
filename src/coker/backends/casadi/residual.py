@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any
 
 import casadi as ca
 import numpy as np
 
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
+from coker.backends.casadi.residual_support import (
+    lower_residual,
+    prepare_initial_conditions,
+    quiet_ipopt_options,
+    residual_sizes,
+)
 from coker.dynamics.residual import ResidualDynamicalSystem
 from coker.dynamics.transcription.collocation import _build_reference_operators
 
@@ -37,13 +43,9 @@ def evaluate_residual_integrals(
     ``(x, z, q)`` partition.
     """
 
-    x_size = system.differential.flat()
-    z_size = 0 if system.algebraic is None else system.algebraic.flat()
-    q_size = 0 if system.quadrature is None else system.quadrature.flat()
+    x_size, z_size, q_size = residual_sizes(system)
     state_size = x_size + q_size
-    x0, z0, q0 = _validate_initial_conditions(
-        initial_conditions, x_size, z_size, q_size
-    )
+    x0, z0, q0 = prepare_initial_conditions(initial_conditions, x_size, z_size, q_size)
     output_times, scalar_endpoint = _integration_times(end_point)
     initial_state = ca.vertcat(x0, q0)
     if scalar_endpoint and output_times[0] == 0.0:
@@ -223,16 +225,15 @@ def _build_symbolic_residual(system, *, state_size, algebraic_size, arguments):
     state = ca.MX.sym("residual_state", state_size, 1)
     state_rate = ca.MX.sym("residual_state_rate", state_size, 1)
     algebraic = ca.MX.sym("residual_algebraic", algebraic_size, 1)
-    backend = get_backend_by_name("casadi")
-    values = backend.evaluate(
-        system.F, (time, state, state_rate, algebraic, *arguments)
+    value = lower_residual(
+        get_backend_by_name("casadi"),
+        system,
+        time,
+        state,
+        state_rate,
+        algebraic,
+        arguments,
     )
-    if len(values) != 1 or values[0] is None:
-        raise ValueError("implicit residual must return exactly one present output")
-    value = values[0]
-    if not isinstance(value, (ca.MX, ca.SX, ca.DM)):
-        value = ca.DM(value)
-    value = cast(ca.MX, ca.reshape(value, value.numel(), 1))
     return ca.Function(
         "residual_collocation_equations",
         [time, state, state_rate, algebraic],
@@ -307,20 +308,14 @@ def _build_collocation_solver(
 
 
 def _solver_options(solver_parameters):
-    options = {
-        "ipopt.print_level": 0,
-        "ipopt.sb": "yes",
-        "print_time": False,
-    }
     if solver_parameters is None:
-        return options
+        return quiet_ipopt_options()
     if not isinstance(solver_parameters, Mapping):
         raise TypeError(
             "CasADi residual collocation solver_parameters must be a mapping of "
             "CasADi IPOPT options"
         )
-    options.update(solver_parameters)
-    return options
+    return quiet_ipopt_options(solver_parameters)
 
 
 def _solve_collocation_step(
