@@ -4,11 +4,11 @@ from coker import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.ops import Noop
 from coker.dynamics import (
     AnalysisStatus,
-    DynamicsSpec,
     analyse_controllability,
     analyse_identifiability,
 )
-from coker.dynamics import create_dynamics_from_spec
+from coker.dynamics.model import DynamicsSpec
+from coker.dynamics.system import create_dynamics_from_spec
 
 
 def _scalar_control_space():

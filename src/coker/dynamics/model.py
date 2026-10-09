@@ -22,10 +22,27 @@ DynamicsParameters: TypeAlias = (
 
 @dataclass
 class DynamicsSpec:
+    """Describe a semi-explicit dynamic system before it is traced.
+
+    Args:
+        inputs: Optional input trajectory declaration; ``None`` means no input.
+        parameters: Optional scalar, vector, or function parameter declarations.
+        algebraic: Optional algebraic-state declaration.
+        initial_conditions: Callable returning ``(x0, z0)``.
+        dynamics: Callable computing ``dxdt(t, x, z, u, p)``.
+        constraints: Callable computing ``g(t, x, z, u, p)``.
+        outputs: Callable computing ``y(t, x, z, u, p, q)``.
+        quadratures: Callable computing ``dqdt(t, x, z, u, p)``.
+
+    Examples:
+        Build a system with :func:`create_dynamics_from_spec`::
+
+            spec = DynamicsSpec(...)
+    """
+
     inputs: FunctionSpace | Noop | None
     parameters: DynamicsParameters
     algebraic: Optional[VectorSpace]
-
     initial_conditions: Callable
     """[x, z] = initial_conditions(z, u, p)."""
 
@@ -86,6 +103,25 @@ def _output_function_space(
 
 @dataclass
 class DynamicalSystem:
+    """Define an explicit or semi-explicit system and its output.
+
+    Args:
+        inputs: Input trajectory declaration or :class:`~coker.algebra.ops.Noop`.
+        parameters: Optional model parameter declarations.
+        x0: Initial-condition function.
+        dxdt: Differential-rate function.
+        g: Optional algebraic residual function.
+        dqdt: Optional quadrature-rate function.
+        y: Output function.
+        solver_parameters: Backend-specific integration settings.
+
+    Examples:
+        Create a simple explicit system with
+        :func:`~coker.dynamics.create_autonomous_ode`::
+
+            system = create_autonomous_ode(x0, xdot)
+    """
+
     inputs: FunctionSpace | Noop
     parameters: DynamicsParameters
     x0: Function
@@ -96,17 +132,21 @@ class DynamicalSystem:
     solver_parameters: object | None = field(default=None)
 
     def output_as_function_space(self) -> FunctionSpace:
+        """Return the callable space of the public trajectory output."""
         return _output_function_space(self.y, self.inputs, self.parameters)
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
+        """Return the differential, algebraic, and quadrature dimensions."""
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]
 
     @property
     def backend(self) -> str:
+        """Return the backend used by the differential-rate callback."""
         return self.dxdt.backend
 
     def __call__(self, *args):
+        """Evaluate a non-quadrature trajectory at time or a time grid."""
         if not isinstance(self.dqdt, Noop):
             raise NotImplementedError
         from coker.dynamics.residual import to_residual_dynamical_system

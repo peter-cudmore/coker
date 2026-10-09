@@ -38,7 +38,7 @@ from coker.dynamics.system import (
     direct_sum,
 )
 
-from coker.dynamics.model import DynamicsSpec, DynamicalSystem
+from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.residual import (
     ResidualDynamicalSystem,
     to_residual_dynamical_system,
@@ -64,7 +64,6 @@ __all__ = [
     "DynamicalSystem",
     "ResidualDynamicalSystem",
     "to_residual_dynamical_system",
-    "DynamicsSpec",
     "SymbolicDAESystem",
     "SymbolicSystem",
     "UnsupportedSystemError",

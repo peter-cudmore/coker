@@ -82,7 +82,9 @@ class ResidualDynamicalSystem:
             A ``(differential, algebraic, quadrature)`` dimension tuple.
 
         Examples:
-            >>> differential, algebraic, quadrature = residual.get_state_dimensions()
+            Inspect a constructed system::
+
+                differential, algebraic, quadrature = residual.get_state_dimensions()
         """
         return self.differential, self.algebraic, self.quadrature
 
@@ -93,8 +95,9 @@ class ResidualDynamicalSystem:
             Registered backend name for this model.
 
         Examples:
-            >>> residual.backend()
-            'numpy'
+            Inspect a constructed system::
+
+                backend_name = residual.backend()
         """
         return self.F.backend
 
@@ -106,7 +109,9 @@ class ResidualDynamicalSystem:
             parameters and returning the model output.
 
         Examples:
-            >>> output_space = residual.output_as_function_space()
+            Inspect a constructed system::
+
+                output_space = residual.output_as_function_space()
         """
         return _output_function_space(self.y, self.inputs, self.parameters)
 

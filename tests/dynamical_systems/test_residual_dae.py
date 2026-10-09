@@ -6,11 +6,8 @@ import pytest
 from coker import Dimension, FunctionSpace, Scalar, VectorSpace, function
 from coker.backends.numpy import NumpyBackend
 from coker.algebra.ops import Noop
-from coker.dynamics import (
-    DynamicsSpec,
-    ResidualDynamicalSystem,
-    to_residual_dynamical_system,
-)
+from coker.dynamics import ResidualDynamicalSystem, to_residual_dynamical_system
+from coker.dynamics.model import DynamicsSpec
 from coker.dynamics.system import create_dynamics_from_spec
 
 

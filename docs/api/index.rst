@@ -8,6 +8,9 @@ API Reference
    spaces
    conditional
    optimisation
+   dynamics
+   parameters
+   backends
 
 Public import boundary
 ----------------------

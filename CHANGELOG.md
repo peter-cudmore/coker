@@ -23,6 +23,7 @@
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
 - Keep function parameters at `coker.parameters.function_parameters`, signatures/lowering configuration at `coker.backends.lowered`, and solve status at `coker.toolkits.codesign`; remove obsolete dynamics reexports and system-modelling registry/handle helpers from public facades.
+- Trim collocation implementation types and `DynamicsSpec` from the `coker.dynamics` root API.
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
 - Rename generic rank witnesses on analysis results to `rank_conditions`.
 - Let identifiability analysis classify each flattened scalar parameter as an optimisation variable or a known numeric constant.

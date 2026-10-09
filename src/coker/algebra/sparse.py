@@ -15,6 +15,12 @@ from coker.algebra.tensor import SymbolicVector
 class SparseMatrixPattern:
     """Immutable CSC structure and symbolic source data for a sparse matrix.
 
+    Args:
+        shape: Two-dimensional matrix shape.
+        indptr: CSC column offsets.
+        indices: CSC row indices.
+        data: Symbolic values in CSC order.
+
     ``indptr`` and ``indices`` use the canonical CSC ordering: columns are
     visited from left to right and row indices within each column are sorted.
     ``data`` contains the symbolic values in exactly that order.
@@ -29,11 +35,20 @@ class SparseMatrixPattern:
 class SparseMatrixBuilder:
     """Construct symbolic matrices from a fixed boolean CSC sparsity pattern.
 
-    Pattern canonicalisation happens once during construction.  Every call to
+    Args:
+        pattern: Two-dimensional boolean dense mask or SciPy sparse mask.
+
+    Pattern canonicalisation happens once during construction. Every call to
     :meth:`matrix` then interprets its flat data vector in canonical CSC
     order, making the resulting sparsity structure stable across backends and
-    runs.  The builder owns only the small structural arrays; callers own the
+    runs. The builder owns only the small structural arrays; callers own the
     data vectors.
+
+    Examples:
+        Build a sparse numeric matrix from its stored values::
+
+            builder = SparseMatrixBuilder(np.array([[True, False]]))
+            matrix = builder.matrix(np.array([2.0]))
     """
 
     def __init__(self, pattern: np.ndarray | scipy.sparse.sparray):

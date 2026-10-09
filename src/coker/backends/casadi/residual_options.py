@@ -29,9 +29,11 @@ class CasadiResidualSolverOptions(SolverParameters):
             ``VARIATIONAL``.
 
     Examples:
-        >>> options = CasadiResidualSolverOptions(
-        ...     solver=CasadiResidualSolver.VARIATIONAL
-        ... )
+        Select direct collocation explicitly::
+
+            options = CasadiResidualSolverOptions(
+                solver=CasadiResidualSolver.VARIATIONAL
+            )
     """
 
     solver: CasadiResidualSolver

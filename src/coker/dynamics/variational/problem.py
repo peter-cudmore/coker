@@ -139,6 +139,27 @@ class QuadratureSpec:
 
 @dataclass
 class VariationalProblem:
+    """Represent a backend-neutral dynamic optimisation problem.
+
+    Args:
+        loss: Scalar objective function or symbolic expression.
+        t_final: Fixed duration or bounded duration decision.
+        system: Dynamic system to transcribe.
+        control: Optional control decision declarations.
+        parameters: Optional fitted parameter declarations.
+        system_parameter_map: Optional map from solver to system parameters.
+        quadratures: Registered running-integral channels.
+        transcription_options: Collocation and solve configuration.
+        backend: Backend name used to create the solver.
+        path_constraints: Constraints evaluated across the trajectory.
+        terminal_constraints: Constraints evaluated at the final time.
+        initial_constraints: Constraints evaluated at time zero.
+
+    Examples:
+        Use :class:`VariationalProblemBuilder` to construct a problem from
+        symbolic expressions, then call :meth:`get_solver`.
+    """
+
     loss: LossFunction | Tracer
     t_final: float | BoundedVariable
     system: DynamicalSystem
@@ -220,10 +241,20 @@ class VariationalProblem:
             )
 
     def get_solver(self, backend: Optional[str] = None):
+        """Create a solver for this problem.
+
+        Args:
+            backend: Override the problem's configured backend name.
+
+        Returns:
+            Solver with a ``solve()`` method that returns a variational
+            solution.
+        """
         from coker.backends import get_backend_by_name
 
-        backend_name = self.backend if backend is None else backend
+        backend_name = backend or self.backend
         return get_backend_by_name(backend_name).create_variational_solver(self)
 
     def __call__(self) -> VariationalSolution:
+        """Solve the problem using its configured backend."""
         return self.get_solver().solve()
