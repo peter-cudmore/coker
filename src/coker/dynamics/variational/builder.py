@@ -20,6 +20,7 @@ from coker.parameters import (
     ParameterVariable,
 )
 from coker.parameters.function_parameters import FunctionParameter
+from coker.dynamics.residual import ResidualDynamicalSystem
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variational.problem import (
     ConstraintSpec,
@@ -62,7 +63,7 @@ class VariationalProblemBuilder:
 
     def __init__(
         self,
-        system: DynamicalSystem,
+        system: DynamicalSystem | ResidualDynamicalSystem,
         t_final: float | BoundedVariable,
         *,
         control: Optional[Sequence[ControlVariable]] = None,
@@ -229,9 +230,8 @@ class VariationalProblemBuilder:
     def integrate(self, expression: Tracer) -> Tracer:
         """Register a scalar integrand and return its accumulated state.
 
-        The returned tracer is a distinct quadrature channel.  Its initial
-        value is zero and its derivative is the supplied expression; the
-        derivative channels are exposed on ``system.dqdt`` for the dynamics
+        The returned tracer is a distinct quadrature channel. Its initial
+        value is zero, and its derivative is imposed by the variational
         transcription.
         """
         self._require_open()

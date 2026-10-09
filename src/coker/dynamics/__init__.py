@@ -39,6 +39,10 @@ from coker.dynamics.system import (
 )
 
 from coker.dynamics.model import DynamicsSpec, DynamicalSystem
+from coker.dynamics.residual import (
+    ResidualDynamicalSystem,
+    to_residual_dynamical_system,
+)
 from coker.dynamics.variational.builder import VariationalProblemBuilder
 from coker.dynamics.variational.problem import (
     TranscriptionOptions,
@@ -58,6 +62,8 @@ __all__ = [
     "ControlSolution",
     "ControlVariable",
     "DynamicalSystem",
+    "ResidualDynamicalSystem",
+    "to_residual_dynamical_system",
     "DynamicsSpec",
     "SymbolicDAESystem",
     "SymbolicSystem",

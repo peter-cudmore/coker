@@ -7,6 +7,7 @@ import torch
 
 from coker.algebra.ops import Noop
 from coker.backends.backend import SolverParameters, get_backend_by_name
+from coker.dynamics.residual import _normalise_direct_integration_functions
 
 
 @dataclass(frozen=True)
@@ -37,12 +38,13 @@ def evaluate_integrals(
     so basic PyTorch evaluation does not require the optional ODE dependency.
     """
     backend = get_backend_by_name("pytorch", set_current=False)
-    dxdt, constraint, dqdt = functions
+    dxdt, constraint, dqdt = _normalise_direct_integration_functions(functions)
     x0, z0, q0 = initial_conditions
     u, *parameters = inputs
-    has_quadrature = not isinstance(dqdt, Noop)
+    quadrature_function = None if dqdt is None or isinstance(dqdt, Noop) else dqdt
+    has_quadrature = quadrature_function is not None
 
-    if not isinstance(constraint, Noop):
+    if constraint is not None and not isinstance(constraint, Noop):
         raise NotImplementedError(
             "Algebraic constraints are not implemented for the pytorch backend"
         )
@@ -93,9 +95,9 @@ def evaluate_integrals(
     def rhs(time, state):
         x = state[:x_size].reshape_as(x0)
         dx = dxdt(time, x, None, u, *parameters).reshape(-1)
-        if not has_quadrature:
+        if quadrature_function is None:
             return dx
-        dq = dqdt(time, x, None, u, *parameters).reshape(-1)
+        dq = quadrature_function(time, x, None, u, *parameters).reshape(-1)
         return torch.cat((dx, dq))
 
     solution = odeint(

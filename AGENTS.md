@@ -26,6 +26,10 @@ The currently selected `osqp` Rust crate is `std`/allocator-oriented and is not 
 
 For every hypothesized bug fix, first add the smallest behavioral regression that reproduces the suspected cause. Implement only after that test demonstrates the diagnosis; remove the test afterward only when it provides no durable contract coverage.
 
+Tests SHOULD NOT use `monkeypatch`. Prefer public behavior or explicit,
+constructor-provided test doubles; test seams MUST be part of the implementation
+contract rather than patched internals.
+
 ## Python style
 
 Prefer explicit interfaces and direct attribute access. Do not use `getattr` or
@@ -37,10 +41,30 @@ relevant exception and attach context when re-raising.
 Do not use `typing.Protocol`. Prefer a local abstract base class or metaclass
 when an interface is required. Keep inheritance shallow: one interface or base
 class and one child class unless additional depth is necessary.
+Prefer polymorphism to define interfaces, with only simple shared helpers.
+Do not use inheritance to share model behavior or state. Share behavior through
+free functions that explicitly dispatch on the interface implementation.
 
 Function and method names MUST use an active verb, omit context apparent from
 their module or owning type, and remain concise. Abbreviations are allowed when
 they are established, consistent conventions in the existing codebase.
+
+## Public API documentation
+
+Keep the public-facing API small and well documented. Every public class and
+method MUST have a Google-style docstring with basic usage. Documentation MUST
+provide detailed examples, and CI MUST execute those examples.
+
+## Backend policy
+
+The CasADi backend MUST remain at least as feature complete as the NumPy
+backend. Prefer CasADi for optimisation, simulation, and high-performance
+numerical workloads; retain NumPy as the reference and small-system fallback.
+
+## Pre-commit review
+
+Before committing, review the changed code for dead code, duplicated behavior,
+and helpers or branches that can be inlined without reducing clarity.
 
 ## Pull requests
 
