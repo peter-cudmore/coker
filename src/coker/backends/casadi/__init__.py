@@ -47,8 +47,11 @@ from coker.backends.casadi.variational.options import (  # noqa: F401
 from coker.backends.casadi.variational.transcription import (
     create_variational_solver,
 )
-from coker.dynamics import VariationalProblem
-from coker.dynamics.residual import _normalise_direct_integration_functions
+from coker.dynamics.residual import (
+    ResidualDynamicalSystem,
+    _normalise_direct_integration_functions,
+)
+from coker.dynamics.variational.problem import VariationalProblem
 
 __all__ = ["CasadiBackend", "CasadiVariationalOptions"]
 
@@ -357,6 +360,28 @@ class CasadiBackend(Backend):
         inputs,
         solver_parameters=None,
     ):
+        if isinstance(functions, ResidualDynamicalSystem) and functions.legacy is None:
+            from coker.backends.casadi import sundials
+
+            if sundials.is_available():
+                return sundials.evaluate_residual_integrals(
+                    functions,
+                    initial_conditions,
+                    end_point,
+                    inputs,
+                    solver_parameters,
+                )
+
+            from coker.backends.casadi.residual import evaluate_residual_integrals
+
+            return evaluate_residual_integrals(
+                functions,
+                initial_conditions,
+                end_point,
+                inputs,
+                solver_parameters,
+            )
+
         dxdt, g, dqdt = _normalise_direct_integration_functions(functions)
         if g is None or isinstance(g, Noop):
             algebraic_function = None

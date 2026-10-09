@@ -39,7 +39,7 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - name: Install documentation dependencies
-        run: uv sync --frozen --group ci --group docs
+        run: uv sync --frozen --group ci --group docs --extra casadi
       - name: Run documentation examples
         run: uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
       - name: Build documentation
