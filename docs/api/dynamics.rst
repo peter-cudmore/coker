@@ -4,12 +4,12 @@ Dynamics API
 Dynamics systems
 ----------------
 
-Use :func:`coker.dynamics.create_autonomous_ode` for simple explicit models.
-Use :class:`coker.dynamics.ResidualDynamicalSystem` when the model is naturally
-an implicit DAE. The :doc:`../dynamics` guide contains executable trajectory and
+Use :func:`coker.dynamics.create_autonomous_ode` for simple explicit models
+and :func:`coker.dynamics.direct_sum` to compose them. Use
+:class:`coker.dynamics.ResidualDynamicalSystem` when the model is naturally an
+implicit DAE. The :doc:`../dynamics` guide contains executable trajectory and
 variational-solve examples.
 
-.. autoclass:: coker.dynamics.DynamicsSpec
 
 .. autoclass:: coker.dynamics.DynamicalSystem
    :members:

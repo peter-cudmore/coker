@@ -4,7 +4,8 @@ import pytest
 from coker import VectorSpace
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
-from coker.dynamics import DynamicsSpec, to_residual_dynamical_system
+from coker.dynamics import to_residual_dynamical_system
+from coker.dynamics.model import DynamicsSpec
 from coker.dynamics.system import create_dynamics_from_spec
 
 

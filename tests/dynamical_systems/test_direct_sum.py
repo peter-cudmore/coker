@@ -2,11 +2,11 @@ import numpy as np
 import pytest
 from coker import FunctionSpace, Scalar, VectorSpace
 from coker.dynamics import (
-    DynamicsSpec,
     VariationalProblem,
     create_autonomous_ode,
     direct_sum,
 )
+from coker.dynamics.model import DynamicsSpec
 from coker.parameters.function_parameters import (
     FunctionParameter,
     RadialBasisFunction,

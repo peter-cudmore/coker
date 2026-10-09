@@ -302,7 +302,7 @@ rely on a cache lifetime across separately created problems.
 Heterogeneous and function-valued parameters
 --------------------------------------------
 
-``DynamicsSpec.parameters`` may be one declaration or a positional tuple of
+System parameter declarations may be one declaration or a positional tuple of
 ``Scalar``, ``VectorSpace``, and ``FunctionSpace`` declarations. A dynamics
 callback receives that same positional layout as one final ``p`` tuple.
 
