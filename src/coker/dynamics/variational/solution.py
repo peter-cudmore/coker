@@ -1,8 +1,9 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TypeAlias
 
 import numpy as np
+import numpy.typing as npt
 
 from coker.algebra.function import InequalityExpression
 from coker.dynamics.variables import ControlSolution
@@ -10,6 +11,21 @@ from coker.dynamics.transcription.collocation import (
     InterpolatingPolyCollection,
 )
 from coker.toolkits.codesign.optimisation import SolveInfo
+
+
+FloatArray: TypeAlias = npt.NDArray[np.float64]
+
+VariationalOutput: TypeAlias = Callable[
+    [
+        float,
+        np.ndarray,
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray,
+        np.ndarray | None,
+    ],
+    np.ndarray,
+]
 
 
 def _to_flat_array(value) -> np.ndarray:
@@ -46,14 +62,25 @@ def _evaluate_violation(raw_value, lower, upper) -> np.ndarray:
 
 @dataclass(frozen=True)
 class SegmentDefectDiagnostic:
-    """Physical segment residuals and mesh provenance from a transcription."""
+    """Full physical segment residual and mesh provenance from a
+    transcription."""
 
     normalized_interval: Tuple[float, float]
     physical_interval: Tuple[float, float]
     degree: int
     tolerance: float
-    state_residual: np.ndarray
-    quadrature_residual: np.ndarray
+    full_residual: FloatArray
+
+    def __post_init__(self) -> None:
+        residual = self.full_residual
+        if residual is None:
+            raise ValueError("Segment diagnostics require a full residual")
+        if not isinstance(residual, np.ndarray):
+            raise TypeError("Segment full residual must be a NumPy array")
+        if residual.ndim != 1:
+            raise ValueError("Segment full residual must be one-dimensional")
+        if not np.issubdtype(residual.dtype, np.floating):
+            raise TypeError("Segment full residual must have a floating dtype")
 
 
 @dataclass
@@ -63,10 +90,7 @@ class VariationalSolution:
     projectors: Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]
     control_solutions: List[ControlSolution]
     parameters: Mapping[str, object]
-    output: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-        np.ndarray,
-    ]
+    output: VariationalOutput
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
     adaptive_refinement_rounds: Optional[int] = None
@@ -91,17 +115,7 @@ class VariationalSolution:
         ],
         control_solutions: List[ControlSolution],
         parameters: Mapping[str, object],
-        output: Callable[
-            [
-                float,
-                np.ndarray,
-                np.ndarray,
-                np.ndarray,
-                np.ndarray,
-                np.ndarray,
-            ],
-            np.ndarray,
-        ],
+        output: VariationalOutput,
         parameter_vector: np.ndarray,
         solver_parameter_vector: np.ndarray | None = None,
         *,
@@ -203,6 +217,6 @@ class VariationalSolution:
             z = self.projectors[1] @ v if self.projectors[1] is not None else None
             q = self.projectors[2] @ v if self.projectors[2] is not None else None
             u = self.control_law(t)
-            return self.output(t, x, z, u, self.parameters, q)
+            return self.output(t, x, z, u, self._parameter_vector, q)
 
         return self.path.map(f)

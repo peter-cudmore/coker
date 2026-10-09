@@ -108,8 +108,7 @@ def test_zero_defect_tolerances_omit_redundant_segment_rows():
     assert solution.solve_info.success
     assert len(solution.segment_defects) == 2
     assert all(
-        np.isfinite(diagnostic.state_residual).all()
-        and diagnostic.tolerance == 0.0
+        np.isfinite(diagnostic.full_residual).all() and diagnostic.tolerance == 0.0
         for diagnostic in solution.segment_defects
     )
     assert all(
@@ -127,9 +126,7 @@ def test_refinement_predicts_degree_then_multi_splits():
     predicted = _predict_refined_degree(0.4, 0.1, 3)
 
     assert predicted == 5
-    intervals, degrees = _split_refined_interval(
-        (0.0, 0.9), predicted, 4, 2, 1e-8
-    )
+    intervals, degrees = _split_refined_interval((0.0, 0.9), predicted, 4, 2, 1e-8)
     np.testing.assert_allclose(
         intervals,
         ((0.0, 0.3), (0.3, 0.6), (0.6, 0.9)),

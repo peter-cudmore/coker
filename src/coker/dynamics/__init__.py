@@ -32,6 +32,10 @@ from coker.dynamics.system import create_autonomous_ode, direct_sum
 from coker.interfaces import SolverParameters
 
 from coker.dynamics.model import DynamicsSpec, DynamicalSystem
+from coker.dynamics.residual import (
+    ResidualDynamicalSystem,
+    to_residual_dynamical_system,
+)
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     InterpolatingPolyCollection,
@@ -66,6 +70,8 @@ __all__ = [
     "ControlSolution",
     "ControlVariable",
     "DynamicalSystem",
+    "ResidualDynamicalSystem",
+    "to_residual_dynamical_system",
     "DynamicsSpec",
     "SymbolicDAESystem",
     "SymbolicSystem",

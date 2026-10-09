@@ -971,10 +971,10 @@ def if_then_else(expression, true_branch, false_branch):
         >>> f = function(
         ...     [Scalar("x")],
         ...     lambda x: if_then_else(
-            ...         x == 0,
-            ...         np.array([1.0, 0.0]),
-            ...         np.array([0.0, 1.0]),
-            ...     ),
+        ...         x == 0,
+        ...         np.array([1.0, 0.0]),
+        ...         np.array([0.0, 1.0]),
+        ...     ),
         ...     backend="numpy",
         ... )
         >>> f(0)

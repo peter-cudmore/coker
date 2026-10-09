@@ -22,13 +22,15 @@ Backend capability matrix
      - Dependency story
      - Observed coverage in this repository
    * - ``numpy``
-     - Direct numerical evaluation, baseline execution, and host-side ODE work.
+     - Reference execution and small-system fallback.
      - Included in the base install.
      - Covered by ``tests/backends/numpy/`` and the benchmark suite.
    * - ``casadi``
-     - Nonlinear optimisation, transcription-heavy workflows, and the default
-       :class:`~coker.dynamics.VariationalProblem` solve path.
-     - Install with ``pip install "coker[casadi]"``.
+     - Optimisation, simulation, and high-performance numerical work,
+       including nonlinear transcription workflows.
+     - Install with ``pip install "coker[casadi]"``. Independent residual DAEs
+       use CasADi's native IDAS/IDA plugin when available and otherwise use a
+       direct-collocation feasibility solve.
      - Covered by ``tests/backends/casadi/`` and the variational solver tests.
    * - ``sympy``
      - Symbolic inspection and expression printing. Function-space inputs and
@@ -67,8 +69,9 @@ Choosing a backend
 
 A good default is:
 
-- use ``numpy`` while bringing up a model or debugging array shapes;
-- use ``casadi`` for solve-heavy optimisation and parameter-fitting problems;
+- use ``numpy`` as a reference implementation or for small systems;
+- use ``casadi`` for optimisation, simulation, and high-performance numerical
+  work;
 - use ``pytorch`` when you need tensor-valued execution, autograd, or a
   nonlinear mathematical-program solve on PyTorch;
 - use ``sympy`` when you need symbolic forms or printable expressions;

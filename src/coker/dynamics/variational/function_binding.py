@@ -14,6 +14,10 @@ from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
 from coker.parameters.function_parameters import FunctionParameter
+from coker.dynamics.residual import (
+    LegacyFormCertificate,
+    ResidualDynamicalSystem,
+)
 from coker.dynamics.model import DynamicalSystem
 from coker.parameters import (
     BoundVector,
@@ -184,8 +188,13 @@ def _reconstruct_concrete_values(
 
 
 def specialize_system_parameters(
-    system: DynamicalSystem, declarations: Sequence[object]
-) -> tuple[DynamicalSystem, list[object], ParameterValueLayout | None]:
+    system: DynamicalSystem | ResidualDynamicalSystem,
+    declarations: Sequence[object],
+) -> tuple[
+    DynamicalSystem | ResidualDynamicalSystem,
+    list[object],
+    ParameterValueLayout | None,
+]:
     """Bind function-valued parameters and return a numeric solver system."""
     space = system.parameters
     if not isinstance(space, tuple):
@@ -343,6 +352,16 @@ def specialize_system_parameters(
             backend=system.backend(),
         )
 
+    def bind_residual(original):
+        spaces = original.input_spaces()
+        return function(
+            [*spaces[:5], numeric_parameters],
+            lambda t, w, wdot, z, u, p: original(
+                t, w, wdot, z, u, *reconstruct_parameters(p)
+            ),
+            backend=system.backend(),
+        )
+
     def bind_outputs(original):
         spaces = original.input_spaces()
         return function(
@@ -353,8 +372,30 @@ def specialize_system_parameters(
             backend=system.backend(),
         )
 
-    return (
-        DynamicalSystem(
+    if isinstance(system, ResidualDynamicalSystem):
+        certificate = (
+            LegacyFormCertificate(
+                rate=bind_dynamics(system.legacy.rate),
+                quadrature=bind_dynamics(system.legacy.quadrature),
+                algebraic=bind_dynamics(system.legacy.algebraic),
+            )
+            if system.legacy is not None
+            else None
+        )
+        specialized_system = ResidualDynamicalSystem(
+            inputs=system.inputs,
+            parameters=numeric_parameters,
+            x0=bind_initial_conditions(system.x0),
+            F=bind_residual(system.F),
+            y=bind_outputs(system.y),
+            differential=system.differential,
+            algebraic=system.algebraic,
+            quadrature=system.quadrature,
+            solver_parameters=system.solver_parameters,
+            legacy=certificate,
+        )
+    else:
+        specialized_system = DynamicalSystem(
             system.inputs,
             numeric_parameters,
             bind_initial_conditions(system.x0),
@@ -363,7 +404,10 @@ def specialize_system_parameters(
             bind_dynamics(system.dqdt),
             bind_outputs(system.y),
             solver_parameters=system.solver_parameters,
-        ),
+        )
+
+    return (
+        specialized_system,
         solver_declarations,
         ParameterValueLayout(
             tuple(space),

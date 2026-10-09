@@ -32,6 +32,101 @@ from an initial-condition function and an ``xdot`` function. If you pass a
 parameter space, the system becomes directly usable inside a
 :class:`~coker.dynamics.VariationalProblem`.
 
+Residual differential-algebraic systems
+---------------------------------------
+
+:class:`~coker.dynamics.ResidualDynamicalSystem` represents a coupled system
+directly as:
+
+.. math::
+
+   F(t, w, \dot{w}, z, u, p) = 0,
+
+where ``w`` combines differential and quadrature state, and ``z`` is the
+algebraic state. Use it when the model is inherently implicit; use
+:func:`~coker.dynamics.to_residual_dynamical_system` to convert an existing
+semi-explicit :class:`~coker.dynamics.DynamicalSystem`.
+
+The NumPy backend integrates square index-one residual systems with a fixed-step
+implicit method. The residual must provide one row for each differential or
+quadrature rate and algebraic variable. Initial algebraic values are required
+when algebraic variables are declared. For CasADi residual systems, there is
+no public solver-mode switch: Coker automatically uses the native IDAS/IDA
+plugin when available and otherwise uses a direct-collocation feasibility
+solve. In the IDAS/IDA path, ``solver_parameters`` must be a mapping of CasADi
+IDAS options; ``calc_ic`` cannot be disabled, and ``init_xdot`` may supply an
+initial differential-state-rate guess. In the collocation path, it must instead
+be a mapping of CasADi IPOPT options. These backend-specific option mappings
+are not interchangeable. This interface does not discretize PDEs, but a
+finite-element, finite-volume, or weak-form model may supply its resulting
+residual DAE here.
+
+The following executable CasADi example solves the coupled residual
+``xdot + z - 1 = 0`` and ``x + 2 * xdot - z = 0``:
+
+.. doctest:: residual_dae
+
+   >>> import numpy as np
+   >>> from coker import Dimension, Scalar, VectorSpace, function
+   >>> from coker.algebra.ops import Noop
+   >>> from coker.dynamics import ResidualDynamicalSystem
+   >>> residual = ResidualDynamicalSystem(
+   ...     inputs=Noop(),
+   ...     parameters=None,
+   ...     x0=function(
+   ...         [VectorSpace("z", 1), Noop(), None],
+   ...         lambda z, _u, _p: (np.array([0.0]), z),
+   ...         backend="casadi",
+   ...     ),
+   ...     F=function(
+   ...         [
+   ...             Scalar("t"),
+   ...             VectorSpace("w", 1),
+   ...             VectorSpace("wdot", 1),
+   ...             VectorSpace("z", 1),
+   ...             Noop(),
+   ...             None,
+   ...         ],
+   ...         lambda _t, w, wdot, z, _u, _p: np.array(
+   ...             [wdot[0] + z[0] - 1.0, w[0] + 2.0 * wdot[0] - z[0]]
+   ...         ),
+   ...         backend="casadi",
+   ...     ),
+   ...     y=function(
+   ...         [Scalar("t"), VectorSpace("x", 1), VectorSpace("z", 1),
+   ...          Noop(), None, None],
+   ...         lambda _t, x, _z, _u, _p, _q: x,
+   ...         backend="casadi",
+   ...     ),
+   ...     differential=Dimension(1),
+   ...     algebraic=Dimension(1),
+   ...     quadrature=None,
+   ... )
+   >>> np.testing.assert_allclose(
+   ...     residual(0.25),
+   ...     [1.0 - np.exp(-0.25 / 3.0)],
+   ...     rtol=1e-4,
+   ... )
+
+For an equivalent semi-explicit model, retain the public ODE/DAE declaration
+and convert only where residual access is required:
+
+.. doctest:: residual_dae
+
+   >>> from coker.dynamics import create_autonomous_ode, to_residual_dynamical_system
+   >>> explicit = create_autonomous_ode(
+   ...     x0=np.array([1.0]),
+   ...     xdot=lambda x, _parameters: x,
+   ...     backend="numpy",
+   ... )
+   >>> converted = to_residual_dynamical_system(explicit)
+   >>> np.testing.assert_allclose(
+   ...     converted.F(
+   ...         0.0, np.array([2.0]), np.array([2.0]), np.empty((0,)), None, None
+   ...     ),
+   ...     [0.0],
+   ... )
+
 Functional problem building
 ---------------------------
 
