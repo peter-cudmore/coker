@@ -12,6 +12,7 @@ from coker.backends.casadi.variational.variable_scaling import (
     _derive_constraint_scaling,
     _derive_variable_scaling,
 )
+from coker.backends.casadi.residual_support import quiet_ipopt_options
 from coker.dynamics import VariationalProblem, VariationalSolution
 from coker.parameters import BoundedVariable
 from coker.dynamics.transcription.collocation import (
@@ -435,13 +436,7 @@ def _compile_nlp(
     solver_options = dict(factory.options.optimiser_options)
     warm_start = bool(solver_options.pop("warm_start", False))
     if not factory.options.verbose:
-        solver_options.update(
-            {
-                "ipopt.print_level": 0,
-                "print_time": False,
-                "ipopt.sb": "yes",
-            }
-        )
+        solver_options = quiet_ipopt_options(solver_options)
 
     scaled = _scale_nlp(
         factory=factory,
