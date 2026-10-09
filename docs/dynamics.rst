@@ -50,16 +50,16 @@ semi-explicit :class:`~coker.dynamics.DynamicalSystem`.
 The NumPy backend integrates square index-one residual systems with a fixed-step
 implicit method. The residual must provide one row for each differential or
 quadrature rate and algebraic variable. Initial algebraic values are required
-when algebraic variables are declared. For CasADi residual systems, there is
-no public solver-mode switch: Coker automatically uses the native IDAS/IDA
-plugin when available and otherwise uses a direct-collocation feasibility
-solve. In the IDAS/IDA path, ``solver_parameters`` must be a mapping of CasADi
-IDAS options; ``calc_ic`` cannot be disabled, and ``init_xdot`` may supply an
-initial differential-state-rate guess. In the collocation path, it must instead
-be a mapping of CasADi IPOPT options. These backend-specific option mappings
-are not interchangeable. This interface does not discretize PDEs, but a
-finite-element, finite-volume, or weak-form model may supply its resulting
-residual DAE here.
+when algebraic variables are declared. CasADi provides two explicitly selected
+residual solver paths through
+:class:`~coker.backends.casadi.CasadiResidualSolverOptions`:
+:attr:`~coker.backends.casadi.CasadiResidualSolver.IDAS` uses the native
+SUNDIALS plugin, and
+:attr:`~coker.backends.casadi.CasadiResidualSolver.VARIATIONAL` uses a direct
+collocation feasibility solve. IDAS options and IPOPT options remain separate
+in that options object.
+This interface does not discretize PDEs, but a finite-element, finite-volume,
+or weak-form model may supply its resulting residual DAE here.
 
 The following executable CasADi example solves the coupled residual
 ``xdot + z - 1 = 0`` and ``x + 2 * xdot - z = 0``:
@@ -302,7 +302,7 @@ rely on a cache lifetime across separately created problems.
 Heterogeneous and function-valued parameters
 --------------------------------------------
 
-``DynamicsSpec.parameters`` may be one declaration or a positional tuple of
+System parameter declarations may be one declaration or a positional tuple of
 ``Scalar``, ``VectorSpace``, and ``FunctionSpace`` declarations. A dynamics
 callback receives that same positional layout as one final ``p`` tuple.
 

@@ -8,3 +8,6 @@ API Reference
    spaces
    conditional
    optimisation
+   dynamics
+   parameters
+   backends

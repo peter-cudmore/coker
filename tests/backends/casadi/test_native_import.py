@@ -11,7 +11,8 @@ from coker.backends.lowered import (
     FunctionSignature,
     LoweringOptions,
 )
-from coker.dynamics import DynamicsSpec, VariationalProblemBuilder
+from coker.dynamics import VariationalProblemBuilder
+from coker.dynamics.model import DynamicsSpec
 from coker.dynamics.system import create_dynamics_from_spec
 from coker.parameters import BoundedVariable
 from coker.parameters.function_parameters import (

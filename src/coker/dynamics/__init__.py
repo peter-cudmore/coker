@@ -31,19 +31,10 @@ from coker.dynamics.analysis import (
 from coker.dynamics.system import create_autonomous_ode, direct_sum
 from coker.interfaces import SolverParameters
 
-from coker.dynamics.model import DynamicsSpec, DynamicalSystem
+from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.residual import (
     ResidualDynamicalSystem,
     to_residual_dynamical_system,
-)
-from coker.dynamics.transcription.collocation import (
-    InterpolatingPoly,
-    InterpolatingPolyCollection,
-    evaluate_legendre_polynomial,
-    expand_coefficients,
-    generate_discritisation_operators,
-    legendre_coefficient,
-    lgr_points,
 )
 from coker.dynamics.variational.mesh import (
     split_at_non_differentiable_points,
@@ -72,14 +63,11 @@ __all__ = [
     "DynamicalSystem",
     "ResidualDynamicalSystem",
     "to_residual_dynamical_system",
-    "DynamicsSpec",
     "SymbolicDAESystem",
     "SymbolicSystem",
     "UnsupportedSystemError",
     "IdentifiabilityResult",
     "ObservabilityResult",
-    "InterpolatingPoly",
-    "InterpolatingPolyCollection",
     "LossFunction",
     "PiecewiseConstantVariable",
     "PiecewiseControlSolution",
@@ -100,11 +88,6 @@ __all__ = [
     "analyse_observability",
     "create_autonomous_ode",
     "direct_sum",
-    "evaluate_legendre_polynomial",
-    "expand_coefficients",
-    "generate_discritisation_operators",
-    "legendre_coefficient",
-    "lgr_points",
     "split_at_non_differentiable_points",
     "lower_dae_system",
     "lower_system",

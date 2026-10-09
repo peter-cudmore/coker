@@ -59,7 +59,23 @@ def _validation_t_final(t_final: float | BoundedVariable) -> None:
 
 
 class VariationalProblemBuilder:
-    """Build a variational problem from one, context-owned symbolic trace."""
+    """Build a variational problem from one context-owned symbolic trace.
+
+    Args:
+        system: Explicit, semi-explicit, or residual dynamic system.
+        t_final: Fixed positive horizon or bounded horizon decision.
+        control: Optional control-variable declarations.
+        parameters: Optional fitted parameter declarations.
+        backend: Name of the backend that will solve the problem.
+        transcription_options: Mesh and backend solve configuration.
+        system_parameter_map: Map solver parameters into system parameters.
+
+    Examples:
+        Build a problem inside the context manager::
+
+            with VariationalProblemBuilder(system, t_final=1.0) as problem:
+                built = problem.build(Minimise(problem.state() @ problem.state()))
+    """
 
     def __init__(
         self,
@@ -172,21 +188,35 @@ class VariationalProblemBuilder:
 
     @property
     def t(self) -> Tracer:
+        """Return the symbolic marker for path-time expressions."""
         self._require_open()
         return self._t
 
     @property
     def t_final(self) -> Tracer:
+        """Return the symbolic marker for terminal-time expressions."""
         self._require_open()
         return self._t_final
 
     def state(self, time: Optional[object] = None) -> Tracer:
+        """Return the symbolic differential state at ``time``.
+
+        Args:
+            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
+                :attr:`t`.
+        """
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
         return self._state(time if isinstance(time, Tracer) else self._t_initial)
 
     def input(self, time: Optional[object] = None) -> Tracer:
+        """Return the symbolic input at ``time``.
+
+        Args:
+            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
+                :attr:`t`.
+        """
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
@@ -195,6 +225,12 @@ class VariationalProblemBuilder:
         return self._input
 
     def output(self, time: Optional[object] = None) -> Tracer:
+        """Return the symbolic system output at ``time``.
+
+        Args:
+            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
+                :attr:`t`.
+        """
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
@@ -202,6 +238,7 @@ class VariationalProblemBuilder:
 
     @property
     def parameters(self) -> Tracer:
+        """Return the symbolic system-parameter vector or tuple."""
         self._require_open()
         return self._parameters
 
@@ -230,9 +267,12 @@ class VariationalProblemBuilder:
     def integrate(self, expression: Tracer) -> Tracer:
         """Register a scalar integrand and return its accumulated state.
 
-        The returned tracer is a distinct quadrature channel. Its initial
-        value is zero, and its derivative is imposed by the variational
-        transcription.
+        Args:
+            expression: Scalar path expression to integrate over the horizon.
+
+        Returns:
+            Symbolic quadrature value, which is available in the objective and
+            terminal constraints.
         """
         self._require_open()
         if not isinstance(expression, Tracer):
@@ -258,7 +298,16 @@ class VariationalProblemBuilder:
         *,
         subject_to: Optional[Sequence[object]] = None,
     ) -> VariationalProblem:
-        """Build a problem from a ``Minimise`` objective and constraints."""
+        """Build a problem from an objective and symbolic constraints.
+
+        Args:
+            objective: Scalar :class:`~coker.toolkits.codesign.Minimise`
+                expression.
+            subject_to: Path, initial, or terminal symbolic comparisons.
+
+        Returns:
+            Backend-neutral variational problem ready for ``get_solver()``.
+        """
         self._require_open()
         if not isinstance(objective, Minimise):
             raise TypeError("build requires a Minimise objective")

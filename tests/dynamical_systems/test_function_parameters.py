@@ -7,11 +7,8 @@ import numpy as np
 from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.function import BoundCallable
 from coker.algebra.ops import Noop
-from coker.dynamics import (
-    DynamicsSpec,
-    VariationalProblem,
-    VariationalProblemBuilder,
-)
+from coker.dynamics import VariationalProblem, VariationalProblemBuilder
+from coker.dynamics.model import DynamicsSpec
 from coker.parameters.function_parameters import (
     ClosureParameter,
     DenseLayer,
