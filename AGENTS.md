@@ -61,6 +61,11 @@ The CasADi backend MUST remain at least as feature complete as the NumPy
 backend. Prefer CasADi for optimisation, simulation, and high-performance
 numerical workloads; retain NumPy as the reference and small-system fallback.
 
+## Pre-commit review
+
+Before committing, review the changed code for dead code, duplicated behavior,
+and helpers or branches that can be inlined without reducing clarity.
+
 ## Pull requests
 
 Pull requests SHOULD be squash-merged by default. Their descriptions MUST

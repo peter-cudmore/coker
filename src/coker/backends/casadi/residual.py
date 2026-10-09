@@ -68,7 +68,7 @@ def evaluate_residual_integrals(
             scalar_endpoint, initial_state, z0, x_size, q_size, z_size
         )
 
-    solver, unpack = _build_collocation_solver(
+    solver = _build_collocation_solver(
         residual,
         state_size=state_size,
         algebraic_size=z_size,
@@ -94,7 +94,6 @@ def evaluate_residual_integrals(
         for _ in range(step_count):
             current_state, current_algebraic = _solve_collocation_step(
                 solver,
-                unpack,
                 current_time,
                 step_duration,
                 current_state,
@@ -304,17 +303,7 @@ def _build_collocation_solver(
         raise RuntimeError(
             "CasADi residual collocation solver construction failed"
         ) from error
-
-    def unpack(decision_value):
-        state_values = ca.reshape(
-            decision_value[: state_size * degree], state_size, degree
-        )
-        algebraic_values = ca.reshape(
-            decision_value[state_size * degree :], algebraic_size, degree
-        )
-        return state_values[:, -1], algebraic_values[:, -1]
-
-    return solver, unpack
+    return solver
 
 
 def _solver_options(solver_parameters):
@@ -336,7 +325,6 @@ def _solver_options(solver_parameters):
 
 def _solve_collocation_step(
     solver,
-    unpack,
     start_time,
     duration,
     start_state,
@@ -377,7 +365,13 @@ def _solve_collocation_step(
             "CasADi residual collocation returned a non-finite solution at "
             f"time {start_time + duration}"
         )
-    return unpack(solution_vector)
+    state_values = ca.reshape(
+        solution_vector[: state_size * degree], state_size, degree
+    )
+    algebraic_values = ca.reshape(
+        solution_vector[state_size * degree :], algebraic_size, degree
+    )
+    return state_values[:, -1], algebraic_values[:, -1]
 
 
 def _format_initial_output(scalar, state, algebraic, x_size, q_size, z_size):
