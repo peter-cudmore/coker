@@ -136,7 +136,7 @@ docs/             Sphinx documentation
 
 ## Development
 
-The repository uses `uv` in CI for environment management.
+Development requires Python 3.10+, matching `pyproject.toml`. The repository uses `uv` in CI for environment management.
 
 Install a development environment:
 
