@@ -88,8 +88,8 @@ class MathematicalProgram(SymbolicCallable):
         implementation: Callable[..., Any],
         backend: Optional[str] = None,
     ):
-        self.input_shape = input_shape
-        self.output_shape = output_shape
+        self._input_shape = input_shape
+        self._output_shape = output_shape
         self._impl = implementation
         self.backend = backend
         self._optimisation_module: OptimisationModule | None = None
@@ -111,17 +111,26 @@ class MathematicalProgram(SymbolicCallable):
         program._parameter_captures = tuple(captures)
         return program
 
+    def input_shape(self) -> Tuple[Dimension, ...]:
+        """Return runtime argument shapes in declaration order."""
+        return self._input_shape
+
+    def output_shape(self) -> Tuple[Dimension, ...]:
+        """Return requested output shapes, excluding the objective."""
+        return self._output_shape
+
     @property
     def result_shape(self) -> Tuple[Dimension, ...]:
         """Return the objective-first shapes produced by this program."""
-        return (Dimension.scalar(), *self.output_shape)
+        return (Dimension.scalar(), *self.output_shape())
 
     def _validate_arguments(self, args) -> None:
-        if len(args) != len(self.input_shape):
+        input_shape = self.input_shape()
+        if len(args) != len(input_shape):
             raise ValueError(
-                f"Expected {len(self.input_shape)} arguments, got {len(args)}"
+                f"Expected {len(input_shape)} arguments, got {len(args)}"
             )
-        for index, (arg, expected) in enumerate(zip(args, self.input_shape)):
+        for index, (arg, expected) in enumerate(zip(args, input_shape)):
             if isinstance(arg, Tracer) and arg.dim != expected:
                 raise ValueError(
                     f"Argument {index} has shape {arg.dim}, "
@@ -171,7 +180,7 @@ class MathematicalProgram(SymbolicCallable):
             float(objective_array.reshape(-1)[0]),
             *(
                 np.reshape(np.asarray(output), dim.shape)
-                for output, dim in zip(outputs, self.output_shape)
+                for output, dim in zip(outputs, self.output_shape())
             ),
         )
 
@@ -209,22 +218,15 @@ class MathematicalProgram(SymbolicCallable):
             )
         arguments = [
             dim.to_space(f"input_{i}")
-            for i, dim in enumerate(self.input_shape)
+            for i, dim in enumerate(self.input_shape())
         ]
         result_dimensions = self.result_shape
-        capture_dimensions = tuple(
-            block.dim
-            for capture in self._parameter_captures
-            for block in capture.blocks
-        )
         function_space = FunctionSpace(
             "program",
             arguments,
             [
                 dimension.to_space(f"result_{index}")
-                for index, dimension in enumerate(
-                    (*result_dimensions, *capture_dimensions)
-                )
+                for index, dimension in enumerate(result_dimensions)
             ],
         )
         symbol = tape.intern_symbol(
@@ -257,7 +259,7 @@ class MathematicalProgram(SymbolicCallable):
         return function(
             arguments=[
                 dim.to_space(f"input_{i}")
-                for i, dim in enumerate(self.input_shape)
+                for i, dim in enumerate(self.input_shape())
             ],
             implementation=cast(Callable, self._call_symbolic),
             backend=backend_name,
@@ -407,7 +409,7 @@ class ProblemBuilder:
             backend_name = current.name
         else:
             backend_name = backend
-        backend_impl = get_backend_by_name(backend_name)
+        backend_impl = get_backend_by_name(backend_name, set_current=False)
 
         implementation = backend_impl.build_optimisation_problem(
             self.objective.expression,
@@ -452,6 +454,7 @@ def norm(arg, order=2):
 
 __all__ = [
     "BoundedConstraint",
+    "MathematicalProgram",
     "OptimisationModule",
     "Minimise",
     "ProblemBuilder",

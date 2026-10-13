@@ -1,16 +1,12 @@
-import coker.toolkits.system_modelling.std_lib as std_lib
-from coker.toolkits.system_modelling.api import list_components
+from coker.toolkits.system_modelling.std_lib import Gain, Integrator
+from coker.toolkits.system_modelling import list_components
 
 
-def test_list_libraries():
-    assert std_lib is not None
+def test_list_components_reports_loaded_standard_library_components():
     components = list_components()
-    assert len(components) > 4
-
-    for component, library_path, _hint in components:
-        assert library_path.startswith(
-            "coker/toolkits/system_modelling/std_lib"
-        ), (
-            "Only components in the standard library should be "
-            f"imported: {library_path}"
-        )
+    for component in (Gain, Integrator):
+        assert (
+            component.__name__,
+            "coker/toolkits/system_modelling/std_lib/common/signal_processing",
+            None,
+        ) in components

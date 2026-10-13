@@ -60,12 +60,14 @@ the ``backend`` argument:
        backend="casadi",
    )
 
-Available backend names in the current package are ``"numpy"``, ``"casadi"``,
-``"sympy"``, ``"coker"``, and ``"jax"``.
+Bundled backend names are ``"numpy"``, ``"casadi"``, ``"sympy"``, ``"jax"``,
+and ``"pytorch"``; optional dependencies must be installed where required.
+Additional plugins can register their own names.
 
-In Coker 0.4, :func:`coker.function` defaults to ``"numpy"``. Pass
-``backend=`` explicitly for portable examples. The native ``"coker"`` backend
-is supplied by the separate ``coker_backend`` package.
+Both :func:`coker.function` and the implicit current-backend fallback use
+``"numpy"``. Pass ``backend=`` explicitly for portable examples. The native
+``"coker"`` backend is supplied by the separate ``coker_backend`` package.
+Ordinary evaluation and lowering do not change the current selection.
 
 Migrating to 0.4
 ----------------
@@ -80,6 +82,7 @@ owning modules: ``function`` and ``Function`` from
 Next steps
 ----------
 
+- :doc:`public_api` for canonical imports and the 0.5 migration contracts.
 - :doc:`backends` for backend-selection guidance and the capability matrix.
 - :doc:`dynamics` for ODE construction and variational optimisation.
 - :doc:`toolkits` for robotics, system modelling, and codesign helpers.

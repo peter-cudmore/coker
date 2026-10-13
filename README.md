@@ -21,6 +21,11 @@ Coker combines a few layers that usually live in separate tools:
 
 The primary entry point is `coker.function`. You describe argument spaces explicitly, provide a Python implementation, and choose a backend.
 
+Canonical imports and the 0.5 migration contracts are inventoried in
+[the public API guide](docs/public_api.rst). NumPy is the base-install default;
+backend lookup, evaluation, and lowering do not change ambient selection unless
+the application explicitly requests `get_backend_by_name(name, set_current=True)`.
+
 ```python
 import numpy as np
 from coker import function, Scalar, VectorSpace

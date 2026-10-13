@@ -367,7 +367,8 @@ def instantiate_backend(name: str):
     return backend
 
 
-def get_backend_by_name(name: str, set_current=True) -> Backend:
+def get_backend_by_name(name: str, set_current: bool = False) -> Backend:
+    """Look up a plugin backend; select it only when explicitly requested."""
     global __current_backend
 
     backend = __backends.get(name)
@@ -381,7 +382,7 @@ def get_backend_by_name(name: str, set_current=True) -> Backend:
 
 __backends = {}
 
-default_backend = "coker"
+default_backend = "numpy"
 __current_backend = None
 
 

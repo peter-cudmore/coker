@@ -2,12 +2,12 @@ Coker backend architecture
 ==========================
 
 The embedded backend implementation is supplied by the separate
-``coker_backend`` package. Import it before selecting the backend:
+``coker_backend`` package. Import it before using the backend:
 
 .. code-block:: python
 
    import coker_backend
-   from coker.backends.backend import get_backend_by_name
+   from coker.backends import get_backend_by_name
 
    backend = get_backend_by_name("coker")
 

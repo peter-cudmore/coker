@@ -63,11 +63,14 @@ A representative pattern is:
 System modelling
 ----------------
 
-The system-modelling toolkit provides component/block modelling helpers and a
-standard-library discovery API. ``list_components()`` walks registered standard
-library components and returns ``(component_name, library_path, hint)`` tuples.
-The repository test checks that these components resolve from
-``coker/toolkits/system_modelling/std_lib``.
+Import discovery through ``from coker.toolkits.system_modelling import
+list_components``. Import a component library first, for example
+``import coker.toolkits.system_modelling.std_lib``. Discovery walks loaded
+component subclasses and returns ``(component_name, library_path, None)``
+tuples; paths use slashes and usage hints are currently absent. Model authors
+use ``Block``, ``BlockContainer``, and ``BlockSpec`` from that same public
+package rather than lazy-handle or registry internals. See :doc:`public_api`
+for the complete boundary.
 
 The most concrete entry point today is ``examples/pid_example.py``, which builds
 both a plant model and a PID-style controller from standard-library blocks such
@@ -84,7 +87,7 @@ directly.
 .. code-block:: python
 
    from coker import FunctionSpace, Scalar, VectorSpace
-   from coker.dynamics import RadialBasisFunction
+   from coker.parameters.function_parameters import RadialBasisFunction
    from coker.toolkits.codesign import Minimise, ProblemBuilder
 
    with ProblemBuilder(arguments=[VectorSpace("target", 2)]) as builder:
@@ -126,6 +129,17 @@ instances: they retain the original declaration in ``specification``, the
 declared ``FunctionSpace`` in ``space``, their native callable in ``function``,
 and the fitted basis in ``parameters``. Their private solver captures never
 change the public ``(objective, *outputs)`` tuple.
+
+Import the returned type as ``coker.toolkits.codesign.MathematicalProgram``.
+Like ``Function``, it exposes ``input_shape()`` and ``output_shape()`` methods.
+The latter excludes the objective; ``result_shape`` includes it.
+``program.backend`` names the solver backend. ``program.lower()`` returns a
+solver-pinned ``Function``, not a ``LoweredFunction``; calling it solves the
+program and returns only ``(objective, *outputs)``.
+
+``OptimisationModule`` is a supported solver implementation interface.
+``WeightedNorm`` is backend recognition metadata produced by ``weighted_norm``;
+ordinary model code uses the helper rather than constructing the record.
 
 For bounded CasADi/IPOPT solves, configure CasADi's flat IPOPT options through
 the builder's ``solver_options``:

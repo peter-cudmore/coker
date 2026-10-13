@@ -13,6 +13,8 @@ The dynamics API is re-exported from :mod:`coker.dynamics`; general and
 function-valued declarations are exposed from their respective packages:
 
 - :func:`coker.dynamics.create_autonomous_ode`
+- :func:`coker.dynamics.create_control_system`
+- :class:`coker.dynamics.DynamicsSpec` with :func:`coker.dynamics.create_dynamics_from_spec`
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
 - :class:`coker.parameters.BoundedVariable`
@@ -21,16 +23,82 @@ function-valued declarations are exposed from their respective packages:
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
 - :class:`coker.parameters.BoundVector`
 - :class:`coker.parameters.DenseTensorVariable`
-- :class:`coker.function_parameters.FunctionParameter`
-- :class:`coker.function_parameters.ClosureParameter`
-- :class:`coker.function_parameters.MonotonePiecewiseLinear`
-- :class:`coker.function_parameters.DenseLayer`
-- :class:`coker.function_parameters.RadialBasisFunction`
+- :class:`coker.parameters.function_parameters.FunctionParameter`
+- :class:`coker.parameters.function_parameters.ClosureParameter`
+- :class:`coker.parameters.function_parameters.MonotonePiecewiseLinear`
+- :class:`coker.parameters.function_parameters.DenseLayer`
+- :class:`coker.parameters.function_parameters.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
 parameter space, the system becomes directly usable inside a
 :class:`~coker.dynamics.VariationalProblem`.
+
+Use ``create_control_system(x0, xdot, control, ...)`` for a controlled ODE.
+Its dynamics callback is ``xdot(t, x, u, p)``, where ``u`` is the control value.
+For general systems, use the public spec route; no internal absence sentinel
+is required:
+
+.. code-block:: python
+
+   import numpy as np
+   from coker import FunctionSpace, Scalar, VectorSpace
+   from coker.dynamics import (
+       DynamicsSpec, create_control_system, create_dynamics_from_spec, direct_sum,
+   )
+
+   control = FunctionSpace("u", [Scalar("t")], [VectorSpace("u", 1)])
+   controlled = create_control_system(
+       [0.0], lambda t, x, u, p: u, control,
+   )
+   general = create_dynamics_from_spec(DynamicsSpec(
+       inputs=None,
+       parameters=None,
+       algebraic=None,
+       initial_conditions=lambda z, u, p: (np.array([1.0]), None),
+       dynamics=lambda t, x, z, u, p: -x,
+       constraints=None,
+       outputs=lambda t, x, z, u, p, q: x,
+       quadratures=None,
+   ))
+
+``DynamicsSpec.initial_conditions(z, u, p)`` returns ``(x0, z0)``. Its dynamics,
+constraints, and quadrature callbacks receive ``(t, x, z, u, p)``; outputs
+receive ``(t, x, z, u, p, q)``. Tuple parameters arrive as one final ``p`` tuple
+(before ``q`` for outputs). ``None`` declares absent inputs, constraints, or
+quadratures. ``system.backend`` exposes the backend name as a read-only property.
+
+Composition and projections
+---------------------------
+
+``direct_sum(*systems, backend=None)`` returns exactly
+``(DynamicalSystem, ProjectionSet)`` in subsystem order. The system does not
+carry an implicit projection attribute. By default it uses the first system's
+backend; ``backend=`` explicitly chooses the composed backend.
+
+.. code-block:: python
+
+   combined, projections = direct_sum(general, general)
+   output = combined(0.25)
+   left, right = projections.outputs.inverse(output)
+   left_matrix, right_matrix = projections.outputs.as_matrices()
+
+``ProjectionSet`` exposes ``state``, ``algebraic``, ``quadratures``, ``outputs``,
+``controls``, and ``parameters``. Numeric projections are
+``CompositionOperator`` values: ``inverse(value)`` splits a flat vector,
+``as_matrices()`` returns one projection matrix per subsystem, and
+``offsets()``/``sizes()`` describe the partition. Absent channels produce
+``None`` entries in ``inverse`` and zero-row matrices. Scalar outputs occupy
+one flat slot.
+
+When any subsystem declares a function-valued parameter, ``parameters`` is a
+``StructuredParameterProjection`` instead. ``split(parameter_tuple)`` returns
+one positional tuple per subsystem, and ``widths`` reports declaration counts,
+not flattened scalar widths. Numeric-only parameters retain their flat-vector
+``CompositionOperator`` projection.
+
+See :doc:`public_api` for the ordinary/extension/internal API inventory.
+
 
 Functional problem building
 ---------------------------
@@ -80,7 +148,7 @@ Function-valued parameters
 --------------------------
 
 Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
-:class:`~coker.dynamics.FunctionParameter` realization at problem construction;
+:class:`~coker.parameters.function_parameters.FunctionParameter` realization at problem construction;
 Coker replaces its concrete parameter blocks with scalar solver decisions before
 solving. The function space and realization must agree on their argument and
 output shapes.
@@ -103,7 +171,7 @@ a dense layer with an identity activation:
 
    from coker import FunctionSpace, VectorSpace, function
    from coker.dynamics import VariationalProblemBuilder
-   from coker.function_parameters import DenseLayer
+   from coker.parameters.function_parameters import DenseLayer
    from coker.toolkits.codesign import Minimise
 
    activation = function(
@@ -248,7 +316,7 @@ immediately after time:
 
 Values for a declared ``FunctionSpace`` parameter may be ordinary Python
 callables, :class:`coker.Function` objects, or
-:class:`~coker.function_parameters.FittedFunction` objects. Coker normalizes
+:class:`~coker.parameters.function_parameters.FittedFunction` objects. Coker normalizes
 these values once before integration, so callers do not provide backend-native
 or lowered handles. No ``Noop`` placeholder is used for direct evaluation.
 
@@ -260,7 +328,7 @@ shape of its initial guess:
 .. code-block:: python
 
    from coker.dynamics import VariationalProblemBuilder
-   from coker.function_parameters import MonotonePiecewiseLinear
+   from coker.parameters.function_parameters import MonotonePiecewiseLinear
    from coker.parameters import BoundVector
 
    with VariationalProblemBuilder(

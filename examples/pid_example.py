@@ -1,4 +1,4 @@
-from coker.toolkits.system_modelling.modelling import (
+from coker.toolkits.system_modelling import (
     Block,
     BlockContainer,
     BlockSpec,

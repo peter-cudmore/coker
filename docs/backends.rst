@@ -7,9 +7,20 @@ backend name is selected with the ``backend=...`` argument to
 :class:`coker.dynamics.VariationalProblem` and
 :class:`coker.toolkits.codesign.ProblemBuilder`.
 
-The current backend registry accepts the names ``"numpy"``, ``"coker"``,
-``"jax"``, ``"casadi"``, ``"pytorch"``, and ``"sympy"``. If no backend is
-selected, ``get_current_backend()`` defaults to ``"coker"``.
+The bundled registry declares ``"numpy"``, ``"jax"``, ``"casadi"``,
+``"pytorch"``, and ``"sympy"``. Additional plugins can register arbitrary
+names, including the separately installed native ``"coker"`` backend.
+
+``function()`` defaults to NumPy. ``get_current_backend()`` also falls back to
+NumPy until the application deliberately selects a backend with
+``get_backend_by_name(name, set_current=True)``. Lookup without that flag is
+nonmutating. An implicit ``ProblemBuilder.build()`` or low-level
+``coker.backends.evaluate(..., backend=None)`` consumes the current selection;
+ordinary functions use their own ``backend`` name, even after ambient selection.
+Explicit evaluation, lowering, and problem construction never select an ambient
+backend. Variational problems retain a separate CasADi solver default.
+
+See :doc:`public_api` for the import inventory and migration notes.
 
 Backend capability matrix
 -------------------------
@@ -89,6 +100,13 @@ handle. Every handle exposes an ordered ``signature`` and a common packed
 ``execute(inputs)`` ABI returning a tuple. Positional handle calls unwrap one
 output and return a tuple for multiple outputs. ``Function(...)`` also unwraps
 a single output and returns a tuple for multiple outputs.
+
+Configuration types have canonical imports in ``coker.backends.lowered``:
+``FunctionSignature``, ``FunctionInputSpec``, ``FunctionOutputSpec``, and
+``LoweringOptions``. ``f.lower(LoweringOptions(backend="sympy"))`` creates an
+alternate handle without changing ``f.backend`` or the current backend.
+``MathematicalProgram.lower()`` intentionally differs: it returns a ``Function``
+pinned to its solver backend, whose invocation solves the program.
 
 The NumPy and PyTorch handles retain reusable execution plans. CasADi exposes
 its native function through ``ca_function`` when the graph can be represented

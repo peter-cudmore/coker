@@ -16,6 +16,7 @@ multiple execution backends.
    :maxdepth: 1
    :caption: Guides
 
+   public_api
    backends
    dynamics
    toolkits

@@ -7,7 +7,7 @@ from coker import FunctionSpace, Scalar, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.backends import get_backend_by_name
 from coker.dynamics import DynamicsSpec, VariationalProblemBuilder
-from coker.dynamics.system import create_dynamics_from_spec
+from coker.dynamics import create_dynamics_from_spec
 from coker.parameters import DenseTensorVariable, UnboundedVariable
 from coker.parameters.function_parameters import (
     ClosureParameter,

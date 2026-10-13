@@ -24,26 +24,32 @@ DynamicsParameters: TypeAlias = (
 
 @dataclass
 class DynamicsSpec:
-    inputs: FunctionSpace | Noop
+    inputs: FunctionSpace | Noop | None
     parameters: DynamicsParameters
     algebraic: Optional[VectorSpace]
 
     initial_conditions: Callable
-    """ [x, z] = initial_conditions(t_0, p) """
+    """[x, z] = initial_conditions(z, u, p)."""
 
     dynamics: Callable
     """dx = dynamics(t, x, z, u, p)"""
 
-    constraints: Callable
+    constraints: Callable | Noop | None
     """g(t, x, z, u, p) = 0."""
 
     outputs: Callable
     """y(t) = outputs(t, x, z, u, p, q)"""
 
-    quadratures: Callable
+    quadratures: Callable | Noop | None
     """dq/dt = quadratures(t, x, z, u, p)"""
 
     def __post_init__(self):
+        if self.inputs is None:
+            self.inputs = Noop()
+        if self.constraints is None:
+            self.constraints = Noop()
+        if self.quadratures is None:
+            self.quadratures = Noop()
         if isinstance(self.parameters, list):
             self.parameters = tuple(self.parameters)
         if isinstance(self.parameters, tuple) and not all(
@@ -58,7 +64,7 @@ class DynamicsSpec:
 
 @dataclass
 class DynamicalSystem:
-    inputs: FunctionSpace
+    inputs: FunctionSpace | Noop
     parameters: ParameterDeclaration | tuple[ParameterDeclaration, ...] | None
     x0: Function
     dxdt: Function
@@ -71,7 +77,8 @@ class DynamicalSystem:
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]
 
-    def backend(self):
+    @property
+    def backend(self) -> str:
         return self.dxdt.backend
 
     def _prepare_backend_value(self, backend, value):
@@ -88,10 +95,10 @@ class DynamicalSystem:
             return value
 
         if isinstance(value, Function):
-            if value.backend != self.backend():
+            if value.backend != self.backend:
                 raise ValueError(
                     f"Function-valued parameter {index} uses backend "
-                    f"{value.backend!r}, expected {self.backend()!r}"
+                    f"{value.backend!r}, expected {self.backend!r}"
                 )
             if value not in declaration:
                 raise ValueError(
@@ -110,9 +117,7 @@ class DynamicalSystem:
                 f"Function-valued parameter {index} must be callable"
             )
 
-        prepared = function(
-            declaration.arguments, value, backend=self.backend()
-        )
+        prepared = function(declaration.arguments, value, backend=self.backend)
         if prepared not in declaration:
             raise ValueError(
                 f"Function-valued parameter {index} does not match declared "
