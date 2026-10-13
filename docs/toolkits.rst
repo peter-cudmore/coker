@@ -3,8 +3,7 @@ Toolkit guides
 
 Beyond the core symbolic API, Coker ships several domain-focused toolkits under
 ``src/coker/toolkits/``. They share the same tracing and backend model, so the
-same function/back-end ideas apply across robotics, optimisation, and
-system-modelling workflows.
+same function/back-end ideas apply across robotics and optimisation workflows.
 
 Spatial algebra
 ---------------
@@ -59,22 +58,6 @@ A representative pattern is:
        implementation=lambda q: model.forward_kinematics(q)[tip].apply(origin),
        backend="numpy",
    )
-
-System modelling
-----------------
-
-Import discovery through ``from coker.toolkits.system_modelling import
-list_components``. Import a component library first, for example
-``import coker.toolkits.system_modelling.std_lib``. Discovery walks loaded
-component subclasses and returns ``(component_name, library_path, None)``
-tuples; paths use slashes and usage hints are currently absent. Model authors
-use ``Block``, ``BlockContainer``, and ``BlockSpec`` from that same public
-package rather than lazy-handle or registry internals. See :doc:`public_api`
-for the complete boundary.
-
-The most concrete entry point today is ``examples/pid_example.py``, which builds
-both a plant model and a PID-style controller from standard-library blocks such
-as ``Gain``, ``Integrator``, ``Difference``, and ``Sum``.
 
 Codesign-style mathematical programs
 ------------------------------------

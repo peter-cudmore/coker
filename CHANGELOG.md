@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- Canonical public API inventory and 0.5 migration guide, separating ordinary usage, supported extensions, and internal helpers.
+- Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
 - `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.
 - `CasadiVariationalOptions` for CasADi solver policy and adaptive mesh refinement controls.
@@ -17,6 +17,7 @@
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
 
 ### Changed
+- Consolidate API boundaries and migration notes into existing guides and remove premature backend/toolkit documentation.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
 - Keep function parameters at `coker.parameters.function_parameters`, signatures/lowering configuration at `coker.backends.lowered`, and solve status at `coker.toolkits.codesign`; remove obsolete dynamics reexports and system-modelling registry/handle helpers from public facades.

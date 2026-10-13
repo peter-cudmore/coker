@@ -9,7 +9,7 @@ backend name is selected with the ``backend=...`` argument to
 
 The bundled registry declares ``"numpy"``, ``"jax"``, ``"casadi"``,
 ``"pytorch"``, and ``"sympy"``. Additional plugins can register arbitrary
-names, including the separately installed native ``"coker"`` backend.
+names.
 
 ``function()`` defaults to NumPy. ``get_current_backend()`` also falls back to
 NumPy until the application deliberately selects a backend with
@@ -20,7 +20,7 @@ ordinary functions use their own ``backend`` name, even after ambient selection.
 Explicit evaluation, lowering, and problem construction never select an ambient
 backend. Variational problems retain a separate CasADi solver default.
 
-See :doc:`public_api` for the import inventory and migration notes.
+See :doc:`api/index` for canonical imports and :doc:`getting_started` for migration notes.
 
 Backend capability matrix
 -------------------------
@@ -47,11 +47,6 @@ Backend capability matrix
        preserving the callable identity across calls with distinct arguments.
      - Included in the base install.
      - Covered by ``tests/backends/sympy/test_sympy_printing.py``.
-   * - ``coker``
-     - Compact workspace-oriented execution graph.
-     - Requires the separately packaged ``coker_backend`` plugin.
-     - Described in :doc:`backend_architecture`; it is not part of the base
-       Coker installation.
    * - ``jax``
      - Alternate array backend when you want JAX-native values.
      - Install with ``pip install "coker[jax]"``.
@@ -82,14 +77,12 @@ A good default is:
 - use ``casadi`` for solve-heavy optimisation and parameter-fitting problems;
 - use ``pytorch`` when you need tensor-valued execution, autograd, or a
   nonlinear mathematical-program solve on PyTorch;
-- use ``sympy`` when you need symbolic forms or printable expressions;
-- use ``coker`` when you want the native compact execution graph documented in
-  :doc:`backend_architecture`.
+- use ``sympy`` when you need symbolic forms or printable expressions.
 
 The repository's tests validate numerical execution under ``numpy``, ``jax``,
 and ``pytorch`` (including CUDA-conditional mathematical-program and
-fixed-horizon variational fitting behavior), variational solves through
-``casadi``, and low-level native graph behaviour under ``coker``.
+fixed-horizon variational fitting behavior), and variational solves through
+``casadi``.
 
 
 Lowering handles
@@ -111,8 +104,7 @@ pinned to its solver backend, whose invocation solves the program.
 The NumPy and PyTorch handles retain reusable execution plans. CasADi exposes
 its native function through ``ca_function`` when the graph can be represented
 as a :class:`casadi.Function`; otherwise its handle uses the same evaluate
-fallback. The separately packaged Coker-RS backend exposes typed artifact
-export and caller-workspace binding through ``CokerArtifactFunction``.
+fallback.
 
 
 PyTorch module lowering
@@ -234,36 +226,14 @@ program's solver callable. An unavailable backend or an unsupported
 solver/backend combination is rejected while building or lowering, before
 evaluation. Derivatives through an argmin or argmax are not defined.
 
-``numpy``, ``casadi``, and ``coker`` support host-side program composition.
+``numpy`` and ``casadi`` support host-side program composition.
 PyTorch supports direct CPU or CUDA mathematical-program construction/solving
 and fixed-horizon, bound-only ODE parameter fitting; JAX does not construct
 optimisation programs.
-
-Embedded mapped QP calls
-------------------------
-
-The Rust runtime executes mapped QP calls only through
-``MappedModule::execute_with_qp_contexts``.  Bytecode ``QpCall`` layers identify
-their target QP executable with ``qp_function_id`` and their embedding-owned
-state with ``call_slot``.
-
-Before execution, prepare one ``QpCallContext`` for every call layer.  Each
-context holds the prepared solver created from that mapped QP program's
-caller-owned arena, plus caller-owned evaluator workspace, coefficient output,
-flat parameter, and primal-solution buffers.  Allocate these buffers during
-application setup using ``MappedQpProgram::workspace_requirements()``; the
-execution path performs no allocation and does not rebuild a solver.
-
-Pass all contexts to ``execute_with_qp_contexts`` with the parent inputs,
-workspace, and outputs.  The runtime validates that every call slot has exactly
-one context, that its QP id and buffer widths match bytecode, then evaluates
-coefficients, solves, and copies the primal solution to the layer's parent
-workspace destination.  QP calls are numerical boundaries and are unsupported
-by push-forward execution.
 
 Related guides
 --------------
 
 - :doc:`getting_started` for the minimal symbolic function workflow.
 - :doc:`dynamics` for ODE and variational problem construction.
-- :doc:`toolkits` for robotics, system-modelling, and codesign helpers.
+- :doc:`toolkits` for robotics and codesign helpers.

@@ -97,7 +97,7 @@ one positional tuple per subsystem, and ``widths`` reports declaration counts,
 not flattened scalar widths. Numeric-only parameters retain their flat-vector
 ``CompositionOperator`` projection.
 
-See :doc:`public_api` for the ordinary/extension/internal API inventory.
+See :doc:`api/index` for the ordinary/extension/internal API boundary.
 
 
 Functional problem building

@@ -4,7 +4,7 @@ Mathematical programs
 Import ``ProblemBuilder`` and ``MathematicalProgram`` from
 ``coker.toolkits.codesign``. Programs expose callable ``input_shape()`` and
 ``output_shape()`` metadata; ``result_shape`` is the objective-first property.
-See :doc:`../public_api` for the complete public boundary and lowering contract.
+See :doc:`../getting_started` for migration and lowering contracts.
 
 .. autoclass:: coker.toolkits.codesign.MathematicalProgram
    :members:

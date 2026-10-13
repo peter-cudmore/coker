@@ -16,17 +16,10 @@ multiple execution backends.
    :maxdepth: 1
    :caption: Guides
 
-   public_api
    backends
    dynamics
    toolkits
    examples
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Internals
-
-   backend_architecture
 
 .. toctree::
    :maxdepth: 2
