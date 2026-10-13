@@ -14,6 +14,23 @@ Optional extras are available for backend-specific dependencies:
 
    pip install "coker[casadi]"
    pip install "coker[jax]"
+   pip install "coker[pytorch]"
+
+JAX requires Python 3.11 or newer. NumPy and SymPy are included in the base
+installation; the other built-in backend entry points need their corresponding
+extras before use.
+
+The double-pendulum visualisation script declares its own NumPy, Matplotlib,
+and local Coker dependencies in inline ``uv`` metadata. From the repository
+root, run:
+
+.. code-block:: bash
+
+   uv run scripts/double_pendulum.py
+
+Matplotlib is not a package dependency or extra and is not required for
+non-visual kinematics or other Coker APIs. See :doc:`examples` for interactive
+and headless double-pendulum commands.
 
 Basic usage
 -----------
@@ -54,15 +71,18 @@ the ``backend`` argument:
 
 .. code-block:: python
 
+   from coker import Scalar, function
+
    f_casadi = function(
        arguments=[Scalar("x")],
        implementation=lambda x: x ** 2,
        backend="casadi",
    )
 
-Bundled backend names are ``"numpy"``, ``"casadi"``, ``"sympy"``, ``"jax"``,
-and ``"pytorch"``; optional dependencies must be installed where required.
-Additional plugins can register their own names.
+The package declares backend entry points for ``"numpy"``, ``"casadi"``,
+``"sympy"``, ``"jax"``, and ``"pytorch"``. Install the optional dependencies
+listed above before selecting CasADi, JAX, or PyTorch. Additional plugins can
+register their own names.
 
 Both :func:`coker.function` and the implicit current-backend fallback use
 ``"numpy"``. Pass ``backend=`` explicitly for portable examples.

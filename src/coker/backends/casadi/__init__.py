@@ -49,7 +49,12 @@ from coker.backends.casadi.variational.transcription import (
 )
 from coker.dynamics import VariationalProblem
 
-__all__ = ["CasadiBackend", "CasadiVariationalOptions"]
+__all__ = [
+    "CasadiBackend",
+    "CasadiLoweredFunction",
+    "CasadiNLPSolverOptions",
+    "CasadiVariationalOptions",
+]
 
 scalar_types = (float, int)
 
@@ -440,9 +445,6 @@ class CasadiBackend(Backend):
             z_final = None
 
         return x_final, z_final, q_final
-
-
-__all__ = ["CasadiBackend", "CasadiLoweredFunction", "CasadiNLPSolverOptions"]
 
 
 register_backend("casadi", CasadiBackend)

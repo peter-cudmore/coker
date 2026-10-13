@@ -7,6 +7,8 @@ from coker.toolkits.spatial import (
     Screw,
     SE3Adjoint,
     SE3CoAdjoint,
+    se3_bracket,
+    se3CoAdjoint,
 )
 from coker.toolkits.spatial.algebra import hat
 from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
@@ -88,6 +90,25 @@ def test_adjoint_and_coadjoint_match_matrix_actions():
             coadjoint.apply(screw).to_array(),
             coadjoint.as_matrix() @ screw.to_array(),
         )
+
+
+def test_se3_bracket_preserves_scaled_rotation_and_translation():
+    left = Screw(rotation=E_X, translation=E_Y, magnitude=2)
+    right = Screw(rotation=E_Y, translation=E_Z, magnitude=3)
+
+    result = se3_bracket(left, right)
+
+    assert np.allclose(result.to_array(), [0, 0, 6, 0, -6, 0])
+    assert np.allclose(se3_bracket(right, left).to_array(), -result.to_array())
+
+
+def test_se3_coadjoint_applies_scaled_dual_action():
+    vector = Screw(rotation=E_X, translation=E_Y, magnitude=2)
+    other = Screw(rotation=E_Y, translation=E_Z, magnitude=3)
+
+    result = se3CoAdjoint(vector).apply(other)
+
+    assert np.allclose(result.to_array(), [-6, 0, -6, 0, 6, 0])
 
 
 def test_noncommuting_isometry_chain_preserves_group_result():
