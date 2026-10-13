@@ -24,12 +24,38 @@ DynamicsParameters: TypeAlias = (
 
 @dataclass
 class DynamicsSpec:
+    """Describe callbacks for a differential/algebraic system.
+
+    Construct with ``coker.dynamics.system.create_dynamics_from_spec``.
+    Missing inputs, constraints, and quadratures use ``Noop()`` from
+    ``coker.algebra.ops``; absent algebraic and parameter spaces use ``None``.
+
+    Args:
+        inputs: A time-to-control ``FunctionSpace``, or ``Noop()``.
+        parameters: One scalar/vector/function declaration, a positional
+            tuple or list of declarations, or ``None``. Tuple declarations
+            are passed to callbacks as one final ``p`` tuple; a single
+            declaration is passed directly.
+        algebraic: Algebraic variable space, or ``None``.
+        initial_conditions: Callback ``(z, u, p) -> (x0, z0)``. Its first
+            argument is the algebraic slot, not time. Return ``None`` for
+            absent algebraic initial values.
+        dynamics: Callback ``(t, x, z, u, p) -> dxdt``.
+        constraints: Callback ``(t, x, z, u, p) -> g`` for ``g = 0``.
+        outputs: Callback ``(t, x, z, u, p, q) -> y``.
+        quadratures: Callback ``(t, x, z, u, p) -> dqdt``. Direct
+            ``DynamicalSystem`` evaluation does not support this channel.
+
+    Input callbacks receive the control function, not its value; evaluate
+    ``u(t)`` where needed. State and derivative shapes must match.
+    """
+
     inputs: FunctionSpace | Noop
     parameters: DynamicsParameters
     algebraic: Optional[VectorSpace]
 
     initial_conditions: Callable
-    """ [x, z] = initial_conditions(t_0, p) """
+    """``(x0, z0) = initial_conditions(z, u, p)``."""
 
     dynamics: Callable
     """dx = dynamics(t, x, z, u, p)"""
@@ -58,6 +84,24 @@ class DynamicsSpec:
 
 @dataclass
 class DynamicalSystem:
+    """Hold traced dynamics, initial conditions, and observed outputs.
+
+    Prefer the constructors in ``coker.dynamics.system`` over assembling
+    component functions manually. Construction and numerical integration
+    are separate: the function backend selects direct evaluation, while a
+    variational problem independently selects its solver backend.
+
+    Attributes:
+        inputs: Control function space, or ``Noop()`` when absent.
+        parameters: Ordered parameter declarations, or ``None``.
+        x0: Function ``(z, u, *p) -> (x0, z0)``.
+        dxdt: Function ``(t, x, z, u, *p) -> dxdt``.
+        g: Algebraic residual function, or ``Noop()``.
+        dqdt: Quadrature derivative function, or ``Noop()``.
+        y: Observed output function ``(t, x, z, u, *p, q) -> y``.
+        solver_parameters: Backend-specific direct integration settings.
+    """
+
     inputs: FunctionSpace
     parameters: ParameterDeclaration | tuple[ParameterDeclaration, ...] | None
     x0: Function
@@ -68,10 +112,16 @@ class DynamicalSystem:
     solver_parameters: Optional[object] = field(default=None)
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
+        """Return differential, algebraic, and quadrature dimensions.
+
+        Returns:
+            An ``(x, z, q)`` tuple of dimensions; absent channels are ``None``.
+        """
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]
 
     def backend(self):
+        """Return the backend name of the differential dynamics function."""
         return self.dxdt.backend
 
     def _prepare_backend_value(self, backend, value):
@@ -152,6 +202,28 @@ class DynamicalSystem:
         return time, input_value, parameters if declarations else (None,)
 
     def __call__(self, *args):
+        """Integrate from time zero and return the declared output.
+
+        Args:
+            *args: ``(time, *parameters)`` without inputs, or
+                ``(time, input_function, *parameters)`` with inputs.
+                ``time`` is a numeric endpoint or a one-dimensional NumPy
+                sampling array. Parameters follow declaration order;
+                function-valued slots accept compatible Coker functions,
+                fitted functions, or traceable Python callables.
+
+        Returns:
+            The output at an endpoint in its declared shape. Sampled scalar
+            and one-component outputs have shape ``(n_times,)``; sampled
+            multi-component vector outputs have shape ``(n_times, n_output)``.
+
+        Raises:
+            ValueError: Argument count or function parameter shape/backend
+                does not match the declaration.
+            TypeError: A function-valued parameter is not callable.
+            NotImplementedError: Quadratures are present, or the selected
+                backend does not support the required integration.
+        """
         from coker.backends import get_backend_by_name
 
         t, u, parameter_arguments = self._map_arguments(*args)
@@ -195,6 +267,12 @@ class DynamicalSystem:
         )
 
     def output_as_function_space(self) -> FunctionSpace:
+        """Return a function space matching the public trajectory arguments.
+
+        Returns:
+            A time-to-output space with the optional control function and
+            parameter declarations following time in evaluation order.
+        """
         t, _x, _z, u, *parameter_shapes, _q = self.y.input_shape()
         (out,) = self.y.output_shape()
         args = [t.to_space("t")]

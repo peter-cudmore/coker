@@ -53,7 +53,18 @@ def _dae_bracket(
 def analyse_controllability(
     system, *, max_order: int | None = None
 ) -> ControllabilityResult:
-    """Establish generic local accessibility through Lie-algebra rank."""
+    """Establish generic local accessibility through Lie-algebra rank.
+
+    Args:
+        system: A ``DynamicalSystem``, ``SymbolicSystem``, or
+            ``SymbolicDAESystem`` within the autonomous input-affine scope.
+        max_order: Optional nonnegative Lie-bracket expansion limit.
+
+    Returns:
+        A ``ControllabilityResult`` with rank and nonzero validity conditions.
+        Unsupported systems or exhausted limits return ``INCONCLUSIVE`` with
+        a reason. This does not prove global controllability.
+    """
     try:
         symbolic = normalize_symbolic_system(system)
         tangent = (

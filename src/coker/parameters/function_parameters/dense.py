@@ -109,7 +109,22 @@ def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
 
 @dataclass(frozen=True)
 class DenseLayer(FunctionParameter):
-    """Affine scalar or vector layer followed by a Coker activation."""
+    """Declare an affine layer followed by a traceable Coker activation.
+
+    Args:
+        input_size: Positive number of affine input components. A scalar
+            activation requires one.
+        activation: Single-input/output Coker activation function. A vector
+            activation determines the affine output width.
+        name: Public fitted-function name and concrete decision-name prefix.
+
+    Attributes:
+        parameters: Weight and bias declarations in reconstruction order.
+
+    Raises:
+        TypeError: The activation is not a supported Coker callable.
+        ValueError: Widths or the activation signature are incompatible.
+    """
 
     input_size: int
     activation: Function | BoundCallable

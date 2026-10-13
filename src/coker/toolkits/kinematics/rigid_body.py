@@ -13,15 +13,26 @@ from coker.toolkits.spatial import (
 
 @dataclass
 class Inertia:
+    """Describe a link's spatial inertia using consistent mass/length units.
+
+    Args:
+        centre_of_mass: Centre-of-mass frame relative to the link frame.
+        mass: Link mass (kg when using SI).
+        moments: Symmetric inertia entries ``xx, xy, xz, yy, yz, zz`` of shape
+            ``(6,)``, in the centre-of-mass frame (kg m² in SI).
+    """
+
     centre_of_mass: Isometry3
     mass: float
     moments: np.ndarray
 
     @staticmethod
     def zero() -> "Inertia":
+        """Return zero mass and moments at the link origin."""
         return Inertia(Isometry3.identity(), 0, np.zeros((6,)))
 
     def as_matrix(self):
+        """Return centre-of-mass spatial inertia, shape ``(6, 6)``."""
         inertial_component = np.array(
             [
                 [self.moments[0], self.moments[1], self.moments[2]],
@@ -38,6 +49,11 @@ class Inertia:
         return np.block([[inertial_component, zeros], [zeros, mass_component]])
 
     def as_matrix_origin(self):
+        """Return the current origin matrix, requiring zero COM rotation.
+
+        This method fills cross blocks only; use the full adjoint transport
+        used by ``inverse_dynamics`` when a complete shifted inertia is needed.
+        """
         p_hat = hat(self.centre_of_mass.translation)
         assert self.centre_of_mass.rotation.angle == 0
         m = self.as_matrix()
@@ -47,16 +63,22 @@ class Inertia:
 
 
 class JointType:
+    """Extension base defining ordered local Screw coordinate axes."""
+
     @property
     def axes(self) -> List[Screw]:
+        """Return local axes in generalized-coordinate order; default empty."""
         return []
 
 
 class Weld(JointType):
+    """Fix a link to its parent with zero generalized coordinates."""
+
     pass
 
 
 class Free(JointType):
+    """Use six local coordinates: translation x/y/z, then rotation x/y/z."""
 
     @property
     def axes(self) -> List[Screw]:
@@ -71,6 +93,12 @@ class Free(JointType):
 
 
 class Revolute(JointType):
+    """Define a one-coordinate joint.
+
+    Args:
+        axis: Local Screw; normally a unit angular axis for radians.
+    """
+
     def __init__(self, axis: Screw):
         self.axis = axis
 
@@ -80,6 +108,11 @@ class Revolute(JointType):
 
 
 class Planar(JointType):
+    """Define ordered local Screw axes supplied as positional arguments.
+
+    No planar-axis count or geometric constraint is enforced.
+    """
+
     def __init__(self, *axes):
         self._axes = axes
 
@@ -90,6 +123,14 @@ class Planar(JointType):
 
 @dataclass
 class RigidBody:
+    """Build an articulated tree and evaluate kinematics and dynamics.
+
+    Links must be added parent-first; ``WORLD == -1`` denotes the world.
+    Coordinates are ordered by link insertion, then each joint's axes.
+    Revolute coordinates use radians, translational coordinates use length;
+    numeric and traceable arrays use the same flat ``(n,)`` shape.
+    """
+
     WORLD = -1
 
     def __init__(self):
@@ -119,9 +160,11 @@ class RigidBody:
 
     @property
     def joint_bases(self) -> List[List[Screw]]:
+        """Return per-link ordered local Screw bases."""
         return [j.axes for j in self.joints]
 
     def joint_global_basis(self, joint_index):
+        """Return a link's joint axes expressed in the world rest frame."""
         bases = self.joint_bases[joint_index]
 
         adjoint = SE3Adjoint(self._rest_transforms[joint_index])
@@ -130,6 +173,17 @@ class RigidBody:
     def add_link(
         self, parent: int, at: Isometry3, joint: JointType, inertia: Inertia
     ) -> int:
+        """Append a link and return its integer index.
+
+        Args:
+            parent: Existing link index or ``WORLD``.
+            at: Rest child-to-parent frame transform.
+            joint: Joint defining local ordered coordinate axes.
+            inertia: Link inertia relative to its link frame.
+
+        Returns:
+            int: Index usable as a parent for subsequent links.
+        """
         idx = len(self.parents)
 
         assert 0 <= parent < idx or parent == self.WORLD
@@ -148,15 +202,34 @@ class RigidBody:
         return idx
 
     def add_effector(self, parent: int, at: Isometry3):
+        """Attach an effector frame and return its insertion-order index.
+
+        Args:
+            parent: Existing link index (not WORLD).
+            at: Effector-to-link transform.
+
+        Returns:
+            int: Index into forward-kinematics and Jacobian results.
+        """
         assert RigidBody.WORLD < parent < len(self.parents)
         idx = len(self.end_effectors)
         self.end_effectors.append((parent, at))
         return idx
 
     def total_joints(self):
+        """Return the number of scalar coordinates, not the number of links."""
         return sum([len(j) for j in self.joint_bases])
 
     def potential_energy(self, angles, gravity_vector):
+        """Return gravitational potential energy.
+
+        Args:
+            angles: Generalized coordinates, normally shape ``(n,)``.
+            gravity_vector: World acceleration vector, shape ``(3,)``.
+
+        Returns:
+            Scalar: ``-sum(mass * dot(gravity_vector, world_COM))``.
+        """
 
         if len(angles.shape) != 1:
             assert angles.shape[0] == self.total_joints()
@@ -222,6 +295,7 @@ class RigidBody:
         return result
 
     def get_dependant_joints(self, effector_index):
+        """Return sorted coordinate indices affecting the selected effector."""
         joints = []
 
         parent, _ = self.end_effectors[effector_index]
@@ -283,6 +357,16 @@ class RigidBody:
         return transforms
 
     def joint_transforms(self, angles, effector=None) -> List[Isometry3]:
+        """Return world link transforms for coordinates of shape ``(n,)``.
+
+        Args:
+            angles: Numeric or traceable ordered generalized coordinates.
+            effector: Optional effector index restricting results to its
+                ancestor path, in root-to-leaf order.
+
+        Returns:
+            list[Isometry3]: Child-to-world transforms.
+        """
 
         joint_index = 0
         transforms = []
@@ -308,10 +392,19 @@ class RigidBody:
         return list(reversed(out))
 
     def forward_kinematics(self, angles) -> List[Isometry3]:
+        """Return effector-to-world transforms in effector insertion order.
+
+        Args:
+            angles: Numeric or traceable coordinates of shape ``(n,)``.
+
+        Returns:
+            list[Isometry3]: One transform per registered effector.
+        """
         xforms = self.joint_transforms(angles)
         return [xforms[parent] @ xform for parent, xform in self.end_effectors]
 
     def get_dependent_links(self, parent_link: int):
+        """Return a root-to-leaf iterator over the link's ancestor indices."""
         result = list()
         while parent_link != self.WORLD:
             result.append(parent_link)
@@ -319,12 +412,23 @@ class RigidBody:
         return reversed(result)
 
     def spatial_manipulator_jacobian(self, angles):
+        """Return a world spatial Jacobian, shape ``(6, n)``, per effector."""
         return [
             self.spatial_single_manipulator_jacobian(angles, i)
             for i, _ in enumerate(self.end_effectors)
         ]
 
     def spatial_single_manipulator_jacobian(self, angles, end_effector):
+        """Return the selected effector's world spatial Jacobian.
+
+        Args:
+            angles: Ordered coordinates of shape ``(n,)``.
+            end_effector: Registered effector index.
+
+        Returns:
+            Array: Shape ``(6, n)``, angular then spatial-linear rows. These
+                linear rows are not directly the Cartesian point Jacobian.
+        """
         abs_xforms = self._get_absolute_joint_xform(angles)
         xforms = self._accumulate_joint_xforms(abs_xforms)
 
@@ -354,6 +458,7 @@ class RigidBody:
         return np.concatenate(columns, axis=1)
 
     def body_manipulator_jacobian(self, angles):
+        """Return effector-frame Jacobians, each of shape ``(6, n)``."""
         g_list = self.forward_kinematics(angles)
         ad_g_inv = [SE3Adjoint(g).inverse().as_matrix() for g in g_list]
         columns = [
@@ -370,7 +475,21 @@ class RigidBody:
         gravity: np.ndarray,
         end_effector_forces: Dict[int, Screw] = None,
     ) -> np.ndarray:
-        """Compute torques for forces"""
+        """Compute generalized forces using recursive inverse dynamics.
+
+        Args:
+            angles: Coordinates of shape ``(n,)``.
+            angle_rates: Coordinate rates of shape ``(n,)``.
+            angle_accel: Coordinate accelerations of shape ``(n,)``.
+            gravity: World acceleration vector of shape ``(3,)``.
+            end_effector_forces: Optional mapping from effector index to a
+                numeric ``(6,)`` moment-then-force array, transformed with the
+                current effector SE3CoAdjoint matrix and subtracted.
+                Despite the annotation, Screw objects are not consumed here.
+
+        Returns:
+            Array: Generalized forces of shape ``(n,)``.
+        """
         transforms = []
         velocities = []
         accelerations = []
@@ -495,6 +614,7 @@ class RigidBody:
         return jacobians
 
     def mass_matrix(self, angles):
+        """Return the generalized mass matrix of shape ``(n, n)``."""
         jacobians = self._get_link_com_jacobians(angles)
         n = self.total_joints()
         mass_matrix = np.zeros((n, n))
@@ -505,6 +625,16 @@ class RigidBody:
         return mass_matrix
 
     def add_body(self, body: "RigidBody", at: Isometry3, parent: int):
+        """Append a body's links/effectors, sharing joint and inertia objects.
+
+        Args:
+            body: Body to attach.
+            at: Placement relative to the selected parent.
+            parent: Existing parent link index or WORLD.
+
+        Returns:
+            tuple[list[int], list[int]]: New link and effector indices.
+        """
         links = []
 
         iterator = zip(
@@ -553,6 +683,13 @@ class RigidBody:
         calculations as numerical users, so it can be passed directly to
         :func:`coker.function` when a backend-specific
         :class:`coker.Function` is required.
+
+        Returns:
+            Callable: Accepts numeric or traceable ``angles`` of shape
+                ``(n,)``. Returns ``(positions, jacobians)`` with shapes
+                ``(3 * e,)`` and ``(3 * e, n)`` for ``e`` effectors, stacked
+                in insertion order. Positions and Cartesian derivatives are
+                expressed in the world frame. At least one effector is needed.
         """
 
         def kinematics(angles):

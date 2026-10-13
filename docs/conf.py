@@ -23,6 +23,7 @@ copyright = f"2024, {author}"
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
+    "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
@@ -41,6 +42,14 @@ autodoc_default_options = {
 }
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
+
+# Execute only explicitly designated documentation examples. Autodoc usage
+# snippets remain illustrative; complete runnable examples use doctest blocks.
+doctest_test_doctest_blocks = ""
+doctest_global_setup = """
+import os
+os.environ.setdefault("MPLBACKEND", "Agg")
+"""
 
 # intersphinx — link to numpy/scipy/python docs
 intersphinx_mapping = {

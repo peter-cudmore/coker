@@ -37,7 +37,17 @@ from .symbolic import (
 
 @dataclass(frozen=True)
 class SymbolicDAESystem:
-    """A semi-explicit DAE ``xdot=f(x, z, u, p), 0=g(x, z, p)``."""
+    """Expose a semi-explicit DAE ``xdot=f(x, z, u, p), 0=g(x, z, p)``.
+
+    Attributes:
+        state: Differential-state symbols.
+        algebraic: Algebraic-state symbols.
+        parameters: Unknown finite parameter symbols.
+        controls: Known control-value symbols.
+        dynamics: Differential rates in state order.
+        constraints: Algebraic residual expressions.
+        outputs: Observed scalar output expressions.
+    """
 
     state: tuple[sp.Symbol, ...]
     algebraic: tuple[sp.Symbol, ...]
@@ -80,7 +90,19 @@ def geometry(system: SymbolicDAESystem) -> ConstraintGeometry:
 
 
 def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
-    """Lower a supported semi-explicit DAE without solving its constraints."""
+    """Lower a supported semi-explicit DAE without solving its constraints.
+
+    Args:
+        system: Traced dynamics with an algebraic residual function.
+
+    Returns:
+        A ``SymbolicDAESystem`` in declared component order.
+
+    Raises:
+        UnsupportedSystemError: The model has unsupported shapes, operations,
+            time dependence, quadratures, function-valued parameters, or
+            control-dependent algebraic constraints.
+    """
     if not isinstance(system.g, Function):
         raise UnsupportedSystemError(
             "DAE constraints must be a Coker Function"

@@ -53,7 +53,20 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class MonotonePiecewiseLinear(FunctionParameter):
-    """Bounded monotone scalar realization over normalized-domain knots."""
+    """Declare a bounded monotone scalar realization.
+
+    Args:
+        domain_knots: At least two finite strictly increasing domain knots.
+        lower_bound: Finite lower output bound.
+        upper_bound: Finite upper output bound greater than the lower bound.
+        guess: Initial unconstrained basis values, one per knot; defaults to
+            zeros. These are not the final bounded function values.
+        name: Public name used to reconstruct the fitted callable.
+
+    Raises:
+        TypeError: Knots, bounds or guesses have incompatible types.
+        ValueError: Knot order, sizes or finite bound requirements are invalid.
+    """
 
     domain_knots: Sequence[Real]
     lower_bound: Real

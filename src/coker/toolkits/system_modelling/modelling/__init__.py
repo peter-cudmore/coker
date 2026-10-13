@@ -25,6 +25,12 @@ class LazyPortHandle:
         self.port_index = port_index
 
     def resolve(self) -> (BlockIndex, PortIndex):
+        """Return container-local component and port indices.
+
+        Returns:
+            tuple[int, int]: Index of the attached component and local port.
+                Resolving an unattached component raises AssertionError.
+        """
         parent: BlockContainer = self.component.parent
         assert parent is not None
 
@@ -55,7 +61,14 @@ class CokerModel:
 
 
 def model(func):
-    """Decorator that registers this function as a mode factory"""
+    """Wrap a component factory without compiling or simulating it.
+
+    Args:
+        func: Callable constructing a model.
+
+    Returns:
+        CokerModel: Callable wrapper delegating to the original factory.
+    """
     return CokerModel(func)
 
 
@@ -91,6 +104,15 @@ class PortForwarder:
 
 
 class BlockContainer(CokerListableSubclasses):
+    """Collect component metadata and connections, not executable simulation.
+
+    Args:
+        name: Container name.
+
+    Add components before connecting their lazy ports. Containers include two
+    internal forwarding components, so user components start at index two.
+    """
+
     def __init__(self, name):
         self.name = name
         """Exposed quantities, forwarded from internal components."""
@@ -116,6 +138,7 @@ class BlockContainer(CokerListableSubclasses):
         ] = {}
 
     def spec(self):
+        """Return current inputs, outputs, accumulated parameters and state."""
         return BlockSpec(
             inputs=self._inputs.ports,
             outputs=self._outputs.ports,
@@ -126,6 +149,7 @@ class BlockContainer(CokerListableSubclasses):
     def add_models(
         self, *components: Union["Block", "BlockContainer", PortForwarder]
     ):
+        """Attach components in order and collect their state/parameters."""
         for component in components:
             component.set_parent(self)
             self.components.append(component)
@@ -143,6 +167,12 @@ class BlockContainer(CokerListableSubclasses):
         self.parent = parent
 
     def add_connections(self, *connections: Tuple):
+        """Wire tuples of input/output handles, optionally with a label.
+
+        Args:
+            connections: Tuples ``(input, output)`` or ``(output, input)``;
+                an optional third element labels the source output.
+        """
         for port_in, port_out, *label in connections:
             if isinstance(port_in, LazyOutputHandle) and isinstance(
                 port_out, LazyInputHandle
@@ -164,6 +194,7 @@ class BlockContainer(CokerListableSubclasses):
     def add_connection(
         self, port_in: LazyInputHandle, port_out: LazyOutputHandle
     ):
+        """Store an input-to-output connection; reject duplicate drivers."""
         in_port = port_in.resolve()
         out_port = port_out.resolve()
         assert in_port not in self.connections, (
@@ -174,16 +205,20 @@ class BlockContainer(CokerListableSubclasses):
         self.connections[in_port] = out_port
 
     def add_input(self, signal) -> LazyPortHandle:
+        """Expose a container input, returning its internal output handle."""
         index = self._inputs.create(signal)
 
         return LazyOutputHandle(self._inputs, index)
 
     def add_output(self, signal) -> LazyPortHandle:
+        """Expose a container output, returning its internal input handle."""
         index = self._outputs.create(signal)
         return LazyInputHandle(self._outputs, index)
 
 
 class PortBundle:
+    """Select a multiport handle by signal name or insertion-order integer."""
+
     def __init__(self, ports: dict[str, LazyPortHandle]):
         self.ports = ports
 
@@ -197,6 +232,15 @@ class PortBundle:
 
 
 class Block(CokerListableSubclasses):
+    """Extension base for component port/state/parameter metadata.
+
+    Args:
+        name: Component name, or None for a generated name.
+        block_spec: BlockSpec declaring ports and metadata.
+
+    This class defines wiring, not numerical evaluation or simulation.
+    """
+
     next_index = 0
 
     def __init__(self, name: Union[str, None], block_spec: "BlockSpec"):
@@ -212,6 +256,7 @@ class Block(CokerListableSubclasses):
         pass
 
     def spec(self) -> "BlockSpec":
+        """Return the component's BlockSpec."""
         return self._spec
 
     def __str__(self):
@@ -233,6 +278,7 @@ class Block(CokerListableSubclasses):
 
     @property
     def input(self) -> Union[LazyPortHandle, PortBundle]:
+        """Return an input handle or indexable PortBundle for many inputs."""
         assert self.spec().inputs, f"Component {self} has no inputs"
 
         if len(self.spec().inputs) == 1:
@@ -247,6 +293,7 @@ class Block(CokerListableSubclasses):
 
     @property
     def output(self) -> Union[LazyPortHandle, PortBundle]:
+        """Return an output handle or indexable PortBundle for many outputs."""
         assert self.spec().outputs, f"Component {self} has no outputs"
 
         if len(self.spec().outputs) == 1:
@@ -261,7 +308,12 @@ class Block(CokerListableSubclasses):
 
 
 class Signal(Scalar):
-    """Real valued analog signal"""
+    """Declare a scalar analog signal.
+
+    Args:
+        name: Port name.
+        clock_domain: Optional clock metadata; no execution is scheduled.
+    """
 
     def __init__(self, name: str, clock_domain=None):
         self.name = name
@@ -276,6 +328,8 @@ class Signal(Scalar):
 
 
 class Variable:
+    """Declare a named scalar state with optional clock-domain metadata."""
+
     def __init__(self, name: str, clock_domain=None):
         self.name = name
         self.clock_domain = clock_domain
@@ -286,6 +340,8 @@ class Variable:
 
 
 class VectorVariable(Variable):
+    """Declare state with an explicit dimension and optional clock metadata."""
+
     def __init__(self, name: str, dimension: int, clock_domain=None):
         super().__init__(name, clock_domain)
         self._dimension = dimension
@@ -295,6 +351,8 @@ class VectorVariable(Variable):
 
 
 class Parameter:
+    """Declare a named scalar parameter with an optional fixed value."""
+
     def __init__(self, name: str, value: Optional[float] = None):
         self.name = name
         self.value = value
@@ -303,6 +361,7 @@ class Parameter:
         return f"Param:{self.name}"
 
     def is_constant(self) -> bool:
+        """Return whether a fixed value was supplied."""
         return self.value is not None
 
     @staticmethod
@@ -311,6 +370,8 @@ class Parameter:
 
 
 class ConstantParameter:
+    """Declare an unnamed fixed scalar parameter, defaulting to zero."""
+
     def __init__(self, value: float = 0.0):
         self.value = value
 
@@ -320,10 +381,14 @@ class ConstantParameter:
 
 
 class Angle(Signal):
+    """Declare an angular scalar signal (radians by convention)."""
+
     pass
 
 
 class Position3D(Signal):
+    """Declare a three-component position signal in consistent length units."""
+
     @staticmethod
     def dimension() -> int:
         return 3
@@ -338,10 +403,21 @@ class Orientation3D(Signal):
 
 
 class Vector(Parameter):
+    """Parameter subtype; currently inherits scalar dimension metadata."""
+
     pass
 
 
 class BlockSpec:
+    """Describe block ports, state and parameters without evaluation.
+
+    Args:
+        inputs: Ordered Signal input declarations, or None.
+        state: Ordered Variable state declarations, or None.
+        parameters: Ordered Parameter declarations, or None.
+        outputs: Ordered Signal output declarations, or None.
+    """
+
     def __init__(
         self,
         inputs: List[Signal] = None,

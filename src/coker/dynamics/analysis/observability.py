@@ -29,6 +29,16 @@ def analyse_observability(
     Inputs are treated as known, arbitrary signals.  Consequently, controlled
     systems must be affine in their controls; the analysis closes the output
     codistribution under both the drift and each control vector field.
+
+    Args:
+        system: A supported ``DynamicalSystem``, ``SymbolicSystem``, or
+            ``SymbolicDAESystem``.
+        max_order: Optional nonnegative Lie-derivative expansion limit.
+
+    Returns:
+        An ``ObservabilityResult`` with generic rank validity conditions.
+        Unsupported models or exhausted limits return ``INCONCLUSIVE`` with
+        a reason, not a global reconstruction guarantee.
     """
     try:
         symbolic = normalize_symbolic_system(system)

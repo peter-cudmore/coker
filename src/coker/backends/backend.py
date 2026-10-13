@@ -321,11 +321,18 @@ class VariationalSolver:
 
 
 def register_backend(name: str, factory: Callable[[], Backend]) -> None:
-    """Registers an importable backend factory under ``name``.
+    """Register an extension backend factory under an extensible string name.
 
-    Registering the same factory more than once is harmless. Registering a
-    different factory for an existing name fails so backend selection cannot
-    depend on import order.
+    Args:
+        name: Registry/plugin name used by ``function`` and solvers.
+        factory: Zero-argument callable returning a ``Backend`` instance.
+
+    Raises:
+        ValueError: Another factory is already registered under this name.
+
+    Note:
+        Re-registering the same factory is harmless. Registration does not
+        instantiate a backend or select it as the ambient backend.
     """
     existing = __registered_backends.get(name)
     if existing is not None and existing is not factory:
@@ -368,6 +375,21 @@ def instantiate_backend(name: str):
 
 
 def get_backend_by_name(name: str, set_current=True) -> Backend:
+    """Resolve and cache a backend, optionally selecting it as current.
+
+    Args:
+        name: Registered name or installed ``coker.backends`` entry-point name.
+        set_current: Select this instance as the ambient backend when true.
+
+    Returns:
+        The process-wide cached backend instance. Mutating backend device,
+        dtype, or other options affects future consumers of this instance.
+
+    Raises:
+        NotImplementedError: No registry factory or plugin has this name.
+        ValueError: Multiple plugins register the same name.
+        ImportError: A selected plugin's optional dependency is unavailable.
+    """
     global __current_backend
 
     backend = __backends.get(name)
@@ -386,6 +408,14 @@ __current_backend = None
 
 
 def get_current_backend() -> Backend:
+    """Return the ambient backend, resolving the default on first use.
+
+    Returns:
+        The current cached backend. In this release the unresolved default is
+        ``"coker"``, requiring the external plugin. Ordinary ``function``
+        construction defaults independently to ``"numpy"``; use explicit
+        backend selection for portable solver construction.
+    """
     if __current_backend is None:
         return get_backend_by_name(default_backend)
     else:

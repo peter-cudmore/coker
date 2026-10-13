@@ -18,7 +18,33 @@ from coker.interfaces import FunctionSignatureValue
 
 
 class FittedFunction(FunctionSignatureValue):
-    """A concrete function reconstructed from fitted parameter decisions."""
+    """Retain a solved finite realization as a callable.
+
+    Args:
+        specification: Original function-parameter declaration.
+        space: Validated public argument/output spaces.
+        function: Backend-native callable using the fitted blocks.
+        parameters: Structured fitted blocks in declaration order.
+
+    Attributes:
+        specification: Original declaration, not a new solver decision.
+        space: Public callable domain and codomain.
+        function: Native callable retained for subsequent evaluation.
+        parameters: Backend-specific fitted arrays/tensors or scalar values.
+
+    Example:
+        >>> from coker import FunctionSpace, Scalar
+        >>> from coker.parameters.function_parameters import (
+        ...     FittedFunction, RadialBasisFunction,
+        ... )
+        >>> declaration = RadialBasisFunction([0.0], 1.0, name="response")
+        >>> space = FunctionSpace("response", [Scalar("t")], [Scalar("value")])
+        >>> fitted = FittedFunction(
+        ...     declaration, space, lambda t: 2 * t, (2.0,),
+        ... )
+        >>> fitted(3.0)
+        6.0
+    """
 
     def __init__(
         self,
@@ -33,12 +59,24 @@ class FittedFunction(FunctionSignatureValue):
         self.parameters = parameters
 
     def __call__(self, *arguments: Any, **kwargs: Any) -> Any:
+        """Evaluate arguments through the retained backend-native callable.
+
+        Args:
+            *arguments: Concrete values in public argument order.
+            **kwargs: Keyword arguments supported by the native callable.
+
+        Returns:
+            Native callable results; shape and value types follow ``space``
+            and the selected backend.
+        """
         return self.function(*arguments, **kwargs)
 
     def input_shape(self):
+        """Return input dimensional metadata in public argument order."""
         return tuple(self.space.input_dimensions())
 
     def output_shape(self):
+        """Return output dimensional metadata in public result order."""
         return tuple(self.space.output_dimensions())
 
 

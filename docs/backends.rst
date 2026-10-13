@@ -55,12 +55,14 @@ Backend capability matrix
        and forwards ``optimiser_options`` to the selected PyTorch optimizer.
        Constraint handling uses the backend's barrier and augmented-Lagrangian
        stages. ``PytorchODESolverParameters`` configures ``torchdiffeq``
-       initial-value solves only. Variational fitting currently has no
-       separate options object: its fixed integration and LBFGS settings are
-       implementation defaults.
+       initial-value solves. Advanced variational configuration uses
+       ``coker.backends.pytorch.variational.PytorchVariationalSolverOptions``
+       with that module's ``create_variational_solver(problem, options)``;
+       the ordinary backend factory uses default options.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
-       backend tests. Algebraic DAEs, variational controls, quadratures,
-       constraints, and optimized horizons are unsupported.
+       tests. Fixed-horizon, bound-only ODE fitting supports quadratures.
+       Algebraic DAEs, declared controls, comparison constraints and optimized
+       horizons are unsupported by its variational solver.
 
 Choosing a backend
 ------------------

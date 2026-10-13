@@ -12,6 +12,8 @@
 - Symbolic local accessibility, observability, and structural identifiability analysis for supported ODE and semi-explicit index-one DAE systems.
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
+- Navigable API references for callables, parameter realizations, backend integration, codesign, dynamics/results, robotics and component modelling, with executable examples and explicit current limitations.
+- PR documentation checks execute CasADi and PyTorch examples from their RST source and build the API reference with optional dependencies installed.
 
 ### Changed
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
@@ -24,6 +26,8 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Invalid function argument counts and declaration types now raise `TypeError` rather than assertions.
+- Incomplete `ProblemBuilder.build()` configuration now raises deliberate `ValueError`, `TypeError`, or `RuntimeError`, including when Python assertions are disabled.
 - Preserve configured adaptive transcription interval counts.
 - Preserve legacy CasADi `TranscriptionOptions` compatibility.
 - Direct trajectory evaluation supports heterogeneous scalar, vector, and function-valued parameters.

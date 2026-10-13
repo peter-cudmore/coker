@@ -487,7 +487,7 @@ class Tape:
                 if isinstance(dimension, Dimension)
             )
         else:
-            assert False, f"Invalid input type {v}: of {type(v)} "
+            raise TypeError(f"Invalid input type {v}: of {type(v)}")
 
         index = self.nodes.define_input(size)
         tracer = Tracer(self, index)

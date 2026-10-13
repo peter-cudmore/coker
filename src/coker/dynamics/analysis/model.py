@@ -32,7 +32,22 @@ class AnalysisStatus(Enum):
 
 @dataclass(frozen=True)
 class AnalysisResult:
-    """Base result for a symbolic rank analysis."""
+    """Report a generic local symbolic rank conclusion.
+
+    Attributes:
+        status: ``TRUE``, ``FALSE``, or ``INCONCLUSIVE`` for the property
+            named by the result subclass.
+        rank: Established generic rank of ``matrix``.
+        required_rank: Rank needed to establish the property.
+        matrix: Final SymPy rank-test matrix.
+        generators: Vector fields or scalar expressions forming the test.
+        rank_conditions: Expressions required to be nonzero for the reported
+            generic conclusion, including DAE regularity where applicable.
+        reason: Explanation of an inconclusive result, when available.
+
+    These conclusions are local, not global guarantees or numerical
+    estimation certificates.
+    """
 
     status: AnalysisStatus
     rank: int

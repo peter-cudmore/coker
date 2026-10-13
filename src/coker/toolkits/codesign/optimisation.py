@@ -12,7 +12,16 @@ from coker.algebra.graph import Tracer
 
 @dataclass(frozen=True)
 class WeightedNorm:
-    """Structured squared norm objective retained for QP lowering."""
+    """Advanced lowering metadata for a squared weighted residual.
+
+    Prefer :func:`weighted_norm` to creating this record manually. Backends
+    that implement exact quadratic-program lowering can inspect these factors;
+    attaching this record does not select a QP solver.
+
+    Args:
+        weight: Linear weighting operator applied to the residual.
+        residual: Symbolic residual vector.
+    """
 
     weight: Tracer
     residual: Tracer
@@ -20,9 +29,20 @@ class WeightedNorm:
 
 @dataclass(frozen=True)
 class BoundedConstraint:
-    """A residual constrained by explicit lower and upper bounds.
+    """Residual constrained componentwise by inclusive bounds.
 
-    Bounds may be constants or symbolic parameters on the residual's tape.
+    Args:
+        residual: Symbolic scalar or array to constrain.
+        lower_bound: Constant or symbolic lower bound on the residual's tape.
+            Use ``-np.inf`` for an unbounded lower side.
+        upper_bound: Constant or symbolic upper bound on the residual's tape.
+            Use ``np.inf`` for an unbounded upper side.
+
+    Notes:
+        Equal bounds express equality. Symbolic bounds may depend on runtime
+        arguments. Shapes must be supported by the selected backend; this
+        record does not validate or normalise them. CasADi lowers symbolic
+        bounds to residual inequalities evaluated at solve time.
     """
 
     residual: Any
@@ -31,26 +51,45 @@ class BoundedConstraint:
 
     @property
     def tape(self):
-        """Return the tape owning the residual and symbolic bounds."""
+        """Owning residual tape, used by backend extensions."""
         return self.residual.tape
 
     def as_halfplane_bound(self):
-        """Return the residual and its lower and upper bounds."""
+        """Return ``(residual, lower_bound, upper_bound)`` for lowering."""
         return self.residual, self.lower_bound, self.upper_bound
 
 
 def bounded(
     residual: Any, lower_bound: Any, upper_bound: Any
 ) -> BoundedConstraint:
-    """Constrain a residual within explicit lower and upper bounds."""
+    """Create an inclusive componentwise residual constraint.
+
+    Args:
+        residual: Symbolic scalar or array on a ProblemBuilder's tape.
+        lower_bound: Constant/symbolic lower bound; ``-np.inf`` is unbounded.
+        upper_bound: Constant or symbolic upper bound; ``np.inf`` is unbounded.
+
+    Returns:
+        BoundedConstraint to append to ``builder.constraints``. Equal lower
+        and upper bounds express equality; symbolic bounds must share the
+        residual's tape and may depend on runtime arguments.
+    """
     return BoundedConstraint(residual, lower_bound, upper_bound)
 
 
 def weighted_norm(weight: Tracer, residual: Tracer) -> Tracer:
     """Return a structured squared weighted residual.
 
-    The returned scalar is mathematically ``||weight @ residual||²`` and
-    retains the factors required by exact QP lowering.
+    The scalar is mathematically ``||weight @ residual||²``. The factors are
+    retained as WeightedNorm metadata for backends that support exact QP
+    lowering. This helper does not itself select a solver.
+
+    Args:
+        weight: Matrix-like linear weighting operator.
+        residual: Symbolic residual vector on the builder's tape.
+
+    Returns:
+        Scalar objective tracer suitable for ``Minimise``.
     """
     expression = np.dot(weight @ residual, weight @ residual)
     expression.weighted_norm = WeightedNorm(weight, residual)
@@ -59,7 +98,22 @@ def weighted_norm(weight: Tracer, residual: Tracer) -> Tracer:
 
 @dataclass(frozen=True)
 class SolveInfo:
-    """Normalised outcome reported by an optimisation backend."""
+    """Immutable normalised outcome reported by an optimisation backend.
+
+    Args:
+        backend: Backend registry name, such as ``"casadi"`` or ``"numpy"``.
+        solver: Solver/algorithm name.
+        success: Whether the backend reports successful termination.
+        return_status: Backend's human-readable termination status.
+        unified_return_status: Normalised status string when supplied by the
+            backend, or None. This is not a cross-backend status enum.
+        iteration_count: Solver-reported iteration count, or None when absent.
+
+    Notes:
+        A successful termination is not a guarantee of global optimality.
+        Solver-dependent status strings and iteration counts should not be
+        compared across backends.
+    """
 
     backend: str
     solver: str
@@ -70,7 +124,22 @@ class SolveInfo:
 
 
 class SolveFailure(RuntimeError):
-    """An optimisation solve error carrying its normalised result metadata."""
+    """Solver-reported failure carrying its normalised outcome.
+
+    Args:
+        message: Human-readable diagnostic.
+        solve_info: Failed solve metadata, also exposed by the associated
+            MathematicalProgram.
+
+    Attributes:
+        solve_info: Normalised failed outcome. Inspect this rather than parsing
+            solver logs. No result tuple is returned when this is raised.
+
+    Notes:
+        Configuration, argument, and backend-native exceptions are not all
+        converted to SolveFailure. They may occur before a new solve outcome
+        is available.
+    """
 
     def __init__(self, message: str, solve_info: SolveInfo):
         super().__init__(message)

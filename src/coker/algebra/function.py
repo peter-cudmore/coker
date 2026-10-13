@@ -260,10 +260,29 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return output
 
     def __call__(self, *args: Any) -> Any:
-        assert len(args) == len(self.tape.input_indicies), (
-            f"Expected {len(self.tape.input_indicies)} arguments but got "
-            f"{len(args)}"
-        )
+        """Evaluate concrete values or compose a call into an enclosing trace.
+
+        Args:
+            *args: One value per declared argument, in declaration order.
+                Function-space arguments accept Coker or traceable Python
+                callables. Numeric inputs follow the selected backend's
+                conversion and reshape rules.
+
+        Returns:
+            The value for a single implementation result, or a tuple when the
+            implementation returned a list/tuple of results. During tracing,
+            values are symbolic rather than numeric.
+
+        Raises:
+            TypeError: The positional argument count is incorrect.
+            RuntimeError: A native imported callable is composed into a
+                different backend.
+        """
+        if len(args) != len(self.tape.input_indicies):
+            raise TypeError(
+                f"Expected {len(self.tape.input_indicies)} arguments but got "
+                f"{len(args)}"
+            )
 
         args = [
             (self._prepare_argument(arg, idx))
@@ -295,7 +314,26 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return tuple(output)
 
     def lower(self, options: LoweringOptions | None = None) -> LoweredFunction:
-        """Return a cached backend-specific executable lowering handle."""
+        """Return a cached backend-specific executable handle.
+
+        Args:
+            options: Immutable lowering configuration. ``None`` uses this
+                function's backend; ``LoweringOptions(backend=...)`` selects
+                another registered backend for a non-native graph.
+
+        Returns:
+            A cached ``LoweredFunction`` retaining its ordered signature.
+            ``execute(inputs)`` returns a packed tuple of native values.
+
+        Raises:
+            TypeError: ``options`` is not a ``LoweringOptions`` instance.
+            RuntimeError: A native import is lowered by another backend.
+
+        Note:
+            The current registry lookup sets the ambient backend. Use explicit
+            backend names for subsequent program construction. Lowering does
+            not change ``self.backend``.
+        """
 
         options = LoweringOptions() if options is None else options
         if not isinstance(options, LoweringOptions):
@@ -472,25 +510,30 @@ def function(
         implementation: A Python callable that defines the computation.  It
             will be called once during tracing with symbolic
             :class:`~coker.algebra.graph.Tracer` arguments.
-        backend: Name of the backend used for concrete evaluation.
-            Built-in options are ``"numpy"`` (default for tracing),
-            ``"casadi"``, ``"sympy"``, and ``"coker"``.
+        backend: Registered execution backend name. Built-in integrations are
+            ``"numpy"`` (default), ``"casadi"``, ``"sympy"``, ``"jax"``, and
+            ``"pytorch"``. ``"coker"`` requires a separately installed plugin.
         name: Optional human-readable name attached to the returned
             :class:`Function`.
 
     Returns:
-        A compiled :class:`Function` that can be called with concrete numpy
-        arrays or symbolic tracers.
+        A traced :class:`Function`. A scalar/array implementation result is one
+        output; a list/tuple declares multiple output slots, even with one
+        element. Numeric value types depend on the selected backend.
+
+    Raises:
+        TypeError: An argument declaration has an unsupported type, or the
+            implementation cannot accept the declared positional arguments.
 
     Example:
         >>> import numpy as np
         >>> from coker import function, VectorSpace
         >>> A = np.eye(3)
         >>> f = function(
-            ...     [VectorSpace("x", 3)],
-            ...     lambda x: A @ x,
-            ...     backend="numpy",
-            ... )
+        ...     [VectorSpace("x", 3)],
+        ...     lambda x: A @ x,
+        ...     backend="numpy",
+        ... )
         >>> f(np.array([1.0, 0.0, 0.0]))
         array([1., 0., 0.])
     """

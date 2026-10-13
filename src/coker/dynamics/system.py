@@ -33,6 +33,24 @@ def _parameter_callback(callback, heterogeneous, adapter):
 def create_dynamics_from_spec(
     spec: DynamicsSpec, backend="numpy"
 ) -> DynamicalSystem:
+    """Trace a general differential/algebraic specification.
+
+    Args:
+        spec: Callback and space declarations. Initial conditions receive
+            ``(z, u, p)``; dynamics/constraints/quadratures receive
+            ``(t, x, z, u, p)``; output additionally receives ``q``.
+            A tuple of parameter spaces produces one positional ``p`` tuple
+            in these callbacks.
+        backend: Function backend name; defaults to ``"numpy"``.
+
+    Returns:
+        A ``DynamicalSystem`` with traced component functions. Numerical
+        integration and quadrature support depend on the evaluation route.
+
+    Raises:
+        ValueError: Constraints are supplied without algebraic variables.
+        AssertionError: Callback outputs violate state/algebraic shapes.
+    """
     heterogeneous = isinstance(spec.parameters, tuple)
     parameter_arguments = (
         list(spec.parameters) if heterogeneous else [spec.parameters]
@@ -137,6 +155,25 @@ def create_control_system(
     p_init: np.ndarray = None,
     u_init: Callable[[float], np.ndarray] = None,
 ) -> DynamicalSystem:
+    """Construct an ODE driven by a declared time-to-control function.
+
+    Args:
+        x0: Constant initial state, or callback ``x0(p)``.
+        xdot: Callback ``xdot(t, x, u_value, p)``.
+        control: ``FunctionSpace`` with one output matching the control value.
+        parameters: Optional scalar or vector parameter declaration.
+        output: Optional callback ``output(t, x, u_value, p)``; defaults to
+            the differential state.
+        backend: Function backend name; defaults to ``"numpy"``.
+        p_init: Numeric parameter value used only for construction-time shape
+            checks. It does not bind parameters for later evaluation.
+        u_init: Optional numeric control callback used for shape checks.
+
+    Returns:
+        A system evaluated as ``system(time, control_function, *parameters)``.
+        This constructor is imported from ``coker.dynamics.system``, not
+        the ``coker.dynamics`` namespace.
+    """
 
     if isinstance(x0, (list, tuple, int, float)):
         x0 = np.array(x0)
@@ -230,6 +267,21 @@ def create_autonomous_ode(
     backend: str = "numpy",
     p_init: np.ndarray = None,
 ) -> DynamicalSystem:
+    """Construct a time-independent ODE without a control input.
+
+    Args:
+        x0: Constant initial state, or callback ``x0(p)``.
+        xdot: Callback ``xdot(x, p)`` with the same state shape as ``x0``.
+        parameters: Optional scalar or vector parameter declaration.
+        output: Optional callback ``output(x, p)``; defaults to state output.
+        backend: Function backend name; defaults to ``"numpy"``.
+        p_init: Numeric parameter value used for construction-time shape
+            checks only; later evaluation still requires declared parameters.
+
+    Returns:
+        A system evaluated as ``system(time, *parameters)``. Scalar and
+        one-component sampled outputs are flattened to ``(n_times,)``.
+    """
 
     # case 1,
     # - x0 is an array
@@ -315,6 +367,13 @@ def create_autonomous_ode(
 
 
 class CompositionOperator:
+    """Join and split finite vector blocks in subsystem order.
+
+    This is an advanced composition helper returned through ``ProjectionSet``.
+
+    Args:
+        *spaces: Scalar/vector spaces; ``None`` denotes an absent block.
+    """
 
     def __init__(self, *spaces: Scalar | VectorSpace | None):
         self.spaces = spaces
@@ -339,6 +398,14 @@ class CompositionOperator:
         return VectorSpace("composition", (dim,)) if dim else None
 
     def inverse(self, ab) -> List:
+        """Return component vectors, with ``None`` for absent blocks.
+
+        Args:
+            ab: Concatenated vector in subsystem order.
+
+        Returns:
+            One entry per component; all present blocks are vector slices.
+        """
         next_slice = ab
         output = []
         for space in self.spaces:
@@ -374,6 +441,12 @@ class CompositionOperator:
         return CompositionOperator(*spaces)
 
     def as_matrices(self):
+        """Return dense extraction matrices in subsystem order.
+
+        Returns:
+            A list of matrices with shape ``(component_size, total_size)``.
+            Multiplying a matrix by a concatenated vector extracts its block.
+        """
         offsets = list(self.offsets())
         sizes = list(self.sizes())
 
@@ -388,6 +461,21 @@ class CompositionOperator:
 
 @dataclasses.dataclass
 class ProjectionSet:
+    """Access component projections returned alongside a direct-sum system.
+
+    Attributes:
+        parameters: Numeric ``CompositionOperator``, or a structured
+            parameter projection with ``split`` for function-valued slots.
+        state: Differential-state concatenation/projection.
+        algebraic: Algebraic-state concatenation/projection.
+        quadratures: Quadrature concatenation/projection.
+        outputs: Observed-output concatenation/projection.
+        controls: Control-value concatenation/projection.
+
+    Numeric projections expose ``inverse`` and ``as_matrices``. Their block
+    order is the system argument order passed to ``direct_sum``.
+    """
+
     parameters: CompositionOperator
     state: CompositionOperator
     algebraic: CompositionOperator
@@ -601,6 +689,24 @@ def _compose_direct_sum(systems, backend, partition):
 def direct_sum(
     *systems: DynamicalSystem, backend=None
 ) -> Tuple[DynamicalSystem, ProjectionSet]:
+    """Compose independent systems and return their extraction projections.
+
+    Args:
+        *systems: One or more compatible systems, in concatenation order.
+        backend: Optional function backend; defaults to the first system's
+            backend. Component traces must be lowerable by that backend.
+
+    Returns:
+        A pair ``(system, projections)``. Output/state/control channels are
+        concatenated in subsystem order. ``projections.outputs.inverse(y)``
+        splits an output vector; ``as_matrices()`` gives extraction matrices.
+        Numeric parameters form one flat vector. If any parameter is
+        function-valued, declarations remain positional and
+        ``projections.parameters.split(values)`` partitions their tuple.
+
+    This does not integrate either subsystem. Direct evaluation retains the
+    normal backend and quadrature limitations of ``DynamicalSystem``.
+    """
     backend = backend or systems[0].backend()
     partition = (
         _StructuredParameterPartition(systems)

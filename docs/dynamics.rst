@@ -9,8 +9,8 @@ parameter-fitting or optimal-control style problems against them.
 Core entry points
 -----------------
 
-The dynamics API is re-exported from :mod:`coker.dynamics`; general and
-function-valued declarations are exposed from their respective packages:
+Ordinary dynamics APIs are re-exported from :mod:`coker.dynamics`. General and
+controlled constructors currently live in :mod:`coker.dynamics.system`:
 
 - :func:`coker.dynamics.create_autonomous_ode`
 - :func:`coker.dynamics.direct_sum`
@@ -21,11 +21,20 @@ function-valued declarations are exposed from their respective packages:
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
 - :class:`coker.parameters.BoundVector`
 - :class:`coker.parameters.DenseTensorVariable`
-- :class:`coker.function_parameters.FunctionParameter`
-- :class:`coker.function_parameters.ClosureParameter`
-- :class:`coker.function_parameters.MonotonePiecewiseLinear`
-- :class:`coker.function_parameters.DenseLayer`
-- :class:`coker.function_parameters.RadialBasisFunction`
+- :class:`coker.parameters.function_parameters.FunctionParameter`
+- :class:`coker.parameters.function_parameters.ClosureParameter`
+- :class:`coker.parameters.function_parameters.MonotonePiecewiseLinear`
+- :class:`coker.parameters.function_parameters.DenseLayer`
+- :class:`coker.parameters.function_parameters.RadialBasisFunction`
+
+
+For general models import ``create_dynamics_from_spec`` from
+``coker.dynamics.system`` and describe callbacks with ``DynamicsSpec``. For a
+controlled ODE import ``create_control_system`` from that same module; it is
+not a ``coker.dynamics`` re-export. These are the actual construction paths in
+this checkout, not the pending export/default changes in issue #88. See
+:doc:`api/dynamics` for canonical imports, direct-sum projections, callback
+shapes, and executable construction examples.
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -80,8 +89,8 @@ Function-valued parameters
 --------------------------
 
 Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
-:class:`~coker.dynamics.FunctionParameter` realization at problem construction;
-Coker replaces its concrete parameter blocks with scalar solver decisions before
+:class:`~coker.parameters.function_parameters.FunctionParameter` realization at problem
+construction; Coker replaces its concrete parameter blocks with scalar solver decisions before
 solving. The function space and realization must agree on their argument and
 output shapes.
 Solver-bound function parameters require a non-empty ``name``; Coker uses it
@@ -103,7 +112,7 @@ a dense layer with an identity activation:
 
    from coker import FunctionSpace, VectorSpace, function
    from coker.dynamics import VariationalProblemBuilder
-   from coker.function_parameters import DenseLayer
+   from coker.parameters.function_parameters import DenseLayer
    from coker.toolkits.codesign import Minimise
 
    activation = function(
@@ -140,9 +149,12 @@ terminal point constraints.  A numeric ``t_final`` is fixed; a
 ``\int_0^T expr(t) dt`` rather than numerical sampling in the builder.
 ``state(time)`` exposes the differential state, while ``output(time)`` is the
 observed system output (and may include algebraic or quadrature channels).
-The current executable lowering boundary is the CasADi backend; symbolic
-construction is backend-independent, but solving a built problem currently
-requires CasADi.
+CasADi is the default variational backend and supports constrained collocation,
+algebraic states, controls, quadratures, and free horizons. PyTorch additionally
+supports fixed-horizon, bound-only ODE parameter fitting and quadratures, without
+declared controls, algebraic states, or comparison constraints. NumPy, JAX, and
+SymPy do not implement variational solving. The model construction backend is
+independent of the problem's solve backend.
 
 Adaptive CasADi transcription
 -----------------------------
@@ -186,11 +198,11 @@ below that normalized width. ``maximum_degree`` must be no less than
 a single transcription solve.
 
 ``absolute_tolerance`` bounds initial-condition, continuity, and algebraic
-residuals. Set ``segment_defect_tolerance`` and
-``derivative_defect_tolerance`` independently to bound the integrated
-per-segment defects and the collocation derivative defects. Both default to
-``None`` and therefore inherit ``absolute_tolerance``; either may be ``0.0``
-to require an exact NLP equality.
+residuals. ``derivative_defect_tolerance`` independently bounds collocation
+derivative defects; ``None`` inherits ``absolute_tolerance`` and ``0.0`` requires
+an exact NLP equality. ``segment_defect_tolerance`` records the reference
+tolerance for physical post-solve segment-defect diagnostics; it does not add
+NLP constraints.
 
 During one adaptive solve, the CasADi model setup is retained while only
 mesh-dependent NLPs are compiled. Each refined mesh interpolates the preceding
@@ -248,7 +260,7 @@ immediately after time:
 
 Values for a declared ``FunctionSpace`` parameter may be ordinary Python
 callables, :class:`coker.Function` objects, or
-:class:`~coker.function_parameters.FittedFunction` objects. Coker normalizes
+:class:`~coker.parameters.function_parameters.FittedFunction` objects. Coker normalizes
 these values once before integration, so callers do not provide backend-native
 or lowered handles. No ``Noop`` placeholder is used for direct evaluation.
 
@@ -260,7 +272,7 @@ shape of its initial guess:
 .. code-block:: python
 
    from coker.dynamics import VariationalProblemBuilder
-   from coker.function_parameters import MonotonePiecewiseLinear
+   from coker.parameters.function_parameters import MonotonePiecewiseLinear
    from coker.parameters import BoundVector
 
    with VariationalProblemBuilder(
@@ -304,56 +316,51 @@ independent of the selected interior knots.
 Worked parameter-fitting example
 --------------------------------
 
-The test suite includes a minimal parameter-identification problem where the
-unknown parameter is the constant state value of a one-dimensional system.
+The following complete example fits an unknown constant initial state. It
+requires NumPy and CasADi/IPOPT. It uses the builder so the objective's time
+binding is explicit; constructing the problem does not solve it.
 
-.. code-block:: python
+.. doctest::
 
-   import numpy as np
-   from coker import VectorSpace
-   from coker.dynamics import VariationalProblem, create_autonomous_ode
-   from coker.parameters import BoundedVariable
+   >>> import contextlib
+   >>> import io
+   >>> import numpy as np
+   >>> from coker import VectorSpace
+   >>> from coker.dynamics import create_autonomous_ode, VariationalProblemBuilder, TranscriptionOptions
+   >>> from coker.parameters import BoundedVariable
+   >>> from coker.toolkits.codesign import Minimise
+   >>> system = create_autonomous_ode(
+   ...     lambda p: p[:1], lambda x, p: 0 * x,
+   ...     parameters=VectorSpace("p", 1), backend="numpy",
+   ... )
+   >>> with VariationalProblemBuilder(
+   ...     system, t_final=1.0,
+   ...     parameters=[BoundedVariable("value", lower_bound=0.5, upper_bound=3.0, guess=1.0)],
+   ...     transcription_options=TranscriptionOptions(minimum_n_intervals=2, minimum_degree=3),
+   ... ) as builder:
+   ...     problem = builder.build(Minimise((builder.output(builder.t_final)[0] - 2.0) ** 2))
+   >>> with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+   ...     solution = problem()
+   >>> assert solution.solve_info.success
+   >>> assert abs(solution.parameters["value"] - 2.0) < 1e-3
+   >>> assert solution.cost < 1e-6
+   >>> assert solution.state(0.5).shape == (1,)
+   >>> assert np.allclose(solution(0.5), [2.0], atol=1e-3)
 
-   def x0(p):
-       return p[0]
+``solution(t)`` returns observed output, while ``state(t)``, ``algebraic(t)``,
+and ``quadratures(t)`` return flat state channels at scalar physical time.
+Absent algebraic, quadrature, and control channels return ``None``. Stack
+individual evaluations to sample a trajectory; the solution accessors do not
+accept a vector of times. ``solution.parameters`` retains named fitted values
+and ``solution.solve_info`` reports status. Retain ``problem.get_solver()`` for
+repeated solves and call ``solver.solve(**fixed_parameters)`` to fix named
+values; ``problem()`` creates a new solver each time.
 
-   def xdot(x, p):
-       return 0
-
-   measured_value = np.array([2.0])
-
-   system = create_autonomous_ode(
-       parameters=VectorSpace("p", 1),
-       x0=x0,
-       xdot=xdot,
-       backend="numpy",
-   )
-
-   def loss(solution, p_inner):
-       total_error = 0.0
-       for t_i in np.arange(0, 1, 0.1):
-           truth = measured_value[0]
-           estimate = solution(t_i, p_inner)
-           total_error += (truth - estimate) ** 2
-       return total_error
-
-   problem = VariationalProblem(
-       loss=loss,
-       system=system,
-       parameters=[
-           BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2)
-       ],
-       t_final=1,
-       backend="casadi",
-   )
-
-   solution = problem()
-   print(solution.parameters["value"])
-   print(solution.solve_info.success)
-
-This is the same shape used throughout ``tests/dynamical_systems/``: build a
-system, define a loss against the system's callable output, and then solve a
-:class:`~coker.dynamics.VariationalProblem`.
+Direct ``DynamicalSystem`` evaluation rejects systems containing quadratures.
+The residual-system conversion API proposed by issue #88 is absent in this
+checkout. Existing variational transcription supports integral channels;
+:doc:`api/dynamics` includes an executable quadrature example and makes
+this missing conversion dependency explicit.
 
 What the test suite exercises
 -----------------------------

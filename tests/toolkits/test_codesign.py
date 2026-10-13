@@ -100,6 +100,41 @@ def test_optimisation_module_reports_solve_info_through_defined_interface():
     assert program.solve_info is solve_info
 
 
+def test_problem_builder_requires_an_objective():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable(name="x")
+        builder.outputs = [x]
+        with pytest.raises(ValueError, match="objective"):
+            builder.build("numpy")
+
+
+def test_problem_builder_requires_a_minimise_objective():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable(name="x")
+        builder.objective = x**2
+        builder.outputs = [x]
+        with pytest.raises(TypeError, match="Minimise"):
+            builder.build("numpy")
+
+
+def test_problem_builder_requires_a_tape():
+    builder = ProblemBuilder()
+    x = builder.new_variable(name="x")
+    builder.objective = Minimise(x**2)
+    builder.outputs = [x]
+    builder.tape = None
+    with pytest.raises(RuntimeError, match="tape"):
+        builder.build("numpy")
+
+
+def test_problem_builder_requires_nonempty_outputs():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable(name="x")
+        builder.objective = Minimise(x**2)
+        with pytest.raises(ValueError, match="output"):
+            builder.build("numpy")
+
+
 def test_problem_builder_uses_current_backend_when_unspecified(monkeypatch):
     from coker.backends import get_backend_by_name
 

@@ -55,7 +55,19 @@ class _FittedModule(torch.nn.Module):
 
 
 class PytorchBackend(Backend):
-    """Evaluate Coker expression graphs using PyTorch tensors."""
+    """Evaluate expression graphs using PyTorch tensors.
+
+    Args:
+        device: Optional device for converted inputs/constants. ``None``
+            preserves existing tensor devices.
+        dtype: Optional floating dtype for converted inputs/constants.
+            ``None`` preserves existing tensor dtypes.
+
+    Note:
+        Registry instances are shared. Set device/dtype before constructing
+        models, not concurrently with evaluation. Tensor inputs preserve
+        autograd; calls with no tensor inputs adapt outputs back to NumPy.
+    """
 
     def __init__(
         self,
@@ -235,7 +247,17 @@ class PytorchBackend(Backend):
         )
 
     def as_module(self, function):
-        """Lower a function to an eager ``torch.nn.Module``."""
+        """Expose a Coker function as an eager PyTorch module.
+
+        Args:
+            function: Coker function to lower with this backend.
+
+        Returns:
+            An eager ``PytorchModule``. A single output is unwrapped; multiple
+            outputs form a tuple. Ordinary graph constants are closure state,
+            not registered parameters/buffers. Native imported module state
+            remains connected to its original autograd graph.
+        """
         return self.lower(function).as_module()
 
     def _materialize_parameter(self, target, declaration, blocks):
@@ -298,7 +320,19 @@ class PytorchBackend(Backend):
         *,
         name: str | None = None,
     ) -> Function:
-        """Import a PyTorch-compatible callable as a Coker function."""
+        """Import a PyTorch-compatible callable with an explicit signature.
+
+        Args:
+            implementation: Native callable retained by the wrapper.
+            signature: Ordered named input spaces and output shapes.
+            name: Optional wrapper name.
+
+        Returns:
+            A traceable Coker function pinned to the PyTorch backend.
+
+        Raises:
+            TypeError: ``signature`` is not a ``FunctionSignature``.
+        """
         return import_native_function(
             implementation, signature, backend=self.name, name=name
         )
@@ -306,10 +340,20 @@ class PytorchBackend(Backend):
     def import_module(
         self, module: torch.nn.Module, signature: FunctionSignature
     ) -> Function:
-        """Import a parameterised PyTorch module as a Coker function.
+        """Import a parameterised module without copying its trainable state.
 
-        The module remains the native callable, so its parameters and buffers
-        stay authoritative and connected to PyTorch autograd.
+        Args:
+            module: Native module retained by strong reference. Parameters,
+                buffers, device, dtype and training mode stay authoritative.
+            signature: Explicit ordered input spaces and output shapes.
+
+        Returns:
+            A Coker function pinned to PyTorch, preserving native autograd.
+            Logical ownership is transferred to the wrapper; existing Python
+            aliases still reference the same mutable module.
+
+        Raises:
+            TypeError: ``module`` or ``signature`` has the wrong type.
         """
         if not isinstance(module, torch.nn.Module):
             raise TypeError("module must be a torch.nn.Module")
@@ -323,12 +367,18 @@ class PytorchBackend(Backend):
         *,
         name: str | None = None,
     ) -> PytorchModuleParameter:
-        """Import a module as a Coker-owned function parameter.
+        """Import a module as a solver-owned function parameter.
 
-        ``input_space`` and ``output_space`` describe the module's one tensor
-        input and one tensor output. Floating-point module parameters become
-        unbounded solver decisions; buffers are frozen snapshots. Unlike
-        :meth:`import_module`, the caller's module state is never mutated.
+        Args:
+            module: Native module whose floating parameters become unbounded
+                decisions. Buffers are frozen snapshots.
+            input_space: One scalar/vector tensor input declaration.
+            output_space: One scalar/vector tensor output declaration.
+            name: Optional fitted-function name.
+
+        Returns:
+            A finite function-parameter declaration. Unlike ``import_module``,
+            fitting never mutates the caller's module state.
         """
         return PytorchModuleParameter(
             module,

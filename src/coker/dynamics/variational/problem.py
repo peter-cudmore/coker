@@ -33,6 +33,7 @@ def _space_size(
 
 
 class VariationalIterationCallback:
+    """Extension hook receiving numerical variational solver iterates."""
 
     def __call__(
         self,
@@ -43,6 +44,8 @@ class VariationalIterationCallback:
         """Handle callbacks at the end of each optimisation step.
 
         Args:
+            iterate: Solver iteration index.
+            solution: Current candidate; this is not a success certificate.
             **kwargs: Solver-specific arguments.
 
         Returns:
@@ -112,6 +115,14 @@ class ConstraintSpec:
     def from_expression(
         cls, constraint: InequalityExpression
     ) -> "ConstraintSpec":
+        """Normalize a comparison into residual and lower/upper bounds.
+
+        Args:
+            constraint: An algebraic ``InequalityExpression``.
+
+        Returns:
+            A backend-neutral constraint record.
+        """
         return cls(
             residual=constraint.value,
             lower_bound=constraint.lower,
@@ -141,6 +152,38 @@ class QuadratureSpec:
 
 @dataclass
 class VariationalProblem:
+    """Describe a variational objective, declarations, and transcription.
+
+    Prefer ``VariationalProblemBuilder`` for symbolic objectives and
+    constraints. The direct constructor also accepts a loss callback whose
+    arguments are ``(trajectory, parameters)`` without controls or
+    ``(trajectory, control_function, parameters)`` with controls.
+
+    Args:
+        loss: Scalar loss callback, traced ``Function``, or builder tracer.
+        t_final: Fixed physical duration or a bounded duration decision.
+        system: Traced model defining initial conditions and outputs.
+        control: Optional ordered scalar control declarations.
+        parameters: Optional parameter decisions. Finite vector spaces use
+            scalar declarations; heterogeneous tuples are specialized from
+            their positional scalar/vector/function declarations.
+        system_parameter_map: Matrix of shape ``(system_width,
+            declaration_width)`` mapping finite solver parameters to system
+            parameters.
+        quadratures: Builder-owned running-integral records.
+        transcription_options: Mesh and solve configuration.
+        backend: Variational solver backend, default ``"casadi"``.
+        path_constraints: Comparisons enforced at transcription path nodes.
+        terminal_constraints: Comparisons enforced at terminal time.
+        initial_constraints: Comparisons enforced at initial time.
+
+    Construction traces/normalizes declarations but does not solve.
+    CasADi supports collocation with controls, DAEs, quadratures, and free
+    duration. PyTorch supports fixed-duration ODE fitting with parameter
+    bounds and quadratures, not declared controls, DAEs, or comparisons.
+    NumPy, JAX, and SymPy do not supply a variational solver.
+    """
+
     loss: LossFunction | Tracer
     t_final: float | BoundedVariable
     system: DynamicalSystem
@@ -236,6 +279,16 @@ class VariationalProblem:
             )
 
     def get_solver(self, backend: Optional[str] = None):
+        """Create a backend solver for this problem.
+
+        Args:
+            backend: Optional override of the problem's solver backend.
+
+        Returns:
+            A solver exposing ``parameters`` (free scalar fixing names) and
+            ``solve(**fixed_parameters)``. Retain this object for repeated
+            solves; each call here creates a new solver.
+        """
         from coker.backends import get_backend_by_name
 
         backend_name = self.backend if backend is None else backend
@@ -244,4 +297,13 @@ class VariationalProblem:
         )
 
     def __call__(self) -> VariationalSolution:
+        """Create the configured solver and solve with no fixed overrides.
+
+        Returns:
+            A ``VariationalSolution`` carrying solve metadata.
+
+        Raises:
+            SolveFailure: The backend reports numerical solve failure.
+            NotImplementedError: The backend does not support the problem.
+        """
         return self.get_solver().solve()

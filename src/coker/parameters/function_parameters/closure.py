@@ -18,7 +18,18 @@ from .base import FunctionParameter, _concrete_parameter_space
 
 
 class ClosureParameter(FunctionParameter):
-    """Realize a function parameter by binding decisions to a function."""
+    """Declare a function whose leading inputs become solver decisions.
+
+    Args:
+        function: Coker function with concrete blocks before public inputs.
+            Its name becomes the fitted-function name.
+        parameters: Nonempty scalar/dense decision declarations, matching the
+            leading input shapes in order.
+
+    Raises:
+        TypeError: The function or concrete declaration types are unsupported.
+        ValueError: No concrete parameters are supplied.
+    """
 
     def __init__(
         self, function: Function, parameters: Sequence[ParameterVariable]

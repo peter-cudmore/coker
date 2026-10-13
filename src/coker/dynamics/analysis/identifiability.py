@@ -80,7 +80,22 @@ def analyse_identifiability(
     ) = None,
     max_order: int | None = None,
 ) -> IdentifiabilityResult:
-    """Analyse generic local identifiability by augmented observability."""
+    """Analyse generic local identifiability by augmented observability.
+
+    Args:
+        system: A supported autonomous ODE or index-one DAE, as a
+            ``DynamicalSystem`` or symbolic representation.
+        parameters: Optional positional parameter roles. Numeric values are
+            known and substituted; bounded/unbounded variable declarations
+            remain unknown. Without roles all declared parameters are unknown.
+        max_order: Optional nonnegative Lie-derivative expansion limit.
+
+    Returns:
+        An ``IdentifiabilityResult`` with rank validity conditions. Controlled
+        or unsupported models and exhausted limits return ``INCONCLUSIVE``
+        with a reason. A positive conclusion is local and structural, not
+        a guarantee of useful fitting from noisy samples.
+    """
     try:
         symbolic = normalize_symbolic_system(system)
         symbolic = _apply_parameter_roles(symbolic, parameters)

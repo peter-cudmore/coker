@@ -9,11 +9,14 @@ class ComponentHint:
 
 
 def list_components() -> List[Tuple[str, str, ComponentHint]]:
-    """List all components
+    """Discover currently imported component subclasses.
+
+    Import the desired standard-library modules before calling this function;
+    it does not scan the filesystem or import libraries.
 
     Returns:
-        list of  component name, library path, usage hint
-
+        list[tuple[str, str, None]]: Class name, slash-separated module path,
+            and an unimplemented hint (always None).
     """
     entries = []
     for baseclass in CokerListableSubclasses.list_subclasses():

@@ -63,7 +63,28 @@ def _validation_t_final(t_final: float | BoundedVariable) -> None:
 
 
 class VariationalProblemBuilder:
-    """Build a variational problem from one, context-owned symbolic trace."""
+    """Build a problem inside one context-owned symbolic trace.
+
+    Args:
+        system: Traced differential/algebraic system.
+        t_final: Positive fixed duration, or a ``BoundedVariable`` with a
+            strictly positive lower bound for an optimized duration.
+        control: Ordered scalar control declarations matching system inputs.
+        parameters: Parameter declarations. For a tuple system space, provide
+            one declaration per slot: scalar variables, ``BoundVector`` or
+            ``DenseTensorVariable`` for vectors, and named
+            ``FunctionParameter`` realizations for function spaces.
+        backend: Solver/trace backend; defaults to ``"casadi"``.
+        transcription_options: Mesh and backend-specific solve policy.
+        system_parameter_map: Optional matrix mapping solver parameters to
+            finite system parameters.
+
+    Use ``with`` to trace expressions and call ``build`` before leaving the
+    context. The built problem survives context exit; builder symbolic access
+    does not. Building does not solve. CasADi supports constrained collocation;
+    PyTorch supports fixed-horizon, bound-only ODE fitting without declared
+    controls or algebraic states.
+    """
 
     def __init__(
         self,
@@ -182,15 +203,25 @@ class VariationalProblemBuilder:
 
     @property
     def t(self) -> Tracer:
+        """Return the path-time marker used for running expressions."""
         self._require_open()
         return self._t
 
     @property
     def t_final(self) -> Tracer:
+        """Return the symbolic terminal-time marker, not its numeric value."""
         self._require_open()
         return self._t_final
 
     def state(self, time: Optional[object] = None) -> Tracer:
+        """Return differential state at ``t`` (default), ``0``, or ``t_final``.
+
+        Args:
+            time: A builder-owned time marker or numeric zero.
+
+        Returns:
+            A symbolic vector with flattened differential-state width.
+        """
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
@@ -199,6 +230,14 @@ class VariationalProblemBuilder:
         )
 
     def input(self, time: Optional[object] = None) -> Tracer:
+        """Return control values at an allowed time binding.
+
+        Args:
+            time: ``t`` (default), numeric zero, or ``t_final``.
+
+        Returns:
+            A symbolic control value, or ``Noop()`` without declared inputs.
+        """
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
@@ -209,6 +248,14 @@ class VariationalProblemBuilder:
         return self._input
 
     def output(self, time: Optional[object] = None) -> Tracer:
+        """Return observed output at an allowed time binding.
+
+        Args:
+            time: ``t`` (default), numeric zero, or ``t_final``.
+
+        Returns:
+            A symbolic vector of flattened output width, distinct from state.
+        """
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
@@ -218,6 +265,7 @@ class VariationalProblemBuilder:
 
     @property
     def parameters(self) -> Tracer:
+        """Return the specialized finite parameter vector for expressions."""
         self._require_open()
         return self._parameters
 
@@ -247,12 +295,18 @@ class VariationalProblemBuilder:
         self._time_binding(time)
 
     def integrate(self, expression: Tracer) -> Tracer:
-        """Register a scalar integrand and return its accumulated state.
+        """Register a running scalar integral over the physical horizon.
 
-        The returned tracer is a distinct quadrature channel.  Its initial
-        value is zero and its derivative is the supplied expression; the
-        derivative channels are exposed on ``system.dqdt`` for the dynamics
-        transcription.
+        Args:
+            expression: Scalar expression from this builder's trace.
+
+        Returns:
+            A quadrature tracer accumulated from zero over ``[0, t_final]``.
+            This denotes an integration channel, not sampled quadrature.
+
+        Raises:
+            TypeError: The integrand is not a symbolic expression.
+            ValueError: It is nonscalar or belongs to a foreign trace.
         """
         self._require_open()
         if not isinstance(expression, Tracer):
@@ -278,7 +332,24 @@ class VariationalProblemBuilder:
         *,
         subject_to: Optional[Sequence[object]] = None,
     ) -> VariationalProblem:
-        """Build a problem from a ``Minimise`` objective and constraints."""
+        """Construct a problem without executing a numerical solve.
+
+        Args:
+            objective: ``Minimise`` wrapping a scalar expression from this
+                trace.
+            subject_to: Symbolic comparisons. Expressions depending on ``t``
+                are path constraints; initial-time expressions are initial
+                constraints; remaining expressions are terminal constraints.
+
+        Returns:
+            A ``VariationalProblem`` usable after context exit.
+
+        Raises:
+            RuntimeError: The builder context has already closed.
+            TypeError: Objective or constraints have unsupported types.
+            ValueError: Expressions are nonscalar where required or belong
+                to another trace.
+        """
         self._require_open()
         if not isinstance(objective, Minimise):
             raise TypeError("build requires a Minimise objective")

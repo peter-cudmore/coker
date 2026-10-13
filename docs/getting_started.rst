@@ -14,6 +14,7 @@ Optional extras are available for backend-specific dependencies:
 
    pip install "coker[casadi]"
    pip install "coker[jax]"
+   pip install "coker[pytorch]"
 
 Basic usage
 -----------
@@ -22,29 +23,23 @@ Compile a Python callable with :func:`coker.function`, providing the argument
 spaces explicitly. Coker traces the implementation and compiles it for the
 chosen backend.
 
-.. code-block:: python
+.. doctest::
 
-   import numpy as np
-   import coker
-   from coker import function, Scalar, VectorSpace
-
-   # Scalar function
-   f = function(
-       arguments=[Scalar("x")],
-       implementation=lambda x: 2 * x + 1,
-       backend="numpy",
-   )
-   print(f(3))  # 7
-
-   # Vector function
-   A = np.array([[1, 0], [0, -1]], dtype=float)
-
-   g = function(
-       arguments=[VectorSpace("x", 2)],
-       implementation=lambda x: A @ x,
-       backend="numpy",
-   )
-   print(g(np.array([1.0, 2.0])))  # [ 1. -2.]
+   >>> import numpy as np
+   >>> from coker import function, Scalar, VectorSpace
+   >>> f = function(
+   ...     arguments=[Scalar("x")],
+   ...     implementation=lambda x: 2 * x + 1,
+   ...     backend="numpy",
+   ... )
+   >>> assert f(3) == 7
+   >>> A = np.array([[1, 0], [0, -1]], dtype=float)
+   >>> g = function(
+   ...     arguments=[VectorSpace("x", 2)],
+   ...     implementation=lambda x: A @ x,
+   ...     backend="numpy",
+   ... )
+   >>> np.testing.assert_allclose(g(np.array([1.0, 2.0])), [1., -2.])
 
 Switching backends
 ------------------
@@ -52,16 +47,21 @@ Switching backends
 The same implementation can be compiled for any supported backend by changing
 the ``backend`` argument:
 
-.. code-block:: python
+The following example requires ``pip install "coker[casadi]"``:
 
-   f_casadi = function(
-       arguments=[Scalar("x")],
-       implementation=lambda x: x ** 2,
-       backend="casadi",
-   )
+.. doctest::
+
+   >>> from coker import function, Scalar
+   >>> f_casadi = function(
+   ...     arguments=[Scalar("x")],
+   ...     implementation=lambda x: x ** 2,
+   ...     backend="casadi",
+   ... )
+   >>> assert f_casadi(3.) == 9.
 
 Available backend names in the current package are ``"numpy"``, ``"casadi"``,
-``"sympy"``, ``"coker"``, and ``"jax"``.
+``"sympy"``, ``"coker"``, ``"jax"`` and ``"pytorch"``. The backend capability
+matrix and ownership contracts are in :doc:`api/backends`.
 
 In Coker 0.4, :func:`coker.function` defaults to ``"numpy"``. Pass
 ``backend=`` explicitly for portable examples. The native ``"coker"`` backend

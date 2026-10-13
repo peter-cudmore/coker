@@ -75,7 +75,21 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class RadialBasisFunction(FunctionParameter):
-    """Fixed-width scalar Gaussian basis expansion with fitted coefficients."""
+    """Declare a fixed-width scalar Gaussian expansion.
+
+    Args:
+        centers: Nonempty finite scalar Gaussian centers.
+        width: Finite positive Gaussian width in the domain's units.
+        lower_bound: Optional inclusive coefficient lower bound.
+        upper_bound: Optional coefficient upper bound; set both bounds or
+            neither. These bound coefficients, not the output function.
+        guess: Finite initial coefficients, one per center; defaults to zeros.
+        name: Public name used to reconstruct the fitted callable.
+
+    Raises:
+        TypeError: Numeric declarations have incompatible types.
+        ValueError: Centers, width, bounds or initial coefficients are invalid.
+    """
 
     centers: Sequence[Real]
     width: Real

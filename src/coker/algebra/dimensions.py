@@ -27,6 +27,7 @@ class VectorSpace:
 
     @property
     def size(self) -> int:
+        """Return the total number of scalar components."""
         if isinstance(self.dimension, int):
             return self.dimension
         return reduce(mul, self.dimension)
@@ -44,6 +45,7 @@ class Scalar:
 
     @property
     def size(self) -> int:
+        """Return one scalar component."""
         return 1
 
 
@@ -69,6 +71,7 @@ class Dimension:
         self.dim = tuple_or_none
 
     def flat(self):
+        """Return the number of scalar components represented by this shape."""
         d = 1
         if self.dim is not None:
             for d_i in self.dim:
@@ -76,6 +79,14 @@ class Dimension:
         return d
 
     def to_space(self, name) -> Union[Scalar, VectorSpace]:
+        """Return a named argument space with this dimension.
+
+        Args:
+            name: Name for the resulting scalar or vector/tensor space.
+
+        Returns:
+            A scalar space for ``dim is None``, otherwise a vector space.
+        """
         if self.is_scalar():
             return Scalar(name)
         return VectorSpace(name, self.dim)
@@ -112,15 +123,18 @@ class Dimension:
         return self.dim == other.dim
 
     def is_scalar(self):
+        """Return whether this describes a scalar rather than an array."""
         return self.dim is None
 
     def is_vector(self):
+        """Return whether this describes a one-dimensional array."""
         return self.dim is not None and len(self.dim) == 1
 
     def is_covector(self):
         return not self.is_scalar() and len(self.dim) == 2 and self.dim[0] == 1
 
     def is_matrix(self):
+        """Return whether this describes a matrix with more than one row."""
         return not self.is_scalar() and len(self.dim) == 2 and self.dim[0] > 1
 
     def is_multilinear_map(self):
@@ -137,12 +151,14 @@ class Dimension:
 
     @property
     def shape(self):
+        """Return the array shape; the historical scalar shape is ``(1,)``."""
         if self.dim is None:
             return (1,)
         return self.dim
 
     @staticmethod
     def scalar():
+        """Return the scalar dimension, distinct from a length-one vector."""
         return Dimension(None)
 
 
@@ -160,6 +176,13 @@ class ResultBundleDimension:
 class FunctionSpace:
     """Represents a function space, including its domain and codomain.
 
+
+    Args:
+        name: Public callable argument name.
+        arguments: Ordered scalar, vector/tensor or callable input spaces.
+        output: Ordered non-absent output spaces.
+        signature: Optional differentiability order per argument. ``None``
+            denotes smoothness metadata, not executable derivative support.
     Attributes:
         name (str): The name of the function space.
         arguments (List[Scalar | VectorSpace | FunctionSpace]): A list
@@ -190,6 +213,7 @@ class FunctionSpace:
             raise TypeError("FunctionSpace output spaces must not be None")
 
     def input_dimensions(self):
+        """Return input dimensions, retaining nested callable spaces."""
         return [
             (
                 arg
@@ -204,6 +228,7 @@ class FunctionSpace:
         ]
 
     def output_dimensions(self) -> list[Dimension | FunctionSpace]:
+        """Return output dimensions, retaining nested callable spaces."""
         return [
             (
                 out

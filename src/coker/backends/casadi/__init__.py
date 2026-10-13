@@ -117,6 +117,13 @@ def to_numpy_array(array: Union[ca.MX, ca.DM]) -> ArrayLike:
 
 
 class CasadiBackend(Backend):
+    """Evaluate and solve graphs through CasADi 3.7.x.
+
+    Native imports remain CasADi calls. Public numeric Coker functions adapt
+    native outputs to NumPy shapes; lowered execution exposes CasADi values.
+    NLP construction uses IPOPT.
+    """
+
     def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
@@ -190,11 +197,19 @@ class CasadiBackend(Backend):
         ca_function: ca.Function,
         signature: FunctionSignature | None = None,
     ) -> Function:
-        """Import a native CasADi function as a :class:`coker.Function`.
+        """Import a native CasADi function.
 
-        CasADi functions carry ordered names and matrix dimensions, so callers
-        may omit ``signature``. Pass one only to impose a deliberate Coker
-        declaration instead of the native function's interface.
+        Args:
+            ca_function: Native CasADi function retained by the wrapper.
+            signature: Optional explicit Coker declaration. By default, ordered
+                names and matrix dimensions are inferred: a ``(1, 1)`` is
+                scalar, and a column is a one-dimensional vector.
+
+        Returns:
+            A traceable Coker function pinned to the CasADi backend.
+
+        Raises:
+            TypeError: The native function or signature has the wrong type.
         """
         if not isinstance(ca_function, ca.Function):
             raise TypeError(

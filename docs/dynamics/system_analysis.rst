@@ -18,6 +18,31 @@ All conclusions are **generic and local**.  They apply where the reported
 assert global reachability, global state reconstruction, or globally unique
 parameters.
 
+Complete local-observability example
+------------------------------------
+
+The ordinary entry points are imported from ``coker.dynamics``. Analysis lowers
+the model trace to SymPy independently of its numeric construction backend.
+This example requires NumPy and SymPy (no numerical optimizer):
+
+.. doctest::
+
+   >>> import numpy as np
+   >>> from coker.dynamics import create_autonomous_ode, analyse_observability, AnalysisStatus
+   >>> system = create_autonomous_ode(
+   ...     np.array([1.0]), lambda x, p: -x, backend="numpy"
+   ... )
+   >>> result = analyse_observability(system)
+   >>> assert result.status is AnalysisStatus.TRUE
+   >>> assert result.rank == result.required_rank == 1
+   >>> assert result.matrix.shape[1] == 1
+   >>> assert result.reason is None
+
+Inspect ``rank_conditions`` before using the conclusion at a particular point.
+The symbolic lowerers and representations below are advanced inspection APIs,
+not an alternative numerical integrator; complete callable signatures are in
+:doc:`../api/dynamics`.
+
 Model representation
 --------------------
 

@@ -12,6 +12,18 @@ from coker.parameters import (
 
 @dataclass
 class PiecewiseConstantVariable(_ParameterMixin):
+    """Declare one bounded scalar, sampled piecewise-constant control.
+
+    Args:
+        name: Solution/control channel name.
+        sample_rate: Samples per unit of physical time.
+        upper_bound: Upper bound for every sample.
+        lower_bound: Lower bound for every sample.
+
+    The number of samples is ``ceil(duration * sample_rate)``. Evaluation
+    uses ``int(t * sample_rate)``; the terminal boundary is not a new sample.
+    """
+
     name: str
     sample_rate: float
     upper_bound: float = np.inf
@@ -27,6 +39,15 @@ class PiecewiseConstantVariable(_ParameterMixin):
 
 @dataclass
 class SpikeVariable(_ParameterMixin):
+    """Declare a bounded scalar control concentrated at one physical time.
+
+    Args:
+        name: Solution/control channel name.
+        time: Physical time of the spike.
+        upper_bound: Upper bound on spike amplitude.
+        lower_bound: Lower bound on spike amplitude.
+    """
+
     name: str
     time: float
     upper_bound: float = np.inf
@@ -41,6 +62,14 @@ class SpikeVariable(_ParameterMixin):
 
 @dataclass
 class ConstantControlVariable(_ParameterMixin):
+    """Declare one scalar control constant over the full horizon.
+
+    Args:
+        name: Solution/control channel name.
+        upper_bound: Upper bound on the constant value.
+        lower_bound: Lower bound on the constant value.
+    """
+
     name: str
     upper_bound: float = np.inf
     lower_bound: float = -np.inf
@@ -54,6 +83,8 @@ class ConstantControlVariable(_ParameterMixin):
 
 @dataclass
 class ConstantControlSolution:
+    """Evaluate a fitted constant scalar control at any scalar time."""
+
     name: str
     value: float
 
@@ -63,6 +94,8 @@ class ConstantControlSolution:
 
 @dataclass
 class SpikeControlSolution:
+    """Evaluate the amplitude within ``tolerance`` of the declared spike."""
+
     name: str
     time: float
     value: float
@@ -74,6 +107,12 @@ class SpikeControlSolution:
 
 @dataclass
 class PiecewiseControlSolution:
+    """Evaluate fitted scalar samples in half-open physical-time bins.
+
+    Times outside the stored sample range are not supported, including a
+    terminal endpoint whose bin index equals the number of samples.
+    """
+
     name: str
     sample_rate: float
     value: np.ndarray
