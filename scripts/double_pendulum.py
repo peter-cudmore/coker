@@ -1,3 +1,15 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "coker",
+#     "numpy>=2",
+#     "matplotlib>=3.9,<4",
+# ]
+#
+# [tool.uv.sources]
+# coker = { path = ".." }
+# ///
+
 import numpy as np
 from coker.toolkits.kinematics import (
     RigidBody,

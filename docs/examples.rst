@@ -86,19 +86,16 @@ use ordinary PyTorch execution.
 Double-pendulum visualisation
 -----------------------------
 
-Install the optional Matplotlib extra, then run the script from the repository
-root:
+Run the script with ``uv`` from the repository root:
 
 .. code-block:: console
 
-   pip install -e ".[plotting]"
-   python scripts/double_pendulum.py
+   uv run scripts/double_pendulum.py
 
-With ``uv``, the equivalent invocation is:
-
-.. code-block:: console
-
-   uv run --extra plotting python scripts/double_pendulum.py
+Its inline script metadata declares NumPy and Matplotlib and resolves Coker
+from the repository via a source path relative to the script (``..``).
+``uv`` installs these dependencies in a script-specific environment; no
+package-wide plotting extra or manual environment setup is needed.
 
 The script imports ``KinematicsVisualiser`` from
 ``coker.toolkits.kinematics.visualiser``. The main kinematics package does not
@@ -110,6 +107,6 @@ For a headless startup smoke check without a GUI:
 
 .. code-block:: console
 
-   MPLBACKEND=Agg uv run --extra plotting python scripts/double_pendulum.py
+   MPLBACKEND=Agg uv run scripts/double_pendulum.py
 
 The non-interactive Agg backend does not open a window or play the animation.

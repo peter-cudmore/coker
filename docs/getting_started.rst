@@ -20,14 +20,17 @@ JAX requires Python 3.11 or newer. NumPy and SymPy are included in the base
 installation; the other built-in backend entry points need their corresponding
 extras before use.
 
-The kinematics visualiser has a separate optional Matplotlib dependency:
+The double-pendulum visualisation script declares its own NumPy, Matplotlib,
+and local Coker dependencies in inline ``uv`` metadata. From the repository
+root, run:
 
 .. code-block:: bash
 
-   pip install "coker[plotting]"
+   uv run scripts/double_pendulum.py
 
-Plotting is not required for non-visual kinematics or other Coker APIs. See
-:doc:`examples` for interactive and headless double-pendulum commands.
+Matplotlib is not a package dependency or extra and is not required for
+non-visual kinematics or other Coker APIs. See :doc:`examples` for interactive
+and headless double-pendulum commands.
 
 Basic usage
 -----------

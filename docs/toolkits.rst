@@ -60,10 +60,12 @@ A representative pattern is:
        backend="numpy",
    )
 
-The separate ``scripts/double_pendulum.py`` visualisation example requires
-``pip install "coker[plotting]"``. Import ``KinematicsVisualiser`` from
-``coker.toolkits.kinematics.visualiser``; the main kinematics module does not
-import Matplotlib. See :doc:`examples` for invocation and backend selection.
+Run the separate ``scripts/double_pendulum.py`` visualisation example with
+``uv run scripts/double_pendulum.py``; its inline metadata declares NumPy,
+Matplotlib, and the local Coker source. Import ``KinematicsVisualiser`` from
+``coker.toolkits.kinematics.visualiser`` for use in your own code, installing
+Matplotlib separately. The main kinematics module does not import Matplotlib.
+See :doc:`examples` for invocation and backend selection.
 
 System modelling
 ----------------

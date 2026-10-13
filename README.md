@@ -67,7 +67,6 @@ Optional extras declared by the package:
 pip install "coker[casadi]"
 pip install "coker[jax]"
 pip install "coker[pytorch]"
-pip install "coker[plotting]"  # optional Matplotlib kinematics visualiser
 ```
 
 Base installation:
@@ -132,7 +131,7 @@ docs/             Sphinx documentation
 - `docs/getting_started.rst` — minimal symbolic function workflow
 - `docs/backend_architecture.rst` — native backend execution model
 - `examples/pid_example.py` — block-model style PID/plant composition
-- `scripts/double_pendulum.py` — rigid-body visualisation (`uv run --extra plotting python scripts/double_pendulum.py`; set `MPLBACKEND=Agg` for headless startup)
+- `scripts/double_pendulum.py` — rigid-body visualisation (`uv run scripts/double_pendulum.py` installs its inline dependencies, including the local Coker checkout; set `MPLBACKEND=Agg` for headless startup)
 - `tests/benchmarks/benchmark_backends.py` — benchmark scenarios for backend evaluation, ODE integration, and variational problems
 
 ## Development

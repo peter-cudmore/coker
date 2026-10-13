@@ -12,7 +12,7 @@
 - Symbolic local accessibility, observability, and structural identifiability analysis for supported ODE and semi-explicit index-one DAE systems.
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
-- Optional `plotting` extra for the Matplotlib-based kinematics visualiser.
+- Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
 
 ### Changed
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
