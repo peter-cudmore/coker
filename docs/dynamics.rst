@@ -21,11 +21,11 @@ function-valued declarations are exposed from their respective packages:
 - :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
 - :class:`coker.parameters.BoundVector`
 - :class:`coker.parameters.DenseTensorVariable`
-- :class:`coker.function_parameters.FunctionParameter`
-- :class:`coker.function_parameters.ClosureParameter`
-- :class:`coker.function_parameters.MonotonePiecewiseLinear`
-- :class:`coker.function_parameters.DenseLayer`
-- :class:`coker.function_parameters.RadialBasisFunction`
+- :class:`coker.parameters.function_parameters.FunctionParameter`
+- :class:`coker.parameters.function_parameters.ClosureParameter`
+- :class:`coker.parameters.function_parameters.MonotonePiecewiseLinear`
+- :class:`coker.parameters.function_parameters.DenseLayer`
+- :class:`coker.parameters.function_parameters.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from an initial-condition function and an ``xdot`` function. If you pass a
@@ -40,13 +40,39 @@ controls and parameters at construction time, then pass a
 :class:`coker.toolkits.codesign.Minimise` objective and ``subject_to``
 comparisons to ``build``.
 
+The optimisation examples below require ``pip install "coker[casadi]"``.
+NumPy is included in that installation.
+
 For example, a fixed-horizon path-planning problem can constrain the input and
 terminal state without constructing a loss callback:
 
+This block demonstrates symbolic construction only. The current CasADi solve
+path cannot lower its control-dependent callbacks.
+
 .. code-block:: python
 
-   from coker.dynamics import VariationalProblemBuilder
+   import numpy as np
+   from coker import FunctionSpace, Scalar
+   from coker.algebra.ops import Noop
+   from coker.dynamics import ConstantControlVariable, DynamicsSpec, VariationalProblemBuilder
+   from coker.dynamics.system import create_dynamics_from_spec
    from coker.toolkits.codesign import Minimise
+
+   input_space = FunctionSpace("u", [Scalar("t")], [Scalar("u")])
+   system = create_dynamics_from_spec(
+       DynamicsSpec(
+           inputs=input_space,
+           parameters=None,
+           algebraic=None,
+           initial_conditions=lambda _z, _u, _p: (np.zeros(1), None),
+           dynamics=lambda t, _x, _z, u, _p: np.ones(1) * u(t),
+           constraints=Noop(),
+           outputs=lambda _t, x, _z, _u, _p, _q: x,
+           quadratures=Noop(),
+       )
+   )
+   control = ConstantControlVariable("u", lower_bound=-1.0, upper_bound=1.0)
+   goal = np.array([1.0])
 
    with VariationalProblemBuilder(
        system,
@@ -57,7 +83,7 @@ terminal state without constructing a loss callback:
        u = problem.input(problem.t)
        x_goal = problem.state(problem.t_final)
        built = problem.build(
-           Minimise(problem.integrate(u @ u) + x_goal @ x_goal),
+           Minimise(problem.integrate(u ** 2) + np.dot(x_goal, x_goal)),
            subject_to=[u <= 1, u >= -1, x_goal == goal],
        )
 
@@ -65,6 +91,18 @@ For data fitting, declare the unknown as a bounded parameter and use the
 symbolic observed output directly in the objective:
 
 .. code-block:: python
+
+   from coker import VectorSpace
+   from coker.dynamics import VariationalProblemBuilder, create_autonomous_ode
+   from coker.parameters import BoundedVariable
+   from coker.toolkits.codesign import Minimise
+
+   system = create_autonomous_ode(
+       parameters=VectorSpace("value", 1),
+       x0=lambda p: p[0],
+       xdot=lambda _x, _p: 0.0,
+   )
+   value = BoundedVariable("value", lower_bound=0.5, upper_bound=3.0, guess=1.0)
 
    with VariationalProblemBuilder(
        system,
@@ -80,7 +118,7 @@ Function-valued parameters
 --------------------------
 
 Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
-:class:`~coker.dynamics.FunctionParameter` realization at problem construction;
+:class:`~coker.parameters.function_parameters.FunctionParameter` realization at problem construction;
 Coker replaces its concrete parameter blocks with scalar solver decisions before
 solving. The function space and realization must agree on their argument and
 output shapes.
@@ -101,9 +139,12 @@ a dense layer with an identity activation:
 
 .. code-block:: python
 
+   import numpy as np
    from coker import FunctionSpace, VectorSpace, function
-   from coker.dynamics import VariationalProblemBuilder
-   from coker.function_parameters import DenseLayer
+   from coker.algebra.ops import Noop
+   from coker.dynamics import DynamicsSpec, VariationalProblemBuilder
+   from coker.dynamics.system import create_dynamics_from_spec
+   from coker.parameters.function_parameters import DenseLayer
    from coker.toolkits.codesign import Minimise
 
    activation = function(
@@ -115,7 +156,18 @@ a dense layer with an identity activation:
        arguments=[VectorSpace("state", 2)],
        output=[VectorSpace("rate", 1)],
    )
-   # The system must declare ``parameters=(response,)`` and call ``p[0](x)``.
+   system = create_dynamics_from_spec(
+       DynamicsSpec(
+           inputs=Noop(),
+           parameters=(response,),
+           algebraic=None,
+           initial_conditions=lambda _z, _u, _p: (np.zeros(2), None),
+           dynamics=lambda _t, x, _z, _u, p: np.concatenate([p[0](x), p[0](x)]),
+           constraints=Noop(),
+           outputs=lambda _t, x, _z, _u, _p, _q: x,
+           quadratures=Noop(),
+       )
+   )
    with VariationalProblemBuilder(
        system,
        t_final=1.0,
@@ -159,7 +211,12 @@ when that limit is reached. Refinement stops when every interval is at or below
 .. code-block:: python
 
    from coker.backends.casadi import CasadiVariationalOptions
-   from coker.dynamics import TranscriptionOptions
+   from coker.dynamics import TranscriptionOptions, VariationalProblem, create_autonomous_ode
+
+   system = create_autonomous_ode(x0=0.0, xdot=lambda _x, _p: 1.0)
+
+   def loss(trajectory, _parameters):
+       return (trajectory(1.0) - 1.0) ** 2
 
    transcription_options = TranscriptionOptions(
        minimum_n_intervals=4,
@@ -216,21 +273,33 @@ without declared inputs, call ``system(time, *parameters)``. For a system with
 declared inputs, call ``system(time, input_value, *parameters)``. Do not add an
 input placeholder to the no-input form.
 
-For example, first declare the function-valued slot:
+The following complete example declares and constructs all three slots:
 
 .. code-block:: python
 
    import numpy as np
 
    from coker import FunctionSpace, Scalar, VectorSpace
+   from coker.algebra.ops import Noop
+   from coker.dynamics import DynamicsSpec
+   from coker.dynamics.system import create_dynamics_from_spec
 
    gain_curve = FunctionSpace(
        "gain_curve",
        arguments=[Scalar("time")],
        output=[Scalar("gain")],
    )
-   # ``system`` was declared with:
-   # parameters=(Scalar("offset"), VectorSpace("bias", 2), gain_curve)
+   spec = DynamicsSpec(
+       inputs=Noop(),
+       parameters=(Scalar("offset"), VectorSpace("bias", 2), gain_curve),
+       algebraic=None,
+       initial_conditions=lambda _z, _u, _p: (np.zeros(2), None),
+       dynamics=lambda t, _x, _z, _u, p: p[1] + p[0] + p[2](t),
+       constraints=Noop(),
+       outputs=lambda _t, x, _z, _u, _p, _q: x,
+       quadratures=Noop(),
+   )
+   system = create_dynamics_from_spec(spec, backend="numpy")
 
    time = np.array([0.0, 0.5, 1.0])
    offset = 2.0
@@ -239,45 +308,61 @@ For example, first declare the function-valued slot:
 
    trajectory = system(time, offset, bias, gain_curve_value)
 
-For an otherwise equivalent system with a declared input, put its input value
-immediately after time:
+Continuing this example, an otherwise equivalent system with a declared input
+puts its input value immediately after time:
 
 .. code-block:: python
 
-   trajectory = system(time, input_value, offset, bias, gain_curve_value)
+   from dataclasses import replace
+
+   input_space = FunctionSpace("input", [Scalar("time")], [Scalar("value")])
+   input_system = create_dynamics_from_spec(
+       replace(
+           spec,
+           inputs=input_space,
+           dynamics=lambda t, _x, _z, u, p: p[1] + p[0] + p[2](t) + u(t),
+       ),
+       backend="numpy",
+   )
+   input_value = lambda _time: 0.5
+   trajectory_with_input = input_system(time, input_value, offset, bias, gain_curve_value)
 
 Values for a declared ``FunctionSpace`` parameter may be ordinary Python
 callables, :class:`coker.Function` objects, or
-:class:`~coker.function_parameters.FittedFunction` objects. Coker normalizes
+:class:`~coker.parameters.function_parameters.FittedFunction` objects. Coker normalizes
 these values once before integration, so callers do not provide backend-native
 or lowered handles. No ``Noop`` placeholder is used for direct evaluation.
 
-The variational builder receives one declaration for each positional parameter.
-Use ``BoundVector`` for a bounded vector decision block, and
+Continuing the same example with the original no-input ``system``, the
+variational builder receives one declaration for each positional parameter,
+in the same order: scalar offset, length-two bias, then gain curve. Use
+``BoundVector`` for a bounded vector decision block, and
 ``DenseTensorVariable`` for an unbounded dense block reconstructed with the
 shape of its initial guess:
 
 .. code-block:: python
 
    from coker.dynamics import VariationalProblemBuilder
-   from coker.function_parameters import MonotonePiecewiseLinear
-   from coker.parameters import BoundVector
+   from coker.parameters.function_parameters import MonotonePiecewiseLinear
+   from coker.parameters import BoundedVariable, BoundVector
+   from coker.toolkits.codesign import Minimise
 
    with VariationalProblemBuilder(
        system,
        t_final=1.0,
        parameters=[
+           BoundedVariable("offset", lower_bound=-1.0, upper_bound=1.0, guess=0.0),
+           BoundVector(
+               "bias",
+               lower_bound=[-1.0, -1.0],
+               upper_bound=[1.0, 1.0],
+               guess=[0.0, 0.0],
+           ),
            MonotonePiecewiseLinear(
                domain_knots=[0.0, 0.5, 1.0],
                lower_bound=0.0,
                upper_bound=2.0,
-               name="response",
-           ),
-           BoundVector(
-               "offset",
-               lower_bound=[-1.0, -1.0],
-               upper_bound=[1.0, 1.0],
-               guess=[0.0, 0.0],
+               name="gain_curve",
            ),
        ],
    ) as builder:

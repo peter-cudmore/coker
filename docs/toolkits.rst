@@ -26,9 +26,9 @@ Rigid-body kinematics and dynamics
 :mod:`coker.toolkits.kinematics` exposes :class:`~coker.toolkits.kinematics.RigidBody`
 and joint/inertia types for articulated models. The test suite demonstrates:
 
-- single-pendulum forward kinematics;
-- double-pendulum mass-matrix and inverse-dynamics checks;
-- SCARA-style manipulator Jacobians;
+- welded, revolute, prismatic, and free-joint coordinate contracts;
+- two-link and branched-tree forward kinematics and Jacobians;
+- single-pendulum energy, mass-matrix, and inverse-dynamics checks;
 - a hexapod leg example with symbolic forward kinematics.
 
 A representative pattern is:
@@ -60,6 +60,13 @@ A representative pattern is:
        backend="numpy",
    )
 
+Run the separate ``scripts/double_pendulum.py`` visualisation example with
+``uv run scripts/double_pendulum.py``; its inline metadata declares NumPy,
+Matplotlib, and the local Coker source. Import ``KinematicsVisualiser`` from
+``coker.toolkits.kinematics.visualiser`` for use in your own code, installing
+Matplotlib separately. The main kinematics module does not import Matplotlib.
+See :doc:`examples` for invocation and backend selection.
+
 System modelling
 ----------------
 
@@ -79,12 +86,17 @@ Codesign-style mathematical programs
 :mod:`coker.toolkits.codesign` provides a small builder for optimisation-style
 programs over symbolic variables. It is useful when you want a compact host-side
 API instead of assembling a :class:`coker.dynamics.VariationalProblem`
-directly.
+directly. :meth:`coker.toolkits.codesign.ProblemBuilder.build` returns a public
+:class:`coker.toolkits.codesign.MathematicalProgram`, which is callable with
+the declared runtime arguments.
+
+The examples in this section require ``pip install "coker[casadi]"``, which
+also supplies NumPy.
 
 .. code-block:: python
 
-   from coker import FunctionSpace, Scalar, VectorSpace
-   from coker.dynamics import RadialBasisFunction
+   import numpy as np
+   from coker import VectorSpace
    from coker.toolkits.codesign import Minimise, ProblemBuilder
 
    with ProblemBuilder(arguments=[VectorSpace("target", 2)]) as builder:
@@ -106,6 +118,10 @@ Function-valued decisions use ``new_function_parameter`` with a declared
 callable participates directly in the objective and constraints:
 
 .. code-block:: python
+
+   from coker import FunctionSpace, Scalar
+   from coker.parameters.function_parameters import RadialBasisFunction
+   from coker.toolkits.codesign import Minimise, ProblemBuilder
 
    rate = FunctionSpace("rate", [Scalar("t")], [Scalar("rate")])
    declaration = RadialBasisFunction([0.0], 1.0, name="response")
@@ -132,6 +148,9 @@ the builder's ``solver_options``:
 
 .. code-block:: python
 
+   from coker.backends.casadi import CasadiNLPSolverOptions
+   from coker.toolkits.codesign import Minimise, ProblemBuilder, bounded
+
    with ProblemBuilder(
        solver_options=CasadiNLPSolverOptions(
            optimiser_options={
@@ -140,13 +159,18 @@ the builder's ``solver_options``:
            }
        )
    ) as builder:
-       ...
+       x = builder.new_variable("x", initial_value=0.0)
+       builder.constraints = [bounded(x, -1.0, 1.0)]
+       builder.objective = Minimise((x - 0.5) ** 2)
+       builder.outputs = [x]
+       problem = builder.build("casadi")
+
+   objective, value = problem()
 
 Where to continue
 -----------------
 
 - :doc:`examples` for the main repository entry points.
-- ``tests/toolkits/kinematics/test_kinematics_examples.py`` for richer robotics
-  models.
+- ``tests/toolkits/kinematics/test_kinematics.py`` for richer robotics models.
 - ``tests/toolkits/test_codesign.py`` for more codesign scenarios, including
   constraint handling and failure cases.

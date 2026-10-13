@@ -114,7 +114,7 @@ The repository also includes domain-focused toolkits under `src/coker/toolkits/`
 - **system_modelling**: block/component modelling with a discoverable standard library
 - **codesign**: a small problem-builder API for optimisation-style programs
 
-The test suite includes concrete examples such as a single pendulum, double pendulum, SCARA manipulator, and hexapod leg models.
+The kinematics tests cover joint coordinate contracts, two-link and branched-tree forward kinematics and Jacobians, single-pendulum energy and inverse dynamics, and hexapod-leg models. See `tests/toolkits/kinematics/test_kinematics.py`; `scripts/double_pendulum.py` provides a separate two-link visualisation example.
 
 ## Repository layout
 
@@ -131,7 +131,7 @@ docs/             Sphinx documentation
 - `docs/getting_started.rst` — minimal symbolic function workflow
 - `docs/backend_architecture.rst` — native backend execution model
 - `examples/pid_example.py` — block-model style PID/plant composition
-- `scripts/double_pendulum.py` — dynamics-oriented script example
+- `scripts/double_pendulum.py` — rigid-body visualisation (`uv run scripts/double_pendulum.py` installs its inline dependencies, including the local Coker checkout; set `MPLBACKEND=Agg` for headless startup)
 - `tests/benchmarks/benchmark_backends.py` — benchmark scenarios for backend evaluation, ODE integration, and variational problems
 
 ## Development

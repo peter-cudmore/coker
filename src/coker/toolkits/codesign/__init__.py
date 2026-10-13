@@ -453,6 +453,7 @@ def norm(arg, order=2):
 __all__ = [
     "BoundedConstraint",
     "OptimisationModule",
+    "MathematicalProgram",
     "Minimise",
     "ProblemBuilder",
     "SolveFailure",
