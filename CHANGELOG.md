@@ -12,6 +12,7 @@
 - Symbolic local accessibility, observability, and structural identifiability analysis for supported ODE and semi-explicit index-one DAE systems.
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
+- Optional `plotting` extra for the Matplotlib-based kinematics visualiser.
 
 ### Changed
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
@@ -27,3 +28,7 @@
 - Preserve configured adaptive transcription interval counts.
 - Preserve legacy CasADi `TranscriptionOptions` compatibility.
 - Direct trajectory evaluation supports heterogeneous scalar, vector, and function-valued parameters.
+- Use `magnitude` when constructing results of `se3_bracket` and `se3CoAdjoint.apply`, preserving scaled spatial operations.
+- Consolidate CasADi exports, retaining `CasadiVariationalOptions`, and include `MathematicalProgram` in the codesign public inventory.
+- Repair function-parameter and codesign documentation imports, complete example setup, and align heterogeneous decisions with the model's scalar/vector/function parameter order.
+- Correct backend availability, robotics example paths and coverage claims, and the double-pendulum visualiser import; respect Matplotlib backend selection instead of requiring Qt.

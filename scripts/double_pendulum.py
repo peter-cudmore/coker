@@ -3,12 +3,9 @@ from coker.toolkits.kinematics import (
     RigidBody,
     Revolute,
     Inertia,
-    KinematicsVisualiser,
 )
+from coker.toolkits.kinematics.visualiser import KinematicsVisualiser
 from coker.toolkits.spatial import Isometry3, Screw
-import matplotlib
-
-matplotlib.use("qtagg")
 
 
 block_inertia = Inertia(
@@ -48,6 +45,5 @@ n = 50
 q_sweep = [i * np.array([np.pi, 0]) / n for i in range(-n, n + 1)] + [
     np.array([np.pi / 2, i * np.pi / n]) for i in range(-n, n + 1)
 ]
-# visualiser.animate_sweep(q_sweep_1, loop=False)
 
-visualiser.animate_sweep(q_sweep, loop=False)
+animation = visualiser.animate_sweep(q_sweep, loop=False)
