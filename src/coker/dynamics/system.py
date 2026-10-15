@@ -337,7 +337,11 @@ class CompositionOperator:
         return output
 
     def __call__(self, *args):
-        output = [a for a, space in zip(args, self.spaces) if space is not None]
+        output = [
+            np.reshape(a, (space.size,))
+            for a, space in zip(args, self.spaces)
+            if space is not None
+        ]
         if not output:
             return None
 
@@ -370,7 +374,7 @@ class CompositionOperator:
 
 @dataclasses.dataclass
 class ProjectionSet:
-    parameters: CompositionOperator
+    parameters: "CompositionOperator | StructuredParameterProjection"
     state: CompositionOperator
     algebraic: CompositionOperator
     quadratures: CompositionOperator
@@ -575,7 +579,13 @@ def _compose_direct_sum(systems, backend, partition):
 def direct_sum(
     *systems: DynamicalSystem, backend=None
 ) -> Tuple[DynamicalSystem, ProjectionSet]:
-    backend = backend or systems[0].backend()
+    """Return ``(system, projections)`` for the composed subsystems.
+
+    Numeric parameters use :class:`CompositionOperator`; heterogeneous
+    function-valued parameters use :class:`StructuredParameterProjection`.
+    The remaining projections are numeric composition operators.
+    """
+    backend = backend or systems[0].backend
     partition = (
         _StructuredParameterPartition(systems)
         if any(

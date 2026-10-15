@@ -13,7 +13,7 @@ from coker.dynamics import (
     VariationalProblemBuilder,
     create_autonomous_ode,
 )
-from coker.dynamics.system import create_control_system
+from coker.dynamics import create_control_system
 from coker.parameters import BoundedVariable
 from coker.toolkits.codesign import Minimise
 

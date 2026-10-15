@@ -8,18 +8,21 @@ The current package metadata marks Coker as **alpha** software (`Development Sta
 
 Coker combines a few layers that usually live in separate tools:
 
-- **Backend lowering** to `numpy`, `casadi`, `jax`, `pytorch`, and `sympy`;
-  the separately packaged native `coker` backend can be registered for compact
-  workspace-oriented execution.
+- **Backend lowering** to `numpy`, `casadi`, `jax`, `pytorch`, and `sympy`.
 - **Differentiable execution models** that support evaluation, composition, and conditional expressions.
 - **Dynamics and variational problem tooling** for ODE systems, transcription helpers, and solver-backed optimisation workflows.
-- **Domain toolkits** for spatial algebra, rigid-body kinematics, system modelling, and codesign-style mathematical programs.
+- **Domain toolkits** for spatial algebra, rigid-body kinematics, and codesign-style mathematical programs.
 
 ## Core capabilities
 
 ### 1. Compile Python callables into reusable functions
 
 The primary entry point is `coker.function`. You describe argument spaces explicitly, provide a Python implementation, and choose a backend.
+
+Canonical imports are inventoried in [the API reference](docs/api/index.rst);
+0.5 migration notes are in [Getting Started](docs/getting_started.rst). NumPy is the base-install default;
+backend lookup, evaluation, and lowering do not change ambient selection unless
+the application explicitly requests `get_backend_by_name(name, set_current=True)`.
 
 ```python
 import numpy as np
@@ -49,7 +52,6 @@ The same traced function can be lowered to different execution backends dependin
 - `jax` for alternate array execution
 - `pytorch` for tensor-valued execution, autograd, and optional ODE/quadrature integration
 - `sympy` for symbolic inspection and printing
-- `coker` when the separately packaged `coker_backend` plugin is installed
 
 ```python
 from coker import function, Scalar
@@ -86,13 +88,6 @@ pip install coker
 - conditional expressions via `if_then_else`
 - backend-specific lowering paths
 
-### Optional native Coker backend
-
-The native `coker` backend is supplied by the separate `coker_backend` package.
-It lowers traced functions into a compact workspace-oriented graph; see
-`docs/backend_architecture.rst` for its artifact and runtime boundary.
-
-
 ### Dynamics and optimisation
 
 `src/coker/dynamics/` exposes:
@@ -111,10 +106,9 @@ The repository also includes domain-focused toolkits under `src/coker/toolkits/`
 
 - **spatial**: rotations, isometries, screws, adjoint operators, quaternions
 - **kinematics**: rigid-body trees, joints, inertias, forward kinematics, dynamics examples
-- **system_modelling**: block/component modelling with a discoverable standard library
 - **codesign**: a small problem-builder API for optimisation-style programs
 
-The test suite includes concrete examples such as a single pendulum, double pendulum, SCARA manipulator, and hexapod leg models.
+The kinematics tests cover joint coordinate contracts, two-link and branched-tree forward kinematics and Jacobians, single-pendulum energy and inverse dynamics, and hexapod-leg models. See `tests/toolkits/kinematics/test_kinematics.py`; `scripts/double_pendulum.py` provides a separate two-link visualisation example.
 
 ## Repository layout
 
@@ -129,9 +123,7 @@ docs/             Sphinx documentation
 ## Example files worth reading first
 
 - `docs/getting_started.rst` — minimal symbolic function workflow
-- `docs/backend_architecture.rst` — native backend execution model
-- `examples/pid_example.py` — block-model style PID/plant composition
-- `scripts/double_pendulum.py` — dynamics-oriented script example
+- `scripts/double_pendulum.py` — rigid-body visualisation (`uv run scripts/double_pendulum.py` installs its inline dependencies, including the local Coker checkout; set `MPLBACKEND=Agg` for headless startup)
 - `tests/benchmarks/benchmark_backends.py` — benchmark scenarios for backend evaluation, ODE integration, and variational problems
 
 ## Development

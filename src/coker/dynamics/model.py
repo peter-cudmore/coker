@@ -25,7 +25,7 @@ class DynamicsSpec:
     """Describe a semi-explicit dynamic system before it is traced.
 
     Args:
-        inputs: Input trajectory declaration or :class:`~coker.algebra.ops.Noop`.
+        inputs: Optional input trajectory declaration; ``None`` means no input.
         parameters: Optional scalar, vector, or function parameter declarations.
         algebraic: Optional algebraic-state declaration.
         initial_conditions: Callable returning ``(x0, z0)``.
@@ -40,16 +40,31 @@ class DynamicsSpec:
             spec = DynamicsSpec(...)
     """
 
-    inputs: FunctionSpace | Noop
+    inputs: FunctionSpace | Noop | None
     parameters: DynamicsParameters
     algebraic: Optional[VectorSpace]
     initial_conditions: Callable
+    """[x, z] = initial_conditions(z, u, p)."""
+
     dynamics: Callable
-    constraints: Callable
+    """dx = dynamics(t, x, z, u, p)"""
+
+    constraints: Callable | Noop | None
+    """g(t, x, z, u, p) = 0."""
+
     outputs: Callable
-    quadratures: Callable
+    """y(t) = outputs(t, x, z, u, p, q)"""
+
+    quadratures: Callable | Noop | None
+    """dq/dt = quadratures(t, x, z, u, p)"""
 
     def __post_init__(self):
+        if self.inputs is None:
+            self.inputs = Noop()
+        if self.constraints is None:
+            self.constraints = Noop()
+        if self.quadratures is None:
+            self.quadratures = Noop()
         if isinstance(self.parameters, list):
             self.parameters = tuple(self.parameters)
         if isinstance(self.parameters, tuple) and not all(
@@ -91,7 +106,7 @@ class DynamicalSystem:
     """Define an explicit or semi-explicit system and its output.
 
     Args:
-        inputs: Input trajectory declaration or :class:`~coker.algebra.ops.Noop`.
+        inputs: Optional input trajectory declaration; ``None`` means no input.
         parameters: Optional model parameter declarations.
         x0: Initial-condition function.
         dxdt: Differential-rate function.
@@ -107,14 +122,24 @@ class DynamicalSystem:
             system = create_autonomous_ode(x0, xdot)
     """
 
-    inputs: FunctionSpace | Noop
+    inputs: FunctionSpace | Noop | None
     parameters: DynamicsParameters
     x0: Function
     dxdt: Function
-    g: Optional[Function]
-    dqdt: Optional[Function]
+    g: Function | Noop | None
+    dqdt: Function | Noop | None
     y: Function
     solver_parameters: object | None = field(default=None)
+
+    def __post_init__(self):
+        if self.inputs is None:
+            self.inputs = Noop()
+        if self.g is None:
+            self.g = Noop()
+        if self.dqdt is None:
+            self.dqdt = Noop()
+        if isinstance(self.parameters, list):
+            self.parameters = tuple(self.parameters)
 
     def output_as_function_space(self) -> FunctionSpace:
         """Return the callable space of the public trajectory output."""
@@ -125,6 +150,7 @@ class DynamicalSystem:
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]
 
+    @property
     def backend(self) -> str:
         """Return the backend used by the differential-rate callback."""
         return self.dxdt.backend

@@ -13,7 +13,7 @@ from coker.parameters import (
     ParameterMixin,
     ParameterVariable,
 )
-from coker.dynamics.system import DynamicalSystem
+from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variational.solution import VariationalSolution
 
 

@@ -540,7 +540,7 @@ class se3CoAdjoint:
 
         m = self.vector.magnitude * other.magnitude
 
-        return Screw(translation=-v, rotation=-w, angle=m)
+        return Screw(translation=-v, rotation=-w, magnitude=m)
 
     def transpose(self) -> se3Adjoint:
         return se3Adjoint(self.vector)
@@ -552,4 +552,4 @@ def se3_bracket(left: Screw, right: Screw) -> Screw:
         right.rotation, left.translation
     )
 
-    return Screw(translation=v, rotation=w, angle=right.magnitude * left.magnitude)
+    return Screw(translation=v, rotation=w, magnitude=right.magnitude * left.magnitude)

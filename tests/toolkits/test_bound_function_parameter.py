@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from coker import FunctionSpace, Scalar, function
-from coker.backends import get_backend_by_name
 from coker.parameters import UnboundedVariable
 from coker.parameters.function_parameters.base import FittedFunction
 from coker.parameters.function_parameters.bound import BoundFunctionParameter
@@ -28,7 +27,6 @@ def test_mathematical_program_fits_cubic_bound_function_parameter(
     optimiser_backend,
 ):
     """Fit a cubic through a bound function parameter."""
-    get_backend_by_name(optimiser_backend)
     cubic = function(
         [
             Scalar("constant"),

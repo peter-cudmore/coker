@@ -18,7 +18,9 @@ try:
     from coker.backends.casadi.variational.transcription import (
         CasadiVariationalSolver,
     )
-    from coker.dynamics.transcription.collocation import InterpolatingPolyCollection
+    from coker.dynamics.transcription.collocation import (
+        InterpolatingPolyCollection,
+    )
     from coker.toolkits.codesign import SolveFailure
     import casadi as ca
 

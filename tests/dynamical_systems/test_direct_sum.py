@@ -12,7 +12,7 @@ from coker.parameters.function_parameters import (
     RadialBasisFunction,
 )
 from coker.algebra.ops import Noop
-from coker.dynamics.system import (
+from coker.dynamics import (
     CompositionOperator,
     create_control_system,
     create_dynamics_from_spec,
@@ -260,3 +260,41 @@ def test_casadi_direct_sum_function_parameter_dae():
     np.testing.assert_allclose(solution.state(1.0), [0.5, 0.25], atol=1e-2)
     np.testing.assert_allclose(solution.algebraic(0.25), [0.25], atol=1e-2)
     np.testing.assert_allclose(solution.quadratures(1.0), [0.25], atol=1e-2)
+
+
+def test_direct_sum_evaluates_scalar_outputs_and_projects_them():
+    left = create_autonomous_ode([2.0], lambda x, p: -x)
+    right = create_autonomous_ode([3.0], lambda x, p: -2 * x)
+    combined, projections = direct_sum(left, right)
+
+    output = combined(0.25)
+
+    np.testing.assert_allclose(
+        output, [2 * np.exp(-0.25), 3 * np.exp(-0.5)], rtol=1e-5
+    )
+    left_output, right_output = projections.outputs.inverse(output)
+    np.testing.assert_allclose(left_output, [2 * np.exp(-0.25)], rtol=1e-5)
+    np.testing.assert_allclose(right_output, [3 * np.exp(-0.5)], rtol=1e-5)
+
+
+def test_general_construction_accepts_none_for_absent_channels():
+    spec = DynamicsSpec(
+        inputs=None,
+        parameters=None,
+        algebraic=None,
+        initial_conditions=lambda z, u, p: (np.array([1.0]), None),
+        dynamics=lambda t, x, z, u, p: -x,
+        constraints=None,
+        outputs=lambda t, x, z, u, p, q: x,
+        quadratures=None,
+    )
+    system = create_dynamics_from_spec(spec)
+    assert system.backend == "numpy"
+    assert np.array_equal(
+        system.dxdt(0.0, np.array([1.0]), None, None, None), [-1.0]
+    )
+    assert np.array_equal(
+        system.y(0.0, np.array([1.0]), None, None, None, None), [1.0]
+    )
+    with pytest.raises(AttributeError):
+        system.backend = "casadi"
