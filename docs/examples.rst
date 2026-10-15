@@ -11,16 +11,10 @@ Recommended reading order
 1. :doc:`getting_started` for the core ``function(...)`` API.
 2. :doc:`backends` to decide how you want a model to execute.
 3. :doc:`dynamics` if your work involves ODEs, fitting, or optimal control.
-4. :doc:`toolkits` if your work is closer to robotics or block-model assembly.
+4. :doc:`toolkits` for robotics and mathematical-program construction.
 
 Repository entry points
 -----------------------
-
-``examples/pid_example.py``
-   Builds a motor plant and a PID-style controller from the system-modelling
-   standard library. This is the best starting point for block/component
-   composition.
-
 
 ``examples/pytorch_explicit_network_training.py``
    Defines a small network as a Coker function with explicit weight and bias
@@ -60,8 +54,7 @@ How to use the examples productively
 
 A good workflow is:
 
-- start from ``examples/pid_example.py`` or the one-dimensional snippets in the
-  tests;
+- start from the one-dimensional snippets in the dynamics tests;
 - swap the backend only after the model is numerically correct under
   ``numpy``;
 - move to ``casadi`` when the workflow becomes solve-heavy;

@@ -12,7 +12,7 @@ from coker.backends.casadi.variational.bindings import ControlFactory
 from coker.dynamics.variables import ConstantControlVariable
 
 
-from coker.dynamics.system import (
+from coker.dynamics import (
     create_autonomous_ode,
     create_control_system,
 )

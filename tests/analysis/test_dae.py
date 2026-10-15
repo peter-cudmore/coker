@@ -8,7 +8,7 @@ from coker.dynamics import (
     analyse_controllability,
     analyse_identifiability,
 )
-from coker.dynamics.system import create_dynamics_from_spec
+from coker.dynamics import create_dynamics_from_spec
 
 
 def _scalar_control_space():

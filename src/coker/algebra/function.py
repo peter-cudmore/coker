@@ -300,7 +300,9 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         options = LoweringOptions() if options is None else options
         if not isinstance(options, LoweringOptions):
             raise TypeError("options must be a LoweringOptions instance")
-        backend = get_backend_by_name(options.backend or self.backend)
+        backend = get_backend_by_name(
+            options.backend or self.backend, set_current=False
+        )
         if self._native_callable is not None and backend.name != self.backend:
             raise RuntimeError(
                 "Cannot lower native callable for backend "
@@ -472,9 +474,8 @@ def function(
         implementation: A Python callable that defines the computation.  It
             will be called once during tracing with symbolic
             :class:`~coker.algebra.graph.Tracer` arguments.
-        backend: Name of the backend used for concrete evaluation.
-            Built-in options are ``"numpy"`` (default for tracing),
-            ``"casadi"``, ``"sympy"``, and ``"coker"``.
+        backend: Registered plugin name used for concrete evaluation.
+            Defaults to ``"numpy"`` independently of the current backend.
         name: Optional human-readable name attached to the returned
             :class:`Function`.
 

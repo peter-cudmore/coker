@@ -22,12 +22,6 @@ multiple execution backends.
    examples
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Internals
-
-   backend_architecture
-
-.. toctree::
    :maxdepth: 2
    :caption: API Reference
 

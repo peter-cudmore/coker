@@ -6,7 +6,7 @@ from coker.dynamics import (
     ControllabilityResult,
     analyse_controllability,
 )
-from coker.dynamics.system import create_control_system
+from coker.dynamics import create_control_system
 
 
 def _scalar_control_space():

@@ -299,7 +299,7 @@ def specialize_system_parameters(
 
     parameterizations = tuple(
         (
-            declaration.build_function(target, system.backend())
+            declaration.build_function(target, system.backend)
             if isinstance(target, FunctionSpace)
             else None
         )
@@ -354,7 +354,7 @@ def specialize_system_parameters(
         return function(
             [spaces[0], spaces[1], numeric_parameters],
             lambda z, u, p: original(z, u, *reconstruct_parameters(p)),
-            backend=system.backend(),
+            backend=system.backend,
         )
 
     def bind_dynamics(original):
@@ -366,7 +366,7 @@ def specialize_system_parameters(
             lambda t, x, z, u, p: original(
                 t, x, z, u, *reconstruct_parameters(p)
             ),
-            backend=system.backend(),
+            backend=system.backend,
         )
 
     def bind_outputs(original):
@@ -376,7 +376,7 @@ def specialize_system_parameters(
             lambda t, x, z, u, p, q: original(
                 t, x, z, u, *reconstruct_parameters(p), q
             ),
-            backend=system.backend(),
+            backend=system.backend,
         )
 
     return (

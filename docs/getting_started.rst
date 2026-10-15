@@ -81,12 +81,42 @@ the ``backend`` argument:
 
 The package declares backend entry points for ``"numpy"``, ``"casadi"``,
 ``"sympy"``, ``"jax"``, and ``"pytorch"``. Install the optional dependencies
-listed above before selecting CasADi, JAX, or PyTorch.
+listed above before selecting CasADi, JAX, or PyTorch. Additional plugins can
+register their own names.
 
-In Coker 0.4, :func:`coker.function` defaults to ``"numpy"``. Pass
-``backend=`` explicitly for portable examples. The native ``"coker"`` backend
-is not a built-in entry point or an extra: it is registered by the separately
-installed ``coker_backend`` plugin.
+Both :func:`coker.function` and the implicit current-backend fallback use
+``"numpy"``. Pass ``backend=`` explicitly for portable examples.
+Ordinary evaluation and lowering do not change the current selection.
+
+Migrating to 0.5
+----------------
+
+- Import dynamics construction from ``coker.dynamics``. General systems use
+  ``DynamicsSpec`` with ``create_dynamics_from_spec``; controlled ODEs use
+  ``create_control_system``. Use ``None`` for absent spec inputs, constraints,
+  and quadratures instead of importing an internal sentinel.
+- Unpack ``system, projections = direct_sum(...)``. Projection fields and
+  numeric/structured parameter behavior are described in :doc:`dynamics`.
+- Replace program tuple attributes with ``program.input_shape()`` and
+  ``program.output_shape()``. The latter excludes the objective;
+  ``program.result_shape`` includes it. Replace ``system.backend()`` with the
+  read-only ``system.backend`` property.
+- Import callable parameters from ``coker.parameters.function_parameters``,
+  programs/solve status from ``coker.toolkits.codesign``, ODE option interfaces
+  from ``coker.interfaces``, and signatures/lowering options from
+  ``coker.backends.lowered``. Removed facade exports have no compatibility shims.
+- ``get_current_backend()`` falls back to NumPy. ``function()`` continues to
+  default to NumPy even after explicit ambient selection.
+- ``get_backend_by_name(name)`` no longer changes ambient selection. Use
+  ``get_backend_by_name(name, set_current=True)`` only to deliberately select
+  the backend consumed by later implicit builders/evaluator calls. Prefer
+  explicit ``backend=`` for portable workflows. Variational problems retain
+  their domain-specific CasADi solver default and require the CasADi extra.
+- ``Function.lower(options)`` returns a ``LoweredFunction`` without changing
+  the function's backend or ambient selection. ``MathematicalProgram.lower()``
+  instead returns a solver-pinned ``Function``; calling it solves the program
+  and returns only the objective and requested outputs. Imported native
+  callables remain pinned to their owning backend.
 
 Migrating to 0.4
 ----------------
@@ -101,7 +131,8 @@ owning modules: ``function`` and ``Function`` from
 Next steps
 ----------
 
+- :doc:`api/index` for canonical imports, extension interfaces, and internals.
 - :doc:`backends` for backend-selection guidance and the capability matrix.
 - :doc:`dynamics` for ODE construction and variational optimisation.
-- :doc:`toolkits` for robotics, system modelling, and codesign helpers.
+- :doc:`toolkits` for robotics and codesign helpers.
 - :doc:`examples` for the main repository entry points.

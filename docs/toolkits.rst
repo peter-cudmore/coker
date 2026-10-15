@@ -3,8 +3,7 @@ Toolkit guides
 
 Beyond the core symbolic API, Coker ships several domain-focused toolkits under
 ``src/coker/toolkits/``. They share the same tracing and backend model, so the
-same function/back-end ideas apply across robotics, optimisation, and
-system-modelling workflows.
+same function/back-end ideas apply across robotics and optimisation workflows.
 
 Spatial algebra
 ---------------
@@ -66,19 +65,6 @@ Matplotlib, and the local Coker source. Import ``KinematicsVisualiser`` from
 ``coker.toolkits.kinematics.visualiser`` for use in your own code, installing
 Matplotlib separately. The main kinematics module does not import Matplotlib.
 See :doc:`examples` for invocation and backend selection.
-
-System modelling
-----------------
-
-The system-modelling toolkit provides component/block modelling helpers and a
-standard-library discovery API. ``list_components()`` walks registered standard
-library components and returns ``(component_name, library_path, hint)`` tuples.
-The repository test checks that these components resolve from
-``coker/toolkits/system_modelling/std_lib``.
-
-The most concrete entry point today is ``examples/pid_example.py``, which builds
-both a plant model and a PID-style controller from standard-library blocks such
-as ``Gain``, ``Integrator``, ``Difference``, and ``Sum``.
 
 Codesign-style mathematical programs
 ------------------------------------
@@ -142,6 +128,17 @@ instances: they retain the original declaration in ``specification``, the
 declared ``FunctionSpace`` in ``space``, their native callable in ``function``,
 and the fitted basis in ``parameters``. Their private solver captures never
 change the public ``(objective, *outputs)`` tuple.
+
+Import the returned type as ``coker.toolkits.codesign.MathematicalProgram``.
+Like ``Function``, it exposes ``input_shape()`` and ``output_shape()`` methods.
+The latter excludes the objective; ``result_shape`` includes it.
+``program.backend`` names the solver backend. ``program.lower()`` returns a
+solver-pinned ``Function``, not a ``LoweredFunction``; calling it solves the
+program and returns only ``(objective, *outputs)``.
+
+``OptimisationModule`` is a supported solver implementation interface.
+``WeightedNorm`` is backend recognition metadata produced by ``weighted_norm``;
+ordinary model code uses the helper rather than constructing the record.
 
 For bounded CasADi/IPOPT solves, configure CasADi's flat IPOPT options through
 the builder's ``solver_options``:

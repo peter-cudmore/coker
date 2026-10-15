@@ -13,6 +13,8 @@ The dynamics API is re-exported from :mod:`coker.dynamics`; general and
 function-valued declarations are exposed from their respective packages:
 
 - :func:`coker.dynamics.create_autonomous_ode`
+- :func:`coker.dynamics.create_control_system`
+- :class:`coker.dynamics.DynamicsSpec` with :func:`coker.dynamics.create_dynamics_from_spec`
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
 - :class:`coker.parameters.BoundedVariable`
@@ -31,6 +33,72 @@ function-valued declarations are exposed from their respective packages:
 from an initial-condition function and an ``xdot`` function. If you pass a
 parameter space, the system becomes directly usable inside a
 :class:`~coker.dynamics.VariationalProblem`.
+
+Use ``create_control_system(x0, xdot, control, ...)`` for a controlled ODE.
+Its dynamics callback is ``xdot(t, x, u, p)``, where ``u`` is the control value.
+For general systems, use the public spec route; no internal absence sentinel
+is required:
+
+.. code-block:: python
+
+   import numpy as np
+   from coker import FunctionSpace, Scalar, VectorSpace
+   from coker.dynamics import (
+       DynamicsSpec, create_control_system, create_dynamics_from_spec, direct_sum,
+   )
+
+   control = FunctionSpace("u", [Scalar("t")], [VectorSpace("u", 1)])
+   controlled = create_control_system(
+       [0.0], lambda t, x, u, p: u, control,
+   )
+   general = create_dynamics_from_spec(DynamicsSpec(
+       inputs=None,
+       parameters=None,
+       algebraic=None,
+       initial_conditions=lambda z, u, p: (np.array([1.0]), None),
+       dynamics=lambda t, x, z, u, p: -x,
+       constraints=None,
+       outputs=lambda t, x, z, u, p, q: x,
+       quadratures=None,
+   ))
+
+``DynamicsSpec.initial_conditions(z, u, p)`` returns ``(x0, z0)``. Its dynamics,
+constraints, and quadrature callbacks receive ``(t, x, z, u, p)``; outputs
+receive ``(t, x, z, u, p, q)``. Tuple parameters arrive as one final ``p`` tuple
+(before ``q`` for outputs). ``None`` declares absent inputs, constraints, or
+quadratures. ``system.backend`` exposes the backend name as a read-only property.
+
+Composition and projections
+---------------------------
+
+``direct_sum(*systems, backend=None)`` returns exactly
+``(DynamicalSystem, ProjectionSet)`` in subsystem order. The system does not
+carry an implicit projection attribute. By default it uses the first system's
+backend; ``backend=`` explicitly chooses the composed backend.
+
+.. code-block:: python
+
+   combined, projections = direct_sum(general, general)
+   output = combined(0.25)
+   left, right = projections.outputs.inverse(output)
+   left_matrix, right_matrix = projections.outputs.as_matrices()
+
+``ProjectionSet`` exposes ``state``, ``algebraic``, ``quadratures``, ``outputs``,
+``controls``, and ``parameters``. Numeric projections are
+``CompositionOperator`` values: ``inverse(value)`` splits a flat vector,
+``as_matrices()`` returns one projection matrix per subsystem, and
+``offsets()``/``sizes()`` describe the partition. Absent channels produce
+``None`` entries in ``inverse`` and zero-row matrices. Scalar outputs occupy
+one flat slot.
+
+When any subsystem declares a function-valued parameter, ``parameters`` is a
+``StructuredParameterProjection`` instead. ``split(parameter_tuple)`` returns
+one positional tuple per subsystem, and ``widths`` reports declaration counts,
+not flattened scalar widths. Numeric-only parameters retain their flat-vector
+``CompositionOperator`` projection.
+
+See :doc:`api/index` for the ordinary/extension/internal API boundary.
+
 
 Functional problem building
 ---------------------------
@@ -53,9 +121,10 @@ path cannot lower its control-dependent callbacks.
 
    import numpy as np
    from coker import FunctionSpace, Scalar
-   from coker.algebra.ops import Noop
-   from coker.dynamics import ConstantControlVariable, DynamicsSpec, VariationalProblemBuilder
-   from coker.dynamics.system import create_dynamics_from_spec
+   from coker.dynamics import (
+       ConstantControlVariable, DynamicsSpec, VariationalProblemBuilder,
+       create_dynamics_from_spec,
+   )
    from coker.toolkits.codesign import Minimise
 
    input_space = FunctionSpace("u", [Scalar("t")], [Scalar("u")])
@@ -66,9 +135,9 @@ path cannot lower its control-dependent callbacks.
            algebraic=None,
            initial_conditions=lambda _z, _u, _p: (np.zeros(1), None),
            dynamics=lambda t, _x, _z, u, _p: np.ones(1) * u(t),
-           constraints=Noop(),
+           constraints=None,
            outputs=lambda _t, x, _z, _u, _p, _q: x,
-           quadratures=Noop(),
+           quadratures=None,
        )
    )
    control = ConstantControlVariable("u", lower_bound=-1.0, upper_bound=1.0)
@@ -141,9 +210,9 @@ a dense layer with an identity activation:
 
    import numpy as np
    from coker import FunctionSpace, VectorSpace, function
-   from coker.algebra.ops import Noop
-   from coker.dynamics import DynamicsSpec, VariationalProblemBuilder
-   from coker.dynamics.system import create_dynamics_from_spec
+   from coker.dynamics import (
+       DynamicsSpec, VariationalProblemBuilder, create_dynamics_from_spec,
+   )
    from coker.parameters.function_parameters import DenseLayer
    from coker.toolkits.codesign import Minimise
 
@@ -158,14 +227,14 @@ a dense layer with an identity activation:
    )
    system = create_dynamics_from_spec(
        DynamicsSpec(
-           inputs=Noop(),
+           inputs=None,
            parameters=(response,),
            algebraic=None,
            initial_conditions=lambda _z, _u, _p: (np.zeros(2), None),
            dynamics=lambda _t, x, _z, _u, p: np.concatenate([p[0](x), p[0](x)]),
-           constraints=Noop(),
+           constraints=None,
            outputs=lambda _t, x, _z, _u, _p, _q: x,
-           quadratures=Noop(),
+           quadratures=None,
        )
    )
    with VariationalProblemBuilder(
@@ -280,9 +349,7 @@ The following complete example declares and constructs all three slots:
    import numpy as np
 
    from coker import FunctionSpace, Scalar, VectorSpace
-   from coker.algebra.ops import Noop
-   from coker.dynamics import DynamicsSpec
-   from coker.dynamics.system import create_dynamics_from_spec
+   from coker.dynamics import DynamicsSpec, create_dynamics_from_spec
 
    gain_curve = FunctionSpace(
        "gain_curve",
@@ -290,14 +357,14 @@ The following complete example declares and constructs all three slots:
        output=[Scalar("gain")],
    )
    spec = DynamicsSpec(
-       inputs=Noop(),
+       inputs=None,
        parameters=(Scalar("offset"), VectorSpace("bias", 2), gain_curve),
        algebraic=None,
        initial_conditions=lambda _z, _u, _p: (np.zeros(2), None),
        dynamics=lambda t, _x, _z, _u, p: p[1] + p[0] + p[2](t),
-       constraints=Noop(),
+       constraints=None,
        outputs=lambda _t, x, _z, _u, _p, _q: x,
-       quadratures=Noop(),
+       quadratures=None,
    )
    system = create_dynamics_from_spec(spec, backend="numpy")
 
