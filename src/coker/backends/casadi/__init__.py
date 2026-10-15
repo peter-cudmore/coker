@@ -68,6 +68,8 @@ __all__ = [
     "CasadiBackend",
     "CasadiResidualSolver",
     "CasadiResidualSolverOptions",
+    "CasadiLoweredFunction",
+    "CasadiNLPSolverOptions",
     "CasadiVariationalOptions",
 ]
 
@@ -466,9 +468,6 @@ class CasadiBackend(Backend):
             z_final = None
 
         return x_final, z_final, q_final
-
-
-__all__ = ["CasadiBackend", "CasadiLoweredFunction", "CasadiNLPSolverOptions"]
 
 
 register_backend("casadi", CasadiBackend)

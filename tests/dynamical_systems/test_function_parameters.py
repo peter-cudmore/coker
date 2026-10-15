@@ -20,7 +20,7 @@ from coker.dynamics.variational.function_binding import (
     ParameterValueLayout,
     specialize_system_parameters,
 )
-from coker.dynamics.system import create_dynamics_from_spec
+from coker.dynamics import create_dynamics_from_spec
 from coker.dynamics.variables import ConstantControlVariable
 from coker.toolkits.codesign import Minimise
 from coker.parameters import (

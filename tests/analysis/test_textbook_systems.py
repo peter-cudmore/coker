@@ -10,8 +10,8 @@ from coker.dynamics import (
     analyse_identifiability,
     create_autonomous_ode,
 )
-from coker.dynamics.model import DynamicsSpec
-from coker.dynamics.system import (
+from coker.dynamics import (
+    DynamicsSpec,
     create_control_system,
     create_dynamics_from_spec,
 )

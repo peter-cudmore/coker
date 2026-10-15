@@ -38,7 +38,7 @@ class ResidualDynamicalSystem:
     nonempty quadrature starts at zero for trajectory evaluation.
 
     Args:
-        inputs: Declared input space, or :class:`~coker.algebra.ops.Noop`.
+        inputs: Optional input space; ``None`` means no input.
         parameters: Optional scalar, vector, or function-valued parameter
             declarations.
         x0: Initial-condition function returning differential and algebraic
@@ -59,7 +59,7 @@ class ResidualDynamicalSystem:
             output = residual(1.0)
     """
 
-    inputs: FunctionSpace | Noop
+    inputs: FunctionSpace | Noop | None
     parameters: DynamicsParameters
     x0: Function
     F: Function
@@ -71,6 +71,8 @@ class ResidualDynamicalSystem:
     legacy: LegacyFormCertificate | None = None
 
     def __post_init__(self) -> None:
+        if self.inputs is None:
+            object.__setattr__(self, "inputs", Noop())
         _validate_residual_system(self)
 
     def get_state_dimensions(
@@ -88,6 +90,7 @@ class ResidualDynamicalSystem:
         """
         return self.differential, self.algebraic, self.quadrature
 
+    @property
     def backend(self) -> str:
         """Return the backend used by the residual callback.
 
@@ -97,7 +100,7 @@ class ResidualDynamicalSystem:
         Examples:
             Inspect a constructed system::
 
-                backend_name = residual.backend()
+                backend_name = residual.backend
         """
         return self.F.backend
 
@@ -139,7 +142,7 @@ def _evaluate_residual_trajectory(system: ResidualDynamicalSystem, *args):
     time, inputs, parameters = _map_residual_arguments(system, args)
     from coker.backends import get_backend_by_name
 
-    backend = get_backend_by_name(system.backend())
+    backend = get_backend_by_name(system.backend)
     inputs = _prepare_backend_value(backend, inputs)
     parameters = tuple(
         _prepare_backend_value(backend, parameter) for parameter in parameters
@@ -206,10 +209,10 @@ def _prepare_residual_parameter(system, declaration, value, index):
     if not isinstance(declaration, FunctionSpace):
         return value
     if isinstance(value, Function):
-        if value.backend != system.backend():
+        if value.backend != system.backend:
             raise ValueError(
                 f"Function-valued parameter {index} uses backend "
-                f"{value.backend!r}, expected {system.backend()!r}"
+                f"{value.backend!r}, expected {system.backend!r}"
             )
         if value not in declaration:
             raise ValueError(
@@ -224,7 +227,7 @@ def _prepare_residual_parameter(system, declaration, value, index):
         )
     if not callable(value):
         raise TypeError(f"Function-valued parameter {index} must be callable")
-    prepared = function(declaration.arguments, value, backend=system.backend())
+    prepared = function(declaration.arguments, value, backend=system.backend)
     if prepared not in declaration:
         raise ValueError(
             f"Function-valued parameter {index} does not match declared "
@@ -425,7 +428,7 @@ def to_residual_dynamical_system(
             *parameter_spaces,
         ],
         cast(Callable[..., Any], residual),
-        backend=system.backend(),
+        backend=system.backend,
         name="_residual",
     )
     return ResidualDynamicalSystem(

@@ -1,19 +1,13 @@
-from typing import List, Tuple
 from coker.toolkits.system_modelling.modelling.coker_abc import (
     CokerListableSubclasses,
 )
 
 
-class ComponentHint:
-    pass
+def list_components() -> list[tuple[str, str, None]]:
+    """Return registered components as ``(name, library_path, None)`` tuples.
 
-
-def list_components() -> List[Tuple[str, str, ComponentHint]]:
-    """List all components
-
-    Returns:
-        list of  component name, library path, usage hint
-
+    Import component libraries before discovery to register their classes.
+    The third entry is always ``None``; usage hints are not implemented.
     """
     entries = []
     for baseclass in CokerListableSubclasses.list_subclasses():

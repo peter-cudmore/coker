@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
+- Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
+- `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.
+- Residual differential-algebraic systems through `ResidualDynamicalSystem` and `to_residual_dynamical_system`, with NumPy integration and explicit CasADi IDAS or variational solver options.
 - `CasadiVariationalOptions` for CasADi solver policy and adaptive mesh refinement controls.
 - Local defect estimation with p-refinement before h-refinement.
 - Reuse of the previous path as the refined NLP initial guess.
@@ -12,9 +16,14 @@
 - Symbolic local accessibility, observability, and structural identifiability analysis for supported ODE and semi-explicit index-one DAE systems.
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
+- Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
 
 ### Changed
-- Trim collocation implementation types and `DynamicsSpec` from the `coker.dynamics` root API.
+- Trim collocation implementation types from the `coker.dynamics` root API while retaining the public `DynamicsSpec` construction route.
+- Consolidate API boundaries and migration notes into existing guides, retaining the dynamics, parameters, and backend API reference pages.
+- Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
+- Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
+- Keep function parameters at `coker.parameters.function_parameters`, signatures/lowering configuration at `coker.backends.lowered`, and solve status at `coker.toolkits.codesign`; remove obsolete dynamics reexports and system-modelling registry/handle helpers from public facades.
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
 - Rename generic rank witnesses on analysis results to `rank_conditions`.
 - Let identifiability analysis classify each flattened scalar parameter as an optimisation variable or a known numeric constant.
@@ -25,6 +34,13 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Evaluation, alternate lowering, and explicit problem builds no longer change subsequent implicit backend selection.
+- Lowered mathematical programs expose only objective and requested outputs while still reconstructing private decision captures.
+- Direct-sum composition correctly packs scalar subsystem outputs on NumPy.
 - Preserve configured adaptive transcription interval counts.
 - Preserve legacy CasADi `TranscriptionOptions` compatibility.
 - Direct trajectory evaluation supports heterogeneous scalar, vector, and function-valued parameters.
+- Use `magnitude` when constructing results of `se3_bracket` and `se3CoAdjoint.apply`, preserving scaled spatial operations.
+- Consolidate CasADi exports, retaining `CasadiVariationalOptions`, and include `MathematicalProgram` in the codesign public inventory.
+- Repair function-parameter and codesign documentation imports, complete example setup, and align heterogeneous decisions with the model's scalar/vector/function parameter order.
+- Correct backend availability, robotics example paths and coverage claims, and the double-pendulum visualiser import; respect Matplotlib backend selection instead of requiring Qt.

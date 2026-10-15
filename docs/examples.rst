@@ -11,16 +11,10 @@ Recommended reading order
 1. :doc:`getting_started` for the core ``function(...)`` API.
 2. :doc:`backends` to decide how you want a model to execute.
 3. :doc:`dynamics` if your work involves ODEs, fitting, or optimal control.
-4. :doc:`toolkits` if your work is closer to robotics or block-model assembly.
+4. :doc:`toolkits` for robotics and mathematical-program construction.
 
 Repository entry points
 -----------------------
-
-``examples/pid_example.py``
-   Builds a motor plant and a PID-style controller from the system-modelling
-   standard library. This is the best starting point for block/component
-   composition.
-
 
 ``examples/pytorch_explicit_network_training.py``
    Defines a small network as a Coker function with explicit weight and bias
@@ -46,9 +40,10 @@ Repository entry points
    Contains the repository's clearest collection of dynamics and
    parameter-fitting examples, including constraints and regularisation.
 
-``tests/toolkits/kinematics/test_kinematics_examples.py``
-   Collects small but realistic robotics models: pendulums, SCARA, elbow-arm,
-   and hexapod-leg scenarios.
+``tests/toolkits/kinematics/test_kinematics.py``
+   Exercises joint coordinate contracts, two-link and branched-tree forward
+   kinematics and Jacobians, single-pendulum energy and inverse dynamics, and
+   hexapod-leg symbolic forward kinematics.
 
 ``tests/benchmarks/benchmark_backends.py``
    Compares backend behaviour for function evaluation, ODE integration, and a
@@ -59,8 +54,7 @@ How to use the examples productively
 
 A good workflow is:
 
-- start from ``examples/pid_example.py`` or the one-dimensional snippets in the
-  tests;
+- start from the one-dimensional snippets in the dynamics tests;
 - swap the backend only after the model is numerically correct under
   ``numpy``;
 - move to ``casadi`` when the workflow becomes solve-heavy;
@@ -81,3 +75,31 @@ The PyTorch examples require the optional extra:
 The mathematical-program example selects CUDA float32 when available and CPU
 float64 otherwise. The direct explicit-parameter and imported-module examples
 use ordinary PyTorch execution.
+
+Double-pendulum visualisation
+-----------------------------
+
+Run the script with ``uv`` from the repository root:
+
+.. code-block:: console
+
+   uv run scripts/double_pendulum.py
+
+Its inline script metadata declares NumPy and Matplotlib and resolves Coker
+from the repository via a source path relative to the script (``..``).
+``uv`` installs these dependencies in a script-specific environment; no
+package-wide plotting extra or manual environment setup is needed.
+
+The script imports ``KinematicsVisualiser`` from
+``coker.toolkits.kinematics.visualiser``. The main kinematics package does not
+import Matplotlib. No Qt backend is forced: Matplotlib uses its configured
+backend, or one selected via ``MPLBACKEND``. An interactive backend needs its
+usual GUI dependencies and a display.
+
+For a headless startup smoke check without a GUI:
+
+.. code-block:: console
+
+   MPLBACKEND=Agg uv run scripts/double_pendulum.py
+
+The non-interactive Agg backend does not open a window or play the animation.

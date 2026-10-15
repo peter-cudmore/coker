@@ -1,4 +1,7 @@
-from coker.algebra.function import Function, SymbolicCallable, function
+"""Core construction API and the ``SymbolicCallable`` extension interface."""
+
+from coker.algebra.function import Function, function
+from coker.interfaces import SymbolicCallable
 from coker.algebra.graph import if_then_else
 from coker.algebra.dimensions import (
     Dimension,

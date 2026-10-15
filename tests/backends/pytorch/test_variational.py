@@ -6,12 +6,12 @@ from coker.dynamics import (
     VariationalProblem,
     VariationalProblemBuilder,
 )
-from coker.dynamics.system import create_autonomous_ode
+from coker.dynamics import create_autonomous_ode
 from coker.toolkits.codesign import Minimise
 from coker.backends.pytorch.variational import PytorchVariationalSolverOptions
 from coker.algebra.ops import Noop
-from coker.dynamics.model import DynamicsSpec
-from coker.dynamics.system import create_dynamics_from_spec
+from coker.dynamics import DynamicsSpec
+from coker.dynamics import create_dynamics_from_spec
 from coker.parameters import BoundedVariable
 
 

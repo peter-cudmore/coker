@@ -17,7 +17,7 @@ from coker.parameters.function_parameters import (
     FittedFunction,
     RadialBasisFunction,
 )
-from coker.dynamics.system import create_dynamics_from_spec
+from coker.dynamics import create_dynamics_from_spec
 from coker.toolkits.codesign import Minimise
 from coker.parameters import BoundedVariable, BoundVector
 
