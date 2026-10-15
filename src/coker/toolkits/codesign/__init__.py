@@ -127,9 +127,7 @@ class MathematicalProgram(SymbolicCallable):
     def _validate_arguments(self, args) -> None:
         input_shape = self.input_shape()
         if len(args) != len(input_shape):
-            raise ValueError(
-                f"Expected {len(input_shape)} arguments, got {len(args)}"
-            )
+            raise ValueError(f"Expected {len(input_shape)} arguments, got {len(args)}")
         for index, (arg, expected) in enumerate(zip(args, input_shape)):
             if isinstance(arg, Tracer) and arg.dim != expected:
                 raise ValueError(

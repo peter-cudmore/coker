@@ -359,7 +359,7 @@ def specialize_system_parameters(
             lambda t, w, wdot, z, u, p: original(
                 t, w, wdot, z, u, *reconstruct_parameters(p)
             ),
-            backend=system.backend(),
+            backend=system.backend,
         )
 
     def bind_outputs(original):

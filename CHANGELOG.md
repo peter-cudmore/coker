@@ -6,6 +6,7 @@
 - Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
 - `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.
+- Residual differential-algebraic systems through `ResidualDynamicalSystem` and `to_residual_dynamical_system`, with NumPy integration and explicit CasADi IDAS or variational solver options.
 - `CasadiVariationalOptions` for CasADi solver policy and adaptive mesh refinement controls.
 - Local defect estimation with p-refinement before h-refinement.
 - Reuse of the previous path as the refined NLP initial guess.
@@ -19,11 +20,11 @@
 - Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
 ### Changed
-- Consolidate API boundaries and migration notes into existing guides and remove premature backend/toolkit documentation.
+- Trim collocation implementation types from the `coker.dynamics` root API while retaining the public `DynamicsSpec` construction route.
+- Consolidate API boundaries and migration notes into existing guides, retaining the dynamics, parameters, and backend API reference pages.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
 - Keep function parameters at `coker.parameters.function_parameters`, signatures/lowering configuration at `coker.backends.lowered`, and solve status at `coker.toolkits.codesign`; remove obsolete dynamics reexports and system-modelling registry/handle helpers from public facades.
-- Trim collocation implementation types and `DynamicsSpec` from the `coker.dynamics` root API.
 - Relocate dynamical-system analysis to `coker.dynamics` and reusable symbolic rank and DAE-constraint operations to the SymPy backend.
 - Rename generic rank witnesses on analysis results to `rank_conditions`.
 - Let identifiability analysis classify each flattened scalar parameter as an optimisation variable or a known numeric constant.

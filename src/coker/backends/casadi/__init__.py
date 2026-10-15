@@ -66,10 +66,10 @@ from coker.dynamics.variational.problem import VariationalProblem
 
 __all__ = [
     "CasadiBackend",
-    "CasadiLoweredFunction",
-    "CasadiNLPSolverOptions",
     "CasadiResidualSolver",
     "CasadiResidualSolverOptions",
+    "CasadiLoweredFunction",
+    "CasadiNLPSolverOptions",
     "CasadiVariationalOptions",
 ]
 

@@ -15,6 +15,7 @@ function-valued declarations are exposed from their respective packages:
 - :func:`coker.dynamics.create_autonomous_ode`
 - :func:`coker.dynamics.create_control_system`
 - :class:`coker.dynamics.DynamicsSpec` with :func:`coker.dynamics.create_dynamics_from_spec`
+- :class:`coker.dynamics.ResidualDynamicalSystem` with :func:`coker.dynamics.to_residual_dynamical_system`
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
 - :class:`coker.parameters.BoundedVariable`
@@ -135,13 +136,12 @@ The following executable CasADi example solves the coupled residual
 
    >>> import numpy as np
    >>> from coker import Dimension, Scalar, VectorSpace, function
-   >>> from coker.algebra.ops import Noop
    >>> from coker.dynamics import ResidualDynamicalSystem
    >>> residual = ResidualDynamicalSystem(
-   ...     inputs=Noop(),
+   ...     inputs=None,
    ...     parameters=None,
    ...     x0=function(
-   ...         [VectorSpace("z", 1), Noop(), None],
+   ...         [VectorSpace("z", 1), None, None],
    ...         lambda z, _u, _p: (np.array([0.0]), z),
    ...         backend="casadi",
    ...     ),
@@ -151,7 +151,7 @@ The following executable CasADi example solves the coupled residual
    ...             VectorSpace("w", 1),
    ...             VectorSpace("wdot", 1),
    ...             VectorSpace("z", 1),
-   ...             Noop(),
+   ...             None,
    ...             None,
    ...         ],
    ...         lambda _t, w, wdot, z, _u, _p: np.array(
@@ -161,7 +161,7 @@ The following executable CasADi example solves the coupled residual
    ...     ),
    ...     y=function(
    ...         [Scalar("t"), VectorSpace("x", 1), VectorSpace("z", 1),
-   ...          Noop(), None, None],
+   ...          None, None, None],
    ...         lambda _t, x, _z, _u, _p, _q: x,
    ...         backend="casadi",
    ...     ),
@@ -193,6 +193,7 @@ and convert only where residual access is required:
    ...     ),
    ...     [0.0],
    ... )
+
 
 Functional problem building
 ---------------------------

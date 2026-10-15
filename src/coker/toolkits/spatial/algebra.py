@@ -552,6 +552,4 @@ def se3_bracket(left: Screw, right: Screw) -> Screw:
         right.rotation, left.translation
     )
 
-    return Screw(
-        translation=v, rotation=w, magnitude=right.magnitude * left.magnitude
-    )
+    return Screw(translation=v, rotation=w, magnitude=right.magnitude * left.magnitude)
