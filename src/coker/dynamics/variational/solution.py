@@ -8,6 +8,7 @@ from coker.algebra.function import InequalityExpression
 from coker.dynamics.variables import ControlSolution
 from coker.dynamics.transcription.collocation import (
     InterpolatingPolyCollection,
+    InterpolatingPoly,
 )
 from coker.toolkits.codesign.optimisation import SolveInfo
 
@@ -58,6 +59,12 @@ class SegmentDefectDiagnostic:
 
 @dataclass
 class VariationalSolution:
+    """A solved trajectory with physical-time public evaluation.
+
+    ``path`` and ``control_solutions`` use normalized time on ``[0, 1]``;
+    ``t_final`` maps that coordinate to physical time.
+    """
+
     cost: float
     path: InterpolatingPolyCollection
     projectors: Tuple[
@@ -175,30 +182,30 @@ class VariationalSolution:
 
     def as_raw(self) -> np.ndarray:
         points = [
-            np.vstack([np.array([t]), x])
+            np.vstack([np.array([t * self.t_final]), x])
             for t, x, _ in self.path.knot_points()
         ]
         return np.hstack(points)
 
     def state(self, t):
-        v = self.path(t)
+        v = self.path(t / self.t_final)
         proj = self.projectors[0]
         return proj @ v
 
     def algebraic(self, t):
         if self.projectors[1] is None:
             return None
-        return self.projectors[1] @ self.path(t)
+        return self.projectors[1] @ self.path(t / self.t_final)
 
     def quadratures(self, t):
         if self.projectors[2] is None:
             return None
-        return self.projectors[2] @ self.path(t)
+        return self.projectors[2] @ self.path(t / self.t_final)
 
     def control_law(self, t):
         if not self.control_solutions:
             return None
-        return np.array([c(t) for c in self.control_solutions])
+        return np.array([c(t / self.t_final) for c in self.control_solutions])
 
     def __call__(self, t) -> np.ndarray:
         x = self.state(t)
@@ -210,6 +217,7 @@ class VariationalSolution:
     def to_poly(self) -> InterpolatingPolyCollection:
 
         def f(t, v):
+            t *= self.t_final
             x = self.projectors[0] @ v
             z = (
                 self.projectors[1] @ v
@@ -222,6 +230,17 @@ class VariationalSolution:
                 else None
             )
             u = self.control_law(t)
-            return self.output(t, x, z, u, self.parameters, q)
+            return self.output(t, x, z, u, self._parameter_vector, q)
 
-        return self.path.map(f)
+        return InterpolatingPolyCollection(
+            [
+                InterpolatingPoly(
+                    poly.dimension,
+                    tuple(t * self.t_final for t in poly.interval),
+                    poly.degree,
+                    poly.values,
+                    reference_operators=poly._reference_operators,
+                )
+                for poly in self.path.map(f).polys
+            ]
+        )

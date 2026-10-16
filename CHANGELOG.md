@@ -18,6 +18,7 @@
 - Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
 
 ### Changed
+- Temporarily skip the PyTorch variational trajectory-fit regression while unstable high-degree interpolation is tracked in [#103](https://github.com/peter-cudmore/coker/issues/103); other backend coverage is unchanged.
 - Consolidate API boundaries and migration notes into existing guides and remove premature backend/toolkit documentation.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
@@ -32,6 +33,7 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Evaluate variational solutions in physical time using only `t_final`, with normalized CasADi and PyTorch paths and preserved control/defect semantics.
 - Evaluation, alternate lowering, and explicit problem builds no longer change subsequent implicit backend selection.
 - Lowered mathematical programs expose only objective and requested outputs while still reconstructing private decision captures.
 - Direct-sum composition correctly packs scalar subsystem outputs on NumPy.

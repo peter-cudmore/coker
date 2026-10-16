@@ -259,7 +259,8 @@ class _TranscriptionFactory:
             np.column_stack(
                 [
                     np.asarray(
-                        solution.control_law(float(time)), dtype=float
+                        solution.control_law(float(time) * solution.t_final),
+                        dtype=float,
                     ).reshape((-1,))
                     for time in times.flat
                 ]
