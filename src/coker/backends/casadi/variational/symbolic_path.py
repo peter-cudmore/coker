@@ -89,6 +89,7 @@ class CasadiSolutionAssembler:
             control_solutions=control_solutions,
             output=self.problem.system.y,
             t_final=float(horizon),
+            time_scale=float(horizon),
             solve_info=solve_info,
             path_constraint_exprs=self.problem.path_constraints,
             terminal_constraint_exprs=self.problem.terminal_constraints,

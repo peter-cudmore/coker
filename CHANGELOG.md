@@ -32,6 +32,7 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Evaluate CasADi variational solutions in physical time for fixed and optimized horizons, preserving normalized internal paths, controls, and defect estimation.
 - Evaluation, alternate lowering, and explicit problem builds no longer change subsequent implicit backend selection.
 - Lowered mathematical programs expose only objective and requested outputs while still reconstructing private decision captures.
 - Direct-sum composition correctly packs scalar subsystem outputs on NumPy.

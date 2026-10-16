@@ -8,6 +8,7 @@ from coker.algebra.function import InequalityExpression
 from coker.dynamics.variables import ControlSolution
 from coker.dynamics.transcription.collocation import (
     InterpolatingPolyCollection,
+    InterpolatingPoly,
 )
 from coker.toolkits.codesign.optimisation import SolveInfo
 
@@ -58,6 +59,12 @@ class SegmentDefectDiagnostic:
 
 @dataclass
 class VariationalSolution:
+    """A solved trajectory with physical-time public evaluation.
+
+    ``path`` and ``control_solutions`` retain the backend's time coordinate;
+    ``_time_scale`` is the number of physical seconds per backend time unit.
+    """
+
     cost: float
     path: InterpolatingPolyCollection
     projectors: Tuple[
@@ -86,6 +93,7 @@ class VariationalSolution:
     _solver_parameter_vector: np.ndarray | None = field(
         default=None, init=False, repr=False
     )
+    _time_scale: float = field(default=1.0, init=False, repr=False)
 
     @classmethod
     def from_solver(
@@ -112,6 +120,7 @@ class VariationalSolution:
         solver_parameter_vector: np.ndarray | None = None,
         *,
         t_final: float = 0.0,
+        time_scale: float = 1.0,
         solve_info: Optional[SolveInfo] = None,
         path_constraint_exprs: List[InequalityExpression] | None = None,
         terminal_constraint_exprs: List[InequalityExpression] | None = None,
@@ -136,6 +145,7 @@ class VariationalSolution:
         )
         solution._parameter_vector = parameter_vector
         solution._solver_parameter_vector = solver_parameter_vector
+        solution._time_scale = time_scale
         return solution
 
     def path_constraints(self, t) -> np.ndarray:
@@ -175,30 +185,32 @@ class VariationalSolution:
 
     def as_raw(self) -> np.ndarray:
         points = [
-            np.vstack([np.array([t]), x])
+            np.vstack([np.array([t * self._time_scale]), x])
             for t, x, _ in self.path.knot_points()
         ]
         return np.hstack(points)
 
     def state(self, t):
-        v = self.path(t)
+        v = self.path(t / self._time_scale)
         proj = self.projectors[0]
         return proj @ v
 
     def algebraic(self, t):
         if self.projectors[1] is None:
             return None
-        return self.projectors[1] @ self.path(t)
+        return self.projectors[1] @ self.path(t / self._time_scale)
 
     def quadratures(self, t):
         if self.projectors[2] is None:
             return None
-        return self.projectors[2] @ self.path(t)
+        return self.projectors[2] @ self.path(t / self._time_scale)
 
     def control_law(self, t):
         if not self.control_solutions:
             return None
-        return np.array([c(t) for c in self.control_solutions])
+        return np.array(
+            [c(t / self._time_scale) for c in self.control_solutions]
+        )
 
     def __call__(self, t) -> np.ndarray:
         x = self.state(t)
@@ -210,6 +222,7 @@ class VariationalSolution:
     def to_poly(self) -> InterpolatingPolyCollection:
 
         def f(t, v):
+            t *= self._time_scale
             x = self.projectors[0] @ v
             z = (
                 self.projectors[1] @ v
@@ -222,6 +235,17 @@ class VariationalSolution:
                 else None
             )
             u = self.control_law(t)
-            return self.output(t, x, z, u, self.parameters, q)
+            return self.output(t, x, z, u, self._parameter_vector, q)
 
-        return self.path.map(f)
+        return InterpolatingPolyCollection(
+            [
+                InterpolatingPoly(
+                    poly.dimension,
+                    tuple(t * self._time_scale for t in poly.interval),
+                    poly.degree,
+                    poly.values,
+                    reference_operators=poly._reference_operators,
+                )
+                for poly in self.path.map(f).polys
+            ]
+        )
