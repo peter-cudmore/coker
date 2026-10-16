@@ -15,7 +15,7 @@ from coker.dynamics import create_dynamics_from_spec
 from coker.parameters import BoundedVariable
 
 
-def make_problem(*, guess=0.0):
+def make_problem(*, guess=0.0, t_final=1.0):
     parameters = VectorSpace("p", 1)
     system = create_autonomous_ode(
         x0=1.0,
@@ -24,22 +24,26 @@ def make_problem(*, guess=0.0):
         backend="pytorch",
     )
     parameter = BoundedVariable("rate", -2.0, 2.0, guess=guess)
-    target = float(np.exp(0.7))
+    target = float(np.exp(0.7 * t_final))
     return VariationalProblem(
-        t_final=1.0,
+        t_final=t_final,
         system=system,
         parameters=[parameter],
         backend="pytorch",
-        loss=lambda solution, p: (solution(1.0, p) - target) ** 2,
+        loss=lambda solution, p: (solution(t_final, p) - target) ** 2,
     )
 
 
-def test_cuda_neural_ode_fit_and_solution():
-    solution = make_problem().get_solver("pytorch")()
+@pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
+def test_cuda_neural_ode_fit_and_solution(horizon):
+    solution = make_problem(t_final=horizon).get_solver("pytorch")()
     assert solution.solve_info.success
     assert abs(solution.parameters["rate"] - 0.7) < 2e-3
     assert solution.cost < 1e-6
-    assert abs(float(solution.state(1.0)[0]) - float(np.exp(0.7))) < 2e-3
+    for time in np.linspace(0, horizon, 9):
+        expected = np.exp(0.7 * time)
+        np.testing.assert_allclose(solution.state(time), expected, atol=2e-3)
+        np.testing.assert_allclose(solution(time), expected, atol=2e-3)
 
 
 def test_cuda_fixed_and_unknown_parameter_validation():
@@ -91,7 +95,8 @@ def test_cuda_integrates_registered_quadratures():
     assert solution.quadratures(1.0)[0] == pytest.approx(target, abs=2e-3)
 
 
-def test_cuda_integrates_system_quadratures():
+@pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
+def test_cuda_integrates_system_quadratures(horizon):
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
@@ -106,14 +111,21 @@ def test_cuda_integrates_system_quadratures():
         backend="pytorch",
     )
     problem = VariationalProblem(
-        t_final=1.0,
+        t_final=horizon,
         system=system,
         parameters=[BoundedVariable("rate", -2.0, 2.0, guess=0.7)],
         backend="pytorch",
-        loss=lambda solution, p: (solution(1.0, p) - 0.7) ** 2,
+        loss=lambda solution, p: (solution(horizon, p) - 0.7 * horizon) ** 2,
     )
 
     solution = problem.get_solver("pytorch").solve()
 
     assert solution.solve_info.success
-    assert solution.quadratures(1.0)[0] == pytest.approx(0.7, abs=2e-3)
+    for time in np.linspace(0, horizon, 9):
+        expected = 0.7 * time
+        np.testing.assert_allclose(
+            solution.quadratures(time), expected, atol=2e-3
+        )
+        np.testing.assert_allclose(solution(time), expected, atol=2e-3)
+    raw = solution.as_raw()
+    np.testing.assert_allclose(raw[2], 0.7 * raw[0], atol=2e-3)

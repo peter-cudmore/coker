@@ -777,7 +777,7 @@ class PytorchVariationalSolver(VariationalSolver):
         )
         poly = InterpolatingPoly(
             path_values.shape[1],
-            (0.0, float(self.problem.t_final)),
+            (0.0, 1.0),
             len(times) - 1,
             path_values.reshape(-1, 1),
         )

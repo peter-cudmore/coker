@@ -510,9 +510,10 @@ the returned trajectory directly at physical times:
 ``control_law(t)`` accept physical time on ``[0, fit.t_final]``, including for
 an optimized horizon. Output and constraint callbacks also receive physical
 time. ``as_raw()`` returns physical knot times, and ``to_poly()`` returns an
-output interpolant on physical intervals. CasADi's underlying ``fit.path``
-and control coefficients retain their normalized coordinate for transcription
-and defect estimation; do not pass physical times directly to that path.
+output interpolant on physical intervals. CasADi and PyTorch store ``fit.path``
+on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time mapping.
+CasADi control coefficients and defect estimation also use normalized time;
+do not pass physical times directly to the underlying path.
 
 What the test suite exercises
 -----------------------------

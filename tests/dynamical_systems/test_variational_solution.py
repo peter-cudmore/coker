@@ -121,15 +121,15 @@ def test_evaluate_outputs_quadratures_and_constraints(horizon, free_horizon):
         np.testing.assert_allclose(segment.quadrature_residual, 0, atol=1e-6)
 
 
-@pytest.mark.parametrize("time_scale", [1.0, 4.0])
-def test_evaluate_backend_algebraics_and_controls_in_physical_time(time_scale):
+@pytest.mark.parametrize("horizon", [0.5, 4.0])
+def test_evaluate_algebraics_and_controls_in_physical_time(horizon):
     path = InterpolatingPolyCollection(
         [
             InterpolatingPoly(
                 2,
-                (0.0, 4.0 / time_scale),
+                (0.0, 1.0),
                 1,
-                np.array([[0.0], [0.0], [4.0], [8.0]]),
+                np.array([[0.0], [0.0], [horizon], [2 * horizon]]),
             )
         ]
     )
@@ -138,17 +138,15 @@ def test_evaluate_backend_algebraics_and_controls_in_physical_time(time_scale):
         path=path,
         projectors=(np.array([[1.0, 0.0]]), np.array([[0.0, 1.0]]), None),
         control_solutions=[
-            PiecewiseControlSolution(
-                "u", 1.5 * time_scale / 4, np.array([1.0, 2.0])
-            )
+            PiecewiseControlSolution("u", 1.5, np.array([1.0, 2.0]))
         ],
         parameters={"p": 3.0},
         parameter_vector=np.array([3.0]),
         output=lambda t, x, z, u, p, _q: t + x + z + u + p[0],
-        t_final=4.0,
-        time_scale=time_scale,
+        t_final=horizon,
     )
-    for time, control in [(0.0, 1), (2.5, 1), (3.0, 2), (4.0, 2)]:
+    for fraction, control in [(0.0, 1), (0.625, 1), (0.75, 2), (1.0, 2)]:
+        time = fraction * horizon
         np.testing.assert_allclose(fit.control_law(time), control)
         np.testing.assert_allclose(fit.algebraic(time), 2 * time)
         np.testing.assert_allclose(fit(time), 4 * time + control + 3)
@@ -162,10 +160,10 @@ def test_evaluate_backend_algebraics_and_controls_in_physical_time(time_scale):
     factory = _TranscriptionFactory(
         VariationalProblem(
             system=system,
-            loss=lambda trajectory, _u, p: trajectory(4.0, _u, p)[0],
+            loss=lambda trajectory, _u, p: trajectory(horizon, _u, p)[0],
             parameters=[3.0],
             control=[ConstantControlVariable("u")],
-            t_final=4.0,
+            t_final=horizon,
             backend="casadi",
         )
     )
@@ -173,4 +171,6 @@ def test_evaluate_backend_algebraics_and_controls_in_physical_time(time_scale):
         np.array([0.0, 0.625, 0.75, 1.0]), np.zeros((1, 4)), fit
     )
     # Defect nodes are normalized, but controls and dynamics receive seconds.
-    np.testing.assert_allclose(rates, [[4.0, 6.5, 8.0, 9.0]])
+    np.testing.assert_allclose(
+        rates, [[4.0, 4 + 0.625 * horizon, 5 + 0.75 * horizon, 5 + horizon]]
+    )
