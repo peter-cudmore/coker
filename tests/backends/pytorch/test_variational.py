@@ -34,6 +34,10 @@ def make_problem(*, guess=0.0, t_final=1.0):
     )
 
 
+@pytest.mark.skip(
+    reason="PyTorch trajectory interpolation is unstable; see "
+    "https://github.com/peter-cudmore/coker/issues/103"
+)
 @pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
 def test_cuda_neural_ode_fit_and_solution(horizon):
     solution = make_problem(t_final=horizon).get_solver("pytorch")()

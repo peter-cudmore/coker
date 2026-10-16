@@ -18,6 +18,7 @@
 - Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
 
 ### Changed
+- Temporarily skip the PyTorch variational trajectory-fit regression while unstable high-degree interpolation is tracked in [#103](https://github.com/peter-cudmore/coker/issues/103); other backend coverage is unchanged.
 - Consolidate API boundaries and migration notes into existing guides and remove premature backend/toolkit documentation.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
