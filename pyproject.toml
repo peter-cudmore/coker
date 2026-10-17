@@ -28,6 +28,12 @@ dependencies = [
     "typing-extensions",
 ]
 
+[project.urls]
+Documentation = "https://peter-cudmore.github.io/coker/"
+Source = "https://github.com/peter-cudmore/coker"
+Issues = "https://github.com/peter-cudmore/coker/issues"
+Changelog = "https://github.com/peter-cudmore/coker/blob/main/CHANGELOG.md"
+
 [project.entry-points."coker.backends"]
 numpy = "coker.backends.numpy:NumpyBackend"
 jax = "coker.backends.jax:JaxBackend"
