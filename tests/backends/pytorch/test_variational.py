@@ -34,20 +34,51 @@ def make_problem(*, guess=0.0, t_final=1.0):
     )
 
 
-@pytest.mark.skip(
-    reason="PyTorch trajectory interpolation is unstable; see "
-    "https://github.com/peter-cudmore/coker/issues/103"
-)
+@pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
+def test_interpolate_exact_exponential_samples(horizon):
+    solver = make_problem(t_final=horizon).get_solver("pytorch")
+    times = solver._trajectory_times()
+
+    def exact(time):
+        return np.array(
+            [
+                np.exp(0.7 * time),
+                np.expm1(0.7 * time) / 0.7,
+                np.expm1(1.4 * time) / 1.4,
+            ]
+        ).T
+
+    path = solver._interpolate_trajectory(exact(times))
+    boundaries = [path.intervals[0][0]] + [end for _, end in path.intervals]
+    near_boundaries = [
+        boundary + offset
+        for boundary in boundaries
+        for offset in (-1e-7, 0.0, 1e-7)
+        if 0 <= boundary + offset <= 1
+    ]
+    queries = np.unique(np.r_[np.linspace(0, 1, 1001), near_boundaries])
+    actual = np.array([path(time) for time in queries])
+    np.testing.assert_allclose(
+        actual, exact(queries * horizon), rtol=1e-7, atol=1e-8
+    )
+    for left, right in zip(path.polys[:-1], path.polys[1:]):
+        np.testing.assert_array_equal(
+            left.end_point()[1], right.start_point()[1]
+        )
+
+
 @pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
 def test_cuda_neural_ode_fit_and_solution(horizon):
     solution = make_problem(t_final=horizon).get_solver("pytorch")()
     assert solution.solve_info.success
     assert abs(solution.parameters["rate"] - 0.7) < 2e-3
     assert solution.cost < 1e-6
+    output_poly = solution.to_poly()
     for time in np.linspace(0, horizon, 9):
         expected = np.exp(0.7 * time)
         np.testing.assert_allclose(solution.state(time), expected, atol=2e-3)
         np.testing.assert_allclose(solution(time), expected, atol=2e-3)
+        np.testing.assert_allclose(output_poly(time), expected, atol=2e-3)
 
 
 def test_cuda_fixed_and_unknown_parameter_validation():
@@ -133,3 +164,63 @@ def test_cuda_integrates_system_quadratures(horizon):
         np.testing.assert_allclose(solution(time), expected, atol=2e-3)
     raw = solution.as_raw()
     np.testing.assert_allclose(raw[2], 0.7 * raw[0], atol=2e-3)
+
+
+@pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
+def test_evaluate_piecewise_state_and_quadratures(horizon):
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=Noop(),
+            parameters=VectorSpace("p", 1),
+            algebraic=None,
+            initial_conditions=lambda _z, _u, p: (1 + 0 * p, None),
+            dynamics=lambda _t, x, _z, _u, p: p[0] * x,
+            constraints=Noop(),
+            outputs=lambda t, x, _z, _u, _p, _q: x + t,
+            quadratures=lambda _t, x, _z, _u, _p: x,
+        ),
+        backend="pytorch",
+    )
+    with VariationalProblemBuilder(
+        system,
+        t_final=horizon,
+        parameters=[BoundedVariable("rate", -2.0, 2.0)],
+        backend="pytorch",
+    ) as builder:
+        integral = builder.integrate(builder.state(builder.t)[0] ** 2)
+        problem = builder.build(Minimise(integral))
+
+    solution = problem.get_solver("pytorch").solve(rate=0.7)
+    output_poly = solution.to_poly()
+    near_boundaries = [
+        boundary + offset
+        for boundary in (0.0, 0.25, 0.5, 0.75, 1.0)
+        for offset in (-1e-7, 0.0, 1e-7)
+        if 0 <= boundary + offset <= 1
+    ]
+    fractions = np.unique(np.r_[np.linspace(0, 1, 1001), near_boundaries])
+    for time in fractions * horizon:
+        state = np.exp(0.7 * time)
+        quadratures = [
+            np.expm1(0.7 * time) / 0.7,
+            np.expm1(1.4 * time) / 1.4,
+        ]
+        np.testing.assert_allclose(solution.state(time), state, atol=2e-3)
+        np.testing.assert_allclose(
+            solution.quadratures(time), quadratures, rtol=1e-5, atol=2e-3
+        )
+        np.testing.assert_allclose(solution(time), state + time, atol=2e-3)
+        np.testing.assert_allclose(output_poly(time), state + time, atol=2e-3)
+
+    assert solution.path.intervals[0][0] == 0
+    assert solution.path.intervals[-1][1] == 1
+    raw = solution.as_raw()
+    assert raw[0, 0] == 0
+    assert 0 < raw[0, -1] < horizon
+    np.testing.assert_allclose(raw[1], np.exp(0.7 * raw[0]), atol=2e-3)
+    np.testing.assert_allclose(
+        raw[2], np.expm1(0.7 * raw[0]) / 0.7, rtol=1e-5, atol=2e-3
+    )
+    np.testing.assert_allclose(
+        raw[3], np.expm1(1.4 * raw[0]) / 1.4, rtol=1e-5, atol=2e-3
+    )

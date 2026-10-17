@@ -32,7 +32,10 @@ from coker.parameters.function_parameters import FunctionParameter
 from coker.toolkits.codesign import SolveFailure, SolveInfo, SolverOptions
 
 
-_TRAJECTORY_GRID_NODES = 31
+# Four degree-eight pieces keep roughly the previous sample budget while
+# avoiding cancellation in the expanded high-degree interpolation basis.
+_TRAJECTORY_DEGREE = 8
+_TRAJECTORY_INTERVALS = tuple((i / 4, (i + 1) / 4) for i in range(4))
 _OPTIMISER_TYPES = {
     "Adam": torch.optim.Adam,
     "LBFGS": torch.optim.LBFGS,
@@ -439,14 +442,30 @@ class PytorchVariationalSolver(VariationalSolver):
         return (self._system_parameter_map @ values.reshape(-1, 1)).reshape(-1)
 
     def _trajectory_times(self):
-        tau, map_time, *_ = generate_discritisation_operators(
-            (0.0, float(self.problem.t_final)), _TRAJECTORY_GRID_NODES
-        )
-        return torch.as_tensor(
-            [map_time(value) for value in tau],
-            device=self._device,
-            dtype=self._dtype,
-        )
+        times = []
+        for interval in _TRAJECTORY_INTERVALS:
+            tau, map_time, *_ = generate_discritisation_operators(
+                interval, _TRAJECTORY_DEGREE
+            )
+            # Adjacent pieces share one integrated boundary sample.
+            nodes = tau[1:] if times else tau
+            times.extend(map_time(value) for value in nodes)
+        return np.asarray(times) * float(self.problem.t_final)
+
+    def _interpolate_trajectory(self, path_values):
+        polys = []
+        for index, interval in enumerate(_TRAJECTORY_INTERVALS):
+            start = index * _TRAJECTORY_DEGREE
+            values = path_values[start : start + _TRAJECTORY_DEGREE + 1]
+            polys.append(
+                InterpolatingPoly(
+                    path_values.shape[1],
+                    interval,
+                    _TRAJECTORY_DEGREE,
+                    values.reshape(-1, 1),
+                )
+            )
+        return InterpolatingPolyCollection(polys)
 
     def _trace_arguments(
         self, signature, time, state, parameters, quadratures
@@ -757,7 +776,9 @@ class PytorchVariationalSolver(VariationalSolver):
                 "PyTorch variational solve failed", info
             ) from ex
         values = values_from_raw().detach()
-        times = self._trajectory_times()
+        times = torch.as_tensor(
+            self._trajectory_times(), device=self._device, dtype=self._dtype
+        )
         states, system_q, registered_q = self._integrate(values, times)
         state_values = states.detach().cpu().numpy()
         quadrature_values = [
@@ -774,12 +795,6 @@ class PytorchVariationalSolver(VariationalSolver):
             np.concatenate((state_values, all_quadrature_values), axis=1)
             if all_quadrature_values is not None
             else state_values
-        )
-        poly = InterpolatingPoly(
-            path_values.shape[1],
-            (0.0, 1.0),
-            len(times) - 1,
-            path_values.reshape(-1, 1),
         )
         state_projector = np.zeros(
             (state_values.shape[1], path_values.shape[1])
@@ -815,7 +830,7 @@ class PytorchVariationalSolver(VariationalSolver):
         )
         return VariationalSolution.from_solver(
             cost=float(cost.detach().cpu()),
-            path=InterpolatingPolyCollection([poly]),
+            path=self._interpolate_trajectory(path_values),
             projectors=(state_projector, None, quadrature_projector),
             control_solutions=[],
             parameters=public_parameters,
