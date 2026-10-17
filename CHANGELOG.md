@@ -16,6 +16,7 @@
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
 - Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
+- Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
 ### Changed
 - Consolidate API boundaries and migration notes into existing guides and remove premature backend/toolkit documentation.

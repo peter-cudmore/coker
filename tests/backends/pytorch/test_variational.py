@@ -8,7 +8,10 @@ from coker.dynamics import (
 )
 from coker.dynamics import create_autonomous_ode
 from coker.toolkits.codesign import Minimise
-from coker.backends.pytorch.variational import PytorchVariationalSolverOptions
+from coker.backends.pytorch.variational import (
+    PytorchVariationalSolverOptions,
+    create_variational_solver,
+)
 from coker.algebra.ops import Noop
 from coker.dynamics import DynamicsSpec
 from coker.dynamics import create_dynamics_from_spec
@@ -34,9 +37,26 @@ def make_problem(*, guess=0.0, t_final=1.0):
     )
 
 
+@pytest.fixture(
+    params=[
+        None,
+        PytorchVariationalSolverOptions(
+            trajectory_degree=6, trajectory_n_intervals=8
+        ),
+        PytorchVariationalSolverOptions(
+            trajectory_degree=10, trajectory_n_intervals=3
+        ),
+    ]
+)
+def trajectory_options(request):
+    return request.param
+
+
 @pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
-def test_interpolate_exact_exponential_samples(horizon):
-    solver = make_problem(t_final=horizon).get_solver("pytorch")
+def test_interpolate_exact_exponential_samples(horizon, trajectory_options):
+    solver = create_variational_solver(
+        make_problem(t_final=horizon), trajectory_options
+    )
     times = solver._trajectory_times()
 
     def exact(time):
@@ -104,6 +124,17 @@ def test_variational_options_follow_solver_option_contract():
         PytorchVariationalSolverOptions(optimiser_method="SGD")
 
 
+@pytest.mark.parametrize(
+    "degree, intervals",
+    [(0, 4), (-1, 4), (1.5, 4), (8, 0), (8, -1), (8, 1.5)],
+)
+def test_reject_invalid_trajectory_grid(degree, intervals):
+    with pytest.raises(ValueError, match="must be a positive integer"):
+        PytorchVariationalSolverOptions(
+            trajectory_degree=degree, trajectory_n_intervals=intervals
+        )
+
+
 def test_cuda_integrates_registered_quadratures():
     parameters = VectorSpace("p", 1)
     system = create_autonomous_ode(
@@ -131,7 +162,16 @@ def test_cuda_integrates_registered_quadratures():
 
 
 @pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
-def test_cuda_integrates_system_quadratures(horizon):
+@pytest.mark.parametrize(
+    "options",
+    [
+        None,
+        PytorchVariationalSolverOptions(
+            trajectory_degree=1, trajectory_n_intervals=1
+        ),
+    ],
+)
+def test_cuda_integrates_system_quadratures(horizon, options):
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
@@ -153,7 +193,7 @@ def test_cuda_integrates_system_quadratures(horizon):
         loss=lambda solution, p: (solution(horizon, p) - 0.7 * horizon) ** 2,
     )
 
-    solution = problem.get_solver("pytorch").solve()
+    solution = create_variational_solver(problem, options).solve()
 
     assert solution.solve_info.success
     for time in np.linspace(0, horizon, 9):
@@ -167,7 +207,7 @@ def test_cuda_integrates_system_quadratures(horizon):
 
 
 @pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
-def test_evaluate_piecewise_state_and_quadratures(horizon):
+def test_evaluate_piecewise_state_and_quadratures(horizon, trajectory_options):
     system = create_dynamics_from_spec(
         DynamicsSpec(
             inputs=Noop(),
@@ -190,11 +230,25 @@ def test_evaluate_piecewise_state_and_quadratures(horizon):
         integral = builder.integrate(builder.state(builder.t)[0] ** 2)
         problem = builder.build(Minimise(integral))
 
-    solution = problem.get_solver("pytorch").solve(rate=0.7)
+    solution = create_variational_solver(problem, trajectory_options).solve(
+        rate=0.7
+    )
+    if trajectory_options is not None:
+        assert (
+            len(solution.path.polys)
+            == trajectory_options.trajectory_n_intervals
+        )
+        assert all(
+            poly.degree == trajectory_options.trajectory_degree
+            for poly in solution.path.polys
+        )
+    boundaries = [solution.path.intervals[0][0]] + [
+        end for _, end in solution.path.intervals
+    ]
     output_poly = solution.to_poly()
     near_boundaries = [
         boundary + offset
-        for boundary in (0.0, 0.25, 0.5, 0.75, 1.0)
+        for boundary in boundaries
         for offset in (-1e-7, 0.0, 1e-7)
         if 0 <= boundary + offset <= 1
     ]

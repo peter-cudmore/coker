@@ -32,10 +32,6 @@ from coker.parameters.function_parameters import FunctionParameter
 from coker.toolkits.codesign import SolveFailure, SolveInfo, SolverOptions
 
 
-# Four degree-eight pieces keep roughly the previous sample budget while
-# avoiding cancellation in the expanded high-degree interpolation basis.
-_TRAJECTORY_DEGREE = 8
-_TRAJECTORY_INTERVALS = tuple((i / 4, (i + 1) / 4) for i in range(4))
 _OPTIMISER_TYPES = {
     "Adam": torch.optim.Adam,
     "LBFGS": torch.optim.LBFGS,
@@ -49,6 +45,8 @@ class PytorchVariationalSolverOptions(SolverOptions):
     ``ode`` is forwarded to :func:`torchdiffeq.odeint`. ``optimiser_method``
     selects a supported :mod:`torch.optim` optimiser, while
     ``optimiser_options`` are forwarded to its constructor.
+    ``trajectory_degree`` and ``trajectory_n_intervals`` set the degree and
+    number of uniform pieces in the returned state and quadrature interpolant.
     """
 
     ode: PytorchODESolverParameters = PytorchODESolverParameters()
@@ -61,6 +59,8 @@ class PytorchVariationalSolverOptions(SolverOptions):
             "line_search_fn": "strong_wolfe",
         }
     )
+    trajectory_degree: int = 8
+    trajectory_n_intervals: int = 4
 
     def __post_init__(self):
         super().__post_init__()
@@ -72,6 +72,18 @@ class PytorchVariationalSolverOptions(SolverOptions):
             )
         if not isinstance(self.optimiser_options, Mapping):
             raise TypeError("optimiser_options must be a mapping")
+        if (
+            not isinstance(self.trajectory_degree, int)
+            or self.trajectory_degree <= 0
+        ):
+            raise ValueError("trajectory_degree must be a positive integer")
+        if (
+            not isinstance(self.trajectory_n_intervals, int)
+            or self.trajectory_n_intervals <= 0
+        ):
+            raise ValueError(
+                "trajectory_n_intervals must be a positive integer"
+            )
 
 
 @dataclass(frozen=True)
@@ -98,6 +110,10 @@ class PytorchVariationalSolver(VariationalSolver):
     ):
         self.problem = problem
         self._options = options or PytorchVariationalSolverOptions()
+        count = self._options.trajectory_n_intervals
+        self._trajectory_intervals = tuple(
+            (i / count, (i + 1) / count) for i in range(count)
+        )
         backend = get_backend_by_name("pytorch", set_current=False)
         self._device = backend.device or torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
@@ -443,9 +459,9 @@ class PytorchVariationalSolver(VariationalSolver):
 
     def _trajectory_times(self):
         times = []
-        for interval in _TRAJECTORY_INTERVALS:
+        for interval in self._trajectory_intervals:
             tau, map_time, *_ = generate_discritisation_operators(
-                interval, _TRAJECTORY_DEGREE
+                interval, self._options.trajectory_degree
             )
             # Adjacent pieces share one integrated boundary sample.
             nodes = tau[1:] if times else tau
@@ -454,14 +470,15 @@ class PytorchVariationalSolver(VariationalSolver):
 
     def _interpolate_trajectory(self, path_values):
         polys = []
-        for index, interval in enumerate(_TRAJECTORY_INTERVALS):
-            start = index * _TRAJECTORY_DEGREE
-            values = path_values[start : start + _TRAJECTORY_DEGREE + 1]
+        degree = self._options.trajectory_degree
+        for index, interval in enumerate(self._trajectory_intervals):
+            start = index * degree
+            values = path_values[start : start + degree + 1]
             polys.append(
                 InterpolatingPoly(
                     path_values.shape[1],
                     interval,
-                    _TRAJECTORY_DEGREE,
+                    degree,
                     values.reshape(-1, 1),
                 )
             )
