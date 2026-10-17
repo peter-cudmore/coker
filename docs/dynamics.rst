@@ -515,6 +515,22 @@ on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time map
 CasADi control coefficients and defect estimation also use normalized time;
 do not pass physical times directly to the underlying path.
 
+By default, PyTorch assembles its returned state and quadrature channels into
+four degree-eight LGR polynomials on normalized subintervals. Integration samples
+the corresponding physical-time nodes once, sharing each segment boundary.
+This avoids the cancellation of a single expanded degree-31 polynomial without
+changing the ODE solver or its tolerances. ``to_poly()`` applies the same
+piecewise representation to scalar or vector outputs.
+
+Set ``trajectory_degree`` and ``trajectory_n_intervals`` on
+``coker.backends.pytorch.variational.PytorchVariationalSolverOptions`` to
+override these defaults. Both must be positive integers. Pass the options to
+``coker.backends.pytorch.variational.create_variational_solver(problem, options)``.
+For example, ``PytorchVariationalSolverOptions(trajectory_degree=6,
+trajectory_n_intervals=8)`` selects eight degree-six pieces. Prefer additional
+intervals over high polynomial degrees to avoid cancellation in the expanded
+interpolation basis.
+
 What the test suite exercises
 -----------------------------
 
