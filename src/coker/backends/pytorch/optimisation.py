@@ -77,35 +77,23 @@ class PytorchNLPSolverOptions(SolverOptions):
     def __post_init__(self):
         super().__post_init__()
         if self.optimiser_method not in _OPTIMISER_TYPES:
-            raise ValueError(
-                f"Unsupported PyTorch optimiser {self.optimiser_method!r}"
-            )
+            raise ValueError(f"Unsupported PyTorch optimiser {self.optimiser_method!r}")
         if not isinstance(self.optimiser_options, Mapping):
             raise TypeError("optimiser_options must be a mapping")
-        if (
-            not isinstance(self.inner_iterations, int)
-            or self.inner_iterations <= 0
-        ):
+        if not isinstance(self.inner_iterations, int) or self.inner_iterations <= 0:
             raise ValueError("inner_iterations must be a positive integer")
         if (
             not isinstance(self.restoration_iterations, int)
             or self.restoration_iterations <= 0
         ):
-            raise ValueError(
-                "restoration_iterations must be a positive integer"
-            )
-        if (
-            not isinstance(self.barrier_stages, int)
-            or self.barrier_stages <= 0
-        ):
+            raise ValueError("restoration_iterations must be a positive integer")
+        if not isinstance(self.barrier_stages, int) or self.barrier_stages <= 0:
             raise ValueError("barrier_stages must be a positive integer")
         if (
             not isinstance(self.augmented_lagrangian_stages, int)
             or self.augmented_lagrangian_stages <= 0
         ):
-            raise ValueError(
-                "augmented_lagrangian_stages must be a positive integer"
-            )
+            raise ValueError("augmented_lagrangian_stages must be a positive integer")
         if not isinstance(self.history_size, int) or self.history_size <= 0:
             raise ValueError("history_size must be a positive integer")
         if (
@@ -229,14 +217,10 @@ class _PytorchOptimisationProblem:
                 i for i in range(len(self.constraints)) if i not in equalities
             ]
             multipliers = [torch.zeros_like(bounds[i][0]) for i in equalities]
-            if (
-                self.options.warm_start
-                and self._warm_start_multipliers is not None
-            ):
+            if self.options.warm_start and self._warm_start_multipliers is not None:
                 cached = self._warm_start_multipliers
                 if len(cached) == len(multipliers) and all(
-                    v.device == self.device and v.dtype == self.dtype
-                    for v in cached
+                    v.device == self.device and v.dtype == self.dtype for v in cached
                 ):
                     multipliers = [v.clone().detach() for v in cached]
             penalty = torch.tensor(1.0, dtype=self.dtype, device=self.device)
@@ -261,9 +245,7 @@ class _PytorchOptimisationProblem:
 
                 n = self._run_optimiser(decision, equality_objective)
                 iterations += n
-                decision = self._restore_feasibility(
-                    decision, runtime_args, bounds
-                )
+                decision = self._restore_feasibility(decision, runtime_args, bounds)
                 decision.requires_grad_(True)
                 bounds = self._constraint_bounds(decision, runtime_args)
                 values = self._constraint_values(decision, runtime_args)
@@ -271,10 +253,7 @@ class _PytorchOptimisationProblem:
                     error = values[i] - bounds[i][0]
                     multipliers[j] = multipliers[j] + penalty * error.detach()
                 max_error = torch.stack(
-                    [
-                        torch.max(torch.abs(values[i] - bounds[i][0]))
-                        for i in equalities
-                    ]
+                    [torch.max(torch.abs(values[i] - bounds[i][0])) for i in equalities]
                 ).max()
                 if bool(max_error <= self.options.tolerance_constraint):
                     break
@@ -298,15 +277,11 @@ class _PytorchOptimisationProblem:
                             safe_slack = torch.clamp(
                                 slack, min=self.options.interior_margin
                             )
-                            value = (
-                                value - barrier * torch.log(safe_slack).sum()
-                            )
+                            value = value - barrier * torch.log(safe_slack).sum()
                             value = (
                                 value
                                 + 1e4
-                                * torch.relu(
-                                    self.options.interior_margin - slack
-                                )
+                                * torch.relu(self.options.interior_margin - slack)
                                 .square()
                                 .sum()
                             )
@@ -315,22 +290,16 @@ class _PytorchOptimisationProblem:
                             safe_slack = torch.clamp(
                                 slack, min=self.options.interior_margin
                             )
-                            value = (
-                                value - barrier * torch.log(safe_slack).sum()
-                            )
+                            value = value - barrier * torch.log(safe_slack).sum()
                             value = (
                                 value
                                 + 1e4
-                                * torch.relu(
-                                    self.options.interior_margin - slack
-                                )
+                                * torch.relu(self.options.interior_margin - slack)
                                 .square()
                                 .sum()
                             )
                     return (
-                        torch.nan_to_num(
-                            value, nan=1e20, posinf=1e20, neginf=-1e20
-                        )
+                        torch.nan_to_num(value, nan=1e20, posinf=1e20, neginf=-1e20)
                         + decision.sum() * 0
                     )
 
@@ -344,9 +313,7 @@ class _PytorchOptimisationProblem:
                 or self._constraint_violation(decision, runtime_args)
                 > self.options.tolerance_constraint
             ):
-                raise FloatingPointError(
-                    "non-finite objective or constraint violation"
-                )
+                raise FloatingPointError("non-finite objective or constraint violation")
             if final.requires_grad:
                 final.backward()
                 if decision.grad is None or not bool(
@@ -360,9 +327,7 @@ class _PytorchOptimisationProblem:
             return self._fail(str(ex), iterations, ex)
 
     def _run_optimiser(self, decision, objective, *, max_iter=None):
-        max_iter = (
-            self.options.inner_iterations if max_iter is None else max_iter
-        )
+        max_iter = self.options.inner_iterations if max_iter is None else max_iter
         optimiser_type = _OPTIMISER_TYPES[self.options.optimiser_method]
         optimiser_options = dict(self.options.optimiser_options)
         if self.options.optimiser_method == "LBFGS":
@@ -384,10 +349,7 @@ class _PytorchOptimisationProblem:
             if not loss.requires_grad:
                 loss = loss + decision.sum() * 0.0
             loss.backward()
-            if (
-                decision.grad is None
-                or not torch.isfinite(decision.grad).all()
-            ):
+            if decision.grad is None or not torch.isfinite(decision.grad).all():
                 raise FloatingPointError("non-finite gradient")
             state["iterations"] += 1
             return loss
@@ -415,18 +377,14 @@ class _PytorchOptimisationProblem:
                 if lower is not None:
                     loss = (
                         loss
-                        + torch.relu(
-                            lower + 2 * self.options.interior_margin - value
-                        )
+                        + torch.relu(lower + 2 * self.options.interior_margin - value)
                         .square()
                         .sum()
                     )
                 if upper is not None:
                     loss = (
                         loss
-                        + torch.relu(
-                            value - upper + 2 * self.options.interior_margin
-                        )
+                        + torch.relu(value - upper + 2 * self.options.interior_margin)
                         .square()
                         .sum()
                     )
@@ -439,9 +397,7 @@ class _PytorchOptimisationProblem:
 
     def _constraint_values(self, decision, runtime_args):
         return [
-            torch.as_tensor(
-                value, dtype=self.dtype, device=self.device
-            ).reshape(-1)
+            torch.as_tensor(value, dtype=self.dtype, device=self.device).reshape(-1)
             for value in self._evaluate_tracers(
                 [constraint.residual for constraint in self.constraints],
                 decision,
@@ -467,17 +423,15 @@ class _PytorchOptimisationProblem:
             value = self._evaluate_tracers([bound], decision, runtime_args)[0]
         else:
             value = bound
-        result = torch.as_tensor(
-            value, dtype=self.dtype, device=self.device
-        ).reshape(-1)
+        result = torch.as_tensor(value, dtype=self.dtype, device=self.device).reshape(
+            -1
+        )
         if bool(torch.all(torch.isinf(result))):
             return None
         return result
 
     @staticmethod
-    def _with_equality_penalty(
-        value, values, bounds, equalities, multipliers, penalty
-    ):
+    def _with_equality_penalty(value, values, bounds, equalities, multipliers, penalty):
         for multiplier, index in zip(multipliers, equalities):
             error = values[index] - bounds[index][0]
             value = value + (multiplier * error).sum()
@@ -493,18 +447,12 @@ class _PytorchOptimisationProblem:
                 self.constraints[i].lower_bound,
                 self.constraints[i].upper_bound,
             ):
-                result = torch.maximum(
-                    result, torch.max(torch.abs(value - lower))
-                )
+                result = torch.maximum(result, torch.max(torch.abs(value - lower)))
                 continue
             if lower is not None:
-                result = torch.maximum(
-                    result, torch.max(torch.relu(lower - value))
-                )
+                result = torch.maximum(result, torch.max(torch.relu(lower - value)))
             if upper is not None:
-                result = torch.maximum(
-                    result, torch.max(torch.relu(value - upper))
-                )
+                result = torch.maximum(result, torch.max(torch.relu(value - upper)))
         return result
 
     @staticmethod
@@ -520,9 +468,7 @@ class _PytorchOptimisationProblem:
             return False
 
     def _normalise_runtime_args(self, runtime_args: Sequence[object]):
-        tensors = [
-            value for value in runtime_args if isinstance(value, torch.Tensor)
-        ]
+        tensors = [value for value in runtime_args if isinstance(value, torch.Tensor)]
         if tensors:
             if len({value.device for value in tensors}) != 1:
                 raise ValueError(
@@ -539,14 +485,10 @@ class _PytorchOptimisationProblem:
                     _to_backend_array(value, self.device),
                     binding.dim,
                 )
-                for value, binding in zip(
-                    runtime_args, self.parameter_bindings
-                )
+                for value, binding in zip(runtime_args, self.parameter_bindings)
             )
         else:
-            values = normalise_runtime_args(
-                runtime_args, self.parameter_bindings
-            )
+            values = normalise_runtime_args(runtime_args, self.parameter_bindings)
         return tuple(
             torch.as_tensor(value, dtype=self.dtype, device=self.device)
             for value in values
@@ -557,9 +499,7 @@ class _PytorchOptimisationProblem:
             b.index: _reshape(decision[b.start : b.stop], b.dim)
             for b in self.decision_bindings
         }
-        parameters = {
-            b.index: v for b, v in zip(self.parameter_bindings, runtime_args)
-        }
+        parameters = {b.index: v for b, v in zip(self.parameter_bindings, runtime_args)}
         return [
             decisions[i] if i in decisions else parameters[i]
             for i in self.tape.input_indicies
@@ -609,8 +549,7 @@ class _PytorchOptimisationProblem:
                 else _reshape(value, self.tape.dim[index])
             )
         return [
-            None if tracer is None else workspace[tracer.index]
-            for tracer in tracers
+            None if tracer is None else workspace[tracer.index] for tracer in tracers
         ]
 
     def _evaluate_cost(self, decision, runtime_args):
@@ -623,9 +562,7 @@ class _PytorchOptimisationProblem:
     def _results(self, decision, runtime_args):
         return [
             _to_numpy_array(value)
-            for value in self._evaluate_tracers(
-                self.outputs, decision, runtime_args
-            )
+            for value in self._evaluate_tracers(self.outputs, decision, runtime_args)
         ]
 
     def _remember_warm_start(self, decision, multipliers):
@@ -676,12 +613,8 @@ def build_optimisation_problem(
     options=None,
 ):
     tape = cost.tape
-    if any(
-        item.tape != tape for item in (*constraints, *parameters, *outputs)
-    ):
-        raise ValueError(
-            "All optimisation expressions must belong to the cost tape"
-        )
+    if any(item.tape != tape for item in (*constraints, *parameters, *outputs)):
+        raise ValueError("All optimisation expressions must belong to the cost tape")
     if options is None:
         selected = PytorchNLPSolverOptions()
     elif isinstance(options, PytorchNLPSolverOptions):

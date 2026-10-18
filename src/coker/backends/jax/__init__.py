@@ -96,11 +96,7 @@ class _JaxFunctionTableTarget:
             (
                 None
                 if input_space is None
-                else (
-                    Noop()
-                    if isinstance(input_space, Noop)
-                    else next(arguments)
-                )
+                else (Noop() if isinstance(input_space, Noop) else next(arguments))
             )
             for input_space in input_spaces
         )
@@ -134,17 +130,13 @@ class _JaxFunctionSymbolResolver(FunctionSymbolResolver):
         try:
             return self._lowered_function_targets[target]
         except KeyError:
-            native_target = _JaxFunctionTableTarget(
-                target, self._backend, self
-            )
+            native_target = _JaxFunctionTableTarget(target, self._backend, self)
             self._lowered_function_targets[target] = native_target
             return native_target
 
 
 def _is_jax_callable(value) -> bool:
-    return isinstance(value, (SymbolicCallable, FunctionSymbol)) or callable(
-        value
-    )
+    return isinstance(value, (SymbolicCallable, FunctionSymbol)) or callable(value)
 
 
 def _evaluate_jax_tape(
@@ -165,9 +157,7 @@ def _evaluate_jax_tape(
     for index, value in zip(tape.input_indicies, inputs):
         workspace[index] = (
             value
-            if value is None
-            or isinstance(value, Noop)
-            or _is_jax_callable(value)
+            if value is None or isinstance(value, Noop) or _is_jax_callable(value)
             else backend.to_backend_array(value)
         )
 
@@ -181,9 +171,7 @@ def _evaluate_jax_tape(
             if op == OP.BIND and argument_index == 2:
                 arguments.append(node)
             elif isinstance(node, Tracer):
-                arguments.append(
-                    workspace[node.index] if node.tape is tape else node
-                )
+                arguments.append(workspace[node.index] if node.tape is tape else node)
             elif _is_jax_callable(node):
                 arguments.append(node)
             else:
@@ -308,18 +296,14 @@ class JaxBackend(Backend):
     def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
-            return self._fit_function_parameter(
-                declaration, target, flat_values
-            )
+            return self._fit_function_parameter(declaration, target, flat_values)
         if isinstance(target, VectorSpace):
             return jnp.reshape(flat_values, target.dimension)
         if isinstance(target, Scalar):
             if flat_values.size != 1:
                 raise ValueError("scalar parameter must have one solver value")
             return flat_values[0]
-        raise TypeError(
-            "parameter target must be a scalar, vector, or function space"
-        )
+        raise TypeError("parameter target must be a scalar, vector, or function space")
 
     @staticmethod
     def _concatenate_parameter_blocks(blocks):
@@ -344,9 +328,7 @@ class JaxBackend(Backend):
             parameters,
         )
 
-    def _evaluate_parameterization(
-        self, parameterization, argument, parameters
-    ):
+    def _evaluate_parameterization(self, parameterization, argument, parameters):
         workspace = {}
         _evaluate_jax_tape(
             parameterization.tape,
@@ -396,13 +378,9 @@ class JaxBackend(Backend):
             return np.reshape(arg, dim.dim)
         elif arg is None:
             return arg
-        raise NotImplementedError(
-            f"Don't know how to resize {arg.__class__.__name__}"
-        )
+        raise NotImplementedError(f"Don't know how to resize {arg.__class__.__name__}")
 
-    def evaluate(
-        self, function: Function, inputs: Sequence[Any]
-    ) -> list[Any | None]:
+    def evaluate(self, function: Function, inputs: Sequence[Any]) -> list[Any | None]:
         workspace = {}
         _evaluate_jax_tape(function.tape, inputs, self, workspace)
         return _cast_outputs(function.output, function.tape, workspace, self)
@@ -423,9 +401,7 @@ class JaxBackend(Backend):
         return JaxLoweredFunction(self, function)
 
     def get_evaluator(self) -> Evaluator:
-        raise NotImplementedError(
-            "JAX lowering does not use compiled tape evaluators"
-        )
+        raise NotImplementedError("JAX lowering does not use compiled tape evaluators")
 
     def import_function(
         self,

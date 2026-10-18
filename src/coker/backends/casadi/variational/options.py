@@ -65,13 +65,9 @@ class CasadiVariationalOptions:
             not math.isfinite(self.minimum_interval_duration)
             or self.minimum_interval_duration <= 0
         ):
-            raise ValueError(
-                "minimum_interval_duration must be finite and positive"
-            )
+            raise ValueError("minimum_interval_duration must be finite and positive")
         if (
             not math.isfinite(self.affine_rank_tolerance)
             or self.affine_rank_tolerance <= 0
         ):
-            raise ValueError(
-                "affine_rank_tolerance must be finite and positive"
-            )
+            raise ValueError("affine_rank_tolerance must be finite and positive")

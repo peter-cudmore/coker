@@ -66,9 +66,7 @@ def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
     dynamics_time = _scalar_symbol(dynamics_args[0], "dynamics time")
     output_time = _scalar_symbol(output_args[0], "output time")
     state = _argument_symbols(dynamics_args[1], state_dimension, "state")
-    output_state = _argument_symbols(
-        output_args[1], state_dimension, "output state"
-    )
+    output_state = _argument_symbols(output_args[1], state_dimension, "output state")
 
     parameter_start = 4
     parameters = _argument_symbols_for_declarations(
@@ -87,24 +85,18 @@ def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
             dynamics_args[parameter_start] is not None
             or output_args[parameter_start] is not None
         ):
-            raise UnsupportedSystemError(
-                "parameter-free model has a parameter input"
-            )
+            raise UnsupportedSystemError("parameter-free model has a parameter input")
 
     _ensure_distinct_symbols((dynamics_time,), state, parameters)
 
     raw_dynamics_expressions = _function_expressions(
         system.dxdt, raw_dynamics, "dynamics"
     )
-    raw_output_expressions = _function_expressions(
-        system.y, raw_outputs, "outputs"
-    )
+    raw_output_expressions = _function_expressions(system.y, raw_outputs, "outputs")
 
     if control_dimension is None:
         if dynamics_args[3] is not None or output_args[3] is not None:
-            raise UnsupportedSystemError(
-                "autonomous model has a control input"
-            )
+            raise UnsupportedSystemError("autonomous model has a control input")
         controls: tuple[sp.Symbol, ...] = ()
         dynamics_control_values: tuple[sp.Expr, ...] = ()
         output_control_values: tuple[sp.Expr, ...] = ()
@@ -174,10 +166,7 @@ def _validate_system(system: DynamicalSystem) -> None:
             subject=subject,
         )
     state_dimension = _require_finite_dimension(dynamics_shapes[1], "state")
-    if (
-        _require_finite_dimension(output_shapes[1], "output state")
-        != state_dimension
-    ):
+    if _require_finite_dimension(output_shapes[1], "output state") != state_dimension:
         raise UnsupportedSystemError(
             "output state shape does not match the dynamics state shape"
         )
@@ -209,9 +198,7 @@ def _parameter_declarations(
     elif isinstance(parameters, tuple):
         declarations = parameters
     else:
-        raise UnsupportedSystemError(
-            "parameters must be scalar or vector spaces"
-        )
+        raise UnsupportedSystemError("parameters must be scalar or vector spaces")
 
     for index, declaration in enumerate(declarations):
         if isinstance(declaration, FunctionSpace):
@@ -232,12 +219,8 @@ def _control_dimension(inputs: object) -> Dimension | None:
     if isinstance(inputs, Noop):
         return None
     if not isinstance(inputs, FunctionSpace):
-        raise UnsupportedSystemError(
-            "controls must be declared as a FunctionSpace"
-        )
-    if len(inputs.arguments) != 1 or not isinstance(
-        inputs.arguments[0], Scalar
-    ):
+        raise UnsupportedSystemError("controls must be declared as a FunctionSpace")
+    if len(inputs.arguments) != 1 or not isinstance(inputs.arguments[0], Scalar):
         raise UnsupportedSystemError(
             "controls must be functions of one scalar time argument"
         )
@@ -269,19 +252,13 @@ def _lower_functions(
             arguments, values = backend.lower_to_symbolic(function)
             lowered.append((arguments, values))
     except (NotImplementedError, TypeError, ValueError) as exc:
-        raise UnsupportedSystemError(
-            f"SymPy cannot lower this system: {exc}"
-        ) from exc
+        raise UnsupportedSystemError(f"SymPy cannot lower this system: {exc}") from exc
 
     if any(
         len(arguments) != len(shapes)
-        for (arguments, _values), (_function, shapes) in zip(
-            lowered, functions
-        )
+        for (arguments, _values), (_function, shapes) in zip(lowered, functions)
     ):
-        raise UnsupportedSystemError(
-            "lowered function arguments are inconsistent"
-        )
+        raise UnsupportedSystemError("lowered function arguments are inconsistent")
     return tuple(lowered)
 
 
@@ -295,9 +272,7 @@ def _validate_signature(
     subject: str,
 ) -> None:
     if len(shapes) != expected_size:
-        raise UnsupportedSystemError(
-            f"{subject} has an unsupported argument signature"
-        )
+        raise UnsupportedSystemError(f"{subject} has an unsupported argument signature")
     if not isinstance(shapes[0], Dimension) or not shapes[0].is_scalar():
         raise UnsupportedSystemError(f"{subject} time input must be scalar")
     _require_finite_dimension(shapes[1], f"{subject} state")
@@ -306,22 +281,13 @@ def _validate_signature(
 
     control_shape = shapes[3]
     if control_dimension is None:
-        if (
-            not isinstance(control_shape, FunctionSpace)
-            or control_shape.name != "noop"
-        ):
-            raise UnsupportedSystemError(
-                "autonomous model has a control input"
-            )
+        if not isinstance(control_shape, FunctionSpace) or control_shape.name != "noop":
+            raise UnsupportedSystemError("autonomous model has a control input")
     elif not isinstance(control_shape, FunctionSpace):
-        raise UnsupportedSystemError(
-            "control input does not match its declaration"
-        )
+        raise UnsupportedSystemError("control input does not match its declaration")
 
     parameter_start = 4
-    parameter_slots = (
-        len(parameter_declarations) if parameter_declarations else 1
-    )
+    parameter_slots = len(parameter_declarations) if parameter_declarations else 1
     for index in range(parameter_slots):
         shape = shapes[parameter_start + index]
         if not parameter_declarations:
@@ -342,9 +308,7 @@ def _validate_signature(
 
 def _dimension_from_declaration(value: Scalar | VectorSpace) -> Dimension:
     return (
-        Dimension.scalar()
-        if isinstance(value, Scalar)
-        else Dimension(value.dimension)
+        Dimension.scalar() if isinstance(value, Scalar) else Dimension(value.dimension)
     )
 
 
@@ -397,9 +361,7 @@ def _argument_symbols_for_declarations(
     if not declarations:
         return ()
     symbols: list[sp.Symbol] = []
-    for index, (argument, declaration) in enumerate(
-        zip(arguments, declarations)
-    ):
+    for index, (argument, declaration) in enumerate(zip(arguments, declarations)):
         symbols.extend(
             _argument_symbols(
                 argument,
@@ -416,19 +378,13 @@ def _function_expressions(
     raw_values = (values,) if function.is_single else tuple(values)
     shapes = function.output_shape()
     if len(raw_values) != len(shapes):
-        raise UnsupportedSystemError(
-            f"{subject} lowering returned invalid outputs"
-        )
+        raise UnsupportedSystemError(f"{subject} lowering returned invalid outputs")
 
     expressions: list[sp.Expr] = []
     for index, (value, shape) in enumerate(zip(raw_values, shapes)):
-        dimension = _require_finite_dimension(
-            shape, f"{subject} output {index}"
-        )
+        dimension = _require_finite_dimension(shape, f"{subject} output {index}")
         expressions.extend(
-            _expressions_for_dimension(
-                value, dimension, f"{subject} output {index}"
-            )
+            _expressions_for_dimension(value, dimension, f"{subject} output {index}")
         )
     return tuple(expressions)
 
@@ -449,9 +405,7 @@ def _control_values(
         ) from exc
 
 
-def _values_for_dimension(
-    value: object, dimension: Dimension
-) -> tuple[sp.Expr, ...]:
+def _values_for_dimension(value: object, dimension: Dimension) -> tuple[sp.Expr, ...]:
     values = _flatten(value)
     if len(values) != dimension.flat():
         raise ValueError("symbolic value does not match declared dimension")
@@ -495,9 +449,7 @@ def _control_symbols(
 def _replace_expressions(
     expressions: Iterable[sp.Expr], replacements: dict[object, object]
 ) -> tuple[sp.Expr, ...]:
-    return tuple(
-        expression.xreplace(replacements) for expression in expressions
-    )
+    return tuple(expression.xreplace(replacements) for expression in expressions)
 
 
 def _ensure_distinct_symbols(
