@@ -218,6 +218,7 @@ class VariationalSolution:
 
         def f(t, v):
             t *= self.t_final
+            v = v.reshape(-1)
             x = self.projectors[0] @ v
             z = (
                 self.projectors[1] @ v
@@ -230,7 +231,9 @@ class VariationalSolution:
                 else None
             )
             u = self.control_law(t)
-            return self.output(t, x, z, u, self._parameter_vector, q)
+            return np.asarray(
+                self.output(t, x, z, u, self._parameter_vector, q)
+            ).reshape(-1)
 
         return InterpolatingPolyCollection(
             [
