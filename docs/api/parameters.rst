@@ -13,4 +13,3 @@ array shape.
 .. autoclass:: coker.parameters.BoundVector
 
 .. autoclass:: coker.parameters.DenseTensorVariable
-

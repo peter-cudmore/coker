@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Distribution metadata links to the public documentation, source repository, issue tracker, and changelog.
 - Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
 - `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.
@@ -35,6 +36,7 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Preserve node-major value layout when evaluating multidimensional polynomial knot derivatives and coupled residual diagnostics.
 - Stabilize PyTorch variational trajectories with low-degree piecewise LGR interpolation, preserving state, quadratures, and physical-time evaluation; restore the trajectory-fit regression.
 - Normalize scalar outputs and column-shaped path samples when converting variational solutions with `to_poly()`.
 - Evaluate variational solutions in physical time using only `t_final`, with normalized CasADi and PyTorch paths and preserved control/defect semantics.

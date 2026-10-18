@@ -194,7 +194,6 @@ and convert only where residual access is required:
    ...     [0.0],
    ... )
 
-
 Functional problem building
 ---------------------------
 

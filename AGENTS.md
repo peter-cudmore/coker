@@ -68,6 +68,10 @@ and helpers or branches that can be inlined without reducing clarity.
 
 ## Pull requests
 
+Pull requests MUST target `develop`, never `main`. Verify the base branch
+before creating or updating a pull request. If host tooling cannot select
+`develop`, escalate instead of using `main`.
+
 Pull requests SHOULD be squash-merged by default. Their descriptions MUST
 include a changelog of user-visible changes.
 

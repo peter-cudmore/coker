@@ -70,18 +70,13 @@ class PytorchVariationalSolverOptions(SolverOptions):
             raise ValueError(f"Unsupported PyTorch optimiser {self.optimiser_method!r}")
         if not isinstance(self.optimiser_options, Mapping):
             raise TypeError("optimiser_options must be a mapping")
-        if (
-            not isinstance(self.trajectory_degree, int)
-            or self.trajectory_degree <= 0
-        ):
+        if not isinstance(self.trajectory_degree, int) or self.trajectory_degree <= 0:
             raise ValueError("trajectory_degree must be a positive integer")
         if (
             not isinstance(self.trajectory_n_intervals, int)
             or self.trajectory_n_intervals <= 0
         ):
-            raise ValueError(
-                "trajectory_n_intervals must be a positive integer"
-            )
+            raise ValueError("trajectory_n_intervals must be a positive integer")
 
 
 @dataclass(frozen=True)

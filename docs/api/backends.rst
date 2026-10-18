@@ -17,4 +17,3 @@ small implicit residual integrator.
 .. autoclass:: coker.backends.numpy.NumpyBackend
 
 .. autoclass:: coker.backends.numpy.NumpySolverParameters
-
