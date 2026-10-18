@@ -17,9 +17,9 @@
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
 - Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
+- Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
 ### Changed
-- Temporarily skip the PyTorch variational trajectory-fit regression while unstable high-degree interpolation is tracked in [#103](https://github.com/peter-cudmore/coker/issues/103); other backend coverage is unchanged.
 - Consolidate API boundaries and migration notes into existing guides and remove premature backend/toolkit documentation.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
@@ -34,6 +34,8 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Stabilize PyTorch variational trajectories with low-degree piecewise LGR interpolation, preserving state, quadratures, and physical-time evaluation; restore the trajectory-fit regression.
+- Normalize scalar outputs and column-shaped path samples when converting variational solutions with `to_poly()`.
 - Evaluate variational solutions in physical time using only `t_final`, with normalized CasADi and PyTorch paths and preserved control/defect semantics.
 - Evaluation, alternate lowering, and explicit problem builds no longer change subsequent implicit backend selection.
 - Lowered mathematical programs expose only objective and requested outputs while still reconstructing private decision captures.
