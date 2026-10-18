@@ -156,6 +156,38 @@ uv run black --check --diff src
 uv run flake8 src tests docs examples scripts
 ```
 
+### Release gate
+
+Pull requests dry-run the release gate. Production publication is triggered
+only by a `v<version>` tag, not by a version bump on `main`. Before tagging,
+set `project.version` in `pyproject.toml` and add a matching dated changelog
+heading, for example `## 0.5.0 - 2026-10-18`, with the actual release date
+(not a future date). Keep the `Unreleased` section for subsequent changes.
+
+The tagged commit must pass the shared Python runtime matrix, lint checks,
+introductory documentation examples, and warning-clean Sphinx build. The
+release workflow builds one sdist and wheel, checks their package versions,
+then installs that wheel with the CasADi extra in a fresh environment outside
+the checkout. The installed-package smoke asserts the public NumPy scalar
+and vector results, CasADi solve success, the fitted decay rate, and physical-time
+trajectory values over a non-unit horizon. Issue [#94](https://github.com/peter-cudmore/coker/issues/94)
+was fixed by [#95](https://github.com/peter-cudmore/coker/pull/95); the physical-time
+smoke guards that release blocker without opening a duplicate defect.
+
+Both registries receive only the immutable artifact uploaded after verification;
+publication jobs never rebuild packages. Same-repository pull requests may
+publish to TestPyPI after all gates pass; tagged releases publish to PyPI.
+Registry environment approval and trusted-publishing configuration remain
+required. Local equivalents of the release-specific checks are:
+
+```bash
+uv build
+uv run --no-project scripts/check_release.py
+uv run python scripts/check_doc_examples.py
+# For a prepared release, also enforce tag/date agreement:
+uv run --no-project scripts/check_release.py --tag v0.5.0
+```
+
 ## Project status
 The package metadata marks Coker as alpha-stage software. The repository already includes automated coverage for symbolic operations, backend lowering, dynamics, and toolkit examples.
 
