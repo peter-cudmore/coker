@@ -29,4 +29,3 @@ Variational problems
 
 .. autoclass:: coker.dynamics.VariationalProblem
    :members: get_solver
-
