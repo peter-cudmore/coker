@@ -33,6 +33,7 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Missing optional CasADi, JAX, and PyTorch backend dependencies now report the requested backend and installation command, including JAX's Python requirement, while preserving the original exception cause and broken-plugin diagnostics.
 - Stabilize PyTorch variational trajectories with low-degree piecewise LGR interpolation, preserving state, quadratures, and physical-time evaluation; restore the trajectory-fit regression.
 - Normalize scalar outputs and column-shaped path samples when converting variational solutions with `to_poly()`.
 - Evaluate variational solutions in physical time using only `t_final`, with normalized CasADi and PyTorch paths and preserved control/defect semantics.

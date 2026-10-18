@@ -22,6 +22,18 @@ backend. Variational problems retain a separate CasADi solver default.
 
 See :doc:`api/index` for canonical imports and :doc:`getting_started` for migration notes.
 
+Missing optional dependencies
+-----------------------------
+
+Looking up ``casadi``, ``jax``, or ``pytorch`` without its dependency raises an
+``ImportError`` naming the backend and its ``pip install "coker[...]"`` command.
+The JAX extra requires Python >=3.11; on Python 3.10, upgrade Python before
+installing ``coker[jax]``. The original ``ModuleNotFoundError`` is preserved as
+the exception's cause. Import failures from installed but broken dependencies
+or third-party plugins retain their original diagnostics. Backend lookup stays
+lazy: base NumPy evaluation and plugin registration do not load optional backends.
+
+
 Backend capability matrix
 -------------------------
 
