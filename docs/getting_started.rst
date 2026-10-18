@@ -20,6 +20,13 @@ JAX requires Python 3.11 or newer. NumPy and SymPy are included in the base
 installation; the other built-in backend entry points need their corresponding
 extras before use.
 
+See :ref:`installation-support` for the exact installed-wheel CI platform and
+Python matrix, backend limits, and CUDA caveat. The base install has CI coverage
+on Ubuntu, Windows, and macOS; isolated optional-extra coverage is Ubuntu-only.
+These CPU-only checks do not establish CUDA support: tensor execution/autograd,
+NLP, ODE/quadratures where implemented, and fitting on CUDA remain experimental
+and unverified pending GPU release evidence.
+
 The double-pendulum visualisation script declares its own NumPy, Matplotlib,
 and local Coker dependencies in inline ``uv`` metadata. From the repository
 root, run:

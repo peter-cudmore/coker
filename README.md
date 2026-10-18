@@ -77,6 +77,16 @@ Base installation:
 pip install coker
 ```
 
+See the [installation CI and support boundary](docs/backends.rst#installation-ci-and-support-boundary)
+for the exact platform/Python matrix and backend limits. Base NumPy/SymPy
+installed-wheel CI covers Ubuntu, Windows, and macOS on Python 3.10 and 3.13;
+each optional extra is checked separately on Ubuntu on Python 3.11 and 3.13.
+JAX requires Python 3.11 or newer. These are CI coverage targets, not a claim
+of observed success on every platform or backend feature parity. All accelerator
+checks are CPU-only: CUDA tensor execution/autograd, NLP, ODE/quadratures where
+implemented, and fitting remain experimental and unverified pending GPU release
+evidence. Optional extras on Windows/macOS are outside this isolated-wheel boundary.
+
 ## Toolkit areas in this repository
 
 ### Symbolic algebra and function composition
