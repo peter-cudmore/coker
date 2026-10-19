@@ -95,6 +95,11 @@ Both :func:`coker.function` and the implicit current-backend fallback use
 ``"numpy"``. Pass ``backend=`` explicitly for portable examples.
 Ordinary evaluation and lowering do not change the current selection.
 
+Prefer CasADi for optimisation, simulation, and high-performance numerical
+workloads; NumPy remains the reference implementation and small-system fallback.
+The NumPy construction default does not change that backend policy. See
+:doc:`backends` for current capability limits and installation requirements.
+
 Migrating to 0.5
 ----------------
 

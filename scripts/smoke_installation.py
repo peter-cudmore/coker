@@ -61,8 +61,7 @@ def check_installation() -> None:
         f"Source import: {origin}",
     )
     library_paths = {
-        Path(sysconfig.get_path(name)).absolute()
-        for name in ("purelib", "platlib")
+        Path(sysconfig.get_path(name)).absolute() for name in ("purelib", "platlib")
     }
     require(
         any(origin.is_relative_to(path) for path in library_paths),
@@ -70,21 +69,16 @@ def check_installation() -> None:
     )
     distribution = metadata.distribution("coker")
     installed_files = distribution.files
-    require(
-        installed_files is not None, "Coker distribution has no file manifest"
-    )
+    require(installed_files is not None, "Coker distribution has no file manifest")
     require(
         any(
             str(file).replace("\\", "/") == "coker/__init__.py"
-            and Path(distribution.locate_file(file)).resolve()
-            == resolved_origin
+            and Path(distribution.locate_file(file)).resolve() == resolved_origin
             for file in installed_files
         ),
         f"Imported Coker is not the installed distribution artifact: {origin}",
     )
-    print(
-        f"Installed Coker {distribution.version}: {origin} ({sys.executable})"
-    )
+    print(f"Installed Coker {distribution.version}: {origin} ({sys.executable})")
 
 
 def check_base() -> None:
@@ -119,6 +113,11 @@ def check_casadi() -> None:
     import numpy as np
     from coker.algebra.ops import Noop
     from coker.backends import get_backend_by_name
+    from coker.backends.casadi import (
+        CasadiResidualSolver,
+        CasadiResidualSolverOptions,
+    )
+    from coker.dynamics import ResidualDynamicalSystem
 
     polynomial = coker.function(
         [coker.Scalar("x")], lambda x: x * x + 2, backend="casadi"
@@ -139,26 +138,56 @@ def check_casadi() -> None:
     np.testing.assert_allclose(np.asarray(x_final), expected, rtol=1e-5)
     np.testing.assert_allclose(np.asarray(z_final), expected, rtol=1e-5)
     require(q_final is None, "IDAS returned unexpected quadrature")
-    print(
-        "CasADi function and Coker residual integration: IDAS, x' = z, z = x"
-    )
+    print("CasADi function and Coker residual integration: IDAS, x' = z, z = x")
 
-    # Coker's residual API selects IDAS. Exercise collocation explicitly;
-    # an IDAS failure must not silently count as a successful fallback.
-    x = ca.MX.sym("x")
-    z = ca.MX.sym("z")
-    collocation = ca.integrator(
-        "smoke_collocation",
-        "collocation",
-        {"x": x, "z": z, "ode": z, "alg": z - x},
-        0.0,
-        0.25,
-        {"number_of_finite_elements": 20, "interpolation_order": 3},
+    residual = ResidualDynamicalSystem(
+        inputs=None,
+        parameters=None,
+        x0=coker.function(
+            [coker.VectorSpace("z", 1), Noop(), None],
+            lambda _z, _u, _p: (np.array([1.0]), None),
+            backend="casadi",
+        ),
+        F=coker.function(
+            [
+                coker.Scalar("t"),
+                coker.VectorSpace("w", 1),
+                coker.VectorSpace("wdot", 1),
+                coker.VectorSpace("z", 1),
+                Noop(),
+                None,
+            ],
+            lambda _t, w, wdot, z, _u, _p: np.array([wdot[0] - z[0], z[0] - w[0]]),
+            backend="casadi",
+        ),
+        y=coker.function(
+            [
+                coker.Scalar("t"),
+                coker.VectorSpace("x", 1),
+                coker.VectorSpace("z", 1),
+                Noop(),
+                None,
+                None,
+            ],
+            lambda _t, x, _z, _u, _p, _q: x,
+            backend="casadi",
+        ),
+        differential=coker.Dimension(1),
+        algebraic=coker.Dimension(1),
+        quadrature=None,
     )
-    result = collocation(x0=1.0, z0=1.0)
-    np.testing.assert_allclose(np.asarray(result["xf"]), expected, rtol=1e-5)
-    np.testing.assert_allclose(np.asarray(result["zf"]), expected, rtol=1e-5)
-    print("CasADi explicit collocation: same residual and exp(0.25) oracle")
+    for solver in (CasadiResidualSolver.IDAS, CasadiResidualSolver.VARIATIONAL):
+        x_final, z_final, q_final = backend.evaluate_integrals(
+            residual,
+            [np.array([1.0]), np.array([1.0]), None],
+            0.25,
+            [None, None],
+            CasadiResidualSolverOptions(solver),
+        )
+        np.testing.assert_allclose(np.asarray(x_final), expected, rtol=1e-5)
+        np.testing.assert_allclose(np.asarray(z_final), expected, rtol=1e-5)
+        require(q_final is None, "Residual solver returned unexpected quadrature")
+        print(f"Coker residual {solver.value}: x' = z, z = x, x(0.25) = exp(0.25)")
 
 
 def check_jax() -> None:
@@ -209,13 +238,9 @@ def check_pytorch() -> None:
         argument.grad, torch.tensor([4.0, -6.0], dtype=torch.float64)
     )
 
-    initial = torch.tensor(
-        [2.0], dtype=torch.float64, device="cpu", requires_grad=True
-    )
+    initial = torch.tensor([2.0], dtype=torch.float64, device="cpu", requires_grad=True)
     quadrature = torch.zeros_like(initial, requires_grad=True)
-    x_final, z_final, q_final = PytorchBackend(
-        device="cpu"
-    ).evaluate_integrals(
+    x_final, z_final, q_final = PytorchBackend(device="cpu").evaluate_integrals(
         [
             lambda _t, x, _z, _u, _p: x * 0,
             Noop(),
@@ -241,13 +266,9 @@ def check_pytorch() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "installation", choices=[item.value for item in Installation]
-    )
+    parser.add_argument("installation", choices=[item.value for item in Installation])
     installation = Installation(parser.parse_args().installation)
-    require(
-        bool(sys.flags.isolated), "Invoke with Python -I for isolated imports"
-    )
+    require(bool(sys.flags.isolated), "Invoke with Python -I for isolated imports")
     check_dependencies(installation)
     check_installation()
     check_base()

@@ -184,9 +184,7 @@ class FunctionSpace:
     """
 
     def __post_init__(self) -> None:
-        if self.output is None or any(
-            output is None for output in self.output
-        ):
+        if self.output is None or any(output is None for output in self.output):
             raise TypeError("FunctionSpace output spaces must not be None")
 
     def input_dimensions(self):
@@ -219,13 +217,15 @@ class FunctionSpace:
 
     def matches_signature(self, other: FunctionSpace) -> bool:
         """Return whether another function space has the same I/O shapes."""
-        return (
-            isinstance(other, FunctionSpace)
-            and tuple(self.input_dimensions())
-            == tuple(other.input_dimensions())
-            and tuple(self.output_dimensions())
-            == tuple(other.output_dimensions())
+        if not isinstance(other, FunctionSpace):
+            return False
+        input_dimensions_match = tuple(self.input_dimensions()) == tuple(
+            other.input_dimensions()
         )
+        output_dimensions_match = tuple(self.output_dimensions()) == tuple(
+            other.output_dimensions()
+        )
+        return input_dimensions_match and output_dimensions_match
 
     def validate_argument(
         self,
@@ -246,9 +246,7 @@ class FunctionSpace:
         if isinstance(actual_dimension, FunctionSpace) and isinstance(
             expected_dimension, FunctionSpace
         ):
-            dimensions_match = actual_dimension.matches_signature(
-                expected_dimension
-            )
+            dimensions_match = actual_dimension.matches_signature(expected_dimension)
         elif isinstance(actual_dimension, Dimension) and isinstance(
             expected_dimension, Dimension
         ):
@@ -291,15 +289,13 @@ class FunctionSpace:
         """Return whether a Coker function has this input/output signature."""
         if not isinstance(value, FunctionSignatureValue):
             return False
-        return tuple(value.input_shape()) == tuple(
+        input_dimensions_match = tuple(value.input_shape()) == tuple(
             self.input_dimensions()
-        ) and tuple(
-            dimension
-            for dimension in value.output_shape()
-            if dimension is not None
-        ) == tuple(
-            self.output_dimensions()
         )
+        output_dimensions_match = tuple(
+            dimension for dimension in value.output_shape() if dimension is not None
+        ) == tuple(self.output_dimensions())
+        return input_dimensions_match and output_dimensions_match
 
     def evaluation_dimension(
         self,
@@ -314,11 +310,11 @@ class FunctionSpace:
 
     def is_scalar(self):
         output_dimensions = self.output_dimensions()
-        return (
-            len(output_dimensions) == 1
-            and isinstance(output_dimensions[0], Dimension)
-            and output_dimensions[0].is_scalar()
-        )
+        if len(output_dimensions) != 1:
+            return False
+        (output_dimension,) = output_dimensions
+        is_dimension = isinstance(output_dimension, Dimension)
+        return is_dimension and output_dimension.is_scalar()
 
     @staticmethod
     def create_scalar_function_space(

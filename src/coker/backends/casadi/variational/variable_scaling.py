@@ -105,9 +105,7 @@ def _safe_distance(first: float, second: float) -> float:
     return min(distance, float(np.finfo(float).max))
 
 
-def _derive_variable_scaling(
-    lower: Any, guess: Any, upper: Any
-) -> _VariableScaling:
+def _derive_variable_scaling(lower: Any, guess: Any, upper: Any) -> _VariableScaling:
     """Derive a stable positive affine transform from bounds and a guess.
 
     Finite intervals use their midpoint and half-span. One-sided intervals
@@ -140,13 +138,9 @@ def _derive_variable_scaling(
             else:
                 offset[i], scale[i] = midpoint, half_span
         elif finite_lower:
-            offset[i], scale[i] = lower_i, max(
-                1.0, _safe_distance(guess_i, lower_i)
-            )
+            offset[i], scale[i] = lower_i, max(1.0, _safe_distance(guess_i, lower_i))
         elif finite_upper:
-            offset[i], scale[i] = upper_i, max(
-                1.0, _safe_distance(guess_i, upper_i)
-            )
+            offset[i], scale[i] = upper_i, max(1.0, _safe_distance(guess_i, upper_i))
         else:
             offset[i], scale[i] = guess_i, max(1.0, abs(guess_i))
 
@@ -179,10 +173,7 @@ def _derive_constraint_scaling(
     jacobian_array = np.asarray(jacobian, dtype=float)
     if values_array.size != lower_bounds.size:
         raise ValueError("constraint bounds must match residual size")
-    if not (
-        np.all(np.isfinite(values_array))
-        and np.all(np.isfinite(jacobian_array))
-    ):
+    if not (np.all(np.isfinite(values_array)) and np.all(np.isfinite(jacobian_array))):
         raise ValueError("constraint residual and Jacobian must be finite")
 
     bound_magnitudes = np.maximum(
@@ -190,8 +181,6 @@ def _derive_constraint_scaling(
         np.where(np.isfinite(upper_bounds), np.abs(upper_bounds), 0.0),
     )
     sensitivities = np.max(np.abs(jacobian_array), axis=1)
-    scales = np.maximum.reduce(
-        [np.abs(values_array), sensitivities, bound_magnitudes]
-    )
+    scales = np.maximum.reduce([np.abs(values_array), sensitivities, bound_magnitudes])
     scales[scales == 0.0] = 1.0
     return scales

@@ -15,9 +15,7 @@ from coker.parameters import DenseTensorVariable, ParameterVariable
 from .base import FunctionParameter
 
 
-def _concrete_parameter_name(
-    name: str | None, fallback: str, suffix: str
-) -> str:
+def _concrete_parameter_name(name: str | None, fallback: str, suffix: str) -> str:
     prefix = name if isinstance(name, str) and name else fallback
     return f"{prefix}_{suffix}"
 
@@ -25,9 +23,7 @@ def _concrete_parameter_name(
 def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
     if not isinstance(target, FunctionSpace):
         raise TypeError("target must be a FunctionSpace")
-    if len(target.arguments) != 1 or not isinstance(
-        target.arguments[0], Scalar
-    ):
+    if len(target.arguments) != 1 or not isinstance(target.arguments[0], Scalar):
         raise ValueError("target must have exactly one scalar argument")
     if len(target.output) != 1 or not isinstance(target.output[0], Scalar):
         raise ValueError("target must have exactly one scalar output")
@@ -78,18 +74,14 @@ class MonotonePiecewiseLinear(FunctionParameter):
         if not np.all(np.isfinite(domain_knots)) or not np.all(
             np.diff(domain_knots) > 0
         ):
-            raise ValueError(
-                "domain_knots must be finite and strictly increasing"
-            )
+            raise ValueError("domain_knots must be finite and strictly increasing")
         if not isinstance(self.lower_bound, Real) or not isinstance(
             self.upper_bound, Real
         ):
             raise TypeError("bounds must be real scalars")
         lower, upper = float(self.lower_bound), float(self.upper_bound)
         if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
-            raise ValueError(
-                "lower_bound must be finite and less than upper_bound"
-            )
+            raise ValueError("lower_bound must be finite and less than upper_bound")
         guess = _validate_basis_values(self.guess, domain_knots.size)
         object.__setattr__(
             self,
@@ -139,9 +131,7 @@ class MonotonePiecewiseLinear(FunctionParameter):
             slope = (values[index + 1] - values[index]) / (
                 self.domain_knots[index + 1] - self.domain_knots[index]
             )
-            segment = values[index] + slope * (
-                argument - self.domain_knots[index]
-            )
+            segment = values[index] + slope * (argument - self.domain_knots[index])
             result = if_then_else(
                 argument <= self.domain_knots[index],
                 values[index],
@@ -151,6 +141,4 @@ class MonotonePiecewiseLinear(FunctionParameter):
                     result,
                 ),
             )
-        return if_then_else(
-            argument <= self.domain_knots[0], values[0], result
-        )
+        return if_then_else(argument <= self.domain_knots[0], values[0], result)

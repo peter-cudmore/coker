@@ -48,9 +48,7 @@ class UnitQuaternion:
         if isinstance(other, UnitQuaternion):
             return quaternion_mul(self, other)
 
-        assert other.shape == (
-            3,
-        ), f"Cannot mul a vector of shape {other.shape}"
+        assert other.shape == (3,), f"Cannot mul a vector of shape {other.shape}"
         p = UnitQuaternion(0, other)
 
         return quaternion_mul(self, p)
@@ -62,9 +60,7 @@ class UnitQuaternion:
         elif isinstance(other, UnitQuaternion):
             p = other
         else:
-            raise NotImplementedError(
-                "Can't right multiply by {}".format(other)
-            )
+            raise NotImplementedError("Can't right multiply by {}".format(other))
 
         return quaternion_mul(p, self)
 

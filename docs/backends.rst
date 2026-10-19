@@ -74,13 +74,17 @@ Backend capability matrix
      - Dependency story
      - Repository test coverage (not platform or CUDA certification)
    * - ``numpy``
-     - Direct numerical evaluation, baseline execution, and host-side ODE work.
+     - Reference execution and small-system fallback.
      - Included in the base install.
      - Covered by ``tests/backends/numpy/`` and the benchmark suite.
    * - ``casadi``
-     - Nonlinear optimisation, transcription-heavy workflows, and the default
-       :class:`~coker.dynamics.VariationalProblem` solve path.
-     - Install with ``pip install "coker[casadi]"``.
+     - Optimisation, simulation, and high-performance numerical work,
+       including nonlinear transcription workflows.
+     - Install with ``pip install "coker[casadi]"``. Independent residual DAEs
+       default to native IDAS. ``CasadiResidualSolverOptions`` selects either
+       ``CasadiResidualSolver.IDAS`` or the explicit
+       ``CasadiResidualSolver.VARIATIONAL`` collocation path; solver failures
+       do not silently switch algorithms.
      - Covered by ``tests/backends/casadi/`` and the variational solver tests.
    * - ``sympy``
      - Symbolic inspection and expression printing. Function-space inputs and
@@ -102,9 +106,8 @@ Backend capability matrix
        and forwards ``optimiser_options`` to the selected PyTorch optimizer.
        Constraint handling uses the backend's barrier and augmented-Lagrangian
        stages. ``PytorchODESolverParameters`` configures ``torchdiffeq``
-       initial-value solves only. Variational fitting currently has no
-       separate options object: its fixed integration and LBFGS settings are
-       implementation defaults.
+       initial-value solves only. ``PytorchVariationalSolverOptions`` sets
+       trajectory degree and interval count for fixed-horizon parameter fitting.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
        backend tests. Algebraic DAEs, variational controls, quadratures,
        constraints, and optimized horizons are unsupported.
@@ -114,8 +117,9 @@ Choosing a backend
 
 A good default is:
 
-- use ``numpy`` while bringing up a model or debugging array shapes;
-- use ``casadi`` for solve-heavy optimisation and parameter-fitting problems;
+- use ``numpy`` as a reference implementation or for small systems;
+- use ``casadi`` for optimisation, simulation, and high-performance numerical
+  work;
 - use ``pytorch`` when you need tensor-valued execution, autograd, or a
   nonlinear mathematical-program solve on PyTorch;
 - use ``sympy`` when you need symbolic forms or printable expressions.

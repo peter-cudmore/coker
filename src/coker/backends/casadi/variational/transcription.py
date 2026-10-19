@@ -12,8 +12,9 @@ from coker.backends.casadi.variational.variable_scaling import (
     _derive_constraint_scaling,
     _derive_variable_scaling,
 )
+from coker.backends.casadi.residual_support import quiet_ipopt_options
 from coker.dynamics import VariationalProblem, VariationalSolution
-from coker.parameters import BoundedVariable, ParameterVariable
+from coker.parameters import BoundedVariable
 from coker.dynamics.transcription.collocation import (
     _predict_refined_degree,
     _split_refined_interval,
@@ -40,6 +41,12 @@ from .symbolic_path import (
     SymbolicPolyCollection,
 )
 
+FixedParameter = BoundedVariable | float
+FixedParameterMap = Dict[str, FixedParameter]
+ArgumentMapper = Callable[
+    [FixedParameterMap, Optional[VariationalSolution]], Dict[str, ca.DM]
+]
+
 
 def _derive_objective_scale(nominal_cost: object, tolerance: object) -> float:
     """Return a finite scale that never amplifies a sub-unit objective."""
@@ -60,14 +67,13 @@ class CasadiVariationalSolver(VariationalSolver):
         *,
         problem: VariationalProblem,
         parameters: List[str],
-        map_arguments: Callable[..., Dict[str, ca.DM]],
+        map_arguments: ArgumentMapper,
         solver: ca.Function,
-        assemble_solution: Callable[
-            [ca.DM, float, object], VariationalSolution
-        ],
+        assemble_solution: Callable[[ca.DM, float, object], VariationalSolution],
         initialiser: Optional[ca.Function] = None,
         warm_start: bool = False,
         unscale_objective: Callable[[float], float] = float,
+        callback_wrapper: Optional[CallbackWrapper] = None,
     ):
         self.problem = problem
         self._parameters = parameters
@@ -77,18 +83,19 @@ class CasadiVariationalSolver(VariationalSolver):
         self._initialiser = initialiser
         self._warm_start = warm_start
         self._unscale_objective = unscale_objective
+        self._callback_wrapper = callback_wrapper
         self._last_primal: Optional[ca.DM] = None
         self._last_lam_x: Optional[ca.DM] = None
         self._last_lam_g: Optional[ca.DM] = None
         self._adaptive_solve: Optional[
-            Callable[[Dict[str, float]], VariationalSolution]
+            Callable[[FixedParameterMap], VariationalSolution]
         ] = None
 
     @property
     def parameters(self) -> List[str]:
         return list(self._parameters)
 
-    def solve(self, **fixed_parameters) -> VariationalSolution:
+    def solve(self, **fixed_parameters: FixedParameter) -> VariationalSolution:
         if self._adaptive_solve is not None:
             return self._adaptive_solve(fixed_parameters)
         return self._solve_once(**fixed_parameters)
@@ -96,12 +103,10 @@ class CasadiVariationalSolver(VariationalSolver):
     def _solve_once(
         self,
         previous_solution: Optional[VariationalSolution] = None,
-        **fixed_parameters,
+        **fixed_parameters: FixedParameter,
     ) -> VariationalSolution:
         """Solve one fixed transcription without adaptive mesh dispatch."""
-        solver_arguments = self._map_arguments(
-            fixed_parameters, previous_solution
-        )
+        solver_arguments = self._map_arguments(fixed_parameters, previous_solution)
         x0 = solver_arguments["x0"]
         solver_kwargs = {
             "lbx": solver_arguments["lbx"],
@@ -133,9 +138,7 @@ class CasadiVariationalSolver(VariationalSolver):
             )
             x0 = initialised["x"]
             initial_cost = float(initialised["f"])
-            assert (
-                initial_cost <= ca.inf
-            ), f"Cost at guess {initial_cost} is not finite"
+            assert initial_cost <= ca.inf, f"Cost at guess {initial_cost} is not finite"
 
         result = self._solver(
             x0=x0,
@@ -145,23 +148,16 @@ class CasadiVariationalSolver(VariationalSolver):
         if not solve_info.success:
             objective = float(result["f"])
             constraints = np.asarray(result["g"], dtype=float).reshape(-1)
-            decision_variables = np.asarray(result["x"], dtype=float).reshape(
-                -1
-            )
-            lower_bounds = np.asarray(
-                solver_arguments["lbg"], dtype=float
-            ).reshape(-1)
-            upper_bounds = np.asarray(
-                solver_arguments["ubg"], dtype=float
-            ).reshape(-1)
+            decision_variables = np.asarray(result["x"], dtype=float).reshape(-1)
+            lower_bounds = np.asarray(solver_arguments["lbg"], dtype=float).reshape(-1)
+            upper_bounds = np.asarray(solver_arguments["ubg"], dtype=float).reshape(-1)
             maximum_constraint_violation = max(
                 0.0,
                 float(np.max(lower_bounds - constraints, initial=0.0)),
                 float(np.max(constraints - upper_bounds, initial=0.0)),
             )
             accepts_small_search_direction = (
-                solve_info.return_status
-                == "Search_Direction_Becomes_Too_Small"
+                solve_info.return_status == "Search_Direction_Becomes_Too_Small"
                 and math.isfinite(objective)
                 and np.isfinite(constraints).all()
                 and np.isfinite(decision_variables).all()
@@ -221,20 +217,72 @@ class _ConstraintAccumulator:
                 provenance,
             )
 
-    def add_constraint(
-        self, constraint, args, provenance, *, validate_shape: bool = False
-    ) -> None:
-        (value,) = self._factory.casadi.evaluate(constraint.residual, args)
+    def _evaluate_constraint(
+        self,
+        constraint,
+        *,
+        time,
+        state,
+        algebraic,
+        control,
+        parameters,
+        quadrature,
+    ):
+        arguments = (time, state, algebraic, control, parameters, quadrature)
+        (value,) = self._factory.casadi.evaluate(constraint.residual, arguments)
         lower = self._factory.casadi.to_backend_array(constraint.lower_bound)
         upper = self._factory.casadi.to_backend_array(constraint.upper_bound)
-        if validate_shape:
-            assert lower.shape == value.shape == upper.shape
+        return value, lower, upper
+
+    def add_constraint(
+        self,
+        constraint,
+        provenance,
+        *,
+        time,
+        state,
+        algebraic,
+        control,
+        parameters,
+        quadrature,
+    ) -> None:
+        value, lower, upper = self._evaluate_constraint(
+            constraint,
+            time=time,
+            state=state,
+            algebraic=algebraic,
+            control=control,
+            parameters=parameters,
+            quadrature=quadrature,
+        )
+        self._add_rows(value, lower, upper, provenance)
+
+    def add_terminal_constraint(
+        self,
+        constraint,
+        provenance,
+        *,
+        time,
+        state,
+        algebraic,
+        control,
+        parameters,
+        quadrature,
+    ) -> None:
+        value, lower, upper = self._evaluate_constraint(
+            constraint,
+            time=time,
+            state=state,
+            algebraic=algebraic,
+            control=control,
+            parameters=parameters,
+            quadrature=quadrature,
+        )
+        assert lower.shape == value.shape == upper.shape
         self._add_rows(value, lower, upper, provenance)
 
     def build(self, decision_variables):
-        rows = preprocess_constraint_rows(
-            self._rows, tolerance=self._factory.tolerance
-        )
+        rows = preprocess_constraint_rows(self._rows, tolerance=self._factory.tolerance)
         if self._factory.options.reduce_affine_equalities:
             rows = reduce_affine_equality_rows(
                 rows,
@@ -312,9 +360,7 @@ def _scale_nlp(
         normalized_cost = ca.substitute(
             cost, raw_decision_variables, physical_variables
         )
-        normalized_g = ca.substitute(
-            g, raw_decision_variables, physical_variables
-        )
+        normalized_g = ca.substitute(g, raw_decision_variables, physical_variables)
         objective_scale = _derive_objective_scale(
             float(
                 ca.Function("nominal_cost", [raw_decision_variables], [cost])(
@@ -390,13 +436,7 @@ def _compile_nlp(
     solver_options = dict(factory.options.optimiser_options)
     warm_start = bool(solver_options.pop("warm_start", False))
     if not factory.options.verbose:
-        solver_options.update(
-            {
-                "ipopt.print_level": 0,
-                "print_time": False,
-                "ipopt.sb": "yes",
-            }
-        )
+        solver_options = quiet_ipopt_options(solver_options)
 
     scaled = _scale_nlp(
         factory=factory,
@@ -539,7 +579,6 @@ def _create_solver(
     problem = factory.problem
     duration = factory.duration
     projectors = factory._projectors
-
     poly_collection = SymbolicPolyCollection(
         name="x",
         dimension=factory.path_size,
@@ -600,17 +639,17 @@ def _create_solver(
 
     q_initial = ca.DM.zeros(factory.q_size, 1)
     u_initial = factory.control_eval(t0)
-    initial_args = (
-        t0,
-        factory.proj_x @ x0_symbol,
-        z0_val,
-        u_initial,
-        factory.p,
-        q_initial,
-    )
+    initial_state = factory.proj_x @ x0_symbol
     for constraint in problem.initial_constraints:
         constraints.add_constraint(
-            constraint, initial_args, ("initial constraint", None, None)
+            constraint,
+            ("initial constraint", None, None),
+            time=t0,
+            state=initial_state,
+            algebraic=z0_val,
+            control=u_initial,
+            parameters=factory.p,
+            quadrature=q_initial,
         )
 
     system_parameters = factory.proj_p @ factory.p
@@ -621,63 +660,39 @@ def _create_solver(
             x = factory.proj_x @ v
             z = factory.proj_z @ v
             dx = factory.proj_x @ dv
+            q = factory.proj_q @ v
+            dq = factory.proj_q @ dv
             control = factory.control_eval(t)
-            (dynamics_ij,) = factory.evaluate_dynamics(
-                physical_t,
-                x,
-                z,
-                control,
-                system_parameters,
+            residual_ij = factory.evaluate_symbolic_residual(
+                time=physical_t,
+                state=x,
+                state_rate=dx / duration,
+                algebraic=z,
+                quadrature=q,
+                quadrature_rate=dq / duration,
+                control=control,
+                parameters=system_parameters,
             )
             constraints.add_equality(
-                dx - duration * dynamics_ij,
+                residual_ij,
                 factory.derivative_defect_tolerance,
-                ("dynamics defect", interval, node),
+                ("residual", interval, node),
             )
 
-            if factory.q_size > 0:
-                dq = factory.proj_q @ dv
-                quadrature_values = []
-                if factory.has_state_quadrature:
-                    (base_quadrature,) = factory.evaluate_quadrature(
-                        physical_t,
-                        x,
-                        z,
-                        control,
-                        system_parameters,
-                    )
-                    quadrature_values.append(base_quadrature)
-                quadrature_values.extend(
-                    factory.evaluate_registered_quadratures(
-                        (
-                            physical_t,
-                            x,
-                            z,
-                            control,
-                            system_parameters,
-                            factory.proj_q @ v,
-                        )
-                    )
+            if factory.q_size > factory.system_quadrature_size:
+                registered_rates = factory.evaluate_registered_quadratures(
+                    time=physical_t,
+                    state=x,
+                    algebraic=z,
+                    control=control,
+                    parameters=system_parameters,
+                    quadrature=q,
                 )
-                quadrature_ij = duration * ca.vertcat(*quadrature_values)
                 constraints.add_equality(
-                    dq - quadrature_ij,
+                    dq[factory.system_quadrature_size :]
+                    - duration * ca.vertcat(*registered_rates),
                     factory.derivative_defect_tolerance,
                     ("quadrature defect", interval, node),
-                )
-
-            if factory.z_size > 0:
-                (alg,) = factory.evaluate_algebraic(
-                    physical_t,
-                    x,
-                    z,
-                    control,
-                    system_parameters,
-                )
-                constraints.add_equality(
-                    alg,
-                    factory.tolerance,
-                    ("algebraic constraint", interval, node),
                 )
 
     # Path constraints apply at interval endpoints and collocation knots.
@@ -687,17 +702,18 @@ def _create_solver(
             x = factory.proj_x @ v
             z = factory.proj_z @ v
             q = factory.proj_q @ v
-            args = (
-                physical_t,
-                x,
-                z,
-                factory.control_eval(t),
-                factory.proj_p @ factory.p,
-                q,
-            )
+            control = factory.control_eval(t)
+            parameters = factory.proj_p @ factory.p
             for constraint in problem.path_constraints:
                 constraints.add_constraint(
-                    constraint, args, ("path constraint", interval, node)
+                    constraint,
+                    ("path constraint", interval, node),
+                    time=physical_t,
+                    state=x,
+                    algebraic=z,
+                    control=control,
+                    parameters=parameters,
+                    quadrature=q,
                 )
 
     path_lower_bound = -ca.DM.ones(poly_collection.size(), 1) * ca.inf
@@ -716,21 +732,16 @@ def _create_solver(
     z_end_val = factory.proj_z @ v_end
     q_end_val = factory.proj_q @ v_end
     u_end = factory.control_eval(t_end)
-    end_args = (
-        duration * t_end,
-        x_end_val,
-        z_end_val,
-        u_end,
-        factory.p,
-        q_end_val,
-    )
-
     for constraint in problem.terminal_constraints:
-        constraints.add_constraint(
+        constraints.add_terminal_constraint(
             constraint,
-            end_args,
             ("terminal constraint", None, None),
-            validate_shape=True,
+            time=duration * t_end,
+            state=x_end_val,
+            algebraic=z_end_val,
+            control=u_end,
+            parameters=factory.p,
+            quadrature=q_end_val,
         )
 
     g, lbg, ubg = constraints.build(decision_variables)
@@ -767,9 +778,7 @@ def _create_solver(
     parameter_offset = layout.parameter_slice.start
     path_offset = layout.horizon_size
     path_slice = slice(path_offset, path_offset + layout.path_size)
-    control_slice = slice(
-        path_slice.stop, path_slice.stop + layout.control_size
-    )
+    control_slice = slice(path_slice.stop, path_slice.stop + layout.control_size)
 
     def interpolate_path_guess(previous_path) -> ca.DM:
         return poly_collection.collect_guess(previous_path)
@@ -781,9 +790,7 @@ def _create_solver(
         if len(previous_controls) != len(factory.control_factory.sizes):
             return None
         values = []
-        for control, size in zip(
-            previous_controls, factory.control_factory.sizes
-        ):
+        for control, size in zip(previous_controls, factory.control_factory.sizes):
             value = np.asarray(control.value, dtype=float).reshape((-1,))
             if value.size != size:
                 return None
@@ -791,12 +798,10 @@ def _create_solver(
         return ca.vertcat(*values)
 
     def map_arguments(
-        fixed_parameters: Dict[str, ParameterVariable],
+        fixed_parameters: FixedParameterMap,
         previous_solution: Optional[VariationalSolution] = None,
     ) -> Dict[str, ca.DM]:
-        unknown = sorted(
-            set(fixed_parameters) - set(factory.parameter_indices)
-        )
+        unknown = sorted(set(fixed_parameters) - set(factory.parameter_indices))
         if unknown:
             raise KeyError(f"Unknown solver parameters: {', '.join(unknown)}")
 
@@ -806,9 +811,7 @@ def _create_solver(
         p_guess = ca.DM(factory.p_guess_base)
 
         if previous_solution is not None:
-            physical_x0[path_slice] = interpolate_path_guess(
-                previous_solution.path
-            )
+            physical_x0[path_slice] = interpolate_path_guess(previous_solution.path)
             if factory.free_horizon:
                 physical_x0[layout.horizon_slice] = previous_solution.t_final
             control_guess = compatible_control_guess(previous_solution)
@@ -844,21 +847,15 @@ def _create_solver(
             ubx = physical_ubx
         else:
             x0 = ca.DM(variable_scaling.encode(physical_x0))
-            lbx, ubx = variable_scaling.encode_bounds(
-                physical_lbx, physical_ubx
-            )
+            lbx, ubx = variable_scaling.encode_bounds(physical_lbx, physical_ubx)
         init_control_guess = physical_x0[control_slice]
         init_horizon_guess = (
             physical_x0[layout.horizon_slice]
             if factory.free_horizon
             else ca.DM.zeros(0, 1)
         )
-        init_lbg = ca.vertcat(
-            lbg, p_guess, init_control_guess, init_horizon_guess
-        )
-        init_ubg = ca.vertcat(
-            ubg, p_guess, init_control_guess, init_horizon_guess
-        )
+        init_lbg = ca.vertcat(lbg, p_guess, init_control_guess, init_horizon_guess)
+        init_ubg = ca.vertcat(ubg, p_guess, init_control_guess, init_horizon_guess)
         return {
             "x0": x0,
             "lbx": lbx,
@@ -878,8 +875,8 @@ def _create_solver(
         initialiser=init_solver,
         warm_start=warm_start,
         unscale_objective=unscale_objective,
+        callback_wrapper=callback_wrapper,
     )
-    solver._callback_wrapper = callback_wrapper
     return solver
 
 
@@ -890,16 +887,10 @@ def create_variational_solver(
     options = _resolve_options(problem)
     if (
         options.refinement_enabled
-        and options.maximum_degree
-        < problem.transcription_options.minimum_degree
+        and options.maximum_degree < problem.transcription_options.minimum_degree
     ):
-        raise ValueError(
-            "maximum_degree must be at least transcription minimum_degree"
-        )
-    if (
-        options.refinement_enabled
-        and problem.transcription_options.minimum_degree <= 1
-    ):
+        raise ValueError("maximum_degree must be at least transcription minimum_degree")
+    if options.refinement_enabled and problem.transcription_options.minimum_degree <= 1:
         raise ValueError(
             "transcription minimum_degree must be greater than one "
             "for adaptive refinement"
@@ -937,7 +928,7 @@ def create_variational_solver(
         return initial_solver
 
     def solve_adaptive(
-        fixed_parameters: Dict[str, float],
+        fixed_parameters: FixedParameterMap,
     ) -> VariationalSolution:
         intervals = initial_intervals
         degrees = initial_degrees
@@ -968,9 +959,7 @@ def create_variational_solver(
 
             new_intervals = []
             new_degrees = []
-            for (start, stop), degree, error in zip(
-                intervals, degrees, errors
-            ):
+            for (start, stop), degree, error in zip(intervals, degrees, errors):
                 if error <= options.mesh_tolerance:
                     new_intervals.append((start, stop))
                     new_degrees.append(degree)
@@ -989,9 +978,7 @@ def create_variational_solver(
                 new_degrees.extend(refined_degrees)
             previous_solution = solution
             intervals, degrees = new_intervals, new_degrees
-        raise RuntimeError(
-            "CasADi adaptive refinement terminated unexpectedly"
-        )
+        raise RuntimeError("CasADi adaptive refinement terminated unexpectedly")
 
     initial_solver._adaptive_solve = solve_adaptive
     return initial_solver
