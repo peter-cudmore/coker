@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- Installed-wheel CI profiles for isolated base NumPy/SymPy installations on Ubuntu, Windows, and macOS (Python 3.10/3.13), and individual CasADi/JAX/PyTorch extras on Ubuntu (Python 3.11/3.13), retaining the all-extra Ubuntu suite and verifying wheel provenance for copied or symlinked installs; document the CPU-only coverage boundary and experimental/unverified CUDA paths pending GPU release evidence ([#98](https://github.com/peter-cudmore/coker/issues/98)). Broader support-boundary alignment remains tracked in [#89](https://github.com/peter-cudmore/coker/issues/89).
+- Installed-wheel CI profiles for isolated base NumPy/SymPy installations on Ubuntu, Windows, and macOS (Python 3.10/3.13), and individual CasADi/JAX/PyTorch extras on Ubuntu (Python 3.11/3.13), retaining the all-extra Ubuntu suite and verifying wheel provenance for copied or symlinked installs; classify CUDA support as experimental and unverified pending GPU release evidence ([#98](https://github.com/peter-cudmore/coker/issues/98)). Broader support-boundary alignment remains tracked in [#89](https://github.com/peter-cudmore/coker/issues/89).
 - Distribution metadata links to the public documentation, source repository, issue tracker, and changelog.
 - Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.

@@ -77,8 +77,7 @@ Base installation:
 pip install coker
 ```
 
-See the [installation CI and support boundary](docs/backends.rst#installation-ci-and-support-boundary)
-for the exact platform/Python matrix and backend limits. Base NumPy/SymPy
+See the [backend guide](docs/backends.rst) for backend limits. Base NumPy/SymPy
 installed-wheel CI covers Ubuntu, Windows, and macOS on Python 3.10 and 3.13;
 each optional extra is checked separately on Ubuntu on Python 3.11 and 3.13.
 JAX requires Python 3.11 or newer. These are CI coverage targets, not a claim

@@ -22,46 +22,7 @@ backend. Variational problems retain a separate CasADi solver default.
 
 See :doc:`api/index` for canonical imports and :doc:`getting_started` for migration notes.
 
-.. _installation-support:
-
-Installation CI and support boundary
-------------------------------------
-
-Installed-wheel CI covers the following CPU-only configurations:
-
-.. list-table::
-   :header-rows: 1
-
-   * - Installation
-     - Platform
-     - Python
-   * - Base (NumPy and SymPy)
-     - Ubuntu, Windows, macOS
-     - 3.10 and 3.13
-   * - Each extra separately: CasADi, JAX, or PyTorch
-     - Ubuntu
-     - 3.11 and 3.13
-
-CI builds a wheel once and installs it into a fresh environment for each
-profile. Smoke checks verify installed-wheel provenance, including symlinked
-installs, and run outside the checkout with isolated Python. They exercise the
-base workflows in every profile, import the required optional backend without
-skips, and assert that the other optional backend modules are absent.
-The existing all-extra Ubuntu test suite on Python 3.10--3.13 remains separate;
-JAX requires Python 3.11 or newer and is not exercised on Python 3.10.
-
-This is the CI coverage boundary, not a report that every matrix job has
-already passed or a promise of backend feature parity. Optional extras on
-Windows and macOS are outside the isolated-wheel CI boundary. Broader support
-boundary alignment is tracked in
-`issue #89 <https://github.com/peter-cudmore/coker/issues/89>`_.
-
 CUDA support is **experimental and unverified pending GPU release evidence**.
-CPU-only CI and CUDA-conditional tests that skip without a GPU do not validate
-CUDA execution. This caveat applies to tensor execution and autograd, NLP
-solves, ODE integration and quadratures where implemented, and parameter
-fitting. It does not imply that every backend implements those capabilities.
-Consult the capability limits below before selecting a backend.
 
 Backend capability matrix
 -------------------------
@@ -127,7 +88,7 @@ A good default is:
 The repository includes numerical execution tests under ``numpy``, ``jax``,
 and ``pytorch``, and variational solve tests through ``casadi``. CUDA-conditional
 mathematical-program and fixed-horizon variational fitting tests are not GPU
-release evidence; see :ref:`installation-support` for the CI boundary.
+release evidence.
 
 
 Lowering handles
@@ -274,8 +235,7 @@ evaluation. Derivatives through an argmin or argmax are not defined.
 ``numpy`` and ``casadi`` support host-side program composition.
 PyTorch implements direct CPU or CUDA mathematical-program construction/solving
 and fixed-horizon, bound-only ODE parameter fitting; its CUDA paths remain
-experimental/unverified as described in :ref:`installation-support`. JAX does
-not construct optimisation programs.
+experimental/unverified. JAX does not construct optimisation programs.
 
 Related guides
 --------------
