@@ -225,5 +225,5 @@ def test_poly_collection_vector_quadratic():
         for time, value, derivative in poly.knot_points():
             np.testing.assert_allclose(np.ravel(value), f(time), atol=1e-8)
             np.testing.assert_allclose(
-                np.ravel(derivative), [1.0, 2 * time], atol=1e-8
+                np.ravel(derivative), [1.0, 2 * time], atol=1e-10
             )
