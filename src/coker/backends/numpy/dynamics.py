@@ -21,7 +21,12 @@ class Solver(Enum):
 
 
 class NumpySolverParameters(SolverParameters):
-    """SciPy ODE and implicit-residual integration settings."""
+    """Configure SciPy ODE and implicit-residual integration.
+
+    ``implicit_nonlinear_tolerance`` controls the nonlinear root solve and
+    the absolute maximum equation residual accepted for each implicit step.
+    State and algebraic magnitudes do not relax this acceptance bound.
+    """
 
     DEFAULT_IMPLICIT_MAXIMUM_TIME_STEP = 1e-3
     DEFAULT_IMPLICIT_NONLINEAR_TOLERANCE = np.sqrt(np.finfo(float).eps)
@@ -152,13 +157,10 @@ def _solve_implicit_residual_step(
 
     candidate_rows = residual(root_solution)
     candidate_residual_norm = np.linalg.norm(candidate_rows, ord=np.inf)
-    residual_scale = max(1.0, np.linalg.norm(root_solution, ord=np.inf))
-    residual_tolerance = nonlinear_tolerance * residual_scale
     candidate_residual_is_valid = (
         np.all(np.isfinite(candidate_rows))
         and np.isfinite(candidate_residual_norm)
-        and np.isfinite(residual_tolerance)
-        and candidate_residual_norm <= residual_tolerance
+        and candidate_residual_norm <= nonlinear_tolerance
     )
     if not candidate_residual_is_valid:
         raise RuntimeError(

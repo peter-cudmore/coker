@@ -17,7 +17,8 @@ from coker.backends.lowered import (
     LoweredFunction,
     LoweringOptions,
 )
-from coker.algebra.graph import SymbolEntry, Tape, TraceContext, Tracer
+from coker.algebra.graph import Tape, TraceContext, Tracer
+from coker.algebra.symbols import SymbolEntry
 from coker.algebra.ops import OP, SelectOP
 
 from coker.algebra.dimensions import (

@@ -98,6 +98,7 @@ def evaluate_residual_integrals(
     # rather than materialising a Jacobian preserves the residual graph's
     # structural sparsity for CasADi's automatic differentiation and IDA.
     dae = {
+        "t": time,
         "x": state,
         "z": ca.vertcat(algebraic, state_rate),
         "ode": state_rate,
@@ -132,20 +133,6 @@ def _initial_value(value: Any, size: int, name: str):
             f"{name} initial condition has {result.numel()} values; expected {size}"
         )
     return ca.reshape(result, size, 1)
-
-
-def _optional_initial_value(value: Any, size: int, name: str):
-    if size:
-        return _initial_value(value, size, name)
-    if value is not None:
-        try:
-            if ca.DM(value).numel() != 0:
-                raise ValueError(f"IDA residual integration has no {name} variables")
-        except RuntimeError as error:
-            raise TypeError(
-                f"{name} initial condition must be a CasADi numeric value"
-            ) from error
-    return ca.DM.zeros(0, 1)
 
 
 def _output_times(end_point) -> tuple[list[float], bool]:

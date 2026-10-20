@@ -7,7 +7,6 @@ from typing import Any, cast
 
 import casadi as ca
 
-from coker.algebra.dimensions import FunctionSpace
 from coker.dynamics.residual import ResidualDynamicalSystem
 
 
@@ -78,14 +77,14 @@ def lower_residual(
     algebraic,
     inputs: Sequence[Any],
 ) -> ca.MX:
-    """Lower the coupled residual at already-partitioned symbolic values."""
-    control, *parameters = inputs
-    residual_control = (
-        (lambda _time: control) if isinstance(system.inputs, FunctionSpace) else control
-    )
+    """Lower a residual with trajectory callables for function-space inputs.
+
+    Variational callers must adapt already-evaluated control values before
+    calling this helper; direct integration passes the trajectory unchanged.
+    """
     values = backend.evaluate(
         system.F,
-        (time, state, state_rate, algebraic, residual_control, *parameters),
+        (time, state, state_rate, algebraic, *inputs),
     )
     if len(values) != 1 or values[0] is None:
         raise ValueError("implicit residual must return exactly one present output")

@@ -8,7 +8,8 @@ import torch
 from coker.algebra import Dimension
 from coker.algebra.dimensions import FunctionSpace, Scalar, VectorSpace
 from coker.algebra.function import Function
-from coker.algebra.graph import FunctionSymbol, Tape, Tracer
+from coker.algebra.graph import Tape, Tracer
+from coker.algebra.symbols import FunctionSymbol
 from coker.algebra.ops import Noop
 from coker.backends.evaluator import FunctionSymbolResolver, GenericEvaluator
 from coker.backends.backend import (

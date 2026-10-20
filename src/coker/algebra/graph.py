@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import weakref
 from collections import defaultdict
 from types import FunctionType
@@ -28,6 +27,7 @@ from coker.algebra.ops import (
     numpy_atomics,
     numpy_composites,
 )
+from coker.algebra.symbols import FunctionSymbol
 
 scalar_types = (
     np.float32,
@@ -196,48 +196,6 @@ class TapeInner:
 
     def __len__(self):
         return len(self._nodes)
-
-
-@dataclasses.dataclass(frozen=True)
-class SymbolEntry:
-    """Immutable metadata and target for one callable symbol."""
-
-    target: Any
-    function_space: FunctionSpace
-    name: str | None
-    _identity: tuple[Any, ...] = dataclasses.field(repr=False, compare=False)
-
-    def __hash__(self) -> int:
-        return hash(self._identity)
-
-    def __eq__(self, other: Any) -> bool:
-        return isinstance(other, SymbolEntry) and (self._identity == other._identity)
-
-
-class FunctionSymbol:
-    """Opaque handle to a callable target declared in one tape."""
-
-    def __init__(self, tape: Tape, archive_index: int):
-        self._tape = weakref.ref(tape)
-        self._archive_index = archive_index
-
-    @property
-    def _entry(self) -> SymbolEntry:
-        return self._tape().nodes._symbol_table[self._archive_index]
-
-    @property
-    def target(self) -> Any:
-        """Return the target interpreted by a backend."""
-        return self._entry.target
-
-    @property
-    def function_space(self) -> FunctionSpace:
-        return self._entry.function_space
-
-    @property
-    def symbol_name(self) -> str:
-        """Return the stable name used for symbolic external calls."""
-        return self._entry.name or f"function_{self._archive_index}"
 
 
 class Tape:

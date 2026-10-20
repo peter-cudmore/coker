@@ -159,6 +159,6 @@ class DynamicalSystem:
         """Evaluate a non-quadrature trajectory at time or a time grid."""
         if not isinstance(self.dqdt, Noop):
             raise NotImplementedError
-        from coker.dynamics.residual import to_residual_dynamical_system
+        from coker.dynamics._trajectory import evaluate
 
-        return to_residual_dynamical_system(self)(*args)
+        return evaluate(self, *args)

@@ -152,7 +152,8 @@ def test_numpy_solves_implicit_state_at_the_step_endpoint():
     assert q is None
 
 
-def test_numpy_rejects_nonzero_implicit_state_step_residuals():
+@pytest.mark.parametrize("initial_state", [1.0, 1e12])
+def test_numpy_rejects_nonzero_implicit_state_step_residuals(initial_state):
     system = _state_residual_system(
         lambda _t, _w, wdot, _z, _u, _p: np.array([wdot[0] ** 2 + 1.0])
     )
@@ -160,7 +161,7 @@ def test_numpy_rejects_nonzero_implicit_state_step_residuals():
     with pytest.raises(RuntimeError, match="state-step solve failed at time"):
         NumpyBackend().evaluate_integrals(
             system,
-            [np.array([1.0]), None, None],
+            [np.array([initial_state]), None, None],
             0.25,
             [None, None],
         )
@@ -185,3 +186,18 @@ def test_numpy_validates_implicit_residual_evaluation_times(end_point, message):
             end_point,
             [None, None],
         )
+
+
+def test_numpy_integrates_valid_equation_scaled_large_state():
+    scale = 1e12
+    system = _state_residual_system(
+        lambda _t, w, wdot, _z, _u, _p: np.array([(wdot[0] + w[0]) / scale])
+    )
+    times = np.array([0.001, 0.01])
+    state, algebraic, quadrature = NumpyBackend().evaluate_integrals(
+        system, [np.array([scale]), None, None], times, [None, None]
+    )
+
+    np.testing.assert_allclose(state / scale, [np.exp(-times)], rtol=1e-5)
+    assert algebraic is None
+    assert quadrature is None

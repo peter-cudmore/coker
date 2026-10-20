@@ -77,9 +77,7 @@ def test_evaluate_outputs_quadratures_and_constraints(horizon, free_horizon):
         backend="casadi",
     )
     duration = (
-        BoundedVariable(
-            "duration", horizon / 2, horizon * 2, guess=0.75 * horizon
-        )
+        BoundedVariable("duration", horizon / 2, horizon * 2, guess=0.75 * horizon)
         if free_horizon
         else horizon
     )
@@ -103,9 +101,7 @@ def test_evaluate_outputs_quadratures_and_constraints(horizon, free_horizon):
     for fraction in [0.0, 0.25, 0.63, 0.75, 1.0]:
         time = fraction * fit.t_final
         np.testing.assert_allclose(fit.state(time), time, atol=1e-6)
-        np.testing.assert_allclose(
-            fit.quadratures(time), time**2 / 2, atol=1e-6
-        )
+        np.testing.assert_allclose(fit.quadratures(time), time**2 / 2, atol=1e-6)
         expected = 2 * time + time**2 / 2 + 2
         np.testing.assert_allclose(fit(time), expected, atol=1e-6)
         np.testing.assert_allclose(output_poly(time), expected, atol=1e-6)
@@ -136,9 +132,7 @@ def test_evaluate_algebraics_and_controls_in_physical_time(horizon):
         cost=0,
         path=path,
         projectors=(np.array([[1.0, 0.0]]), np.array([[0.0, 1.0]]), None),
-        control_solutions=[
-            PiecewiseControlSolution("u", 1.5, np.array([1.0, 2.0]))
-        ],
+        control_solutions=[PiecewiseControlSolution("u", 1.5, np.array([1.0, 2.0]))],
         parameters={"p": 3.0},
         parameter_vector=np.array([3.0]),
         output=lambda t, x, z, u, p, _q: t + x + z + u + p[0],
@@ -201,3 +195,89 @@ def test_mapped_solution_output_uses_numeric_parameter_vector(horizon, output_sh
     )
 
     np.testing.assert_allclose(solution.to_poly()(0.5 * horizon), np.array([5.0]))
+
+
+@pytest.mark.parametrize("horizon", [0.5, 4.0])
+def test_registered_integral_contributes_to_interval_and_segment_defects(horizon):
+    system = create_autonomous_ode(
+        x0=np.array([0.0]),
+        xdot=lambda x, _p: 0 * x,
+        backend="casadi",
+    )
+    with VariationalProblemBuilder(
+        system, t_final=horizon, backend="casadi"
+    ) as builder:
+        integral = builder.integrate(builder.state(builder.t)[0] * 0 + 1)
+        problem = builder.build(Minimise(integral))
+    factory = _TranscriptionFactory(problem)
+
+    for final_integral, expected_error in [(0.0, 1.0), (horizon, 0.0)]:
+        poly = InterpolatingPoly(
+            2, (0.0, 1.0), 1, np.array([0.0, 0.0, 0.0, final_integral])
+        )
+        solution = VariationalSolution.from_solver(
+            cost=0.0,
+            path=InterpolatingPolyCollection([poly]),
+            projectors=(np.array([[1.0, 0.0]]), None, np.array([[0.0, 1.0]])),
+            control_solutions=[],
+            parameters={},
+            parameter_vector=np.array([]),
+            output=lambda _t, x, _z, _u, _p, _q: x,
+            t_final=horizon,
+        )
+
+        assert factory.measure_interval_defect(poly, solution) == pytest.approx(
+            expected_error, abs=1e-12
+        )
+        diagnostic = factory.measure_interval_segment_defect(poly, solution)
+        np.testing.assert_allclose(
+            diagnostic.full_residual, [0.0, -horizon * expected_error], atol=1e-12
+        )
+
+
+def test_registered_integral_defect_keeps_model_quadratures_and_physical_time():
+    horizon = 4.0
+    system = create_dynamics_from_spec(
+        DynamicsSpec(
+            inputs=None,
+            parameters=None,
+            algebraic=None,
+            initial_conditions=lambda _z, _u, _p: (np.array([3.0]), None),
+            dynamics=lambda _t, x, _z, _u, _p: 0 * x,
+            constraints=None,
+            outputs=lambda _t, x, _z, _u, _p, _q: x,
+            quadratures=lambda _t, x, _z, _u, _p: 0 * x + 2,
+        ),
+        backend="casadi",
+    )
+    with VariationalProblemBuilder(
+        system, t_final=horizon, backend="casadi"
+    ) as builder:
+        integral = builder.integrate(builder.output(builder.t)[0] + builder.t)
+        problem = builder.build(Minimise(integral))
+    factory = _TranscriptionFactory(problem)
+    values = np.array([[3.0, 3.0, 3.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    poly = InterpolatingPoly(3, (0.0, 1.0), 2, values.T.reshape((-1,)))
+    solution = VariationalSolution.from_solver(
+        cost=0.0,
+        path=InterpolatingPolyCollection([poly]),
+        projectors=(np.array([[1.0, 0.0, 0.0]]), None, np.eye(3)[1:]),
+        control_solutions=[],
+        parameters={},
+        parameter_vector=np.array([]),
+        output=lambda _t, x, _z, _u, _p, _q: x,
+        t_final=horizon,
+    )
+
+    residuals = factory.evaluate_numeric_defect_residuals(
+        np.array([0.0, 0.5, 1.0]), values, np.zeros_like(values), solution
+    )
+    np.testing.assert_allclose(
+        residuals, [[0.0, 0.0, 0.0], [-2.0, -2.0, -2.0], [-3.0, -5.0, -7.0]]
+    )
+    diagnostic = factory.measure_interval_segment_defect(poly, solution)
+    np.testing.assert_allclose(
+        diagnostic.full_residual,
+        [0.0, -2 * horizon, -3 * horizon - horizon**2 / 2],
+        atol=1e-12,
+    )

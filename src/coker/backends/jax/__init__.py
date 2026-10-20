@@ -14,7 +14,8 @@ from coker.algebra.dimensions import (
     Scalar,
     VectorSpace,
 )
-from coker.algebra.graph import FunctionSymbol, Tracer
+from coker.algebra.graph import Tracer
+from coker.algebra.symbols import FunctionSymbol
 from coker.algebra.ops import (
     ConcatenateOP,
     Noop,

@@ -7,7 +7,8 @@ import torch
 
 from coker.algebra.dimensions import ResultBundleDimension
 from coker.algebra.ops import OP
-from coker.algebra.graph import FunctionSymbol, Tracer
+from coker.algebra.graph import Tracer
+from coker.algebra.symbols import FunctionSymbol
 from coker.backends.evaluator import FunctionSymbolResolver, bind_callable
 from coker.backends.backend import get_backend_by_name
 from coker.backends.optimisation import (

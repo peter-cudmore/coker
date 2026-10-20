@@ -16,7 +16,6 @@ from coker.dynamics.model import (
     DynamicsParameters,
     _output_function_space,
 )
-from coker.parameters.function_parameters import FittedFunction
 
 
 @dataclass(frozen=True)
@@ -40,7 +39,7 @@ class ResidualDynamicalSystem:
     Args:
         inputs: Optional input space; ``None`` means no input.
         parameters: Optional scalar, vector, or function-valued parameter
-            declarations.
+            declarations. Lists are normalized to tuples before validation.
         x0: Initial-condition function returning differential and algebraic
             values.
         F: Residual function ``F(t, w, wdot, z, u, p)``.
@@ -73,6 +72,8 @@ class ResidualDynamicalSystem:
     def __post_init__(self) -> None:
         if self.inputs is None:
             object.__setattr__(self, "inputs", Noop())
+        if isinstance(self.parameters, list):
+            object.__setattr__(self, "parameters", tuple(self.parameters))
         _validate_residual_system(self)
 
     def get_state_dimensions(
@@ -134,118 +135,9 @@ class ResidualDynamicalSystem:
 
                 output = residual(1.0)
         """
-        return _evaluate_residual_trajectory(self, *args)
+        from coker.dynamics._trajectory import evaluate
 
-
-def _evaluate_residual_trajectory(system: ResidualDynamicalSystem, *args):
-    """Evaluate one residual system trajectory through its declared backend."""
-    time, inputs, parameters = _map_residual_arguments(system, args)
-    from coker.backends import get_backend_by_name
-
-    backend = get_backend_by_name(system.backend)
-    inputs = _prepare_backend_value(backend, inputs)
-    parameters = tuple(
-        _prepare_backend_value(backend, parameter) for parameter in parameters
-    )
-    x0, z0 = system.x0(0, inputs, *parameters)
-    q0 = _initial_residual_quadrature(system)
-    x, z, q = backend.evaluate_integrals(
-        system,
-        [x0, z0, q0],
-        time,
-        [inputs, *parameters],
-        solver_parameters=system.solver_parameters,
-    )
-    if isinstance(time, (float, int)):
-        return system.y(time, x, z, inputs, *parameters, q)
-
-    def map_arguments(index):
-        x_i = x[:, index]
-        z_i = z[:, index] if z is not None else None
-        q_i = q[:, index] if q is not None else None
-        return x_i, z_i, inputs, *parameters, q_i
-
-    if system.y.output_shape()[0].is_scalar() or system.y.output_shape()[0].dim == (1,):
-        return np.concatenate(
-            [
-                system.y(time_i, *map_arguments(index))
-                for index, time_i in enumerate(time)
-            ]
-        )
-    return np.vstack(
-        [system.y(time_i, *map_arguments(index)) for index, time_i in enumerate(time)]
-    )
-
-
-def _map_residual_arguments(system: ResidualDynamicalSystem, args):
-    declarations = (
-        ()
-        if system.parameters is None
-        else (
-            system.parameters
-            if isinstance(system.parameters, (tuple, list))
-            else (system.parameters,)
-        )
-    )
-    has_inputs = not isinstance(system.inputs, Noop)
-    expected_count = 1 + int(has_inputs) + len(declarations)
-    if len(args) != expected_count:
-        raise ValueError(
-            "Trajectory argument count does not match the system declaration: "
-            f"expected {expected_count}, got {len(args)}"
-        )
-    input_value = args[1] if has_inputs else None
-    parameter_start = 1 + int(has_inputs)
-    parameters = tuple(
-        _prepare_residual_parameter(system, declaration, value, index)
-        for index, (declaration, value) in enumerate(
-            zip(declarations, args[parameter_start:])
-        )
-    )
-    return args[0], input_value, parameters if declarations else (None,)
-
-
-def _prepare_residual_parameter(system, declaration, value, index):
-    if not isinstance(declaration, FunctionSpace):
-        return value
-    if isinstance(value, Function):
-        if value.backend != system.backend:
-            raise ValueError(
-                f"Function-valued parameter {index} uses backend "
-                f"{value.backend!r}, expected {system.backend!r}"
-            )
-        if value not in declaration:
-            raise ValueError(
-                f"Function-valued parameter {index} does not match declared "
-                f"FunctionSpace {declaration.name!r}"
-            )
-        return value
-    if isinstance(value, FittedFunction) and value not in declaration:
-        raise ValueError(
-            f"Function-valued parameter {index} does not match declared "
-            f"FunctionSpace {declaration.name!r}"
-        )
-    if not callable(value):
-        raise TypeError(f"Function-valued parameter {index} must be callable")
-    prepared = function(declaration.arguments, value, backend=system.backend)
-    if prepared not in declaration:
-        raise ValueError(
-            f"Function-valued parameter {index} does not match declared "
-            f"FunctionSpace {declaration.name!r}"
-        )
-    return prepared
-
-
-def _prepare_backend_value(backend, value):
-    return (
-        value if value is None or callable(value) else backend.to_backend_array(value)
-    )
-
-
-def _initial_residual_quadrature(system: ResidualDynamicalSystem) -> np.ndarray | None:
-    if system.quadrature is None or system.quadrature.flat() == 0:
-        return None
-    return np.zeros(system.quadrature.flat())
+        return evaluate(self, *args)
 
 
 _DirectIntegrationCallback: TypeAlias = Callable[..., Any]
