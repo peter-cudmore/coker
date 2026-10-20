@@ -27,7 +27,7 @@ kinematics, Jacobians, energy, mass matrices, and inverse dynamics.
 Define links and effectors, then wrap the required calculation in a Coker
 function:
 
-.. code-block:: python
+.. testcode:: toolkits_kinematics
 
    import numpy as np
    from coker import VectorSpace, function
@@ -54,6 +54,13 @@ function:
        backend="numpy",
    )
 
+   rest_position = fk(np.array([0.0]))
+   assert rest_position.shape == (3,)
+   np.testing.assert_allclose(rest_position, [0.0, 0.0, -0.5], atol=1e-12)
+   np.testing.assert_allclose(
+       fk(np.array([np.pi / 2])), [0.0, 0.5, 0.0], atol=1e-12,
+   )
+
 Run ``uv run scripts/double_pendulum.py`` for a visualisation example. The
 script's inline metadata declares NumPy, Matplotlib, and the local Coker source.
 To visualise your own model, install Matplotlib and import
@@ -72,13 +79,23 @@ runtime arguments.
 
 These examples require ``pip install "coker[casadi]"``, which includes NumPy.
 
-.. code-block:: python
+.. testcode:: toolkits_runtime_target
 
    import numpy as np
    from coker import VectorSpace
+   from coker.backends.casadi import CasadiNLPSolverOptions
    from coker.toolkits.codesign import Minimise, ProblemBuilder
 
-   with ProblemBuilder(arguments=[VectorSpace("target", 2)]) as builder:
+   options = CasadiNLPSolverOptions(
+       optimiser_options={
+           "ipopt.print_level": 0,
+           "ipopt.sb": "yes",
+           "print_time": False,
+       }
+   )
+   with ProblemBuilder(
+       arguments=[VectorSpace("target", 2)], solver_options=options
+   ) as builder:
        (target,) = builder.arguments
        x = builder.new_variable(name="x", shape=(2,), initial_value=np.ones(2))
        delta = x - target
@@ -87,6 +104,10 @@ These examples require ``pip install "coker[casadi]"``, which includes NumPy.
        problem = builder.build("casadi")
 
    objective, x_val = problem(np.array([3.0, -1.0]))
+   np.testing.assert_allclose(objective, 0.0, atol=1e-8)
+   assert x_val.shape == (2,)
+   np.testing.assert_allclose(x_val, [3.0, -1.0], atol=1e-6)
+   np.testing.assert_allclose(problem.parameters["x"], x_val, atol=1e-6)
 
 Use ``bounded(residual, lower, upper)`` when bounds are part of the model.
 Bounds may depend on runtime parameters; CasADi evaluates them as residual
@@ -96,15 +117,25 @@ Use ``new_function_parameter`` to declare a function-valued decision with a
 ``FunctionSpace`` and finite ``FunctionParameter`` realisation. Use the returned
 callable in objectives and constraints:
 
-.. code-block:: python
+.. testcode:: toolkits_function_parameter
+
+   import numpy as np
 
    from coker import FunctionSpace, Scalar
+   from coker.backends.casadi import CasadiNLPSolverOptions
    from coker.parameters.function_parameters import RadialBasisFunction
    from coker.toolkits.codesign import Minimise, ProblemBuilder
 
    rate = FunctionSpace("rate", [Scalar("t")], [Scalar("rate")])
    declaration = RadialBasisFunction([0.0], 1.0, name="response")
-   with ProblemBuilder() as builder:
+   options = CasadiNLPSolverOptions(
+       optimiser_options={
+           "ipopt.print_level": 0,
+           "ipopt.sb": "yes",
+           "print_time": False,
+       }
+   )
+   with ProblemBuilder(solver_options=options) as builder:
        response = builder.new_function_parameter(rate, declaration)
        value = response(0.0)
        builder.objective = Minimise((value - 0.5) ** 2)
@@ -113,6 +144,10 @@ callable in objectives and constraints:
 
    objective, value = problem()
    fitted_response = problem.parameters["response"]
+   np.testing.assert_allclose(objective, 0.0, atol=1e-8)
+   np.testing.assert_allclose(value, 0.5, atol=1e-6)
+   assert fitted_response.parameters[0].shape == (2,)
+   np.testing.assert_allclose(fitted_response(0.0), value, atol=1e-6)
 
 After a numeric solve, ``problem.parameters`` maps named decisions to their
 reconstructed values. Scalars become floats; vectors and tensors become shaped

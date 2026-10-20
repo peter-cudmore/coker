@@ -139,9 +139,14 @@ rather than evaluating the solver's collocation interpolant. This checks
 numerical recovery for this model and data; it does not prove structural
 identifiability.
 
-For measured data, replace the synthetic observations, choose suitable parameter
-bounds and initial guesses, and retain held-out observations for prediction
-checks. Set tolerances to reflect measurement and integration error.
+This objective gives equal weight to noise-free scalar observations. For measured
+data, replace the observations and choose suitable parameter bounds and initial
+guesses. When outputs have different units or uncertainties, divide each
+residual by a meaningful measurement scale or estimated standard deviation
+before squaring; use covariance whitening if measurement errors are correlated.
+Retain held-out observations and choose prediction-error thresholds from
+measurement uncertainty, integration error and the accuracy the task requires,
+not the noise-free tolerances above.
 
 .. Author notes
 

@@ -7,7 +7,7 @@
 - Executable examples for installation, scalar and vector functions, symbolic loops and conditionals, backend selection and import/export, simulation, parameter fitting, path planning, robot-arm kinematics, solver configuration, and lowering, with rendered plots and CI-backed numerical checks.
 - Installed-wheel CI profiles for isolated base NumPy/SymPy installations on Ubuntu, Windows, and macOS (Python 3.10/3.13), and individual CasADi/JAX/PyTorch extras on Ubuntu (Python 3.11/3.13), retaining the all-extra Ubuntu suite and verifying wheel provenance for copied or symlinked installs; classify CUDA support as experimental and unverified pending GPU release evidence ([#98](https://github.com/peter-cudmore/coker/issues/98)). Broader support-boundary alignment remains tracked in [#89](https://github.com/peter-cudmore/coker/issues/89).
 - Distribution metadata links to the public documentation, source repository, issue tracker, and changelog.
-- Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
+- Public API reference for dynamics construction and analysis, optimisation builders, callable parameters, backend lowering, and solver options, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
 - `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.
 - Residual differential-algebraic systems through `ResidualDynamicalSystem` and `to_residual_dynamical_system`, with NumPy integration and explicit CasADi IDAS or variational solver options.
@@ -25,7 +25,7 @@
 
 ### Changed
 - Trim collocation implementation types from the `coker.dynamics` root API while retaining the public `DynamicsSpec` construction route.
-- Consolidate API boundaries and migration notes into existing guides, retaining the dynamics, parameters, and backend API reference pages.
+- Consolidate onboarding into Basics and tutorials, remove migration advice, and add task-specific reading routes, simpler backend calls, JAX selection guidance, and precise recipe adaptation checks.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
 - Keep function parameters at `coker.parameters.function_parameters`, signatures/lowering configuration at `coker.backends.lowered`, and solve status at `coker.toolkits.codesign`; remove obsolete dynamics reexports and system-modelling registry/handle helpers from public facades.

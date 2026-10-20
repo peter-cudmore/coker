@@ -37,7 +37,7 @@ the callback ``xdot(t, x, u, p)``, where ``u`` is the control value.
 Use ``DynamicsSpec`` for general systems; it requires no internal absence
 sentinel:
 
-.. code-block:: python
+.. testcode:: dynamics_construction
 
    import numpy as np
    from coker import FunctionSpace, Scalar, VectorSpace
@@ -60,6 +60,14 @@ sentinel:
        quadratures=None,
    ))
 
+   input_value = lambda _t: np.array([2.0])
+   controlled_output = controlled(0.25, input_value)
+   assert controlled_output.shape == (1,)
+   np.testing.assert_allclose(controlled_output, [0.5], atol=1e-8)
+   general_output = general(0.25)
+   assert general_output.shape == (1,)
+   np.testing.assert_allclose(general_output, [np.exp(-0.25)], rtol=1e-5)
+
 ``DynamicsSpec.initial_conditions(z, u, p)`` returns ``(x0, z0)``. Its dynamics,
 constraints, and quadrature callbacks receive ``(t, x, z, u, p)``; outputs
 receive ``(t, x, z, u, p, q)``. Tuple parameters arrive as one final ``p`` tuple
@@ -74,12 +82,20 @@ Composition and projections
 separately, not attached to the system. The composed system uses the first
 system's backend unless ``backend=`` selects another.
 
-.. code-block:: python
+.. testcode:: dynamics_construction
 
    combined, projections = direct_sum(general, general)
    output = combined(0.25)
    left, right = projections.outputs.inverse(output)
    left_matrix, right_matrix = projections.outputs.as_matrices()
+   assert output.shape == (2,)
+   np.testing.assert_allclose(output, np.full(2, np.exp(-0.25)), rtol=1e-5)
+   np.testing.assert_allclose(left, general_output, rtol=1e-5)
+   np.testing.assert_allclose(right, general_output, rtol=1e-5)
+   np.testing.assert_array_equal(left_matrix, [[1.0, 0.0]])
+   np.testing.assert_array_equal(right_matrix, [[0.0, 1.0]])
+   np.testing.assert_allclose(left_matrix @ output, left)
+   np.testing.assert_allclose(right_matrix @ output, right)
 
 ``ProjectionSet`` exposes ``state``, ``algebraic``, ``quadratures``, ``outputs``,
 ``controls``, and ``parameters``. Numeric projections are
@@ -197,9 +213,11 @@ Use :class:`coker.dynamics.VariationalProblemBuilder` to declare controls,
 parameters, a :class:`coker.toolkits.codesign.Minimise` objective, and
 ``subject_to`` comparisons.
 
-The optimisation examples require ``pip install "coker[casadi]"``, which
-includes NumPy. Symbolic construction is backend-independent; solving a built
-problem currently requires CasADi.
+The optimisation examples below use CasADi; install it with
+``pip install "coker[casadi]"``, which includes NumPy. PyTorch also supports
+restricted fixed-horizon parameter fitting, including quadratures, but not
+algebraic DAEs, control declarations, variational constraints, or optimised
+horizons. See :doc:`backends` for backend capabilities and dependencies.
 
 This fixed-horizon path-planning example constrains the input and terminal
 state. It constructs a symbolic problem only: the current CasADi solve path
@@ -245,9 +263,12 @@ cannot lower its control-dependent callbacks.
        )
 
 For data fitting, declare the unknown as a bounded parameter and use the
-symbolic observed output directly in the objective:
+symbolic observed output directly in the objective. This constant-state model
+fits its initial value:
 
-.. code-block:: python
+.. testcode:: dynamics_builder_fitting
+
+   import numpy as np
 
    from coker import VectorSpace
    from coker.dynamics import VariationalProblemBuilder, create_autonomous_ode
@@ -256,8 +277,9 @@ symbolic observed output directly in the objective:
 
    system = create_autonomous_ode(
        parameters=VectorSpace("value", 1),
-       x0=lambda p: p[0],
-       xdot=lambda _x, _p: 0.0,
+       x0=lambda p: p,
+       xdot=lambda _x, _p: np.zeros(1),
+       backend="casadi",
    )
    value = BoundedVariable("value", lower_bound=0.5, upper_bound=3.0, guess=1.0)
 
@@ -270,6 +292,12 @@ symbolic observed output directly in the objective:
        built = problem.build(
            Minimise((problem.output(problem.t_final)[0] - observed) ** 2)
        )
+
+   fit = built()
+   assert fit.solve_info.success
+   np.testing.assert_allclose(fit.parameters["value"], observed, atol=1e-5)
+   np.testing.assert_allclose(fit(0.0), [observed], atol=1e-5)
+   np.testing.assert_allclose(fit(1.0), [observed], atol=1e-5)
 
 The builder classifies comparisons by their time binding:
 
@@ -304,8 +332,9 @@ The function receives those blocks before the target function's arguments.
 Use ``ClosureParameter.bind_callable`` to trace a Python implementation with
 that calling convention.
 
-This dense layer maps a two-component state to a one-component response with
-an identity activation:
+This declaration constructs a fitting problem whose dense layer maps a
+two-component state to a one-component response with an identity activation;
+it does not run a solver:
 
 .. code-block:: python
 
@@ -365,6 +394,9 @@ its polynomial degree increased up to ``maximum_degree``; it is bisected only
 when that limit is reached. Refinement stops when every interval is at or below
 ``mesh_tolerance`` or raises :class:`RuntimeError` after
 ``maximum_iterations`` refinements.
+
+The following fragment configures a problem without invoking the adaptive
+solve:
 
 .. code-block:: python
 
@@ -465,7 +497,8 @@ Declare and supply all three parameter slots in the same order:
 
    trajectory = system(time, offset, bias, gain_curve_value)
 
-A system with a declared input takes its input value immediately after time:
+Continuing with ``spec`` and the parameter values above, a system with a
+declared input takes its input value immediately after time:
 
 .. code-block:: python
 
@@ -489,10 +522,11 @@ Values for a declared ``FunctionSpace`` parameter may be Python callables,
 normalises them once before integration; do not pass backend-native or lowered
 handles. Direct evaluation does not use a ``Noop`` placeholder.
 
-For the original no-input ``system``, pass builder declarations in the same
-order: scalar offset, length-two bias, then gain curve. ``BoundVector``
+For the original no-input ``system`` above, pass builder declarations in the
+same order: scalar offset, length-two bias, then gain curve. ``BoundVector``
 declares a bounded vector decision block. ``DenseTensorVariable`` declares an
-unbounded dense block with the shape of its initial guess:
+unbounded dense block with the shape of its initial guess. This fragment
+constructs the symbolic problem without solving it:
 
 .. code-block:: python
 
@@ -547,7 +581,7 @@ Fit an autonomous decay rate from observations over four seconds using the
 callback-based :class:`~coker.dynamics.VariationalProblem` interface, then
 evaluate the returned trajectory at physical times:
 
-.. code-block:: python
+.. testcode:: dynamics_decay_fitting
 
    import numpy as np
    from coker import VectorSpace

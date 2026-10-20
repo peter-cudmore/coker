@@ -116,8 +116,16 @@ Adapt the geometry
 ------------------
 
 Change the endpoints, corridor bounds or gate constraints, then update the
-feasibility checks and expected energy. Different obstacle geometry may need
-a different formulation, not just different bounds.
+feasibility checks to match. Retain solver-status checks, checks of every
+constraint, and agreement between the reported objective and
+``measured_energy`` recomputed from the returned path.
+
+The analytic ``expected_y`` and ``expected_energy`` apply only to the unchanged
+symmetric geometry above: equal increments meet the gate at its lower edge.
+For different geometry, derive an independent reference solution or bound
+before replacing these optimality checks; do not guess a target from the
+solver's output. Different obstacle geometry may need a different formulation,
+not just different bounds.
 
 .. Author notes
 

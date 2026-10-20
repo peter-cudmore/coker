@@ -1,9 +1,10 @@
 How to simulate a dynamical system
 ==================================
 
-Construct an explicit ODE, choose an integrator, and plot its trajectory.
+Simulate an autonomous, unforced explicit ODE and plot its trajectory.
 This recipe assumes basic :doc:`Coker function knowledge
-<../tutorials/function_evaluation>`. See :doc:`../dynamics` for the modelling API.
+<../tutorials/function_evaluation>`. See :doc:`../api/dynamics` for the modelling
+contracts.
 
 1. Set up the model
 -------------------
@@ -20,9 +21,10 @@ solution is :math:`x(t)=2\exp(-0.7t)`.
 
 Define the rate and initial state with ``create_autonomous_ode``.
 The output callback keeps a one-element vector for each sample.
-``NumpySolverParameters`` selects SciPy's adaptive RK45 integrator with its
-default error tolerances. The time grid requests output samples, not fixed
-integration steps.
+For this explicit integration path, ``NumpySolverParameters.solver`` selects
+the SciPy method, here adaptive RK45. SciPy's default ``rtol`` and ``atol``
+apply; ``NumpySolverParameters`` does not expose them for this path.
+The time grid requests output samples, not fixed integration steps.
 
 .. plot::
    :include-source: true
@@ -77,10 +79,17 @@ The curves should overlap, decreasing to approximately ``0.12162`` at four
 seconds. The assertions check positivity, monotonic decay, and agreement with
 the analytic solution to ``1e-3`` absolute error.
 
-For another ODE, replace the initial state and rate function. Choose a matching
-output callback and a reference trajectory or physical check. Adjust
-``solver_parameters`` to control integration; changing ``times`` changes the
-output sampling, not the solver's internal step size.
+For another autonomous, unforced ODE, replace the initial state and rate
+function, choose a matching output callback, and define an analytic or trusted
+reference trajectory or a physical check. If you change
+``NumpySolverParameters.solver``, validate the result against that reference
+with tolerances appropriate to the model. Changing ``times`` changes only
+output sampling, not the solver's internal step size or error tolerances.
+
+For time-dependent rates, use :class:`~coker.dynamics.DynamicsSpec`; for an
+external control input, use :func:`~coker.dynamics.create_control_system`.
+Follow their callback and input contracts in :doc:`../api/dynamics` rather
+than adding time or control arguments to this autonomous rate callback.
 
 .. Author notes
 

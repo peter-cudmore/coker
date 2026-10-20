@@ -13,14 +13,6 @@ learn the tracing limits before starting the tutorials.
    navigation
    sharp_edges
 
-Onboarding and migration
-------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   ../getting_started
-
 .. Author notes
 
    - Identify the primary audience and the knowledge assumed before starting.

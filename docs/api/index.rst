@@ -6,6 +6,8 @@ backend integration.
 
 .. Author notes
 
+   - Audience: users locating canonical public imports and their owning
+     reference contracts, separate from extension interfaces and internals.
    - List the supported public classes and functions that still need coverage.
    - Add constructor, call, return-value, error, and backend-support contracts.
    - Prioritise function parameters, solve results, analysis, and toolkit APIs.
@@ -35,16 +37,17 @@ in implementation modules are not public APIs.
   ``create_control_system``, ``create_autonomous_ode``, ``direct_sum`` and its
   ``ProjectionSet``, variational builders/options/results, controls, and
   symbolic analyses, ``ResidualDynamicalSystem``, and
-  ``to_residual_dynamical_system``. See :doc:`dynamics` and :doc:`../dynamics`.
+  ``to_residual_dynamical_system``. See :doc:`dynamics`.
 - ``coker.parameters``: scalar, vector, and tensor decision declarations;
-  ``coker.parameters.function_parameters``: callable declarations and
-  ``FittedFunction`` results. See :doc:`../dynamics`.
+  ``coker.parameters.function_parameters``: ``ClosureParameter``,
+  ``BoundFunctionParameter``, ``DenseLayer``, ``MonotonePiecewiseLinear``,
+  ``RadialBasisFunction``, and ``FittedFunction`` results. See :doc:`parameters`.
 - ``coker.toolkits.codesign``: ``ProblemBuilder``, ``MathematicalProgram``,
-  objectives/constraints, solver options, ``SolveInfo``, and ``SolveFailure``.
-  See :doc:`optimisation` and :doc:`../toolkits`.
+  ``Minimise``, ``bounded``, ``norm``, ``weighted_norm``, ``SolverOptions``,
+  ``SolveInfo``, and ``SolveFailure``. See :doc:`optimisation`.
 - ``coker.backends``: plugin lookup and explicit selection;
   ``coker.backends.lowered``: signatures, input/output specs, lowering options,
-  execution handles, and capabilities. See :doc:`../backends`.
+  execution handles, and capabilities. See :doc:`backends`.
 - ``coker.toolkits.spatial`` and ``coker.toolkits.kinematics``: rigid-motion
   primitives and articulated models. See :doc:`../toolkits`.
 
@@ -68,4 +71,3 @@ Extension interfaces
 internals. ``ConstraintSpec``, ``QuadratureSpec``, collocation operators, and
 mesh helpers are builder/backend representations, not ordinary construction
 APIs. Use comparisons, integrals, and the variational builder instead.
-Migration notes are in :doc:`../getting_started`.

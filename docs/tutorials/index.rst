@@ -39,4 +39,11 @@ model shapes. The example catalogue offers further applications:
 
 .. Author notes
 
-   - Keep this section focused on the basics users need for everyday Coker tasks.
+   - Entry prerequisites are Python functions and basic NumPy arrays, not prior
+     symbolic programming. Keep dependency guidance with the lesson that needs it.
+   - Preserve the five-step order: scalar functions, parameterised matrices,
+     loop-built SymbolicVectors, conditionals, then backend selection.
+   - Teach direct Coker calls before optional native export in the final lesson;
+     do not make registry lookup or manual input conversion a beginner prerequisite.
+   - Keep this sequence focused on everyday construction and evaluation. Link to
+     the cookbook for tasks and the API reference for precise contracts.
