@@ -6,10 +6,9 @@ from functools import lru_cache
 import casadi as ca
 import numpy as np
 
-from coker.algebra.dimensions import FunctionSpace
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
-from coker.backends.casadi.lower import substitute
+from coker.backends.casadi.lower import lower as lower_casadi
 from coker.backends.casadi.variational.options import CasadiVariationalOptions
 from coker.backends.casadi.residual_support import lower_residual
 from coker.dynamics import VariationalProblem, VariationalSolution
@@ -86,13 +85,6 @@ class _TranscriptionFactory:
             if problem.transcription_options.derivative_defect_tolerance is not None
             else self.tolerance
         )
-        self.residual_tolerance = self.derivative_defect_tolerance
-        if self.residual.legacy is not None and self.z_size:
-            self.residual_tolerance = ca.vertcat(
-                ca.DM.ones(self.x_size + self.system_quadrature_size, 1)
-                * self.derivative_defect_tolerance,
-                ca.DM.ones(self.z_size, 1) * self.tolerance,
-            )
         self.free_horizon = problem.horizon_decision is not None
 
         self.proj_x = ca.hcat(
@@ -192,12 +184,6 @@ class _TranscriptionFactory:
         control,
         parameters,
     ):
-        """Evaluate with physical-time rates and already-evaluated control values."""
-        residual_control = (
-            (lambda _time: control)
-            if isinstance(self.residual.inputs, FunctionSpace)
-            else control
-        )
         return lower_residual(
             self.casadi,
             self.residual,
@@ -205,63 +191,29 @@ class _TranscriptionFactory:
             self._residual_state(state, quadrature),
             self._residual_rate(state_rate, quadrature_rate),
             algebraic,
-            (residual_control, parameters),
+            (control, parameters),
         )
 
     def evaluate_registered_quadratures(
         self,
         *,
         time,
-        duration,
         state,
         algebraic,
         control,
         parameters,
         quadrature,
     ):
-        def output_at_time(_time):
-            output_control = (
-                (lambda _time: control)
-                if isinstance(self.problem.system.y.input_spaces()[3], FunctionSpace)
-                else control
-            )
-            (output,) = self.casadi.evaluate(
-                self.problem.system.y,
-                [time, state, algebraic, output_control, parameters, quadrature],
-            )
-            return output
-
-        bindings = {
-            "t": time,
-            "t_final": duration,
-            "t_0": ca.DM.zeros(1, 1),
-            "_state": lambda _time: state,
-            "_output": output_at_time,
-        }
-        if isinstance(self.problem.system.inputs, FunctionSpace):
-            bindings[self.problem.system.inputs.name] = lambda _time: control
-        if self.problem.system.parameters is not None:
-            bindings[self.problem.system.parameters.name] = parameters
-        for spec in self.problem.quadratures:
-            bindings[f"q_{spec.channel}"] = quadrature[
-                self.system_quadrature_size + spec.channel
-            ]
+        arguments = (time, state, algebraic, control, parameters, quadrature)
         values = []
         for spec in self.problem.quadratures:
-            workspace = {
-                index: bindings[name]
-                for index, name in zip(
-                    spec.integrand.tape.input_indicies, spec.integrand.tape.input_names
-                )
-                if name in bindings
-            }
-            outputs = substitute([spec.integrand], workspace)
+            workspace = dict(zip(spec.integrand.tape.input_indicies, arguments))
+            _, outputs = lower_casadi(spec.integrand.tape, [spec.integrand], workspace)
             values.append(outputs[0])
         return values
 
     def _build_defect_residual(self) -> ca.Function:
         time = ca.MX.sym("defect_time")
-        duration = ca.MX.sym("defect_duration")
         state = ca.MX.sym("defect_state", self.x_size)
         state_rate = ca.MX.sym("defect_state_rate", self.x_size)
         algebraic = ca.MX.sym("defect_algebraic", self.z_size)
@@ -279,21 +231,6 @@ class _TranscriptionFactory:
             control=control,
             parameters=parameters,
         )
-        if self.q_size > self.system_quadrature_size:
-            registered_rates = self.evaluate_registered_quadratures(
-                time=time,
-                duration=duration,
-                state=state,
-                algebraic=algebraic,
-                control=control,
-                parameters=parameters,
-                quadrature=quadrature,
-            )
-            residual = ca.vertcat(
-                residual,
-                quadrature_rate[self.system_quadrature_size :]
-                - ca.vertcat(*registered_rates),
-            )
         return ca.Function(
             "defect_residual",
             [
@@ -305,7 +242,6 @@ class _TranscriptionFactory:
                 parameters,
                 quadrature,
                 quadrature_rate,
-                duration,
             ],
             [residual],
         )
@@ -370,7 +306,6 @@ class _TranscriptionFactory:
             ca.DM(parameters),
             ca.DM(quadrature_values),
             ca.DM(quadrature_derivatives),
-            ca.repmat(solution.t_final, 1, count),
         )
         return np.asarray(residuals, dtype=float)
 

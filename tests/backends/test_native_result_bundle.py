@@ -3,7 +3,7 @@ import pytest
 from coker import Scalar, function
 from coker.backends import get_backend_by_name
 from coker.algebra.ops import OP
-from coker.algebra.symbols import FunctionSymbol
+from coker.algebra.graph import FunctionSymbol
 from coker.algebra.dimensions import Dimension, FunctionSpace
 from coker.backends.lowered import (
     FunctionInputSpec,

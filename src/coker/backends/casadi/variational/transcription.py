@@ -675,14 +675,13 @@ def _create_solver(
             )
             constraints.add_equality(
                 residual_ij,
-                factory.residual_tolerance,
+                factory.derivative_defect_tolerance,
                 ("residual", interval, node),
             )
 
             if factory.q_size > factory.system_quadrature_size:
                 registered_rates = factory.evaluate_registered_quadratures(
                     time=physical_t,
-                    duration=duration,
                     state=x,
                     algebraic=z,
                     control=control,

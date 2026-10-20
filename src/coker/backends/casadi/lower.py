@@ -5,8 +5,7 @@ import casadi as ca
 import numpy as np
 
 import coker
-from coker.algebra.graph import Tape, Tracer
-from coker.algebra.symbols import FunctionSymbol
+from coker.algebra.graph import FunctionSymbol, Tape, Tracer
 from coker.algebra.ops import (
     OP,
     ConcatenateOP,

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from coker import Dimension, FunctionSpace, Scalar, VectorSpace, function
+from coker import Dimension, Scalar, VectorSpace, function
 from coker.algebra.ops import Noop
 from coker.dynamics import ResidualDynamicalSystem
 
@@ -243,61 +243,3 @@ def test_casadi_selects_variational_residual_solver(casadi_backend):
     np.testing.assert_allclose(
         np.asarray(q), expected_q.reshape((1, 1)), rtol=1e-5, atol=1e-7
     )
-
-
-@pytest.mark.parametrize("use_variational", [False, True], ids=["idas", "variational"])
-def test_casadi_integrates_time_dependent_callable_control(
-    casadi_backend, use_variational
-):
-    from coker.backends.casadi import (
-        CasadiResidualSolver,
-        CasadiResidualSolverOptions,
-    )
-
-    control = FunctionSpace("u", [Scalar("t")], [Scalar("value")])
-    system = ResidualDynamicalSystem(
-        inputs=control,
-        parameters=None,
-        x0=function(
-            [None, control, None],
-            lambda _z, _u, _p: (np.array([0.0]), None),
-            backend="casadi",
-        ),
-        F=function(
-            [
-                Scalar("t"),
-                VectorSpace("w", 1),
-                VectorSpace("wdot", 1),
-                None,
-                control,
-                None,
-            ],
-            lambda t, _w, wdot, _z, u, _p: np.array([wdot[0] - u(t)]),
-            backend="casadi",
-        ),
-        y=function(
-            [Scalar("t"), VectorSpace("x", 1), None, control, None, None],
-            lambda _t, x, _z, _u, _p, _q: x,
-            backend="casadi",
-        ),
-        differential=Dimension(1),
-        algebraic=None,
-        quadrature=None,
-    )
-    solver = (
-        CasadiResidualSolver.VARIATIONAL
-        if use_variational
-        else CasadiResidualSolver.IDAS
-    )
-    times = np.array([0.25, 1.0])
-    state, algebraic, quadrature = casadi_backend.evaluate_integrals(
-        system,
-        [np.array([0.0]), None, None],
-        times,
-        [lambda time: time, None],
-        CasadiResidualSolverOptions(solver),
-    )
-
-    np.testing.assert_allclose(np.asarray(state), [times**2 / 2], atol=1e-6)
-    assert algebraic is None
-    assert quadrature is None

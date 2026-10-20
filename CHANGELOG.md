@@ -38,15 +38,6 @@
 
 ### Fixed
 - Missing optional CasADi, JAX, and PyTorch backend dependencies now report the requested backend and installation command, including JAX's Python requirement, while preserving the original exception cause and broken-plugin diagnostics.
-- Preserve time-dependent callable controls through both CasADi residual solvers, including IDAS time binding.
-- Include builder-registered integral equations in CasADi interval and segment defect diagnostics with physical-time derivative scaling.
-- Keep certified semi-explicit algebraic equations bounded by `absolute_tolerance` independently of derivative defect settings.
-- Evaluate registered-integral diagnostics with the solved free horizon rather than an unbound decision symbol.
-- Adapt evaluated controls to callable output inputs when lowering registered integrands.
-- Normalize residual parameter lists to tuples so both declaration forms work with the variational builder.
-- Reject impossible NumPy implicit residual equations independently of state magnitude, using an absolute equation-residual tolerance.
-- Reuse ordinary trajectory callbacks without constructing and tracing a residual model on every evaluation.
-- Repair the documented backend benchmark's imports of `NumpySolverParameters` and `Solver` after the NumPy solver extraction.
 - SymPy numerical division returns `NaN` for `ZeroDivisionError`, allowing conditionals to select a valid branch instead of failing on inactive division by zero.
 - Preserve node-major value layout when evaluating multidimensional polynomial knot derivatives and coupled residual diagnostics.
 - Stabilize PyTorch variational trajectories with low-degree piecewise LGR interpolation, preserving state, quadratures, and physical-time evaluation; restore the trajectory-fit regression.

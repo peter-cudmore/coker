@@ -18,7 +18,7 @@ from coker.dynamics import (
     create_autonomous_ode,
 )
 from coker.backends.backend import get_backend_by_name
-from coker.backends.numpy import NumpySolverParameters, Solver
+from coker.backends.numpy.core import NumpySolverParameters, Solver
 from coker.parameters import BoundedVariable
 
 

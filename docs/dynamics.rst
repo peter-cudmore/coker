@@ -115,10 +115,6 @@ algebraic state. Use it when the model is inherently implicit; use
 :func:`~coker.dynamics.to_residual_dynamical_system` to convert an existing
 semi-explicit :class:`~coker.dynamics.DynamicalSystem`.
 
-Ordinary ``DynamicalSystem`` evaluations pass their existing callbacks directly
-to the backend without tracing an unused residual graph. Convert explicitly
-when a consumer requires a residual model.
-
 The NumPy backend integrates square index-one residual systems with a fixed-step
 implicit method. The residual must provide one row for each differential or
 quadrature rate and algebraic variable. Initial algebraic values are required
@@ -132,16 +128,6 @@ collocation feasibility solve. IDAS options and IPOPT options remain separate
 in that options object.
 This interface does not discretize PDEs, but a finite-element, finite-volume,
 or weak-form model may supply its resulting residual DAE here.
-
-NumPy accepts an implicit step only when the maximum absolute equation
-residual is within ``NumpySolverParameters.implicit_nonlinear_tolerance``.
-This bound does not grow with state or algebraic magnitudes. Normalize
-equations explicitly when their physical units require different scaling.
-
-For function-space inputs, direct residual integration accepts a trajectory
-callable ``u(t)`` in physical time. Both CasADi residual solvers preserve that
-callable; variational transcription instead supplies its already-evaluated
-control value at each node.
 
 The following executable CasADi example solves the coupled residual
 ``xdot + z - 1 = 0`` and ``x + 2 * xdot - z = 0``:
@@ -425,17 +411,6 @@ residuals. Set ``segment_defect_tolerance`` and
 per-segment defects and the collocation derivative defects. Both default to
 ``None`` and therefore inherit ``absolute_tolerance``; either may be ``0.0``
 to require an exact NLP equality.
-Certified semi-explicit models retain ``absolute_tolerance`` for algebraic
-equations even when a larger derivative tolerance is selected. Independent
-residual models retain one coupled derivative-residual tolerance.
-
-Interval error estimates and segment ``full_residual`` diagnostics include
-both the model's coupled residual and all builder-registered integrals.
-Registered channels contribute ``dq/dt - integrand`` using physical-time
-derivatives; integrated segment residuals retain physical duration scaling.
-For free-horizon problems, registered integrands and post-solve diagnostics use
-the solved physical duration for ``t_final``. Control-dependent output
-integrands receive the output callback's declared callable input contract.
 
 During one adaptive solve, the CasADi model setup is retained while only
 mesh-dependent NLPs are compiled. Each refined mesh interpolates the preceding
@@ -631,9 +606,8 @@ an optimized horizon. Output and constraint callbacks also receive physical
 time. ``as_raw()`` returns physical knot times, and ``to_poly()`` returns an
 output interpolant on physical intervals. CasADi and PyTorch store ``fit.path``
 on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time mapping.
-CasADi control coefficients and defect sample nodes use normalized time, while
-residual callbacks receive physical times and physical-time derivatives.
-Do not pass physical times directly to the underlying path.
+CasADi control coefficients and defect estimation also use normalized time;
+do not pass physical times directly to the underlying path.
 
 By default, PyTorch assembles its returned state and quadrature channels into
 four degree-eight LGR polynomials on normalized subintervals. Integration samples

@@ -15,6 +15,7 @@ from coker.algebra.dimensions import (
 )
 from coker.algebra.graph import (
     DanglingTracerError,
+    SymbolEntry,
     Tape,
     TraceContext,
     Tracer,
@@ -23,7 +24,6 @@ from coker.algebra.graph import (
     strip_symbols_from_array,
 )
 from coker.algebra.ops import OP, Noop
-from coker.algebra.symbols import SymbolEntry
 from coker.algebra.tensor import SymbolicVector
 
 from coker.backends.backend import (

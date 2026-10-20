@@ -14,8 +14,7 @@ from coker.algebra.dimensions import (
     ResultBundleDimension,
 )
 from coker.interfaces import SymbolicCallable
-from coker.algebra.graph import Tape, Tracer
-from coker.algebra.symbols import FunctionSymbol
+from coker.algebra.graph import FunctionSymbol, Tape, Tracer
 from coker.algebra.ops import Noop, OP, normalize_evaluate_result
 
 if TYPE_CHECKING:
