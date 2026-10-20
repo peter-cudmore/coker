@@ -77,7 +77,10 @@ def sympy_div(x, y):
             for j in range(y.shape[1]):
                 y_inv[i, j] = 1 / y[i, j]
         return sp.ImmutableMatrix(x.multiply_elementwise(y_inv))
-    return x / y
+    try:
+        return x / y
+    except ZeroDivisionError:
+        return sp.nan
 
 
 def sympy_matmul(x, y):

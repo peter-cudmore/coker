@@ -37,6 +37,7 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- SymPy numerical division returns `NaN` for `ZeroDivisionError`, allowing conditionals to select a valid branch instead of failing on inactive division by zero.
 - Preserve node-major value layout when evaluating multidimensional polynomial knot derivatives and coupled residual diagnostics.
 - Stabilize PyTorch variational trajectories with low-degree piecewise LGR interpolation, preserving state, quadratures, and physical-time evaluation; restore the trajectory-fit regression.
 - Normalize scalar outputs and column-shaped path samples when converting variational solutions with `to_poly()`.
