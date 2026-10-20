@@ -4,6 +4,7 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable, Sequence
 from importlib.metadata import entry_points
+from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
@@ -332,7 +333,32 @@ def _discover_backend(name: str) -> None:
     if len(plugins) > 1:
         raise ValueError(f"Backend {name!r} has multiple plugin registrations")
 
-    register_backend(name, plugins[0].load())
+    plugin = plugins[0]
+    try:
+        factory = plugin.load()
+    except ModuleNotFoundError as error:
+        dependency = {
+            "casadi": "casadi",
+            "jax": "jax",
+            "pytorch": "torch",
+        }.get(name)
+        # Only diagnose an absent top-level dependency of a built-in plugin.
+        # Installed but broken packages and third-party plugins keep their
+        # original import diagnostics.
+        if (
+            dependency is None
+            or error.name != dependency
+            or plugin.dist is None
+            or plugin.dist.name != "coker"
+            or find_spec(dependency) is not None
+        ):
+            raise
+        requirement = " (requires Python >=3.11)" if name == "jax" else ""
+        raise ImportError(
+            f"Backend {name!r} requires optional dependency {dependency!r}. "
+            f'Install it with pip install "coker[{name}]"{requirement}.'
+        ) from error
+    register_backend(name, factory)
 
 
 def instantiate_backend(name: str):
