@@ -19,10 +19,11 @@ Coker combines a few layers that usually live in separate tools:
 
 The primary entry point is `coker.function`. You describe argument spaces explicitly, provide a Python implementation, and choose a backend.
 
-Canonical imports are inventoried in [the API reference](docs/api/index.rst);
-0.5 migration notes are in [Getting Started](docs/getting_started.rst). NumPy is the base-install default;
-backend lookup, evaluation, and lowering do not change ambient selection unless
-the application explicitly requests `get_backend_by_name(name, set_current=True)`.
+Start with [the basics](docs/basics/index.rst) for installation and a first
+calculation; use [the API reference](docs/api/index.rst) for canonical imports
+and contracts. NumPy is the base-install default; backend lookup, evaluation,
+and lowering do not change ambient selection unless the application explicitly
+requests `get_backend_by_name(name, set_current=True)`.
 
 ```python
 import numpy as np
@@ -131,7 +132,7 @@ docs/             Sphinx documentation
 
 ## Example files worth reading first
 
-- `docs/getting_started.rst` — minimal symbolic function workflow
+- [Your first calculation](docs/basics/getting_started.rst) — minimal symbolic function workflow
 - `scripts/double_pendulum.py` — rigid-body visualisation (`uv run scripts/double_pendulum.py` installs its inline dependencies, including the local Coker checkout; set `MPLBACKEND=Agg` for headless startup)
 - `tests/benchmarks/benchmark_backends.py` — benchmark scenarios for backend evaluation, ODE integration, and variational problems
 
@@ -154,9 +155,14 @@ uv run pytest
 Build the documentation:
 
 ```bash
-uv sync --group docs
+uv sync --group docs --extra casadi --extra pytorch
+uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
 uv run sphinx-build docs/ docs/_build/html -W --keep-going
 ```
+
+See [the documentation authoring guide](docs/AUTHORING.md) for section goals,
+writing conventions, and executable examples. Source-only `Author notes`
+record page-specific directions and planned additions.
 
 Formatting and linting used in CI:
 

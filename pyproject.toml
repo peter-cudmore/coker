@@ -71,6 +71,7 @@ docs = [
     "sphinx>=7.0",
     "furo",
     "sphinx-autodoc-typehints",
+    "matplotlib>=3.7",
 ]
 
 [tool.pytest.ini_options]

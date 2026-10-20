@@ -1,16 +1,14 @@
 Dynamics and optimisation
 =========================
 
-Coker's dynamics layer sits on top of the same symbolic function machinery used
-by :func:`coker.function`. It adds typed descriptions for state, control,
-parameter, and transcription data so you can define ODE systems and then solve
-parameter-fitting or optimal-control style problems against them.
+Coker's dynamics layer uses the symbolic machinery of :func:`coker.function`
+to describe states, controls, parameters, and transcriptions. Use it to define
+ODEs and DAEs, fit parameters, and formulate optimal-control problems.
 
 Core entry points
 -----------------
 
-The dynamics API is re-exported from :mod:`coker.dynamics`; general and
-function-valued declarations are exposed from their respective packages:
+Public entry points include:
 
 - :func:`coker.dynamics.create_autonomous_ode`
 - :func:`coker.dynamics.create_control_system`
@@ -31,16 +29,15 @@ function-valued declarations are exposed from their respective packages:
 - :class:`coker.parameters.function_parameters.RadialBasisFunction`
 
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
-from an initial-condition function and an ``xdot`` function. If you pass a
-parameter space, the system becomes directly usable inside a
-:class:`~coker.dynamics.VariationalProblem`.
+from initial-condition and ``xdot`` functions. Declare a parameter space to
+use the system in a :class:`~coker.dynamics.VariationalProblem`.
 
-Use ``create_control_system(x0, xdot, control, ...)`` for a controlled ODE.
-Its dynamics callback is ``xdot(t, x, u, p)``, where ``u`` is the control value.
-For general systems, use the public spec route; no internal absence sentinel
-is required:
+``create_control_system(x0, xdot, control, ...)`` builds a controlled ODE with
+the callback ``xdot(t, x, u, p)``, where ``u`` is the control value.
+Use ``DynamicsSpec`` for general systems; it requires no internal absence
+sentinel:
 
-.. code-block:: python
+.. testcode:: dynamics_construction
 
    import numpy as np
    from coker import FunctionSpace, Scalar, VectorSpace
@@ -63,6 +60,14 @@ is required:
        quadratures=None,
    ))
 
+   input_value = lambda _t: np.array([2.0])
+   controlled_output = controlled(0.25, input_value)
+   assert controlled_output.shape == (1,)
+   np.testing.assert_allclose(controlled_output, [0.5], atol=1e-8)
+   general_output = general(0.25)
+   assert general_output.shape == (1,)
+   np.testing.assert_allclose(general_output, [np.exp(-0.25)], rtol=1e-5)
+
 ``DynamicsSpec.initial_conditions(z, u, p)`` returns ``(x0, z0)``. Its dynamics,
 constraints, and quadrature callbacks receive ``(t, x, z, u, p)``; outputs
 receive ``(t, x, z, u, p, q)``. Tuple parameters arrive as one final ``p`` tuple
@@ -72,17 +77,25 @@ quadratures. ``system.backend`` exposes the backend name as a read-only property
 Composition and projections
 ---------------------------
 
-``direct_sum(*systems, backend=None)`` returns exactly
-``(DynamicalSystem, ProjectionSet)`` in subsystem order. The system does not
-carry an implicit projection attribute. By default it uses the first system's
-backend; ``backend=`` explicitly chooses the composed backend.
+``direct_sum(*systems, backend=None)`` returns
+``(DynamicalSystem, ProjectionSet)`` in subsystem order. Projections are returned
+separately, not attached to the system. The composed system uses the first
+system's backend unless ``backend=`` selects another.
 
-.. code-block:: python
+.. testcode:: dynamics_construction
 
    combined, projections = direct_sum(general, general)
    output = combined(0.25)
    left, right = projections.outputs.inverse(output)
    left_matrix, right_matrix = projections.outputs.as_matrices()
+   assert output.shape == (2,)
+   np.testing.assert_allclose(output, np.full(2, np.exp(-0.25)), rtol=1e-5)
+   np.testing.assert_allclose(left, general_output, rtol=1e-5)
+   np.testing.assert_allclose(right, general_output, rtol=1e-5)
+   np.testing.assert_array_equal(left_matrix, [[1.0, 0.0]])
+   np.testing.assert_array_equal(right_matrix, [[0.0, 1.0]])
+   np.testing.assert_allclose(left_matrix @ output, left)
+   np.testing.assert_allclose(right_matrix @ output, right)
 
 ``ProjectionSet`` exposes ``state``, ``algebraic``, ``quadratures``, ``outputs``,
 ``controls``, and ``parameters``. Numeric projections are
@@ -103,8 +116,7 @@ See :doc:`api/index` for the ordinary/extension/internal API boundary.
 Residual differential-algebraic systems
 ---------------------------------------
 
-:class:`~coker.dynamics.ResidualDynamicalSystem` represents a coupled system
-directly as:
+:class:`~coker.dynamics.ResidualDynamicalSystem` represents an implicit system:
 
 .. math::
 
@@ -126,10 +138,10 @@ SUNDIALS plugin, and
 :attr:`~coker.backends.casadi.CasadiResidualSolver.VARIATIONAL` uses a direct
 collocation feasibility solve. IDAS options and IPOPT options remain separate
 in that options object.
-This interface does not discretize PDEs, but a finite-element, finite-volume,
-or weak-form model may supply its resulting residual DAE here.
+This interface does not discretise PDEs. A finite-element, finite-volume, or
+weak-form model may supply its residual DAE.
 
-The following executable CasADi example solves the coupled residual
+This CasADi example solves the coupled residual equations
 ``xdot + z - 1 = 0`` and ``x + 2 * xdot - z = 0``:
 
 .. doctest:: residual_dae
@@ -175,8 +187,8 @@ The following executable CasADi example solves the coupled residual
    ...     rtol=1e-4,
    ... )
 
-For an equivalent semi-explicit model, retain the public ODE/DAE declaration
-and convert only where residual access is required:
+Keep a semi-explicit model's ODE/DAE declaration and convert it when residual
+access is needed:
 
 .. doctest:: residual_dae
 
@@ -197,19 +209,19 @@ and convert only where residual access is required:
 Functional problem building
 ---------------------------
 
-New code should use :class:`coker.dynamics.VariationalProblemBuilder`. Declare
-controls and parameters at construction time, then pass a
-:class:`coker.toolkits.codesign.Minimise` objective and ``subject_to``
-comparisons to ``build``.
+Use :class:`coker.dynamics.VariationalProblemBuilder` to declare controls,
+parameters, a :class:`coker.toolkits.codesign.Minimise` objective, and
+``subject_to`` comparisons.
 
-The optimisation examples below require ``pip install "coker[casadi]"``.
-NumPy is included in that installation.
+The optimisation examples below use CasADi; install it with
+``pip install "coker[casadi]"``, which includes NumPy. PyTorch also supports
+restricted fixed-horizon parameter fitting, including quadratures, but not
+algebraic DAEs, control declarations, variational constraints, or optimised
+horizons. See :doc:`backends` for backend capabilities and dependencies.
 
-For example, a fixed-horizon path-planning problem can constrain the input and
-terminal state without constructing a loss callback:
-
-This block demonstrates symbolic construction only. The current CasADi solve
-path cannot lower its control-dependent callbacks.
+This fixed-horizon path-planning example constrains the input and terminal
+state. It constructs a symbolic problem only: the current CasADi solve path
+cannot lower its control-dependent callbacks.
 
 .. code-block:: python
 
@@ -251,9 +263,12 @@ path cannot lower its control-dependent callbacks.
        )
 
 For data fitting, declare the unknown as a bounded parameter and use the
-symbolic observed output directly in the objective:
+symbolic observed output directly in the objective. This constant-state model
+fits its initial value:
 
-.. code-block:: python
+.. testcode:: dynamics_builder_fitting
+
+   import numpy as np
 
    from coker import VectorSpace
    from coker.dynamics import VariationalProblemBuilder, create_autonomous_ode
@@ -262,8 +277,9 @@ symbolic observed output directly in the objective:
 
    system = create_autonomous_ode(
        parameters=VectorSpace("value", 1),
-       x0=lambda p: p[0],
-       xdot=lambda _x, _p: 0.0,
+       x0=lambda p: p,
+       xdot=lambda _x, _p: np.zeros(1),
+       backend="casadi",
    )
    value = BoundedVariable("value", lower_bound=0.5, upper_bound=3.0, guess=1.0)
 
@@ -277,28 +293,48 @@ symbolic observed output directly in the objective:
            Minimise((problem.output(problem.t_final)[0] - observed) ** 2)
        )
 
+   fit = built()
+   assert fit.solve_info.success
+   np.testing.assert_allclose(fit.parameters["value"], observed, atol=1e-5)
+   np.testing.assert_allclose(fit(0.0), [observed], atol=1e-5)
+   np.testing.assert_allclose(fit(1.0), [observed], atol=1e-5)
+
+The builder classifies comparisons by their time binding:
+
+- expressions at ``t`` are path constraints;
+- expressions at ``0`` are initial point constraints;
+- expressions at ``t_final`` and parameter-only expressions are terminal point
+  constraints.
+
+A numeric ``t_final`` fixes the horizon; a ``BoundedVariable`` makes it a solver
+decision. ``integrate(expr)`` denotes the dynamic quadrature
+``\int_0^T expr(t) dt``, not numerical sampling in the builder.
+``state(time)`` exposes the differential state. ``output(time)`` exposes the
+observed output, which may include algebraic or quadrature channels.
+
 Function-valued parameters
 --------------------------
 
-Systems may declare a parameter as a :class:`coker.FunctionSpace`. Supply a
-:class:`~coker.parameters.function_parameters.FunctionParameter` realization at problem construction;
-Coker replaces its concrete parameter blocks with scalar solver decisions before
-solving. The function space and realization must agree on their argument and
-output shapes.
-Solver-bound function parameters require a non-empty ``name``; Coker uses it
-to name their concrete parameter blocks.
-``DenseLayer`` realizes ``activation(weights @ x + bias)`` for vector targets
+Systems may declare a :class:`coker.FunctionSpace` parameter. At problem
+construction, supply a
+:class:`~coker.parameters.function_parameters.FunctionParameter` realisation
+with matching argument and output shapes. Coker expands its concrete parameter
+blocks into scalar solver decisions. A solver-bound function parameter needs
+a non-empty ``name`` for those blocks.
+
+``DenseLayer`` realises ``activation(weights @ x + bias)`` for vector targets
 and ``activation(weight * x + bias)`` for scalar targets. Vector activations
 and targets use vector inputs and outputs. Scalar activations and targets use
 two unbounded scalar decisions, ``weight`` and ``bias``.
 
-``ClosureParameter`` binds explicitly declared scalar or dense parameter blocks
-to a Coker function. Its function receives those blocks first, then the target
-function arguments. Use ``ClosureParameter.bind_callable`` to trace a Python
-implementation with that calling convention.
+``ClosureParameter`` binds declared scalar or dense blocks to a Coker function.
+The function receives those blocks before the target function's arguments.
+Use ``ClosureParameter.bind_callable`` to trace a Python implementation with
+that calling convention.
 
-For example, a one-component vector response over a two-component state can use
-a dense layer with an identity activation:
+This declaration constructs a fitting problem whose dense layer maps a
+two-component state to a one-component response with an identity activation;
+it does not run a solver:
 
 .. code-block:: python
 
@@ -344,20 +380,8 @@ a dense layer with an identity activation:
 are unbounded by default. Pass both ``lower_bound`` and ``upper_bound`` to
 ``RadialBasisFunction`` to constrain every coefficient.
 ``MonotonePiecewiseLinear`` has unbounded internal decisions, but its declared
-output bounds and monotonicity are enforced by its parameterization.
+output bounds and monotonicity are enforced by its parameterisation.
 
-The builder classifies comparisons by their time binding: expressions at
-``t`` are path constraints, expressions at ``0`` are initial point
-constraints, expressions at ``t_final`` (and parameter-only expressions) are
-terminal point constraints.  A numeric ``t_final`` is fixed; a
-``BoundedVariable`` declaration makes the horizon a free decision.  The
-``integrate`` operation denotes the dynamic quadrature
-``\int_0^T expr(t) dt`` rather than numerical sampling in the builder.
-``state(time)`` exposes the differential state, while ``output(time)`` is the
-observed system output (and may include algebraic or quadrature channels).
-The current executable lowering boundary is the CasADi backend; symbolic
-construction is backend-independent, but solving a built problem currently
-requires CasADi.
 
 Adaptive CasADi transcription
 -----------------------------
@@ -370,6 +394,9 @@ its polynomial degree increased up to ``maximum_degree``; it is bisected only
 when that limit is reached. Refinement stops when every interval is at or below
 ``mesh_tolerance`` or raises :class:`RuntimeError` after
 ``maximum_iterations`` refinements.
+
+The following fragment configures a problem without invoking the adaptive
+solve:
 
 .. code-block:: python
 
@@ -401,7 +428,7 @@ when that limit is reached. Refinement stops when every interval is at or below
 
 ``mesh_tolerance`` is the maximum scaled relative state defect per interval.
 ``minimum_interval_duration`` prevents h-refinement from splitting an interval
-below that normalized width. ``maximum_degree`` must be no less than
+below that normalised width. ``maximum_degree`` must be no less than
 ``minimum_degree``. Leave ``refinement_enabled`` at its default ``False`` for
 a single transcription solve.
 
@@ -412,20 +439,21 @@ per-segment defects and the collocation derivative defects. Both default to
 ``None`` and therefore inherit ``absolute_tolerance``; either may be ``0.0``
 to require an exact NLP equality.
 
-During one adaptive solve, the CasADi model setup is retained while only
-mesh-dependent NLPs are compiled. Each refined mesh interpolates the preceding
-path and seeds compatible controls, free parameters, and a free horizon from
-the preceding solution. Explicit parameters passed to ``solve`` override that
-carried parameter value. Successful adaptive solutions expose
-``adaptive_refinement_rounds`` (the number of mesh updates after the initial
-solve) and ``adaptive_maximum_defect`` (the final maximum scaled state defect).
-Previously visited mesh signatures are reused by a bounded cache. Cache reuse
-is an implementation detail: callers should treat adaptive solving as
-deterministic for a fixed problem, options, and parameter values, rather than
-rely on a cache lifetime across separately created problems.
+During an adaptive solve, CasADi retains the model setup and compiles only the
+mesh-dependent NLPs. Each refined mesh interpolates the preceding path and
+seeds compatible controls, free parameters, and a free horizon from the
+preceding solution. Explicit parameters passed to ``solve`` override the
+carried parameter value. Successful solutions expose
+``adaptive_refinement_rounds`` (mesh updates after the initial solve) and
+``adaptive_maximum_defect`` (the final maximum scaled state defect).
 
-Heterogeneous and function-valued parameters
---------------------------------------------
+A bounded cache reuses previously visited mesh signatures. Its lifetime is
+an implementation detail. Treat adaptive solving as deterministic for a
+fixed problem, options, and parameter values, without relying on cache reuse
+across separately created problems.
+
+Parameter order and reconstruction
+----------------------------------
 
 System parameter declarations may be one declaration or a positional tuple of
 ``Scalar``, ``VectorSpace``, and ``FunctionSpace`` declarations. A dynamics
@@ -436,7 +464,7 @@ without declared inputs, call ``system(time, *parameters)``. For a system with
 declared inputs, call ``system(time, input_value, *parameters)``. Do not add an
 input placeholder to the no-input form.
 
-The following complete example declares and constructs all three slots:
+Declare and supply all three parameter slots in the same order:
 
 .. code-block:: python
 
@@ -469,8 +497,8 @@ The following complete example declares and constructs all three slots:
 
    trajectory = system(time, offset, bias, gain_curve_value)
 
-Continuing this example, an otherwise equivalent system with a declared input
-puts its input value immediately after time:
+Continuing with ``spec`` and the parameter values above, a system with a
+declared input takes its input value immediately after time:
 
 .. code-block:: python
 
@@ -488,18 +516,17 @@ puts its input value immediately after time:
    input_value = lambda _time: 0.5
    trajectory_with_input = input_system(time, input_value, offset, bias, gain_curve_value)
 
-Values for a declared ``FunctionSpace`` parameter may be ordinary Python
-callables, :class:`coker.Function` objects, or
-:class:`~coker.parameters.function_parameters.FittedFunction` objects. Coker normalizes
-these values once before integration, so callers do not provide backend-native
-or lowered handles. No ``Noop`` placeholder is used for direct evaluation.
+Values for a declared ``FunctionSpace`` parameter may be Python callables,
+:class:`coker.Function` objects, or
+:class:`~coker.parameters.function_parameters.FittedFunction` objects. Coker
+normalises them once before integration; do not pass backend-native or lowered
+handles. Direct evaluation does not use a ``Noop`` placeholder.
 
-Continuing the same example with the original no-input ``system``, the
-variational builder receives one declaration for each positional parameter,
-in the same order: scalar offset, length-two bias, then gain curve. Use
-``BoundVector`` for a bounded vector decision block, and
-``DenseTensorVariable`` for an unbounded dense block reconstructed with the
-shape of its initial guess:
+For the original no-input ``system`` above, pass builder declarations in the
+same order: scalar offset, length-two bias, then gain curve. ``BoundVector``
+declares a bounded vector decision block. ``DenseTensorVariable`` declares an
+unbounded dense block with the shape of its initial guess. This fragment
+constructs the symbolic problem without solving it:
 
 .. code-block:: python
 
@@ -529,31 +556,32 @@ shape of its initial guess:
    ) as builder:
        problem = builder.build(Minimise(builder.output(builder.t_final)[0] ** 2))
 
-Function-valued parameters use named concrete parameter blocks.
-``DenseLayer`` expands its weights and bias, while
-``MonotonePiecewiseLinear`` and ``RadialBasisFunction`` each expand one vector
-block. The solver flattens those blocks into scalar decisions, then restores
-their original shapes when rebuilding a callable parameter. The returned
-``solution.parameters`` mapping restores scalar decisions as ``float`` values
-and vector or dense tensor decisions as shaped NumPy arrays. Function decisions
-are ``FittedFunction`` objects, retaining their specification, space, callable,
-and structured fitted parameters.
+``DenseLayer`` expands into weight and bias blocks.
+``MonotonePiecewiseLinear`` and ``RadialBasisFunction`` each expand into one
+vector block. The solver flattens these blocks into scalar decisions and
+restores their shapes when reconstructing the fitted function.
 
-``MonotonePiecewiseLinear.domain_knots`` should span the normalized integration
-domain from ``0`` to ``1``; use ``0`` and ``1`` as the endpoint knots and add
-interior knots where the fitted response needs more resolution. This is the
-solver's normalized integration coordinate, not physical time. A system whose
-parameter is expressed in physical time should pass its normalized time
-coordinate to the fitted function. The temporal transcription mesh is
-independent of the selected interior knots.
+``solution.parameters`` maps scalar decisions to ``float`` values and vector
+or dense tensor decisions to shaped NumPy arrays. Function decisions become
+``FittedFunction`` objects with their specification, space, callable, and
+structured fitted parameters.
+
+``MonotonePiecewiseLinear.domain_knots`` should span the normalised integration
+domain from ``0`` to ``1``; use these as endpoint knots and add interior knots
+where the fitted response needs more resolution. This is the solver's
+normalised integration coordinate, not physical time. For a system parameter
+expressed in physical time, pass the corresponding normalised time coordinate
+to the fitted function. The temporal transcription mesh is independent of the
+interior knots.
 
 Worked parameter-fitting example
 --------------------------------
 
-Fit an autonomous decay rate from observations over four seconds, then evaluate
-the returned trajectory directly at physical times:
+Fit an autonomous decay rate from observations over four seconds using the
+callback-based :class:`~coker.dynamics.VariationalProblem` interface, then
+evaluate the returned trajectory at physical times:
 
-.. code-block:: python
+.. testcode:: dynamics_decay_fitting
 
    import numpy as np
    from coker import VectorSpace
@@ -600,21 +628,24 @@ the returned trajectory directly at physical times:
        expected = initial_state * np.exp(-true_rate * time)
        np.testing.assert_allclose(predicted, expected, atol=1e-5)
 
+Trajectory evaluation and interpolation
+---------------------------------------
+
 ``fit(t)``, ``state(t)``, ``algebraic(t)``, ``quadratures(t)``, and
 ``control_law(t)`` accept physical time on ``[0, fit.t_final]``, including for
 an optimized horizon. Output and constraint callbacks also receive physical
 time. ``as_raw()`` returns physical knot times, and ``to_poly()`` returns an
 output interpolant on physical intervals. CasADi and PyTorch store ``fit.path``
-on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time mapping.
-CasADi control coefficients and defect estimation also use normalized time;
-do not pass physical times directly to the underlying path.
+on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time
+mapping. CasADi control coefficients and defect estimation also use normalized
+time; do not pass physical times directly to the underlying path.
 
 By default, PyTorch assembles its returned state and quadrature channels into
-four degree-eight LGR polynomials on normalized subintervals. Integration samples
-the corresponding physical-time nodes once, sharing each segment boundary.
-This avoids the cancellation of a single expanded degree-31 polynomial without
-changing the ODE solver or its tolerances. ``to_poly()`` applies the same
-piecewise representation to scalar or vector outputs.
+four degree-eight LGR polynomials on normalized subintervals. Integration
+samples the corresponding physical-time nodes once, sharing each segment
+boundary. This avoids cancellation from a single high-degree expanded
+polynomial without changing the ODE solver or its tolerances. ``to_poly()``
+applies the same piecewise representation to scalar or vector outputs.
 
 Set ``trajectory_degree`` and ``trajectory_n_intervals`` on
 ``coker.backends.pytorch.variational.PytorchVariationalSolverOptions`` to
@@ -625,29 +656,15 @@ trajectory_n_intervals=8)`` selects eight degree-six pieces. Prefer additional
 intervals over high polynomial degrees to avoid cancellation in the expanded
 interpolation basis.
 
-What the test suite exercises
------------------------------
-
-The current dynamics coverage includes:
-
-- direct simulation checks for scalar and vector linear systems;
-- parameter fitting for constants, lines, and exponential systems;
-- path constraints and regularisation terms;
-- solver re-entrancy and warm-start behaviour;
-- callback support through ``VariationalIterationCallback``.
-
-That makes the tests a useful source of real usage patterns even where the API
-surface is broader than this short guide.
-
 Solve status and failures
 -------------------------
 
-Both the dynamics layer and the codesign helpers surface solve metadata through
-:class:`coker.toolkits.codesign.SolveInfo`. Failed solves raise
+Dynamics and codesign solves expose metadata through
+:class:`coker.toolkits.codesign.SolveInfo`. A failed solve raises
 :class:`coker.toolkits.codesign.SolveFailure` with the backend status attached.
 
-Next places to read
--------------------
+Further reading
+----------------
 
 - ``tests/dynamical_systems/test_variational_solver.py`` for fitting and
   constrained-solve examples.
