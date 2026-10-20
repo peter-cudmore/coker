@@ -52,8 +52,7 @@ class PytorchLoweredFunction(LoweredFunction):
         if any(isinstance(arg, torch.Tensor) for arg in inputs):
             return tuple(outputs)
         return tuple(
-            None if output is None else _to_numpy_array(output)
-            for output in outputs
+            None if output is None else _to_numpy_array(output) for output in outputs
         )
 
     def as_module(self) -> "PytorchModule":
@@ -71,9 +70,7 @@ class PytorchModule(torch.nn.Module):
 
     def forward(self, *inputs: Any) -> Any:
         if len(inputs) != self._input_count:
-            raise TypeError(
-                f"Expected {self._input_count} inputs, got {len(inputs)}"
-            )
+            raise TypeError(f"Expected {self._input_count} inputs, got {len(inputs)}")
         return self._lowered(*inputs)
 
 

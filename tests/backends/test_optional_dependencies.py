@@ -54,9 +54,7 @@ def _run(python, source):
     "backend_name, dependency",
     [("casadi", "casadi"), ("jax", "jax"), ("pytorch", "torch")],
 )
-def test_missing_extra_explains_installation(
-    base_python, backend_name, dependency
-):
+def test_missing_extra_explains_installation(base_python, backend_name, dependency):
     _run(
         base_python,
         f"""

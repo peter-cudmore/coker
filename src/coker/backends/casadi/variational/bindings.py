@@ -84,8 +84,7 @@ class ControlFactory:
         self.t_final = t_final
         self.variables = variables
         self._symbols = [
-            ca.MX.sym(v.name, v.degrees_of_freedom(0, t_final))
-            for v in variables
+            ca.MX.sym(v.name, v.degrees_of_freedom(0, t_final)) for v in variables
         ]
         self.upper_bounds = [
             ca.DM.ones(v.degrees_of_freedom(0, t_final))
@@ -105,14 +104,10 @@ class ControlFactory:
         return ca.DM.zeros(sum(self.sizes), 1)
 
     def symbols(self) -> ca.MX:
-        return (
-            ca.vertcat(*self._symbols) if self._symbols else ca.MX.zeros(0, 1)
-        )
+        return ca.vertcat(*self._symbols) if self._symbols else ca.MX.zeros(0, 1)
 
     def __call__(self, t):
-        assert (
-            0 <= t <= self.t_final
-        ), f"Control variable is not defined at t = {t}"
+        assert 0 <= t <= self.t_final, f"Control variable is not defined at t = {t}"
         out = []
         for s, var in zip(self._symbols, self.variables):
             if isinstance(var, ConstantControlVariable):
@@ -131,9 +126,7 @@ class ControlFactory:
     def to_output_array(self, solution: ca.DM):
         return [
             v.to_solution(solution[offset : offset + size])
-            for v, offset, size in zip(
-                self.variables, self.offsets, self.sizes
-            )
+            for v, offset, size in zip(self.variables, self.offsets, self.sizes)
         ]
 
 

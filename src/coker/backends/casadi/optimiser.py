@@ -140,9 +140,7 @@ def build_optimisation_problem(
 
     spec = {"x": x, "p": p, "f": cost_fn, "g": g}
 
-    solver_inner = ca.nlpsol(
-        "solver", "ipopt", spec, dict(selected.optimiser_options)
-    )
+    solver_inner = ca.nlpsol("solver", "ipopt", spec, dict(selected.optimiser_options))
 
     return CasadiSolver(
         solver_inner, p, None, (lower_bound, upper_bound), output_map, x0
@@ -184,9 +182,7 @@ class CasadiSolver:
             )
 
         soln = self.solver_inner(**spec)
-        self.last_solve_info = solve_info_from_casadi_stats(
-            self.solver_inner.stats()
-        )
+        self.last_solve_info = solve_info_from_casadi_stats(self.solver_inner.stats())
         if not self.last_solve_info.success:
             raise SolveFailure(
                 "CasADi optimisation solve failed with status "

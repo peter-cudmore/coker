@@ -3,9 +3,12 @@
 ## Unreleased
 
 ### Added
+- Installed-wheel CI profiles for isolated base NumPy/SymPy installations on Ubuntu, Windows, and macOS (Python 3.10/3.13), and individual CasADi/JAX/PyTorch extras on Ubuntu (Python 3.11/3.13), retaining the all-extra Ubuntu suite and verifying wheel provenance for copied or symlinked installs; classify CUDA support as experimental and unverified pending GPU release evidence ([#98](https://github.com/peter-cudmore/coker/issues/98)). Broader support-boundary alignment remains tracked in [#89](https://github.com/peter-cudmore/coker/issues/89).
+- Distribution metadata links to the public documentation, source repository, issue tracker, and changelog.
 - Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
 - `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.
+- Residual differential-algebraic systems through `ResidualDynamicalSystem` and `to_residual_dynamical_system`, with NumPy integration and explicit CasADi IDAS or variational solver options.
 - `CasadiVariationalOptions` for CasADi solver policy and adaptive mesh refinement controls.
 - Local defect estimation with p-refinement before h-refinement.
 - Reuse of the previous path as the refined NLP initial guess.
@@ -19,7 +22,8 @@
 - Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
 ### Changed
-- Consolidate API boundaries and migration notes into existing guides and remove premature backend/toolkit documentation.
+- Trim collocation implementation types from the `coker.dynamics` root API while retaining the public `DynamicsSpec` construction route.
+- Consolidate API boundaries and migration notes into existing guides, retaining the dynamics, parameters, and backend API reference pages.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.
 - Standardize program shape metadata as `input_shape()` / `output_shape()` methods and dynamical-system backend metadata as the `backend` property.
 - Keep function parameters at `coker.parameters.function_parameters`, signatures/lowering configuration at `coker.backends.lowered`, and solve status at `coker.toolkits.codesign`; remove obsolete dynamics reexports and system-modelling registry/handle helpers from public facades.
@@ -34,6 +38,8 @@
 
 ### Fixed
 - Missing optional CasADi, JAX, and PyTorch backend dependencies now report the requested backend and installation command, including JAX's Python requirement, while preserving the original exception cause and broken-plugin diagnostics.
+- SymPy numerical division returns `NaN` for `ZeroDivisionError`, allowing conditionals to select a valid branch instead of failing on inactive division by zero.
+- Preserve node-major value layout when evaluating multidimensional polynomial knot derivatives and coupled residual diagnostics.
 - Stabilize PyTorch variational trajectories with low-degree piecewise LGR interpolation, preserving state, quadratures, and physical-time evaluation; restore the trajectory-fit regression.
 - Normalize scalar outputs and column-shaped path samples when converting variational solutions with `to_poly()`.
 - Evaluate variational solutions in physical time using only `t_final`, with normalized CasADi and PyTorch paths and preserved control/defect semantics.
