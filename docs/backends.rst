@@ -22,6 +22,8 @@ backend. Variational problems retain a separate CasADi solver default.
 
 See :doc:`api/index` for canonical imports and :doc:`getting_started` for migration notes.
 
+CUDA support is **experimental and unverified pending GPU release evidence**.
+
 Backend capability matrix
 -------------------------
 
@@ -31,15 +33,19 @@ Backend capability matrix
    * - Backend
      - Best fit
      - Dependency story
-     - Observed coverage in this repository
+     - Repository test coverage (not platform or CUDA certification)
    * - ``numpy``
-     - Direct numerical evaluation, baseline execution, and host-side ODE work.
+     - Reference execution and small-system fallback.
      - Included in the base install.
      - Covered by ``tests/backends/numpy/`` and the benchmark suite.
    * - ``casadi``
-     - Nonlinear optimisation, transcription-heavy workflows, and the default
-       :class:`~coker.dynamics.VariationalProblem` solve path.
-     - Install with ``pip install "coker[casadi]"``.
+     - Optimisation, simulation, and high-performance numerical work,
+       including nonlinear transcription workflows.
+     - Install with ``pip install "coker[casadi]"``. Independent residual DAEs
+       default to native IDAS. ``CasadiResidualSolverOptions`` selects either
+       ``CasadiResidualSolver.IDAS`` or the explicit
+       ``CasadiResidualSolver.VARIATIONAL`` collocation path; solver failures
+       do not silently switch algorithms.
      - Covered by ``tests/backends/casadi/`` and the variational solver tests.
    * - ``sympy``
      - Symbolic inspection and expression printing. Function-space inputs and
@@ -49,21 +55,20 @@ Backend capability matrix
      - Covered by ``tests/backends/sympy/test_sympy_printing.py``.
    * - ``jax``
      - Alternate array backend when you want JAX-native values.
-     - Install with ``pip install "coker[jax]"``.
-     - Backend code exists in ``src/coker/backends/jax/``. The current test
-       suite does not include a dedicated ``tests/backends/jax/`` directory.
+     - Install with ``pip install "coker[jax]"``; Python 3.11 or newer.
+     - Array evaluation is included in installed-wheel smoke checks and the
+       all-extra suite; there is no dedicated ``tests/backends/jax/`` directory.
    * - ``pytorch``
      - Tensor-valued execution, PyTorch autograd, native-module composition,
-       and CPU or CUDA mathematical-program solves.
+       and mathematical-program solves (CPU; CUDA experimental/unverified).
      - Install with ``pip install "coker[pytorch]"``. Mathematical-program NLP
        solves use the configured CPU or CUDA device and floating dtype.
        ``PytorchNLPSolverOptions`` selects ``"LBFGS"`` (default) or ``"Adam"``
        and forwards ``optimiser_options`` to the selected PyTorch optimizer.
        Constraint handling uses the backend's barrier and augmented-Lagrangian
        stages. ``PytorchODESolverParameters`` configures ``torchdiffeq``
-       initial-value solves only. Variational fitting currently has no
-       separate options object: its fixed integration and LBFGS settings are
-       implementation defaults.
+       initial-value solves only. ``PytorchVariationalSolverOptions`` sets
+       trajectory degree and interval count for fixed-horizon parameter fitting.
      - Covered by ``tests/backends/pytorch/`` and dedicated tensor/autograd
        backend tests. Algebraic DAEs, variational controls, quadratures,
        constraints, and optimized horizons are unsupported.
@@ -73,16 +78,17 @@ Choosing a backend
 
 A good default is:
 
-- use ``numpy`` while bringing up a model or debugging array shapes;
-- use ``casadi`` for solve-heavy optimisation and parameter-fitting problems;
+- use ``numpy`` as a reference implementation or for small systems;
+- use ``casadi`` for optimisation, simulation, and high-performance numerical
+  work;
 - use ``pytorch`` when you need tensor-valued execution, autograd, or a
   nonlinear mathematical-program solve on PyTorch;
 - use ``sympy`` when you need symbolic forms or printable expressions.
 
-The repository's tests validate numerical execution under ``numpy``, ``jax``,
-and ``pytorch`` (including CUDA-conditional mathematical-program and
-fixed-horizon variational fitting behavior), and variational solves through
-``casadi``.
+The repository includes numerical execution tests under ``numpy``, ``jax``,
+and ``pytorch``, and variational solve tests through ``casadi``. CUDA-conditional
+mathematical-program and fixed-horizon variational fitting tests are not GPU
+release evidence.
 
 
 Lowering handles
@@ -227,9 +233,9 @@ solver/backend combination is rejected while building or lowering, before
 evaluation. Derivatives through an argmin or argmax are not defined.
 
 ``numpy`` and ``casadi`` support host-side program composition.
-PyTorch supports direct CPU or CUDA mathematical-program construction/solving
-and fixed-horizon, bound-only ODE parameter fitting; JAX does not construct
-optimisation programs.
+PyTorch implements direct CPU or CUDA mathematical-program construction/solving
+and fixed-horizon, bound-only ODE parameter fitting; its CUDA paths remain
+experimental/unverified. JAX does not construct optimisation programs.
 
 Related guides
 --------------

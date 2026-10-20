@@ -1,8 +1,10 @@
 name: Run Python tests
 
 on:
+  push:
+    branches: [develop]
   pull_request:
-    branches: [ main ]
+    branches: [main, develop]
   workflow_dispatch:
   workflow_call:
 
@@ -25,6 +27,93 @@ jobs:
         run: uv sync --frozen --group ci --extra casadi --extra jax --extra pytorch
       - name: Run default test suite
         run: uv run pytest -m "not perf"
+
+  wheel:
+    name: Build installed-smoke artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+      - run: uv build --wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installed-smoke-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  installed-smoke:
+    name: Installed ${{ matrix.profile }} / ${{ matrix.os }} / Python ${{ matrix.python }}
+    needs: wheel
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.13"]
+        profile: [base]
+        include:
+          - {os: ubuntu-latest, python: "3.11", profile: casadi}
+          - {os: ubuntu-latest, python: "3.13", profile: casadi}
+          - {os: ubuntu-latest, python: "3.11", profile: jax}
+          - {os: ubuntu-latest, python: "3.13", profile: jax}
+          - {os: ubuntu-latest, python: "3.11", profile: pytorch}
+          - {os: ubuntu-latest, python: "3.13", profile: pytorch}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: installed-smoke-wheel
+          path: dist
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - name: Install only the selected extra and exercise the wheel
+        shell: python
+        env:
+          PROFILE: ${{ matrix.profile }}
+          PYTHON_VERSION: ${{ matrix.python }}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = Path.cwd()
+          environment = Path(os.environ["RUNNER_TEMP"]) / "installed-smoke"
+          subprocess.run(
+              ["uv", "--no-config", "venv", "--python",
+               os.environ["PYTHON_VERSION"], str(environment)],
+              check=True,
+          )
+          python = environment / (
+              "Scripts/python.exe" if os.name == "nt" else "bin/python"
+          )
+          wheel, = (root / "dist").glob("*.whl")
+          profile = os.environ["PROFILE"]
+          requirement = str(wheel)
+          if profile != "base":
+              requirement += f"[{profile}]"
+          install = [
+              "uv", "--no-config", "pip", "install",
+              "--python", str(python), requirement,
+          ]
+          if profile == "pytorch":
+              install += ["--torch-backend", "cpu"]
+          subprocess.run(install, check=True)
+          subprocess.run(
+              [str(python), "-I",
+               str(root / "scripts" / "smoke_installation.py"), profile],
+              cwd=os.environ["RUNNER_TEMP"],
+              check=True,
+          )
+
+  docs:
+    name: Test documentation examples
+    uses: ./.github/workflows/check-docs.yml
+    with:
+      python-version: "3.13"
 
   perf:
     name: Run perf tests

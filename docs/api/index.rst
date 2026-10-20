@@ -8,6 +8,9 @@ API Reference
    spaces
    conditional
    optimisation
+   dynamics
+   parameters
+   backends
 
 Public import boundary
 ----------------------
@@ -20,7 +23,8 @@ names imported incidentally by implementation modules are not additional APIs:
 - ``coker.dynamics``: ``DynamicsSpec``/``create_dynamics_from_spec``,
   ``create_control_system``, ``create_autonomous_ode``, ``direct_sum`` and its
   ``ProjectionSet``, variational builders/options/results, controls, and
-  symbolic analyses. See :doc:`../dynamics`.
+  symbolic analyses, ``ResidualDynamicalSystem``, and
+  ``to_residual_dynamical_system``. See :doc:`dynamics` and :doc:`../dynamics`.
 - ``coker.parameters``: scalar, vector, and tensor decision declarations;
   ``coker.parameters.function_parameters``: callable declarations and
   ``FittedFunction`` results. See :doc:`../dynamics`.

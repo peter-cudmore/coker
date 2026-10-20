@@ -65,8 +65,7 @@ def _validate_group(rows: tuple[ConstraintRow, ...], tolerance: float) -> None:
         for row in rows
     )
     raise ConstraintPreprocessingError(
-        "Conflicting constraint rows for residual "
-        f"{rows[0].residual}: {intervals}"
+        "Conflicting constraint rows for residual " f"{rows[0].residual}: {intervals}"
     )
 
 
@@ -151,7 +150,5 @@ def reduce_affine_equality_rows(
     retained_ids = {id(row) for row in retained}
     equality_ids = {id(row) for row in equalities}
     return tuple(
-        row
-        for row in rows
-        if id(row) not in equality_ids or id(row) in retained_ids
+        row for row in rows if id(row) not in equality_ids or id(row) in retained_ids
     )

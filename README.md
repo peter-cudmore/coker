@@ -77,6 +77,15 @@ Base installation:
 pip install coker
 ```
 
+See the [backend guide](docs/backends.rst) for backend limits. Base NumPy/SymPy
+installed-wheel CI covers Ubuntu, Windows, and macOS on Python 3.10 and 3.13;
+each optional extra is checked separately on Ubuntu on Python 3.11 and 3.13.
+JAX requires Python 3.11 or newer. These are CI coverage targets, not a claim
+of observed success on every platform or backend feature parity. All accelerator
+checks are CPU-only: CUDA tensor execution/autograd, NLP, ODE/quadratures where
+implemented, and fitting remain experimental and unverified pending GPU release
+evidence. Optional extras on Windows/macOS are outside this isolated-wheel boundary.
+
 ## Toolkit areas in this repository
 
 ### Symbolic algebra and function composition
@@ -164,8 +173,8 @@ set `project.version` in `pyproject.toml` and add a matching dated changelog
 heading, for example `## 0.5.0 - 2026-10-18`, with the actual release date
 (not a future date). Keep the `Unreleased` section for subsequent changes.
 
-The tagged commit must pass the shared Python runtime matrix, lint checks,
-introductory documentation examples, and warning-clean Sphinx build. The
+The tagged commit must pass the shared Python runtime matrix, isolated-install
+profiles, lint checks, Sphinx documentation examples, and warning-clean build. The
 release workflow builds one sdist and wheel, checks their package versions,
 then installs that wheel with the CasADi extra in a fresh environment outside
 the checkout. The installed-package smoke asserts the public NumPy scalar
@@ -183,7 +192,7 @@ required. Local equivalents of the release-specific checks are:
 ```bash
 uv build
 uv run --no-project scripts/check_release.py
-uv run python scripts/check_doc_examples.py
+uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
 # For a prepared release, also enforce tag/date agreement:
 uv run --no-project scripts/check_release.py --tag v0.5.0
 ```

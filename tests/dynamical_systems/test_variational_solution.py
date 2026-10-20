@@ -117,8 +117,7 @@ def test_evaluate_outputs_quadratures_and_constraints(horizon, free_horizon):
     assert fit.path.intervals[-1][1] == 1.0
     assert fit.segment_defects[-1].physical_interval[1] == fit.t_final
     for segment in fit.segment_defects:
-        np.testing.assert_allclose(segment.state_residual, 0, atol=1e-6)
-        np.testing.assert_allclose(segment.quadrature_residual, 0, atol=1e-6)
+        np.testing.assert_allclose(segment.full_residual, 0, atol=1e-6)
 
 
 @pytest.mark.parametrize("horizon", [0.5, 4.0])
@@ -167,10 +166,38 @@ def test_evaluate_algebraics_and_controls_in_physical_time(horizon):
             backend="casadi",
         )
     )
-    rates, _ = factory.evaluate_defect_rates(
-        np.array([0.0, 0.625, 0.75, 1.0]), np.zeros((1, 4)), fit
+    residuals = factory.evaluate_numeric_defect_residuals(
+        np.array([0.0, 0.625, 0.75, 1.0]),
+        np.zeros((1, 4)),
+        np.zeros((1, 4)),
+        fit,
     )
     # Defect nodes are normalized, but controls and dynamics receive seconds.
     np.testing.assert_allclose(
-        rates, [[4.0, 4 + 0.625 * horizon, 5 + 0.75 * horizon, 5 + horizon]]
+        residuals,
+        [[-4.0, -4 - 0.625 * horizon, -5 - 0.75 * horizon, -5 - horizon]],
     )
+
+
+@pytest.mark.parametrize("horizon", [0.5, 1.0, 4.0])
+@pytest.mark.parametrize("output_shape", [(), (1,), (1, 1)])
+def test_mapped_solution_output_uses_numeric_parameter_vector(horizon, output_shape):
+    path = InterpolatingPolyCollection(
+        [InterpolatingPoly(1, (0.0, 1.0), 1, np.array([2.0, 2.0]))]
+    )
+
+    def output(_time, state, _algebraic, _control, parameters, _quadrature):
+        return np.asarray(state + parameters).reshape(output_shape)
+
+    solution = VariationalSolution.from_solver(
+        cost=0.0,
+        path=path,
+        projectors=(np.eye(1), None, None),
+        control_solutions=[],
+        parameters={"offset": 3.0},
+        output=output,
+        parameter_vector=np.array([3.0]),
+        t_final=horizon,
+    )
+
+    np.testing.assert_allclose(solution.to_poly()(0.5 * horizon), np.array([5.0]))

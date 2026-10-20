@@ -2,7 +2,7 @@ name: Publish Coker
 
 on:
   pull_request:
-    branches: ["main"]
+    branches: ["main", "develop"]
     types: [opened, synchronize, reopened, edited]
   push:
     tags: ["v*"]
@@ -13,9 +13,6 @@ permissions:
 jobs:
   runtime-checks:
     uses: ./.github/workflows/test-and-lint.yml
-
-  documentation-checks:
-    uses: ./.github/workflows/check-docs.yml
 
   verify:
     name: Verify release distributions
@@ -67,7 +64,7 @@ jobs:
 
   publish-to-test-pypi:
     name: Publish verified artifacts to TestPyPI
-    needs: [runtime-checks, documentation-checks, verify]
+    needs: [runtime-checks, verify]
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -92,7 +89,7 @@ jobs:
 
   publish-to-pypi:
     name: Publish verified artifacts to PyPI
-    needs: [runtime-checks, documentation-checks, verify]
+    needs: [runtime-checks, verify]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:

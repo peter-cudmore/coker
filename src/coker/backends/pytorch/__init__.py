@@ -78,9 +78,7 @@ class PytorchBackend(Backend):
         if isinstance(array, torch.Tensor):
             device_matches = self.device is None or array.device == self.device
             if array.dtype == torch.bool:
-                return (
-                    array if device_matches else array.to(device=self.device)
-                )
+                return array if device_matches else array.to(device=self.device)
             dtype_matches = self.dtype is None or array.dtype == self.dtype
             if device_matches and dtype_matches:
                 return array
@@ -116,9 +114,7 @@ class PytorchBackend(Backend):
             return np.reshape(arg, dim.dim)
         if isinstance(arg, (float, int, complex)):
             return self.to_backend_array([arg]).reshape(dim.dim)
-        raise NotImplementedError(
-            f"Don't know how to resize {arg.__class__.__name__}"
-        )
+        raise NotImplementedError(f"Don't know how to resize {arg.__class__.__name__}")
 
     def call(self, op, *args) -> ArrayLike:
         if op in impls:
@@ -181,11 +177,7 @@ class PytorchBackend(Backend):
             nonlocal fallback_module
 
             tensor = next(
-                (
-                    value
-                    for value in present_inputs
-                    if isinstance(value, torch.Tensor)
-                ),
+                (value for value in present_inputs if isinstance(value, torch.Tensor)),
                 None,
             )
             if tensor is None:
@@ -206,10 +198,7 @@ class PytorchBackend(Backend):
             native = module_for(present_inputs)
             values = iter(present_inputs)
             return native(
-                *(
-                    None if value is None else next(values)
-                    for value in native_arguments
-                )
+                *(None if value is None else next(values) for value in native_arguments)
             )
 
         return append_native_outputs(
@@ -244,24 +233,18 @@ class PytorchBackend(Backend):
                 (
                     block
                     if isinstance(block, torch.Tensor)
-                    else torch.as_tensor(
-                        block, device=self.device, dtype=self.dtype
-                    )
+                    else torch.as_tensor(block, device=self.device, dtype=self.dtype)
                 ).reshape(-1)
                 for block in blocks
             )
         )
         if isinstance(target, FunctionSpace):
-            return self._fit_function_parameter(
-                declaration, target, flat_values
-            )
+            return self._fit_function_parameter(declaration, target, flat_values)
         if isinstance(target, VectorSpace):
             return flat_values.reshape(declaration.shape)
         if isinstance(target, Scalar):
             return flat_values[0]
-        raise TypeError(
-            "parameter target must be a scalar, vector, or function space"
-        )
+        raise TypeError("parameter target must be a scalar, vector, or function space")
 
     def _fit_function_parameter(self, declaration, target, values):
         from coker.parameters.function_parameters import FittedFunction

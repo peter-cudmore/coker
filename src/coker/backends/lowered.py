@@ -13,9 +13,7 @@ from coker.algebra.dimensions import (
 
 
 InputSpace: TypeAlias = Scalar | VectorSpace | FunctionSpace
-OutputShape: TypeAlias = (
-    Dimension | Scalar | VectorSpace | FunctionSpace | None
-)
+OutputShape: TypeAlias = Dimension | Scalar | VectorSpace | FunctionSpace | None
 
 
 @dataclass(frozen=True)
