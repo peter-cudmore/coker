@@ -89,6 +89,11 @@ Evaluation and lowering do not change the current selection. See
 :doc:`backends` for supported capabilities and :doc:`tutorials/backends` for
 backend selection and native function extraction.
 
+Prefer CasADi for optimisation, simulation, and high-performance numerical
+workloads; NumPy remains the reference implementation and small-system fallback.
+The NumPy construction default does not change that backend policy. See
+:doc:`backends` for current capability limits and installation requirements.
+
 Migrating to 0.5
 ----------------
 

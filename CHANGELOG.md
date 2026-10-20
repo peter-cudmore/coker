@@ -5,6 +5,8 @@
 ### Added
 - Five-section documentation with introductory tutorials, a task-focused cookbook, architecture guides, API reference, and source-only author notes.
 - Executable examples for installation, scalar and vector functions, symbolic loops and conditionals, backend selection and import/export, simulation, parameter fitting, path planning, robot-arm kinematics, solver configuration, and lowering, with rendered plots and CI-backed numerical checks.
+- Installed-wheel CI profiles for isolated base NumPy/SymPy installations on Ubuntu, Windows, and macOS (Python 3.10/3.13), and individual CasADi/JAX/PyTorch extras on Ubuntu (Python 3.11/3.13), retaining the all-extra Ubuntu suite and verifying wheel provenance for copied or symlinked installs; classify CUDA support as experimental and unverified pending GPU release evidence ([#98](https://github.com/peter-cudmore/coker/issues/98)). Broader support-boundary alignment remains tracked in [#89](https://github.com/peter-cudmore/coker/issues/89).
+- Distribution metadata links to the public documentation, source repository, issue tracker, and changelog.
 - Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
 - `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.
@@ -19,6 +21,7 @@
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
 - Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
+- Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
 ### Changed
 - Trim collocation implementation types from the `coker.dynamics` root API while retaining the public `DynamicsSpec` construction route.
@@ -36,6 +39,11 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- SymPy numerical division returns `NaN` for `ZeroDivisionError`, allowing conditionals to select a valid branch instead of failing on inactive division by zero.
+- Preserve node-major value layout when evaluating multidimensional polynomial knot derivatives and coupled residual diagnostics.
+- Stabilize PyTorch variational trajectories with low-degree piecewise LGR interpolation, preserving state, quadratures, and physical-time evaluation; restore the trajectory-fit regression.
+- Normalize scalar outputs and column-shaped path samples when converting variational solutions with `to_poly()`.
+- Evaluate variational solutions in physical time using only `t_final`, with normalized CasADi and PyTorch paths and preserved control/defect semantics.
 - Evaluation, alternate lowering, and explicit problem builds no longer change subsequent implicit backend selection.
 - Lowered mathematical programs expose only objective and requested outputs while still reconstructing private decision captures.
 - Direct-sum composition correctly packs scalar subsystem outputs on NumPy.

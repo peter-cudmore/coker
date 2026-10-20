@@ -20,4 +20,3 @@ See :doc:`../backends` for the capability matrix and backend-selection rules,
 .. autoclass:: coker.backends.numpy.NumpyBackend
 
 .. autoclass:: coker.backends.numpy.NumpySolverParameters
-

@@ -275,9 +275,10 @@ class _TranscriptionFactory:
             controls = np.zeros((0, count))
         else:
             control_samples = [
-                np.asarray(solution.control_law(float(time)), dtype=float).reshape(
-                    (-1,)
-                )
+                np.asarray(
+                    solution.control_law(float(time) * solution.t_final),
+                    dtype=float,
+                ).reshape((-1,))
                 for time in times.flat
             ]
             controls = np.column_stack(control_samples)

@@ -16,4 +16,3 @@ function-valued parameters, and fitted-value reconstruction.
 .. autoclass:: coker.parameters.BoundVector
 
 .. autoclass:: coker.parameters.DenseTensorVariable
-

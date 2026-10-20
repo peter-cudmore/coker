@@ -38,4 +38,3 @@ current lowering limits.
 
 .. autoclass:: coker.dynamics.VariationalProblem
    :members: get_solver
-

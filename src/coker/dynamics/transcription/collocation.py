@@ -331,6 +331,11 @@ class InterpolatingPoly:
         ]
         dx_i = []
         ds_dt = 1 / self.width
+        # Numeric and symbolic arrays use different default reshape orders.
+        if isinstance(self.values, np.ndarray):
+            v = self.values.reshape((self.dimension, -1), order="F")
+        else:
+            v = self.values.reshape((self.dimension, -1))
         for s in self.s:
 
             ds = ds_dt * np.array(
@@ -338,8 +343,6 @@ class InterpolatingPoly:
             ).reshape((1, n))
             projection = (ds @ self.bases).T
 
-            # this treats each column as the interpolation point.
-            v = self.values.reshape((self.dimension, -1))
             value = v @ projection
             dx_i.append(value)
 

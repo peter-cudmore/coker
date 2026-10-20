@@ -190,7 +190,6 @@ access is needed:
    ...     [0.0],
    ... )
 
-
 Functional problem building
 ---------------------------
 
@@ -544,8 +543,9 @@ interior knots.
 Worked parameter-fitting example
 --------------------------------
 
-This example fits the constant state of a one-dimensional system using the
-callback-based :class:`~coker.dynamics.VariationalProblem` interface:
+Fit an autonomous decay rate from observations over four seconds using the
+callback-based :class:`~coker.dynamics.VariationalProblem` interface, then
+evaluate the returned trajectory at physical times:
 
 .. code-block:: python
 
@@ -554,43 +554,73 @@ callback-based :class:`~coker.dynamics.VariationalProblem` interface:
    from coker.dynamics import VariationalProblem, create_autonomous_ode
    from coker.parameters import BoundedVariable
 
-   def x0(p):
-       return p[0]
+   initial_state = 2.0
+   true_rate = 0.7
+   observation_times = np.linspace(0.5, 4.0, 8)
+   observations = initial_state * np.exp(-true_rate * observation_times)
 
-   def xdot(x, p):
-       return 0
-
-   measured_value = np.array([2.0])
+   def rate(state, parameters):
+       return -parameters[0] * state
 
    system = create_autonomous_ode(
        parameters=VectorSpace("p", 1),
-       x0=x0,
-       xdot=xdot,
-       backend="numpy",
+       x0=np.array([initial_state]),
+       xdot=rate,
+       backend="casadi",
    )
 
-   def loss(solution, p_inner):
+   def loss(trajectory, parameters):
        total_error = 0.0
-       for t_i in np.arange(0, 1, 0.1):
-           truth = measured_value[0]
-           estimate = solution(t_i, p_inner)
-           total_error += (truth - estimate) ** 2
+       for time, observed in zip(observation_times, observations):
+           predicted = trajectory(float(time), parameters)
+           total_error += (predicted - float(observed)) ** 2
        return total_error
 
    problem = VariationalProblem(
        loss=loss,
        system=system,
        parameters=[
-           BoundedVariable("value", upper_bound=3, lower_bound=0.5, guess=2)
+           BoundedVariable("decay_rate", 0.05, 2.0, guess=0.3)
        ],
-       t_final=1,
+       t_final=4.0,
        backend="casadi",
    )
 
-   solution = problem()
-   print(solution.parameters["value"])
-   print(solution.solve_info.success)
+   fit = problem()
+   assert fit.solve_info.success
+   np.testing.assert_allclose(fit.parameters["decay_rate"], true_rate, atol=1e-4)
+   for time in [0.0, 0.5, 1.0, 1.5, 2.3, 4.0]:
+       predicted = np.asarray(fit(time)).item()
+       expected = initial_state * np.exp(-true_rate * time)
+       np.testing.assert_allclose(predicted, expected, atol=1e-5)
 
+Trajectory evaluation and interpolation
+---------------------------------------
+
+``fit(t)``, ``state(t)``, ``algebraic(t)``, ``quadratures(t)``, and
+``control_law(t)`` accept physical time on ``[0, fit.t_final]``, including for
+an optimized horizon. Output and constraint callbacks also receive physical
+time. ``as_raw()`` returns physical knot times, and ``to_poly()`` returns an
+output interpolant on physical intervals. CasADi and PyTorch store ``fit.path``
+on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time
+mapping. CasADi control coefficients and defect estimation also use normalized
+time; do not pass physical times directly to the underlying path.
+
+By default, PyTorch assembles its returned state and quadrature channels into
+four degree-eight LGR polynomials on normalized subintervals. Integration
+samples the corresponding physical-time nodes once, sharing each segment
+boundary. This avoids cancellation from a single high-degree expanded
+polynomial without changing the ODE solver or its tolerances. ``to_poly()``
+applies the same piecewise representation to scalar or vector outputs.
+
+Set ``trajectory_degree`` and ``trajectory_n_intervals`` on
+``coker.backends.pytorch.variational.PytorchVariationalSolverOptions`` to
+override these defaults. Both must be positive integers. Pass the options to
+``coker.backends.pytorch.variational.create_variational_solver(problem, options)``.
+For example, ``PytorchVariationalSolverOptions(trajectory_degree=6,
+trajectory_n_intervals=8)`` selects eight degree-six pieces. Prefer additional
+intervals over high polynomial degrees to avoid cancellation in the expanded
+interpolation basis.
 
 Solve status and failures
 -------------------------
