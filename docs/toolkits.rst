@@ -1,36 +1,31 @@
-Toolkit guides
-==============
+Toolkits
+========
 
-Beyond the core symbolic API, Coker ships several domain-focused toolkits under
-``src/coker/toolkits/``. They share the same tracing and backend model, so the
-same function/back-end ideas apply across robotics and optimisation workflows.
+Coker's toolkits provide spatial algebra, rigid-body modelling, and mathematical
+programming through the symbolic tracing and backend model.
 
 Spatial algebra
 ---------------
 
-:mod:`coker.toolkits.spatial` exports the low-level rigid-motion primitives used
-throughout the robotics code:
+:mod:`coker.toolkits.spatial` provides rigid-motion primitives:
 
 - :class:`coker.toolkits.spatial.Rotation3`
 - :class:`coker.toolkits.spatial.Isometry3`
 - :class:`coker.toolkits.spatial.Screw`
 - adjoint and Lie-algebra helpers such as ``hat`` and ``se3_bracket``
 
-These types show up directly in the kinematics tests and in the double-pendulum
-script.
 
 Rigid-body kinematics and dynamics
 ----------------------------------
 
-:mod:`coker.toolkits.kinematics` exposes :class:`~coker.toolkits.kinematics.RigidBody`
-and joint/inertia types for articulated models. The test suite demonstrates:
+:mod:`coker.toolkits.kinematics` provides
+:class:`~coker.toolkits.kinematics.RigidBody`, joint types, and inertia
+declarations for articulated models. Supported joints include welded,
+revolute, prismatic, and free joints. Use the model to calculate forward
+kinematics, Jacobians, energy, mass matrices, and inverse dynamics.
 
-- welded, revolute, prismatic, and free-joint coordinate contracts;
-- two-link and branched-tree forward kinematics and Jacobians;
-- single-pendulum energy, mass-matrix, and inverse-dynamics checks;
-- a hexapod leg example with symbolic forward kinematics.
-
-A representative pattern is:
+Define links and effectors, then wrap the required calculation in a Coker
+function:
 
 .. code-block:: python
 
@@ -59,25 +54,23 @@ A representative pattern is:
        backend="numpy",
    )
 
-Run the separate ``scripts/double_pendulum.py`` visualisation example with
-``uv run scripts/double_pendulum.py``; its inline metadata declares NumPy,
-Matplotlib, and the local Coker source. Import ``KinematicsVisualiser`` from
-``coker.toolkits.kinematics.visualiser`` for use in your own code, installing
-Matplotlib separately. The main kinematics module does not import Matplotlib.
-See :doc:`examples` for invocation and backend selection.
+Run ``uv run scripts/double_pendulum.py`` for a visualisation example. The
+script's inline metadata declares NumPy, Matplotlib, and the local Coker source.
+To visualise your own model, install Matplotlib and import
+``KinematicsVisualiser`` from ``coker.toolkits.kinematics.visualiser``. The main
+kinematics module does not import Matplotlib.
 
-Codesign-style mathematical programs
-------------------------------------
+Mathematical programs
+---------------------
 
-:mod:`coker.toolkits.codesign` provides a small builder for optimisation-style
-programs over symbolic variables. It is useful when you want a compact host-side
-API instead of assembling a :class:`coker.dynamics.VariationalProblem`
-directly. :meth:`coker.toolkits.codesign.ProblemBuilder.build` returns a public
-:class:`coker.toolkits.codesign.MathematicalProgram`, which is callable with
-the declared runtime arguments.
+:mod:`coker.toolkits.codesign` builds optimisation problems over symbolic
+variables. Use :class:`~coker.toolkits.codesign.ProblemBuilder` for algebraic
+programs and :class:`coker.dynamics.VariationalProblemBuilder` for trajectory
+problems. ``ProblemBuilder.build`` returns a public
+:class:`~coker.toolkits.codesign.MathematicalProgram` callable with the declared
+runtime arguments.
 
-The examples in this section require ``pip install "coker[casadi]"``, which
-also supplies NumPy.
+These examples require ``pip install "coker[casadi]"``, which includes NumPy.
 
 .. code-block:: python
 
@@ -99,9 +92,9 @@ Use ``bounded(residual, lower, upper)`` when bounds are part of the model.
 Bounds may depend on runtime parameters; CasADi evaluates them as residual
 constraints at solve time.
 
-Function-valued decisions use ``new_function_parameter`` with a declared
-``FunctionSpace`` and finite ``FunctionParameter`` realization. The returned
-callable participates directly in the objective and constraints:
+Use ``new_function_parameter`` to declare a function-valued decision with a
+``FunctionSpace`` and finite ``FunctionParameter`` realisation. Use the returned
+callable in objectives and constraints:
 
 .. code-block:: python
 
@@ -121,27 +114,30 @@ callable participates directly in the objective and constraints:
    objective, value = problem()
    fitted_response = problem.parameters["response"]
 
-After a numeric solve, ``problem.parameters`` maps each named decision to its
-reconstructed value. Scalar decisions are floats and vector or tensor decisions
-are shaped NumPy arrays. Function-valued decisions are ``FittedFunction``
-instances: they retain the original declaration in ``specification``, the
-declared ``FunctionSpace`` in ``space``, their native callable in ``function``,
-and the fitted basis in ``parameters``. Their private solver captures never
-change the public ``(objective, *outputs)`` tuple.
+After a numeric solve, ``problem.parameters`` maps named decisions to their
+reconstructed values. Scalars become floats; vectors and tensors become shaped
+NumPy arrays. Function-valued decisions become ``FittedFunction`` instances
+with these attributes:
 
-Import the returned type as ``coker.toolkits.codesign.MathematicalProgram``.
-Like ``Function``, it exposes ``input_shape()`` and ``output_shape()`` methods.
-The latter excludes the objective; ``result_shape`` includes it.
-``program.backend`` names the solver backend. ``program.lower()`` returns a
-solver-pinned ``Function``, not a ``LoweredFunction``; calling it solves the
-program and returns only ``(objective, *outputs)``.
+- ``specification``: the original parameter declaration;
+- ``space``: the declared ``FunctionSpace``;
+- ``function``: the native callable;
+- ``parameters``: the fitted basis.
 
-``OptimisationModule`` is a supported solver implementation interface.
-``WeightedNorm`` is backend recognition metadata produced by ``weighted_norm``;
-ordinary model code uses the helper rather than constructing the record.
+Private solver captures are not part of the public ``(objective, *outputs)``
+return tuple.
 
-For bounded CasADi/IPOPT solves, configure CasADi's flat IPOPT options through
-the builder's ``solver_options``:
+``MathematicalProgram.input_shape()`` describes the runtime arguments.
+``output_shape()`` excludes the objective; ``result_shape`` includes it.
+``backend`` names the solver backend. ``lower()`` returns a solver-pinned
+``Function``, not a ``LoweredFunction``. Calling it solves the program and
+returns ``(objective, *outputs)``.
+
+``OptimisationModule`` is a supported solver implementation interface, not a
+model builder. ``WeightedNorm`` is backend recognition metadata produced by
+``weighted_norm``; model code should use the helper, not construct the record.
+
+Pass flat IPOPT options through ``solver_options`` for CasADi/IPOPT solves:
 
 .. code-block:: python
 
@@ -164,10 +160,9 @@ the builder's ``solver_options``:
 
    objective, value = problem()
 
-Where to continue
------------------
+Further reading
+----------------
 
-- :doc:`examples` for the main repository entry points.
-- ``tests/toolkits/kinematics/test_kinematics.py`` for richer robotics models.
-- ``tests/toolkits/test_codesign.py`` for more codesign scenarios, including
-  constraint handling and failure cases.
+- :doc:`how_to/robot_arm` for a robot-arm workflow.
+- :doc:`dynamics` for trajectory problems and solver contracts.
+- :doc:`examples` for repository examples and backend selection.

@@ -12,9 +12,8 @@ See :doc:`../getting_started` for migration and lowering contracts.
 Solve status
 ------------
 
-Coker's codesign toolkit exposes lightweight solve status objects so callers
-can inspect backend results and report failures without parsing backend-specific
-return payloads.
+Inspect backend results and report failures with these types, without parsing
+backend-specific return values.
 
 .. autoclass:: coker.toolkits.codesign.SolveInfo
    :members:

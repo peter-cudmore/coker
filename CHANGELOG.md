@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Added
+- Five-section documentation with introductory tutorials, a task-focused cookbook, architecture guides, API reference, and source-only author notes.
+- Executable examples for installation, scalar and vector functions, symbolic loops and conditionals, backend selection and import/export, simulation, parameter fitting, path planning, robot-arm kinematics, solver configuration, and lowering, with rendered plots and CI-backed numerical checks.
 - Canonical public API boundary inventory in the API reference and 0.5 migration notes in Getting Started, separating ordinary usage, supported extensions, and internal helpers.
 - Public controlled/general dynamics construction and composition projection types through `coker.dynamics`, component discovery through `coker.toolkits.system_modelling`, and `MathematicalProgram` through `coker.toolkits.codesign`.
 - `DynamicsSpec` accepts `None` for absent inputs, constraints, and quadratures.

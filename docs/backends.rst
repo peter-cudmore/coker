@@ -1,26 +1,25 @@
 Backend guide
 =============
 
-Coker can lower the same traced function to several execution backends. The
-backend name is selected with the ``backend=...`` argument to
-:func:`coker.function`, or indirectly through higher-level APIs such as
+Coker lowers traced functions to execution backends. Select a backend with
+``backend=...`` in :func:`coker.function` or higher-level APIs such as
 :class:`coker.dynamics.VariationalProblem` and
 :class:`coker.toolkits.codesign.ProblemBuilder`.
 
 The bundled registry declares ``"numpy"``, ``"jax"``, ``"casadi"``,
-``"pytorch"``, and ``"sympy"``. Additional plugins can register arbitrary
-names.
+``"pytorch"``, and ``"sympy"``. Plugins can register additional names.
 
 ``function()`` defaults to NumPy. ``get_current_backend()`` also falls back to
-NumPy until the application deliberately selects a backend with
-``get_backend_by_name(name, set_current=True)``. Lookup without that flag is
-nonmutating. An implicit ``ProblemBuilder.build()`` or low-level
+NumPy until the application selects a backend with
+``get_backend_by_name(name, set_current=True)``. Lookup without that flag does
+not change the selection. An implicit ``ProblemBuilder.build()`` or low-level
 ``coker.backends.evaluate(..., backend=None)`` consumes the current selection;
 ordinary functions use their own ``backend`` name, even after ambient selection.
 Explicit evaluation, lowering, and problem construction never select an ambient
 backend. Variational problems retain a separate CasADi solver default.
 
-See :doc:`api/index` for canonical imports and :doc:`getting_started` for migration notes.
+For a worked introduction, see :doc:`tutorials/backends`. See :doc:`api/index`
+for canonical imports and :doc:`getting_started` for migration notes.
 
 Backend capability matrix
 -------------------------
@@ -70,22 +69,14 @@ Backend capability matrix
        backend tests. Algebraic DAEs, variational controls, quadratures,
        constraints, and optimized horizons are unsupported.
 
-Choosing a backend
-------------------
+Coverage and selection
+----------------------
 
-A good default is:
-
-- use ``numpy`` as a reference implementation or for small systems;
-- use ``casadi`` for optimisation, simulation, and high-performance numerical
-  work;
-- use ``pytorch`` when you need tensor-valued execution, autograd, or a
-  nonlinear mathematical-program solve on PyTorch;
-- use ``sympy`` when you need symbolic forms or printable expressions.
-
-The repository's tests validate numerical execution under ``numpy``, ``jax``,
-and ``pytorch`` (including CUDA-conditional mathematical-program and
-fixed-horizon variational fitting behavior), and variational solves through
-``casadi``.
+The tests cover numerical execution under ``numpy``, ``jax``, and ``pytorch``,
+including CUDA-conditional mathematical-program solves and fixed-horizon
+variational fitting, and variational solves through ``casadi``.
+See :doc:`tutorials/backends` for a comparison using one function across
+backends.
 
 
 Lowering handles
@@ -104,10 +95,9 @@ alternate handle without changing ``f.backend`` or the current backend.
 ``MathematicalProgram.lower()`` intentionally differs: it returns a ``Function``
 pinned to its solver backend, whose invocation solves the program.
 
-The NumPy and PyTorch handles retain reusable execution plans. CasADi exposes
-its native function through ``ca_function`` when the graph can be represented
-as a :class:`casadi.Function`; otherwise its handle uses the same evaluate
-fallback.
+NumPy and PyTorch handles retain reusable execution plans. CasADi exposes
+``ca_function`` when the graph can be represented as a :class:`casadi.Function`;
+otherwise the handle falls back to evaluation.
 
 
 PyTorch module lowering
@@ -142,15 +132,17 @@ needs an explicit :class:`~coker.backends.lowered.FunctionSignature`:
    casadi_function = casadi_backend.import_function(native_function)
    torch_function = pytorch_backend.import_module(module, signature)
 
-Each imported invocation is recorded as an ``OP.EVALUATE`` node while Coker
-traces.  It is lowered only by its owning backend: CasADi imports remain
-symbolic CasADi calls, and PyTorch imports retain the module, its parameters,
-buffers, device, dtype, and autograd graph.  Cross-backend lowering raises an
-error rather than passing Coker tracers into a native callable.
+Each imported call is recorded as an ``OP.EVALUATE`` node during tracing.
+Only its owning backend can lower it: CasADi imports remain symbolic CasADi
+calls, and PyTorch imports retain the module, its parameters, buffers, device,
+dtype, and autograd graph. Cross-backend lowering raises an error rather than
+passing Coker tracers into a native callable.
 
 Successful CasADi lowered calls return native CasADi values. PyTorch module
 import transfers logical ownership to the Coker wrapper, which retains a strong
 reference to the module; Python aliases cannot be invalidated automatically.
+
+See :doc:`how_to/backend_interoperability` for import and export recipes.
 
 PyTorch training patterns
 -------------------------
@@ -159,7 +151,7 @@ There are three distinct PyTorch workflows:
 
 1. **Explicit Coker parameters.** Declare weights and biases as ordinary Coker
    function inputs, pass ``torch.nn.Parameter`` tensors at evaluation time,
-   and train them with any normal PyTorch optimizer. This preserves a fully
+   and train them with a PyTorch optimiser. This preserves a fully
    visible Coker network expression.
 2. **Imported native modules.** Import a ``torch.nn.Module`` with an explicit
    :class:`~coker.backends.lowered.FunctionSignature`. The module retains
@@ -197,8 +189,8 @@ solver through ``PytorchNLPSolverOptions``:
 
 ``LBFGS`` remains the default and uses the tolerance/history settings on
 ``PytorchNLPSolverOptions``. ``Adam`` performs ``inner_iterations`` explicit
-optimizer steps. See the three ``examples/pytorch_*training.py`` programs for
-runnable versions of each workflow.
+optimiser steps. See the three ``examples/pytorch_*training.py`` programs in
+:doc:`examples` for runnable versions of these workflows.
 
 Optimisation program composition
 --------------------------------
@@ -237,6 +229,7 @@ optimisation programs.
 Related guides
 --------------
 
-- :doc:`getting_started` for the minimal symbolic function workflow.
+- :doc:`tutorials/backends` for backend selection and native function extraction.
+- :doc:`how_to/backend_interoperability` for native import and export.
 - :doc:`dynamics` for ODE and variational problem construction.
 - :doc:`toolkits` for robotics and codesign helpers.

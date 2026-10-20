@@ -1,8 +1,7 @@
 Argument Spaces
 ===============
 
-Argument spaces describe the domain of a :func:`coker.function`. Every
-argument passed to ``function()`` must be one of the types below.
+Use argument spaces to declare the domain of a :func:`coker.function`.
 
 .. autoclass:: coker.Scalar
 

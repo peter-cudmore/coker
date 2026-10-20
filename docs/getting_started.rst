@@ -1,5 +1,9 @@
-Getting Started
-===============
+Usage and migration
+===================
+
+This page summarises setup, basic calls, and migration from earlier versions.
+For a first application, start with :doc:`basics/getting_started`. Follow
+:doc:`tutorials/index` for step-by-step lessons.
 
 Installation
 ------------
@@ -8,7 +12,7 @@ Installation
 
    pip install coker
 
-Optional extras are available for backend-specific dependencies:
+Install the extra for each optional backend you need:
 
 .. code-block:: bash
 
@@ -16,28 +20,26 @@ Optional extras are available for backend-specific dependencies:
    pip install "coker[jax]"
    pip install "coker[pytorch]"
 
-JAX requires Python 3.11 or newer. NumPy and SymPy are included in the base
-installation; the other built-in backend entry points need their corresponding
-extras before use.
+NumPy and SymPy are included in the base installation. CasADi, JAX, and PyTorch
+require their corresponding extras; JAX requires Python 3.11 or newer.
+See :doc:`basics/installation` for environment setup.
 
-The double-pendulum visualisation script declares its own NumPy, Matplotlib,
-and local Coker dependencies in inline ``uv`` metadata. From the repository
-root, run:
+To run the double-pendulum visualisation from the repository root:
 
 .. code-block:: bash
 
    uv run scripts/double_pendulum.py
 
-Matplotlib is not a package dependency or extra and is not required for
-non-visual kinematics or other Coker APIs. See :doc:`examples` for interactive
-and headless double-pendulum commands.
+The script's inline ``uv`` metadata declares NumPy, Matplotlib, and local Coker
+dependencies. Matplotlib is not a package dependency or extra; non-visual
+kinematics and other Coker APIs do not require it. See :doc:`examples` for
+interactive and headless commands.
 
 Basic usage
 -----------
 
-Compile a Python callable with :func:`coker.function`, providing the argument
-spaces explicitly. Coker traces the implementation and compiles it for the
-chosen backend.
+Declare argument spaces and pass a Python callable to :func:`coker.function`.
+Coker traces it and compiles it for the chosen backend:
 
 .. code-block:: python
 
@@ -66,8 +68,7 @@ chosen backend.
 Switching backends
 ------------------
 
-The same implementation can be compiled for any supported backend by changing
-the ``backend`` argument:
+Select a backend with the ``backend`` argument:
 
 .. code-block:: python
 
@@ -79,14 +80,14 @@ the ``backend`` argument:
        backend="casadi",
    )
 
-The package declares backend entry points for ``"numpy"``, ``"casadi"``,
-``"sympy"``, ``"jax"``, and ``"pytorch"``. Install the optional dependencies
-listed above before selecting CasADi, JAX, or PyTorch. Additional plugins can
-register their own names.
+The bundled backend names are ``"numpy"``, ``"casadi"``, ``"sympy"``,
+``"jax"``, and ``"pytorch"``. Plugins can register additional names.
 
 Both :func:`coker.function` and the implicit current-backend fallback use
 ``"numpy"``. Pass ``backend=`` explicitly for portable examples.
-Ordinary evaluation and lowering do not change the current selection.
+Evaluation and lowering do not change the current selection. See
+:doc:`backends` for supported capabilities and :doc:`tutorials/backends` for
+backend selection and native function extraction.
 
 Migrating to 0.5
 ----------------
@@ -131,8 +132,10 @@ owning modules: ``function`` and ``Function`` from
 Next steps
 ----------
 
+- :doc:`tutorials/index` for the ordered basic-usage lessons.
+- :doc:`how_to/index` for task-focused recipes.
 - :doc:`api/index` for canonical imports, extension interfaces, and internals.
-- :doc:`backends` for backend-selection guidance and the capability matrix.
+- :doc:`backends` for backend capabilities and selection rules.
 - :doc:`dynamics` for ODE construction and variational optimisation.
 - :doc:`toolkits` for robotics and codesign helpers.
-- :doc:`examples` for the main repository entry points.
+- :doc:`examples` for repository programs and model examples.

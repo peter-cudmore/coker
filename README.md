@@ -145,9 +145,14 @@ uv run pytest
 Build the documentation:
 
 ```bash
-uv sync --group docs
+uv sync --group docs --extra casadi --extra pytorch
+uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
 uv run sphinx-build docs/ docs/_build/html -W --keep-going
 ```
+
+See [the documentation authoring guide](docs/AUTHORING.md) for section goals,
+writing conventions, and executable examples. Source-only `Author notes`
+record page-specific directions and planned additions.
 
 Formatting and linting used in CI:
 

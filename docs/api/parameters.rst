@@ -1,10 +1,13 @@
 Parameter declarations
 ======================
 
-Parameter declarations describe fixed values and solver decision blocks. Use a
-scalar declaration for one fitted value, :class:`BoundVector` for a bounded
-vector, and :class:`DenseTensorVariable` when the recovered value has a dense
-array shape.
+Parameter declarations define solver decision blocks. Use
+:class:`coker.parameters.BoundedVariable` or
+:class:`coker.parameters.UnboundedVariable` for a scalar,
+:class:`coker.parameters.BoundVector` for a bounded vector, and
+:class:`coker.parameters.DenseTensorVariable` for a dense array reconstructed
+with the shape of its initial guess. See :doc:`../dynamics` for parameter order,
+function-valued parameters, and fitted-value reconstruction.
 
 .. autoclass:: coker.parameters.BoundedVariable
 

@@ -27,6 +27,7 @@ extensions = [
     "sphinx.ext.doctest",
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
+    "matplotlib.sphinxext.plot_directive",
 ]
 
 # Napoleon — Google-style docstrings
@@ -38,6 +39,9 @@ napoleon_attr_annotations = True
 # Plain doctest blocks must opt into this group. Sphinx also executes explicit
 # doctest directives and autodoc examples.
 doctest_test_doctest_blocks = "residual_dae"
+
+# Plot directives execute the displayed source and publish the resulting figures.
+plot_formats = ["png"]
 
 # autodoc defaults
 autodoc_default_options = {

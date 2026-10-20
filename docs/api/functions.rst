@@ -3,6 +3,7 @@ Functions
 
 The :func:`coker.function` factory is the primary entry point for compiling
 Python callables into Coker functions.
+See :doc:`../tutorials/function_evaluation` for a step-by-step introduction.
 
 .. autofunction:: coker.function
 

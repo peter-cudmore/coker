@@ -1,6 +1,17 @@
 API Reference
 =============
 
+Look up public interfaces for function construction, modelling, solving, and
+backend integration.
+
+.. Author notes
+
+   - List the supported public classes and functions that still need coverage.
+   - Add constructor, call, return-value, error, and backend-support contracts.
+   - Prioritise function parameters, solve results, analysis, and toolkit APIs.
+   - Keep ordinary usage distinct from supported extension interfaces.
+   - Request complete executable examples rather than source-code inventories.
+
 .. toctree::
    :maxdepth: 1
 
@@ -12,11 +23,11 @@ API Reference
    parameters
    backends
 
-Public import boundary
-----------------------
+Canonical imports
+-----------------
 
-Use these canonical packages for ordinary construction and result inspection;
-names imported incidentally by implementation modules are not additional APIs:
+Use these packages for construction and result inspection. Incidental imports
+in implementation modules are not public APIs.
 
 - ``coker``: ``function``/``Function``, argument spaces, shape metadata, and
   symbolic tensor/sparse construction. See :doc:`functions` and :doc:`spaces`.
@@ -37,7 +48,8 @@ names imported incidentally by implementation modules are not additional APIs:
 - ``coker.toolkits.spatial`` and ``coker.toolkits.kinematics``: rigid-motion
   primitives and articulated models. See :doc:`../toolkits`.
 
-Supported extension interfaces are distinct from ordinary usage:
+Extension interfaces
+--------------------
 
 - ``coker.SymbolicCallable`` and ``coker.interfaces.FunctionSignatureValue``;
   ``coker.interfaces.SolverParameters`` for ODE options.
