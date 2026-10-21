@@ -5,6 +5,37 @@ Find runnable repository programs and model examples here. For guided lessons,
 use :doc:`tutorials/index`; for task-focused instructions, use
 :doc:`how_to/index`. The :doc:`backends` guide lists backend capabilities.
 
+README examples
+---------------
+
+The `README <https://github.com/peter-cudmore/coker/blob/develop/README.md#install-and-try>`_
+demonstrates reusing a spring-force model for parameter fitting and inspecting
+symbolic vector/matrix maths before differentiating it with PyTorch. Each Python
+block is standalone and includes numerical checks. The documentation doctest
+job executes those blocks directly from the README, so the examples being checked
+are the ones readers copy.
+
+Run documentation commands from the repository root, as described in
+``CONTRIBUTING.md``. The documentation environment includes the CasADi and
+PyTorch extras needed by the examples.
+
+.. testcode:: readme_examples
+   :hide:
+
+   from contextlib import redirect_stdout
+   from io import StringIO
+   from pathlib import Path
+   import re
+
+   readme = Path("README.md")
+   sources = re.findall(
+       r"```python\n(.*?)```", readme.read_text(encoding="utf-8"), re.DOTALL
+   )
+   # The examples assert numerical behavior, not solver log formatting.
+   with redirect_stdout(StringIO()):
+       for source in sources:
+           exec(compile(source, str(readme), "exec"), {})
+
 Repository entry points
 -----------------------
 
