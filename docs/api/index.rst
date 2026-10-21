@@ -1,6 +1,19 @@
 API Reference
 =============
 
+Look up public interfaces for function construction, modelling, solving, and
+backend integration.
+
+.. Author notes
+
+   - Audience: users locating canonical public imports and their owning
+     reference contracts, separate from extension interfaces and internals.
+   - List the supported public classes and functions that still need coverage.
+   - Add constructor, call, return-value, error, and backend-support contracts.
+   - Prioritise function parameters, solve results, analysis, and toolkit APIs.
+   - Keep ordinary usage distinct from supported extension interfaces.
+   - Request complete executable examples rather than source-code inventories.
+
 .. toctree::
    :maxdepth: 1
 
@@ -12,11 +25,11 @@ API Reference
    parameters
    backends
 
-Public import boundary
-----------------------
+Canonical imports
+-----------------
 
-Use these canonical packages for ordinary construction and result inspection;
-names imported incidentally by implementation modules are not additional APIs:
+Use these packages for construction and result inspection. Incidental imports
+in implementation modules are not public APIs.
 
 - ``coker``: ``function``/``Function``, argument spaces, shape metadata, and
   symbolic tensor/sparse construction. See :doc:`functions` and :doc:`spaces`.
@@ -24,20 +37,22 @@ names imported incidentally by implementation modules are not additional APIs:
   ``create_control_system``, ``create_autonomous_ode``, ``direct_sum`` and its
   ``ProjectionSet``, variational builders/options/results, controls, and
   symbolic analyses, ``ResidualDynamicalSystem``, and
-  ``to_residual_dynamical_system``. See :doc:`dynamics` and :doc:`../dynamics`.
+  ``to_residual_dynamical_system``. See :doc:`dynamics`.
 - ``coker.parameters``: scalar, vector, and tensor decision declarations;
-  ``coker.parameters.function_parameters``: callable declarations and
-  ``FittedFunction`` results. See :doc:`../dynamics`.
+  ``coker.parameters.function_parameters``: ``ClosureParameter``,
+  ``BoundFunctionParameter``, ``DenseLayer``, ``MonotonePiecewiseLinear``,
+  ``RadialBasisFunction``, and ``FittedFunction`` results. See :doc:`parameters`.
 - ``coker.toolkits.codesign``: ``ProblemBuilder``, ``MathematicalProgram``,
-  objectives/constraints, solver options, ``SolveInfo``, and ``SolveFailure``.
-  See :doc:`optimisation` and :doc:`../toolkits`.
+  ``Minimise``, ``bounded``, ``norm``, ``weighted_norm``, ``SolverOptions``,
+  ``SolveInfo``, and ``SolveFailure``. See :doc:`optimisation`.
 - ``coker.backends``: plugin lookup and explicit selection;
   ``coker.backends.lowered``: signatures, input/output specs, lowering options,
-  execution handles, and capabilities. See :doc:`../backends`.
+  execution handles, and capabilities. See :doc:`backends`.
 - ``coker.toolkits.spatial`` and ``coker.toolkits.kinematics``: rigid-motion
   primitives and articulated models. See :doc:`../toolkits`.
 
-Supported extension interfaces are distinct from ordinary usage:
+Extension interfaces
+--------------------
 
 - ``coker.SymbolicCallable`` and ``coker.interfaces.FunctionSignatureValue``;
   ``coker.interfaces.SolverParameters`` for ODE options.
@@ -56,4 +71,3 @@ Supported extension interfaces are distinct from ordinary usage:
 internals. ``ConstraintSpec``, ``QuadratureSpec``, collocation operators, and
 mesh helpers are builder/backend representations, not ordinary construction
 APIs. Use comparisons, integrals, and the variational builder instead.
-Migration notes are in :doc:`../getting_started`.

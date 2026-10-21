@@ -21,7 +21,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --frozen --group docs --extra casadi
+        run: uv sync --frozen --group docs --extra casadi --extra pytorch
       - name: Run documentation examples
         run: uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
       - name: Build docs
