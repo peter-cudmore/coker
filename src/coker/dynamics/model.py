@@ -188,13 +188,17 @@ class DynamicalSystem:
                 fitted functions or traceable Python callables.
 
         Returns:
-            The output at an endpoint in its declared shape. Sampled scalar
-            and one-component outputs have shape ``(n_times,)``; sampled
-            multi-component vector outputs have shape ``(n_times, n_output)``.
+            The output at an endpoint in its declared shape. With NumPy,
+            sampled vector outputs have shape ``(n_times,)`` for a declared
+            shape of ``(1,)``, or ``(n_times, n_output)`` for larger vectors.
+            NumPy grid evaluation of genuinely scalar outputs currently raises
+            ValueError; stack scalar-time evaluations with ``numpy.stack``
+            instead.
 
         Raises:
             ValueError: Argument count or function parameter shape/backend
-                does not match the declaration.
+                does not match the declaration, or NumPy grid sampling is
+                requested for a scalar output.
             TypeError: A function-valued parameter is not callable.
             NotImplementedError: Quadratures are present, or the selected
                 backend does not support the required integration. Convert

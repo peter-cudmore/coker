@@ -40,8 +40,13 @@ builder's ``input_shape`` and ``output_shape`` are tuple properties, not methods
 
 The builder creates its tape immediately. Its convenience context neither
 solves nor closes it. ``build()`` constructs the solver without consuming the
-builder; later builds use its current configuration. Mutating a builder does
-not reconfigure a previously built solver.
+builder; later builds use its current configuration. Replacing configuration
+fields is not a supported way to reconfigure an already-built solver. Structural
+graph changes are different: NumPy programs retain the builder's mutable tape
+but snapshot input bindings. Adding decisions with ``new_variable`` or
+``new_function_parameter`` extends that shared tape and can invalidate an
+existing NumPy program. Use a separate builder when existing programs must
+remain usable.
 
 ``new_function_parameter(target, declaration)`` returns a symbolic callable
 whose concrete decisions, guesses and bounds come from the declaration.
@@ -61,8 +66,9 @@ decision declaration order. A sequence of the wrong length raises
 omitted, without changing the current selection. NumPy uses SciPy's
 ``trust-constr`` solver; CasADi uses IPOPT; PyTorch supplies its own optimiser.
 The optional backends require their corresponding extras. JAX and SymPy do not
-provide ordinary optimisation solvers. Backend-specific restrictions and option
-types are described in :doc:`backends`.
+provide ordinary optimisation solvers; unsupported-backend failures raise
+backend-specific exceptions rather than a uniform ``NotImplementedError``.
+Backend-specific restrictions and option types are described in :doc:`backends`.
 
 Objectives and constraints
 --------------------------

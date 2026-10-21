@@ -264,8 +264,11 @@ def create_autonomous_ode(
             checks only; later evaluation still requires declared parameters.
 
     Returns:
-        A system evaluated as ``system(time, *parameters)``. Scalar and
-        one-component sampled outputs are flattened to ``(n_times,)``.
+        A system evaluated as ``system(time, *parameters)``. With NumPy,
+        sampled vector outputs have shape ``(n_times,)`` for a declared shape
+        of ``(1,)``, or ``(n_times, n_output)`` for larger vectors. NumPy grid
+        evaluation of genuinely scalar outputs currently raises ValueError;
+        stack scalar-time evaluations with ``numpy.stack`` instead.
     """
 
     # case 1,

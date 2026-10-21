@@ -98,8 +98,25 @@ Call a system as ``system(time, input_trajectory, *parameter_values)``, omitting
 the input argument if none is declared and passing one positional value per
 parameter declaration. ``time`` is an endpoint or a one-dimensional time grid.
 The result is the declared output, not a tuple of internal state channels.
-On a grid, scalar and one-element-vector outputs form a one-dimensional
-series; larger vectors are stacked with one row per requested time.
+For NumPy vector outputs, a grid produces shape ``(n_times,)`` for a declared
+shape of ``(1,)``; larger vectors have shape ``(n_times, n_output)``.
+Genuinely scalar outputs are distinct from one-element vectors: NumPy grid
+evaluation currently raises ``ValueError`` for scalar outputs. Stack
+separate scalar-time evaluations instead:
+
+.. testcode:: numpy_scalar_sampling
+
+   import numpy as np
+   from coker.dynamics import create_autonomous_ode
+
+   scalar_system = create_autonomous_ode(
+       x0=0.0, xdot=lambda x, p: 1.0, backend="numpy",
+   )
+   times = np.array([0.0, 0.5, 1.0])
+   samples = np.stack([scalar_system(float(time)) for time in times])
+   np.testing.assert_allclose(samples, times, rtol=1e-6, atol=1e-8)
+   assert samples.shape == (3,)
+
 Integration starts at time zero. Function-valued parameter slots accept matching
 Coker ``Function`` and ``FittedFunction`` objects or traceable Python callables;
 Coker functions must use the system's backend. Argument-count and function-space

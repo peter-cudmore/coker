@@ -172,8 +172,10 @@ Install ``matplotlib`` and import ``KinematicsVisualiser`` from
 and ``animate_sweep`` calls ``pyplot.show``. It is not a tracing backend.
 A headless environment can select Matplotlib's ``Agg`` backend before import.
 Widget classes and their artist bookkeeping are internal plotting machinery.
-MuJoCo conversion in ``kinematics.mujoco`` requires the separate optional
-``mujoco`` dependency and is not a canonical package-root user API.
+``coker.toolkits.kinematics.mujoco.to_mujoco_xml`` generates XML without
+requiring the ``mujoco`` package. Loading or simulating the resulting model
+with MuJoCo's Python bindings requires the separate ``mujoco`` dependency.
+The conversion helper is not a canonical package-root user API.
 
 Render a numeric configuration with the optional Matplotlib dependency:
 

@@ -365,7 +365,10 @@ class ProblemBuilder:
     manager is a convenience: entering returns this builder and exiting does
     not solve, build, close the tape, or freeze the configuration. ``build``
     does not consume the builder; later builds use its current configuration.
-    Construct symbolic expressions from the builder's own tracers.
+    NumPy programs share the mutable tape but snapshot input bindings, so adding
+    decisions can invalidate an existing program. Use a separate builder when
+    existing programs must remain usable. Construct symbolic expressions from
+    the builder's own tracers.
 
     Args:
         arguments: Scalar or vector/tensor spaces for runtime inputs, in
@@ -559,6 +562,9 @@ class ProblemBuilder:
         expressions must belong to this builder's tape. The objective must be
         scalar and outputs must be nonempty. Backend-specific shape and
         operation restrictions still apply.
+        JAX and SymPy do not provide standalone NLP solves. Failures for
+        unsupported backends are backend-specific; they do not share a
+        guaranteed exception type.
 
         Args:
             backend: Registered backend name, or None to use the current
@@ -575,8 +581,6 @@ class ProblemBuilder:
             TypeError: If the objective is not Minimise, initial conditions
                 have an unsupported type, or solver options are incompatible.
             RuntimeError: If the builder has no tape.
-            NotImplementedError: If the backend does not support optimisation.
-                JAX and SymPy do not currently provide standalone NLP solves.
         """
         if self.objective is None:
             raise ValueError("An objective is required before building")
