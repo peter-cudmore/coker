@@ -60,8 +60,13 @@ information publicly. Maintainers will correct the current contributor list and
 relevant attribution records. Changes are recorded in public Git history;
 updating a name does not remove earlier versions from that history.
 
-This policy concerns recognition, not copyright ownership or licensing. Coker's
-license remains [MPL-2.0](LICENSE.TXT).
+Credit does not determine copyright ownership. **Pneumatica Bio** owns the
+existing work assigned to it by **Peter Cudmore**. Outside contributors or their
+rights holders retain copyright in their contributions and license them under
+[MPL-2.0](LICENSE.TXT), as described in the
+[contribution licensing policy](CONTRIBUTING.md#contribution-licensing).
+Adding a name to `AUTHORS.md` does not assign or transfer intellectual property
+rights.
 
 ## Policy references
 

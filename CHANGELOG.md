@@ -26,6 +26,9 @@
 - Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
 ### Changed
+- Record Pneumatica Bio as the copyright holder of Peter Cudmore's assigned work, retaining him as the sole author to date and preserving the MPL-2.0 license.
+- Explicitly accept external contributions under MPL-2.0 with copyright retained by their rights holders, without requiring a separate CLA or copyright assignment.
+- Record user-visible changes in PR-local Added, Changed, and Fixed sections, preserving squash metadata for maintainer release preparation instead of editing the cumulative changelog in normal PRs.
 - Trim collocation implementation types from the `coker.dynamics` root API while retaining the public `DynamicsSpec` construction route.
 - Consolidate onboarding into Basics and tutorials, remove migration advice, and add task-specific reading routes, simpler backend calls, JAX selection guidance, and precise recipe adaptation checks.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.

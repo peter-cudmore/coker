@@ -18,7 +18,7 @@ for _cls in [
 
 project = "Coker"
 author = "Peter Cudmore"
-copyright = f"2024, {author}"
+copyright = "2026, Pneumatica Bio"
 
 extensions = [
     "sphinx.ext.autodoc",

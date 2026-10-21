@@ -174,4 +174,8 @@ and follow the [credit policy](CREDITS.md).
 
 ## License
 
+Copyright (c) 2026 **Pneumatica Bio**. **Peter Cudmore** is the sole author to date.
+
 Coker is licensed under **MPL-2.0**. See [LICENSE.TXT](LICENSE.TXT).
+External contributions are accepted under the same licence without copyright
+assignment; see [contribution licensing](CONTRIBUTING.md#contribution-licensing).
