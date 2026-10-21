@@ -16,13 +16,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-          # Body edits run only the trusted checker; code changes test the PR checker.
-          ref: >-
-            ${{
-              github.event.action == 'edited' &&
-              github.event.pull_request.base.sha ||
-              github.sha
-            }}
       - name: Validate PR metadata
         run: python scripts/check_pr_metadata.py
         env:
