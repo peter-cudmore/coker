@@ -1,22 +1,25 @@
-from typing import List, Tuple
 from coker.toolkits.system_modelling.modelling.coker_abc import (
     CokerListableSubclasses,
 )
 
 
-class ComponentHint:
-    pass
-
-
-def list_components() -> List[Tuple[str, str, ComponentHint]]:
+def list_components() -> list[tuple[str, str, None]]:
     """Discover currently imported component subclasses.
 
-    Import the desired standard-library modules before calling this function;
-    it does not scan the filesystem or import libraries.
+    Import component libraries before calling this function; it does not scan
+    the filesystem or import libraries.
 
     Returns:
-        list[tuple[str, str, None]]: Class name, slash-separated module path,
-            and an unimplemented hint (always None).
+        Class name, slash-separated module path and hint tuples. The hint is
+        always None; usage hints are not implemented.
+
+    Examples:
+        >>> from coker.toolkits.system_modelling import list_components
+        >>> from coker.toolkits.system_modelling.std_lib.common import (
+        ...     signal_processing,
+        ... )
+        >>> any(name == "Gain" for name, path, hint in list_components())
+        True
     """
     entries = []
     for baseclass in CokerListableSubclasses.list_subclasses():

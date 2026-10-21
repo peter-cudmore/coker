@@ -24,9 +24,7 @@ from coker.parameters import (
 from .base import FunctionParameter
 
 
-def _concrete_parameter_name(
-    name: str | None, fallback: str, suffix: str
-) -> str:
+def _concrete_parameter_name(name: str | None, fallback: str, suffix: str) -> str:
     prefix = name if isinstance(name, str) and name else fallback
     return f"{prefix}_{suffix}"
 
@@ -43,9 +41,7 @@ def _vector_width(space: VectorSpace, description: str) -> int:
     ):
         width = int(dimension[0])
     else:
-        raise ValueError(
-            f"{description} must be a one-dimensional VectorSpace"
-        )
+        raise ValueError(f"{description} must be a one-dimensional VectorSpace")
     if width < 1:
         raise ValueError(f"{description} must have positive width")
     return width
@@ -98,9 +94,7 @@ def _is_scalar_activation(activation: Function | BoundCallable) -> bool:
 def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
     if not isinstance(target, FunctionSpace):
         raise TypeError("target must be a FunctionSpace")
-    if len(target.arguments) != 1 or not isinstance(
-        target.arguments[0], Scalar
-    ):
+    if len(target.arguments) != 1 or not isinstance(target.arguments[0], Scalar):
         raise ValueError("target must have exactly one scalar argument")
     if len(target.output) != 1 or not isinstance(target.output[0], Scalar):
         raise ValueError("target must have exactly one scalar output")
@@ -114,8 +108,9 @@ class DenseLayer(FunctionParameter):
     Args:
         input_size: Positive number of affine input components. A scalar
             activation requires one.
-        activation: Single-input/output Coker activation function. A vector
-            activation determines the affine output width.
+        activation: Single-input/output Coker activation function. For vector
+            activations, its input width determines the affine output width;
+            its output width determines the layer's final output width.
         name: Public fitted-function name and concrete decision-name prefix.
 
     Attributes:
@@ -124,6 +119,10 @@ class DenseLayer(FunctionParameter):
     Raises:
         TypeError: The activation is not a supported Coker callable.
         ValueError: Widths or the activation signature are incompatible.
+
+    Example:
+        Declare ``DenseLayer(1, function([Scalar("x")], np.tanh))`` for a
+        scalar affine transformation followed by a hyperbolic tangent.
     """
 
     input_size: int
@@ -152,30 +151,22 @@ class DenseLayer(FunctionParameter):
             (
                 (
                     UnboundedVariable(
-                        _concrete_parameter_name(
-                            self.name, "dense_layer", "weight"
-                        ),
+                        _concrete_parameter_name(self.name, "dense_layer", "weight"),
                         1.0,
                     ),
                     UnboundedVariable(
-                        _concrete_parameter_name(
-                            self.name, "dense_layer", "bias"
-                        ),
+                        _concrete_parameter_name(self.name, "dense_layer", "bias"),
                         0.0,
                     ),
                 )
                 if is_scalar
                 else (
                     DenseTensorVariable(
-                        _concrete_parameter_name(
-                            self.name, "dense_layer", "weights"
-                        ),
+                        _concrete_parameter_name(self.name, "dense_layer", "weights"),
                         np.eye(self.hidden_size, self.input_size),
                     ),
                     DenseTensorVariable(
-                        _concrete_parameter_name(
-                            self.name, "dense_layer", "bias"
-                        ),
+                        _concrete_parameter_name(self.name, "dense_layer", "bias"),
                         np.zeros(self.hidden_size),
                     ),
                 )
@@ -184,13 +175,24 @@ class DenseLayer(FunctionParameter):
 
     @property
     def hidden_size(self) -> int:
+        """Return the affine output width for a vector activation.
+
+        Raises:
+            ValueError: The activation has a scalar rather than vector input.
+        """
         return _activation_widths(self.activation)[0]
 
     @property
     def output_size(self) -> int:
+        """Return the vector activation's output width.
+
+        Raises:
+            ValueError: The activation has a scalar rather than vector input.
+        """
         return _activation_widths(self.activation)[1]
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate a scalar target or the layer's vector input/output widths."""
         if _is_scalar_activation(self.activation):
             return _validate_scalar_target(target)
 
@@ -200,30 +202,22 @@ class DenseLayer(FunctionParameter):
             target.arguments[0], VectorSpace
         ):
             raise ValueError("target must have exactly one vector argument")
-        if (
-            _vector_width(target.arguments[0], "target argument")
-            != self.input_size
-        ):
+        if _vector_width(target.arguments[0], "target argument") != self.input_size:
             raise ValueError(
                 f"target vector argument must have width {self.input_size}"
             )
-        if len(target.output) != 1 or not isinstance(
-            target.output[0], VectorSpace
-        ):
+        if len(target.output) != 1 or not isinstance(target.output[0], VectorSpace):
             raise ValueError("target must have exactly one vector output")
-        if (
-            _vector_width(target.output[0], "target output")
-            != self.output_size
-        ):
-            raise ValueError(
-                f"target vector output must have width {self.output_size}"
-            )
+        if _vector_width(target.output[0], "target output") != self.output_size:
+            raise ValueError(f"target vector output must have width {self.output_size}")
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return weight and bias decisions in reconstruction order."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Apply weight and bias blocks, then evaluate the activation."""
         weight, bias = parameters
         if _is_scalar_activation(self.activation):
             return self.activation(weight * argument + bias)

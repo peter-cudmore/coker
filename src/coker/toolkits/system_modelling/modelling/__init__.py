@@ -10,8 +10,7 @@ from coker.toolkits.system_modelling.modelling.coker_abc import (
 def get_component_registry():
 
     return {
-        item.__name__: inspect.getsourcefile(item)
-        for item in Block.__subclasses__()
+        item.__name__: inspect.getsourcefile(item) for item in Block.__subclasses__()
     }
 
 
@@ -50,13 +49,23 @@ class LazyOutputHandle(LazyPortHandle):
 
 
 class CokerModel:
+    """Wrap a model factory without compilation or numerical execution.
+
+    Args:
+        func: Callable returning a component model.
+
+    Prefer the ``model`` decorator, for example ``factory = model(make_plant)``.
+    """
+
     def __init__(self, func):
         self.func = func
 
     def __call__(self, *args, **kwargs):
+        """Call the wrapped factory with its positional and keyword arguments."""
         return self.func(*args, **kwargs)
 
     def name(self):
+        """Return the wrapped factory's Python function name."""
         return self.func.__name__
 
 
@@ -73,6 +82,7 @@ def model(func):
 
 
 def is_component_def(obj) -> bool:
+    """Return whether an object is a Block or BlockContainer subclass."""
     try:
         if issubclass(obj, Block):
             return True
@@ -84,6 +94,7 @@ def is_component_def(obj) -> bool:
 
 
 def is_model(obj) -> bool:
+    """Return whether an object is a model-decorated factory wrapper."""
     return isinstance(obj, CokerModel)
 
 
@@ -111,6 +122,15 @@ class BlockContainer(CokerListableSubclasses):
 
     Add components before connecting their lazy ports. Containers include two
     internal forwarding components, so user components start at index two.
+
+    Examples:
+        >>> from coker.toolkits.system_modelling import BlockContainer, Signal
+        >>> plant = BlockContainer("plant")
+        >>> source = plant.add_input(Signal("u"))
+        >>> sink = plant.add_output(Signal("y"))
+        >>> plant.add_connections((sink, source))
+        >>> len(plant.connections)
+        1
     """
 
     def __init__(self, name):
@@ -125,17 +145,13 @@ class BlockContainer(CokerListableSubclasses):
 
         self.labels: Dict[(BlockIndex, PortIndex), str] = {}
 
-        self.components: List[
-            Union[Block, "BlockContainer", PortForwarder]
-        ] = []
+        self.components: List[Union[Block, "BlockContainer", PortForwarder]] = []
         self.add_models(self._inputs, self._outputs)
 
         self.parent = None
 
         """Dictionary of internal connections as input: output"""
-        self.connections: Dict[
-            (BlockIndex, PortIndex), (BlockIndex, PortIndex)
-        ] = {}
+        self.connections: Dict[(BlockIndex, PortIndex), (BlockIndex, PortIndex)] = {}
 
     def spec(self):
         """Return current inputs, outputs, accumulated parameters and state."""
@@ -146,9 +162,7 @@ class BlockContainer(CokerListableSubclasses):
             state=self._state,
         )
 
-    def add_models(
-        self, *components: Union["Block", "BlockContainer", PortForwarder]
-    ):
+    def add_models(self, *components: Union["Block", "BlockContainer", PortForwarder]):
         """Attach components in order and collect their state/parameters."""
         for component in components:
             component.set_parent(self)
@@ -191,9 +205,7 @@ class BlockContainer(CokerListableSubclasses):
                 self.add_connection(port_in, port_out)
                 self.labels[port_out.resolve()] = name
 
-    def add_connection(
-        self, port_in: LazyInputHandle, port_out: LazyOutputHandle
-    ):
+    def add_connection(self, port_in: LazyInputHandle, port_out: LazyOutputHandle):
         """Store an input-to-output connection; reject duplicate drivers."""
         in_port = port_in.resolve()
         out_port = port_out.resolve()

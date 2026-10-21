@@ -59,9 +59,7 @@ class BoundedConstraint:
         return self.residual, self.lower_bound, self.upper_bound
 
 
-def bounded(
-    residual: Any, lower_bound: Any, upper_bound: Any
-) -> BoundedConstraint:
+def bounded(residual: Any, lower_bound: Any, upper_bound: Any) -> BoundedConstraint:
     """Create an inclusive componentwise residual constraint.
 
     Args:

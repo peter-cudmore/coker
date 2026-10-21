@@ -1,15 +1,32 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TypeAlias
 
 import numpy as np
+import numpy.typing as npt
 
 from coker.algebra.function import InequalityExpression
 from coker.dynamics.variables import ControlSolution
 from coker.dynamics.transcription.collocation import (
     InterpolatingPolyCollection,
+    InterpolatingPoly,
 )
 from coker.toolkits.codesign.optimisation import SolveInfo
+
+
+FloatArray: TypeAlias = npt.NDArray[np.float64]
+
+VariationalOutput: TypeAlias = Callable[
+    [
+        float,
+        np.ndarray,
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray,
+        np.ndarray | None,
+    ],
+    np.ndarray,
+]
 
 
 def _to_flat_array(value) -> np.ndarray:
@@ -46,14 +63,25 @@ def _evaluate_violation(raw_value, lower, upper) -> np.ndarray:
 
 @dataclass(frozen=True)
 class SegmentDefectDiagnostic:
-    """Physical segment residuals and mesh provenance from a transcription."""
+    """Full physical segment residual and mesh provenance from a
+    transcription."""
 
     normalized_interval: Tuple[float, float]
     physical_interval: Tuple[float, float]
     degree: int
     tolerance: float
-    state_residual: np.ndarray
-    quadrature_residual: np.ndarray
+    full_residual: FloatArray
+
+    def __post_init__(self) -> None:
+        residual = self.full_residual
+        if residual is None:
+            raise ValueError("Segment diagnostics require a full residual")
+        if not isinstance(residual, np.ndarray):
+            raise TypeError("Segment full residual must be a NumPy array")
+        if residual.ndim != 1:
+            raise ValueError("Segment full residual must be one-dimensional")
+        if not np.issubdtype(residual.dtype, np.floating):
+            raise TypeError("Segment full residual must have a floating dtype")
 
 
 @dataclass
@@ -63,6 +91,8 @@ class VariationalSolution:
     Ordinary callers obtain this object from a solver rather than constructing
     its interpolation/projector plumbing. Evaluate at scalar physical times
     in ``[0, t_final]``; stack individual evaluations for sampled trajectories.
+    ``path`` and ``control_solutions`` use normalised time on ``[0, 1]``;
+    ``t_final`` maps that coordinate to physical time.
 
     Attributes:
         cost: Scalar objective value.
@@ -80,31 +110,22 @@ class VariationalSolution:
             that a candidate (especially an iteration callback) succeeded.
         adaptive_refinement_rounds: CasADi mesh updates, when enabled.
         adaptive_maximum_defect: Final scaled state defect, when enabled.
-        segment_defects: Physical segment residuals with mesh provenance.
+        segment_defects: Full physical segment residuals with mesh provenance.
     """
 
     cost: float
     path: InterpolatingPolyCollection
-    projectors: Tuple[
-        Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]
-    ]
+    projectors: Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]
     control_solutions: List[ControlSolution]
     parameters: Mapping[str, object]
-    output: Callable[
-        [float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-        np.ndarray,
-    ]
+    output: VariationalOutput
     t_final: float = 0.0
     solve_info: Optional[SolveInfo] = None
     adaptive_refinement_rounds: Optional[int] = None
     adaptive_maximum_defect: Optional[float] = None
     segment_defects: Tuple[SegmentDefectDiagnostic, ...] = ()
-    path_constraint_exprs: List[InequalityExpression] = field(
-        default_factory=list
-    )
-    terminal_constraint_exprs: List[InequalityExpression] = field(
-        default_factory=list
-    )
+    path_constraint_exprs: List[InequalityExpression] = field(default_factory=list)
+    terminal_constraint_exprs: List[InequalityExpression] = field(default_factory=list)
     _parameter_vector: np.ndarray = field(
         default_factory=lambda: np.zeros((0,)), init=False, repr=False
     )
@@ -122,17 +143,7 @@ class VariationalSolution:
         ],
         control_solutions: List[ControlSolution],
         parameters: Mapping[str, object],
-        output: Callable[
-            [
-                float,
-                np.ndarray,
-                np.ndarray,
-                np.ndarray,
-                np.ndarray,
-                np.ndarray,
-            ],
-            np.ndarray,
-        ],
+        output: VariationalOutput,
         parameter_vector: np.ndarray,
         solver_parameter_vector: np.ndarray | None = None,
         *,
@@ -174,9 +185,7 @@ class VariationalSolution:
                 [] if path_constraint_exprs is None else path_constraint_exprs
             ),
             terminal_constraint_exprs=(
-                []
-                if terminal_constraint_exprs is None
-                else terminal_constraint_exprs
+                [] if terminal_constraint_exprs is None else terminal_constraint_exprs
             ),
         )
         solution._parameter_vector = parameter_vector
@@ -242,7 +251,7 @@ class VariationalSolution:
             interpolation knot samples, not observed output samples.
         """
         points = [
-            np.vstack([np.array([t]), x])
+            np.vstack([np.array([t * self.t_final]), x])
             for t, x, _ in self.path.knot_points()
         ]
         return np.hstack(points)
@@ -253,7 +262,7 @@ class VariationalSolution:
         Args:
             t: Scalar physical time within the solution interval.
         """
-        v = self.path(t)
+        v = self.path(t / self.t_final)
         proj = self.projectors[0]
         return proj @ v
 
@@ -265,7 +274,7 @@ class VariationalSolution:
         """
         if self.projectors[1] is None:
             return None
-        return self.projectors[1] @ self.path(t)
+        return self.projectors[1] @ self.path(t / self.t_final)
 
     def quadratures(self, t):
         """Return a flat ``(n_q,)`` integral array, or ``None`` if absent.
@@ -275,20 +284,27 @@ class VariationalSolution:
         """
         if self.projectors[2] is None:
             return None
-        return self.projectors[2] @ self.path(t)
+        return self.projectors[2] @ self.path(t / self.t_final)
 
     def control_law(self, t):
-        """Return ordered scalar controls as ``(n_controls,)``, or ``None``.
+        """Return an array of ordered control values, or ``None`` if absent.
 
         Args:
             t: Scalar physical time valid for each control declaration.
 
+        Returns:
+            A NumPy array assembled without flattening the individual control
+            values. Scalar-valued controls give shape ``(n_controls,)``;
+            CasADi constant controls retain singleton dimensions and give
+            ``(n_controls, 1, 1)``. The shape is backend/control-dependent.
+
+        Stored controls are evaluated at normalised time ``t / t_final``.
         Piecewise controls use half-open sample bins and do not include the
         terminal boundary when it lies beyond their stored samples.
         """
         if not self.control_solutions:
             return None
-        return np.array([c(t) for c in self.control_solutions])
+        return np.array([c(t / self.t_final) for c in self.control_solutions])
 
     def __call__(self, t) -> np.ndarray:
         """Evaluate observed output, not the concatenated state path.
@@ -309,25 +325,31 @@ class VariationalSolution:
         """Map the path to an output interpolation (advanced).
 
         Returns:
-            An ``InterpolatingPolyCollection`` obtained by mapping path knots.
-            Unlike ``__call__``, this helper passes the named ``parameters``
-            mapping to the output callback; the callback must support that
-            layout. Use direct evaluation for ordinary solver output callbacks.
+            An ``InterpolatingPolyCollection`` on physical-time intervals,
+            obtained by mapping path knots through the same numeric parameter
+            vector and output callback as ``__call__``.
         """
 
         def f(t, v):
+            t *= self.t_final
+            v = v.reshape(-1)
             x = self.projectors[0] @ v
-            z = (
-                self.projectors[1] @ v
-                if self.projectors[1] is not None
-                else None
-            )
-            q = (
-                self.projectors[2] @ v
-                if self.projectors[2] is not None
-                else None
-            )
+            z = self.projectors[1] @ v if self.projectors[1] is not None else None
+            q = self.projectors[2] @ v if self.projectors[2] is not None else None
             u = self.control_law(t)
-            return self.output(t, x, z, u, self.parameters, q)
+            return np.asarray(
+                self.output(t, x, z, u, self._parameter_vector, q)
+            ).reshape(-1)
 
-        return self.path.map(f)
+        return InterpolatingPolyCollection(
+            [
+                InterpolatingPoly(
+                    poly.dimension,
+                    tuple(t * self.t_final for t in poly.interval),
+                    poly.degree,
+                    poly.values,
+                    reference_operators=poly._reference_operators,
+                )
+                for poly in self.path.map(f).polys
+            ]
+        )

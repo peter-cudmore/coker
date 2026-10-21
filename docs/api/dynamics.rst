@@ -1,322 +1,326 @@
-Dynamics contracts
-==================
+Dynamics API
+============
 
-This reference describes the **current** public surface, not the pending API
-cleanup in issue #88. Ordinary applications import modelling, composition,
-analysis, and variational objects from :mod:`coker.dynamics`. General and
-controlled construction currently require their owning module::
+Import the constructors, trajectory objects, composition helpers and variational
+interfaces below from :mod:`coker.dynamics`. Finite decision declarations belong
+to :mod:`coker.parameters`; function-valued realisations belong to
+:mod:`coker.parameters.function_parameters`.
 
-   from coker.dynamics import (
-       DynamicsSpec, DynamicalSystem, create_autonomous_ode, direct_sum,
-       VariationalProblem, VariationalProblemBuilder, VariationalSolution,
-       TranscriptionOptions,
-   )
-   from coker.dynamics.system import (
-       create_dynamics_from_spec, create_control_system,
-   )
+System construction
+-------------------
 
-Neither ``create_dynamics_from_spec`` nor ``create_control_system`` is currently
-re-exported by ``coker.dynamics``. General finite decisions belong to
-:mod:`coker.parameters`; function realizations belong to
-:mod:`coker.parameters.function_parameters`. They are not dynamics namespace exports.
+The constructors below return :class:`~coker.dynamics.DynamicalSystem` objects;
+they trace callbacks but do not integrate a trajectory. ``backend`` defaults
+to ``"numpy"``. See :doc:`../dynamics` for worked models, composition examples,
+and the residual-DAE formulation.
 
-Construct and evaluate
-----------------------
+.. py:class:: coker.dynamics.DynamicsSpec(inputs, parameters, algebraic, initial_conditions, dynamics, constraints, outputs, quadratures)
 
-The autonomous constructor defaults to the NumPy backend. Its callbacks are
-``x0(p)``, ``xdot(x, p)``, and optional ``output(x, p)``; a constant initial
-state is also accepted. ``p_init`` is a shape-check value, not a parameter
-binding retained for evaluation. Output is not necessarily state.
+   Declare a semi-explicit system before tracing it with
+   :func:`~coker.dynamics.create_dynamics_from_spec`.
 
-.. doctest::
+   ``inputs`` is a :class:`~coker.FunctionSpace` for the input trajectory.
+   ``parameters`` is ``None``, a scalar, vector or function-space declaration,
+   or an ordered tuple/list of these declarations. ``algebraic`` is a
+   :class:`~coker.VectorSpace` for the algebraic state, or ``None``.
 
-   >>> import numpy as np
-   >>> from coker.dynamics import create_autonomous_ode, direct_sum
-   >>> first = create_autonomous_ode([1.0, 2.0], lambda x, p: -x, backend="numpy")
-   >>> second = create_autonomous_ode([3.0, 4.0], lambda x, p: 0 * x, backend="numpy")
-   >>> times = np.array([0.0, 0.5, 1.0])
-   >>> assert first(times).shape == (3, 2)
-   >>> assert np.allclose(first(times), np.exp(-times[:, None]) * np.array([1.0, 2.0]), atol=1e-3)
-   >>> combined, projections = direct_sum(first, second)
-   >>> values = combined(times)
-   >>> assert values.shape == (3, 4)
-   >>> components = projections.outputs.inverse(values[-1])
-   >>> assert np.allclose(components[1], [3.0, 4.0])
-   >>> extract_first, extract_second = projections.outputs.as_matrices()
-   >>> assert extract_first.shape == (2, 4)
-   >>> assert np.allclose(extract_second @ values[-1], [3.0, 4.0])
+   Callbacks have the following positional contracts:
 
-``direct_sum`` returns a **pair**, not just a system. Projection fields are
-``state``, ``algebraic``, ``quadratures``, ``outputs``, ``controls``, and
-``parameters``, ordered exactly like the supplied subsystems. Numeric fields
-have ``inverse(vector)`` and ``as_matrices()``. Absent blocks split to ``None``;
-their extraction matrices have zero rows. Numeric parameters are concatenated
-into one flat vector. When any parameter is function-valued, the composed
-parameter declaration is positional and ``projections.parameters.split(tuple)``
-returns each subsystem's tuple instead of numeric extraction matrices.
+   * ``initial_conditions(z, u, p)`` returns ``(x0, z0)``. Return ``None``
+     for ``z0`` when no algebraic state is declared.
+   * ``dynamics(t, x, z, u, p)`` returns the differential-state rate with
+     the same shape as ``x0``.
+   * ``constraints(t, x, z, u, p)`` returns the algebraic residual whose
+     value must be zero.
+   * ``quadratures(t, x, z, u, p)`` returns one scalar or vector rate.
+   * ``outputs(t, x, z, u, p, q)`` returns the declared observable output.
 
-Current scalar-output limitation: concatenation requires array-valued component
-outputs. Components restored as zero-dimensional scalars fail in ``direct_sum``
-evaluation with ``ValueError: zero-dimensional arrays cannot be concatenated``.
-The example uses multi-component vector outputs, which support both sampling
-and projection extraction.
+   ``u`` is a trajectory callable: use ``u(t)`` to obtain its current value.
+   For tuple/list parameter declarations, ``p`` is one tuple in declaration
+   order, including callable values for function-space entries. A single
+   declaration supplies its value directly.
 
-For controlled ODEs, the convenience constructor evaluates ``u(t)`` before
-calling ``xdot(t, x, u_value, p)`` or ``output(t, x, u_value, p)``:
+   Use ``None`` for absent inputs, parameters, algebraic state, constraints,
+   or quadratures. Absent input, parameter, algebraic and quadrature callback
+   arguments receive ``None``; keep their positions in the callback signature.
+   Algebraic state and constraints must be declared together. Quadrature
+   initial values are not part of ``initial_conditions``.
 
-.. doctest::
+.. py:function:: coker.dynamics.create_dynamics_from_spec(spec, backend="numpy")
 
-   >>> import numpy as np
-   >>> from coker import FunctionSpace, Scalar, VectorSpace
-   >>> from coker.dynamics.system import create_control_system
-   >>> control_space = FunctionSpace("u", [Scalar("t")], [VectorSpace("u_value", 1)])
-   >>> controlled = create_control_system(
-   ...     [0.0], lambda t, x, u, p: u, control_space, backend="numpy"
-   ... )
-   >>> assert np.allclose(controlled(1.0, lambda t: np.array([2.0])), [2.0])
+   Trace a :class:`~coker.dynamics.DynamicsSpec` and return a
+   :class:`~coker.dynamics.DynamicalSystem` containing its initial-condition,
+   rate, residual, quadrature and output functions.
 
-For general ODE/DAE models use ``DynamicsSpec``. Its initial callback is
-``initial_conditions(z, u, p) -> (x0, z0)``: the first argument is the algebraic
-slot, **not initial time**. Other callbacks receive ``(t, x, z, u, p)``;
-outputs additionally receive accumulated ``q``. Here ``u`` is the control
-function, so the callback explicitly evaluates ``u(t)``. Use ``Noop()`` for
-absent inputs, constraints, and quadratures; ``None`` for absent algebraic or
-parameter spaces. Algebraic variables require residual constraints. State and
-derivative shapes must agree.
+   The initial-condition callback must return exactly two values. The
+   differential rate must have the initial differential state's shape, and
+   the initial algebraic value must match its declaration. Shape mismatches
+   raise ``AssertionError``; constraints without an algebraic declaration
+   raise ``ValueError``. Tracing requires every callback operation to be
+   supported by the selected backend.
 
-.. doctest::
+.. py:function:: coker.dynamics.create_control_system(x0, xdot, control, parameters=None, output=None, backend="numpy", p_init=None, u_init=None)
 
-   >>> import numpy as np
-   >>> from coker import Scalar
-   >>> from coker.algebra.ops import Noop
-   >>> from coker.dynamics import DynamicsSpec
-   >>> from coker.dynamics.system import create_dynamics_from_spec
-   >>> spec = DynamicsSpec(
-   ...     inputs=Noop(), parameters=(Scalar("rate"),), algebraic=None,
-   ...     initial_conditions=lambda z, u, p: (np.array([0.0]), None),
-   ...     dynamics=lambda t, x, z, u, p: np.array([p[0]]),
-   ...     constraints=Noop(), outputs=lambda t, x, z, u, p, q: x,
-   ...     quadratures=Noop(),
-   ... )
-   >>> general = create_dynamics_from_spec(spec, backend="numpy")
-   >>> assert np.allclose(general(1.0, 3.0), [3.0])
+   Return a controlled ODE with no algebraic state or quadratures.
+   ``control`` is a function space of time with one scalar or vector output;
+   ``parameters`` is a scalar/vector declaration or ``None``.
 
-A single parameter declaration reaches callbacks directly as ``p``. Tuple/list
-declarations reach callbacks as one positional tuple ``p`` (including a
-one-element tuple). Direct calls use ``system(time, *parameters)`` without
-inputs and ``system(time, input_function, *parameters)`` with inputs; do not add
-an input placeholder. Function slots accept matching Coker ``Function`` or
-``FittedFunction`` objects or traceable Python callables; Coker functions must
-have the system's backend.
+   ``x0`` is a fixed initial value (array, list, tuple or number), or a
+   callback ``x0(p)``. ``xdot(t, x, u, p)`` returns a rate with the initial
+   state's shape. Optional ``output(t, x, u, p)`` returns the observable;
+   otherwise the output is the state. These callbacks receive the current
+   **value** ``u``, not the input trajectory callable.
+   With no parameters, ``p`` is ``None``.
 
-Direct endpoint evaluation returns the output's declared shape. Sampled
-multi-component vector output has shape ``(n_times, n_output)``. The sampled
-scalar/one-component branch attempts to flatten to ``(n_times,)``, but currently
-fails if the backend restores its individual outputs as zero-dimensional
-scalars. Evaluate scalar endpoints individually and collect them explicitly;
-use array-valued outputs for composition. Direct evaluation integrates from
-time zero. NumPy supports ODEs; CasADi supports ODEs and algebraic residuals;
-PyTorch ODE integration requires the optional ``torchdiffeq`` dependency.
-SymPy does not numerically integrate; JAX has no dynamics integrator.
+   ``p_init`` and ``u_init`` supply sample values for construction-time shape
+   checks, not parameter or control defaults for trajectory evaluation.
+   ``u_init`` is a callable sampled at time zero. Omitted samples use zeros
+   for declared parameters and controls. ``p_init`` requires a parameter
+   declaration and must match its size.
 
-.. autofunction:: coker.dynamics.create_autonomous_ode
+.. py:function:: coker.dynamics.create_autonomous_ode(x0, xdot, parameters=None, output=None, backend="numpy", p_init=None)
 
-.. autofunction:: coker.dynamics.system.create_control_system
+   Return an ODE with no controls, algebraic state or quadratures.
+   ``x0`` is a fixed initial value (array, list, tuple or number), or
+   ``x0(p)``. ``parameters`` is a scalar/vector declaration or ``None``.
 
-.. autofunction:: coker.dynamics.system.create_dynamics_from_spec
+   ``xdot(x, p)`` returns a rate with the initial state's shape.
+   Optional ``output(x, p)`` returns the observable; otherwise the output
+   is the state, with scalar initial states producing scalar output.
+   There is no time argument. ``p`` is ``None`` without a parameter
+   declaration. ``p_init`` provides a construction-time parameter sample,
+   with the same rules as :func:`~coker.dynamics.create_control_system`.
 
-.. autoclass:: coker.dynamics.DynamicsSpec
+Trajectory objects
+------------------
+
+Call a system as ``system(time, input_trajectory, *parameter_values)``, omitting
+the input argument if none is declared and passing one positional value per
+parameter declaration. ``time`` is an endpoint or a one-dimensional time grid.
+The result is the declared output, not a tuple of internal state channels.
+On a grid, scalar and one-element-vector outputs form a one-dimensional
+series; larger vectors are stacked with one row per requested time.
+Integration starts at time zero. Function-valued parameter slots accept matching
+Coker ``Function`` and ``FittedFunction`` objects or traceable Python callables;
+Coker functions must use the system's backend. Argument-count and function-space
+mismatches raise ``ValueError``; noncallable function values raise ``TypeError``.
+
+``system.backend`` is a read-only property, not a method.
+``get_state_dimensions()`` returns differential, algebraic and quadrature
+dimensions, with ``None`` for absent channels. ``output_as_function_space()``
+describes the public time/input/parameter argument order.
+
+
+``DynamicalSystem.__call__`` currently rejects systems with quadratures with
+``NotImplementedError``. Convert them with
+:func:`~coker.dynamics.to_residual_dynamical_system` to evaluate a residual
+trajectory; nonempty quadratures then start at zero.
+
+Numerical support depends on the integration backend, not just whether
+callbacks can be traced:
+
+* NumPy integrates explicit ODEs, including converted ODEs, with SciPy.
+  Independent square index-one residual models use a fixed-step implicit
+  method. Converted semi-explicit DAEs are not supported by its direct
+  integration path.
+* PyTorch evaluates explicit ODEs, including converted ODEs,
+  but rejects algebraic constraints and independent implicit residual models.
+  ODE integration requires the PyTorch extra and ``torchdiffeq``.
+* CasADi supports semi-explicit ODEs/DAEs and independent residual models.
+  For independent residual models, select the IDAS or variational path with
+  :class:`~coker.backends.casadi.CasadiResidualSolverOptions`.
+* SymPy provides symbolic lowering and analysis, not numerical integration.
+* JAX does not provide a dynamics integrator or variational solver.
 
 .. autoclass:: coker.dynamics.DynamicalSystem
-   :members: __call__, backend, get_state_dimensions, output_as_function_space
+   :members: backend,get_state_dimensions,output_as_function_space
+   :special-members: __call__
 
-.. autofunction:: coker.dynamics.direct_sum
+.. autoclass:: coker.dynamics.ResidualDynamicalSystem
+   :members: backend,get_state_dimensions,output_as_function_space
+   :special-members: __call__
 
-Build, solve, and inspect
--------------------------
+.. py:function:: coker.dynamics.to_residual_dynamical_system(system)
 
-Use the builder inside ``with``. ``state(time)`` is differential state;
-``output(time)`` is observed output and can include algebraic or integral
-channels. Time bindings are ``builder.t`` (default), numeric ``0``, and
-``builder.t_final``; arbitrary numeric times and foreign tracers are rejected.
-``integrate(expr)`` registers a scalar physical-time integral accumulated from
-zero, not numerical sampling. Comparisons depending on path time become path
-constraints, initial-bound expressions become initial constraints, and remaining
-expressions (including parameter-only comparisons) become terminal constraints.
-Path constraints are enforced at transcription nodes, not certified everywhere
-between them.
+   Convert a semi-explicit :class:`~coker.dynamics.DynamicalSystem` into a
+   :class:`~coker.dynamics.ResidualDynamicalSystem`. The residual combines
+   differential-rate equations, quadrature-rate equations and algebraic
+   constraints, retaining the input, parameter and output declarations.
+   See :doc:`../dynamics` for the residual equation and worked examples.
 
-``build(Minimise(expr), subject_to=[...])`` creates a problem but does not solve.
-After context exit the problem remains valid but builder symbolic access raises
-``RuntimeError``. A numeric horizon is fixed; a ``BoundedVariable`` horizon is
-optimized and must have a strictly positive lower bound.
+Composition
+-----------
 
-For a finite scalar/vector parameter space, direct ``VariationalProblem``
-construction accepts ordered scalar decisions (or an explicit
-``system_parameter_map``). For tuple parameter spaces, supply one declaration
-per slot: scalar ``BoundedVariable``/``UnboundedVariable`` (or fixed scalar),
-vector ``BoundVector``/``DenseTensorVariable``, and named ``FunctionParameter``
-realizations for function slots. Specialization flattens solver decisions while
-retaining the original public parameter layout.
+.. py:function:: coker.dynamics.direct_sum(*systems, backend=None)
 
-``problem()`` creates and solves a new backend solver. Retain
-``solver = problem.get_solver()`` for repeated solves; ``solver.parameters``
-lists free scalar fixing names and ``solver.solve(**fixed_parameters)`` fixes
-specified values by name. CasADi is the default solver and supports constrained
-collocation, control declarations, algebraic states, quadratures, and free
-horizons. PyTorch supports fixed-horizon, bound-only ODE parameter fitting and
-quadratures, without control declarations, algebraic states, or comparison
-constraints. NumPy, SymPy, and JAX do not implement variational solving. The
-model's construction backend and problem's solve backend are separate choices.
+   Return ``(system, projections)`` for one or more independent
+   :class:`~coker.dynamics.DynamicalSystem` objects. Channels are concatenated
+   in subsystem order. ``system`` is a ``DynamicalSystem``;
+   ``projections`` is a :class:`~coker.dynamics.ProjectionSet`, returned
+   separately rather than attached to the system.
 
-This complete fitting example requires CasADi/IPOPT in addition to NumPy.
-Solver chatter is redirected; numerical values are checked with tolerances.
+   The composed backend defaults to the first subsystem's backend.
+   ``backend=`` traces the composition using another backend, which must
+   support every subsystem operation.
 
-.. doctest::
+   Numeric scalar/vector parameters use a flat-vector
+   :class:`~coker.dynamics.CompositionOperator`. If any parameter declaration
+   is function-valued, the combined parameter declarations remain an ordered
+   tuple and the parameter projection is a
+   :class:`~coker.dynamics.StructuredParameterProjection`.
 
-   >>> import contextlib
-   >>> import io
-   >>> import numpy as np
-   >>> from coker import VectorSpace
-   >>> from coker.dynamics import create_autonomous_ode, VariationalProblemBuilder, TranscriptionOptions
-   >>> from coker.parameters import BoundedVariable
-   >>> from coker.toolkits.codesign import Minimise
-   >>> fitted_system = create_autonomous_ode(
-   ...     lambda p: p[:1], lambda x, p: 0 * x,
-   ...     parameters=VectorSpace("p", 1), backend="numpy",
-   ... )
-   >>> options = TranscriptionOptions(minimum_n_intervals=2, minimum_degree=3, verbose=False)
-   >>> with VariationalProblemBuilder(
-   ...     fitted_system, t_final=1.0,
-   ...     parameters=[BoundedVariable("value", lower_bound=0.5, upper_bound=3.0, guess=1.0)],
-   ...     transcription_options=options,
-   ... ) as builder:
-   ...     problem = builder.build(Minimise((builder.output(builder.t_final)[0] - 2.0) ** 2))
-   >>> with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-   ...     solution = problem()
-   >>> assert solution.solve_info.success
-   >>> assert solution.cost < 1e-6
-   >>> assert abs(solution.parameters["value"] - 2.0) < 1e-3
-   >>> assert solution.state(0.5).shape == (1,)
-   >>> assert solution.algebraic(0.5) is None
-   >>> assert solution.quadratures(0.5) is None
-   >>> assert solution.control_law(0.5) is None
-   >>> assert np.allclose(solution(0.5), [2.0], atol=1e-3)
-   >>> sampled = np.vstack([solution(t) for t in [0.0, 0.5, 1.0]])
-   >>> assert sampled.shape == (3, 1)
-   >>> assert solution.as_raw().shape[0] == 2
+   On the numeric-only path, each subsystem must declare one scalar/vector
+   parameter space or no parameters; numeric-only tuples of declarations
+   are not supported by this composition path.
 
-``VariationalSolution`` accessors take **scalar physical time** in
-``[0, solution.t_final]``. ``state(t)``, ``algebraic(t)``, and ``quadratures(t)``
-return flat ``(n_x,)``, ``(n_z,)``, and ``(n_q,)`` arrays; absent algebraic or
-quadrature channels return ``None``. ``control_law(t)`` is an ordered
-``(n_controls,)`` array or ``None``. Piecewise controls have half-open bins and
-may not be evaluated at the terminal boundary. ``solution(t)`` evaluates the
-observed output, not the concatenated state. Sample multiple times explicitly.
-``as_raw()`` contains time in row zero and concatenated path knots below,
-not output samples.
+.. py:class:: coker.dynamics.ProjectionSet(parameters, state, algebraic, quadratures, outputs, controls)
 
-``parameters`` maps names to floats, shaped NumPy arrays, or ``FittedFunction``
-objects. ``solve_info`` carries backend-neutral success/status metadata; failed
-solves raise ``SolveFailure`` with that information. Iteration callback
-solutions are candidates, not success certificates. ``path_constraints`` and
-``terminal_constraints`` inspect only retained compiled half-space expressions;
-they are not full transcription feasibility certificates.
+   Projections returned by :func:`~coker.dynamics.direct_sum`.
+   ``state``, ``algebraic``, ``quadratures``, ``outputs`` and ``controls``
+   are :class:`~coker.dynamics.CompositionOperator` objects.
+   ``parameters`` is either a ``CompositionOperator`` for numeric-only
+   declarations or a ``StructuredParameterProjection`` for a heterogeneous
+   tuple containing function-valued declarations.
 
-.. autoclass:: coker.dynamics.VariationalProblemBuilder
-   :members: t, t_final, state, input, output, parameters, integrate, build
+.. py:class:: coker.dynamics.CompositionOperator(*spaces)
 
-.. autoclass:: coker.dynamics.VariationalProblem
-   :members: get_solver, __call__, horizon_decision, decision_declarations
+   Join and split numeric channels declared by scalar/vector spaces or
+   ``None``. Calling the operator with one value per subsystem flattens and
+   concatenates present channels; an entirely absent channel returns ``None``.
+   A scalar occupies one slot.
 
-.. autoclass:: coker.dynamics.TranscriptionOptions
+   .. py:method:: inverse(value)
 
-.. autoclass:: coker.dynamics.VariationalSolution
-   :members: __call__, state, algebraic, quadratures, control_law, as_raw, path_constraints, terminal_constraints
+      Return a list of flat subsystem slices in declaration order, with
+      ``None`` for absent channels. Scalar slices remain one-element vectors.
 
-.. autoclass:: coker.dynamics.ConstantControlVariable
+   .. py:method:: as_matrices()
 
-.. autoclass:: coker.dynamics.PiecewiseConstantVariable
+      Return one NumPy projection matrix per subsystem. Multiplication by
+      the combined flat vector selects that subsystem's slice. Absent
+      channels have zero-row matrices.
 
-.. autoclass:: coker.dynamics.SpikeVariable
+   .. py:method:: offsets()
 
-Quadratures and the pending conversion route
---------------------------------------------
+      Yield each subsystem's starting offset in the combined vector.
 
-A ``DynamicalSystem`` with ``dqdt`` explicitly rejects direct ``system(time, ...)``
-evaluation with ``NotImplementedError`` even when its backend integrator can
-handle quadratures. The residual-system conversion route mentioned by issue #89
-is **absent in this checkout**; there is no canonical conversion function to
-import or execute. This documentation does not invent that API or implement the
-pending cutover. Use the existing variational transcription for integral
-channels, or the advanced backend integration interface with explicit initial
-quadrature values (see :doc:`../backends`).
+   .. py:method:: sizes()
 
-This complete example uses a model quadrature in the existing variational route
-(NumPy and CasADi/IPOPT dependencies). Model quadratures start at zero. For
-builder-owned integrals, use ``builder.integrate(scalar_expression)`` instead:
+      Yield each subsystem's flattened width, or zero for an absent channel.
 
-.. doctest::
+   .. py:method:: dim()
 
-   >>> import contextlib
-   >>> import io
-   >>> import numpy as np
-   >>> from coker import Scalar
-   >>> from coker.algebra.ops import Noop
-   >>> from coker.dynamics import DynamicsSpec, VariationalProblemBuilder, TranscriptionOptions
-   >>> from coker.dynamics.system import create_dynamics_from_spec
-   >>> from coker.parameters import BoundedVariable
-   >>> from coker.toolkits.codesign import Minimise
-   >>> quadrature_system = create_dynamics_from_spec(
-   ...     DynamicsSpec(
-   ...         inputs=Noop(), parameters=(Scalar("value"),), algebraic=None,
-   ...         initial_conditions=lambda z, u, p: (np.array([p[0]]), None),
-   ...         dynamics=lambda t, x, z, u, p: 0 * x,
-   ...         constraints=Noop(),
-   ...         outputs=lambda t, x, z, u, p, q: x + q,
-   ...         quadratures=lambda t, x, z, u, p: x,
-   ...     ), backend="numpy",
-   ... )
-   >>> rejected = False
-   >>> try:
-   ...     quadrature_system(1.0, 2.0)
-   ... except NotImplementedError:
-   ...     rejected = True
-   >>> assert rejected
-   >>> with VariationalProblemBuilder(
-   ...     quadrature_system, t_final=1.0,
-   ...     parameters=[BoundedVariable("value", lower_bound=0.5, upper_bound=3.0, guess=1.0)],
-   ...     transcription_options=TranscriptionOptions(minimum_n_intervals=2, minimum_degree=3),
-   ... ) as builder:
-   ...     terminal_error = builder.output(builder.t_final)[0] - 4.0
-   ...     integral_problem = builder.build(
-   ...         Minimise(terminal_error ** 2)
-   ...     )
-   >>> with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-   ...     integral_solution = integral_problem()
-   >>> assert integral_solution.solve_info.success
-   >>> assert integral_solution.quadratures(1.0).shape == (1,)
-   >>> assert np.allclose(integral_solution.quadratures(1.0), [2.0], atol=1e-3)
-   >>> assert np.allclose(integral_solution(1.0), [4.0], atol=1e-3)
+      Return the combined vector space, or ``None`` if its total width is zero.
 
-Analysis and advanced extensions
---------------------------------
+.. py:class:: coker.dynamics.StructuredParameterProjection(widths)
 
-The ordinary analysis functions return generic **local** rank conclusions, not
-global reachability or practical estimation guarantees. Read
-:doc:`../dynamics/system_analysis` for scope, rank conditions, and a complete
-example. Unsupported models return ``INCONCLUSIVE`` with a reason; low-level
-symbolic lowering instead raises ``UnsupportedSystemError``.
+   Partition parameter declarations without flattening their values.
+   ``widths`` is a tuple of declaration counts per subsystem, not scalar
+   dimensions. Function-valued entries remain callable.
+
+   .. py:method:: split(parameters)
+
+      Return a list containing one positional parameter tuple per subsystem.
+      Subsystems without parameters receive an empty tuple.
+
+Symbolic analysis
+-----------------
+
+See :doc:`../dynamics/system_analysis` for the equations, rank-test
+interpretation and supported model scope. These entry points accept a
+``DynamicalSystem``, ``SymbolicSystem`` or ``SymbolicDAESystem``.
+They use SymPy lowering regardless of the model's numerical backend.
+
+The supported domain is smooth systems without explicit time dependence,
+with scalar or finite one-dimensional-vector states, controls, parameters
+and outputs. Semi-explicit DAEs must be index one, with one constraint per
+algebraic variable and a generically nonsingular algebraic Jacobian.
+Quadratures, function-valued parameters, implicit symbolic functions,
+nonsmooth expressions and control-dependent DAE constraints are unsupported.
+An independent ``ResidualDynamicalSystem`` is not an analysis input.
+
+Every analysis accepts keyword-only ``max_order=None``: ``None`` allows
+expansion until rank closure; a non-negative integer limits expansion order.
+An unsupported model, invalid limit or exhausted limit returns
+``INCONCLUSIVE`` with a ``reason`` rather than establishing a negative result.
+Unsupported symbolic operations can therefore make analysis inconclusive
+even when numerical evaluation succeeds.
 
 .. autofunction:: coker.dynamics.analyse_controllability
 
+   Return :class:`~coker.dynamics.ControllabilityResult` from the control-field
+   Lie-algebra rank test. Despite the function name, the property tested is
+   **generic local accessibility**, not global controllability or reachability
+   with constrained inputs. Dynamics must be affine in their controls.
+
 .. autofunction:: coker.dynamics.analyse_observability
+
+   Return :class:`~coker.dynamics.ObservabilityResult` from output
+   Lie derivatives. Known controls are treated as arbitrary signals;
+   controlled dynamics must be input-affine. The required rank is the
+   differential-state dimension, including for supported DAEs.
 
 .. autofunction:: coker.dynamics.analyse_identifiability
 
-.. autoclass:: coker.dynamics.AnalysisStatus
+   Return :class:`~coker.dynamics.IdentifiabilityResult` by augmenting the
+   state with constant unknown parameters and testing observability.
+   Controlled systems are unsupported.
 
-.. autoclass:: coker.dynamics.AnalysisResult
+   Keyword-only ``parameters`` is ``None`` to treat all model parameters as
+   unknown, or a sequence in flattened scalar-parameter order.
+   ``BoundedVariable`` and ``UnboundedVariable`` entries denote unknowns;
+   real numeric entries denote known values substituted before analysis.
+   Bounds are not used by the symbolic rank test. The sequence must match
+   the flattened parameter count. Required rank is the differential-state
+   dimension plus the number of unknown scalar parameters; this is a joint
+   state/parameter rank test, not a numerical fitting result.
+
+.. py:class:: coker.dynamics.AnalysisStatus
+
+   Enum identifying the outcome for the property named by the result type.
+   Compare ``result.status`` with an enum member, not with its truth value.
+
+   .. py:attribute:: TRUE
+
+      Full required rank establishes the generic local property.
+      The enum value is ``True``.
+
+   .. py:attribute:: FALSE
+
+      Stabilised rank below the required rank gives a negative rank-test
+      result. This is not the outcome for unsupported models.
+      The enum value is ``False``.
+
+   .. py:attribute:: INCONCLUSIVE
+
+      The supported analysis could not decide, or the model/arguments are
+      unsupported. Inspect ``reason``. The enum value is ``None``.
+
+.. py:class:: coker.dynamics.AnalysisResult(status, rank, required_rank, matrix, generators, rank_conditions, reason=None)
+
+   Immutable base result shared by the three analyses.
+
+   ``status`` is an :class:`~coker.dynamics.AnalysisStatus`. ``rank`` is the
+   established symbolic matrix rank; ``required_rank`` is the full rank
+   needed by the test. ``matrix`` is the final SymPy matrix. Accessibility
+   stores vector fields as columns; observability and identifiability store
+   output/Lie-derivative gradients as rows. ``generators`` contains the
+   vector fields or scalar expressions used to form the matrix.
+
+   .. py:attribute:: rank_conditions
+
+      Tuple of SymPy expressions that must all be nonzero for the reported
+      generic rank to apply. Conditions include a nonzero maximal-minor
+      witness and, for supported DAE rank results, the algebraic Jacobian
+      determinant. No conclusion is given on excluded singular sets.
+      A rank-zero ODE has no nonzero-minor witness.
+
+   .. py:attribute:: reason
+
+      Diagnostic string for an inconclusive outcome, otherwise ``None``.
+      An inconclusive result can retain partial matrix/rank information.
+      Failure before lowering may instead report empty data and
+      ``required_rank=0``; this does not establish a zero-dimensional model.
 
 .. autoclass:: coker.dynamics.ControllabilityResult
 
@@ -324,44 +328,154 @@ symbolic lowering instead raises ``UnsupportedSystemError``.
 
 .. autoclass:: coker.dynamics.IdentifiabilityResult
 
-Extension hooks include ``VariationalIterationCallback`` (return ``True`` to
-continue), ``SolverParameters`` and backend-specific settings, and
-``VariationalSolution.from_solver`` for backend implementations. Advanced
-symbolic inspection uses ``SymbolicSystem``, ``SymbolicDAESystem``,
-``lower_system`` and ``lower_dae_system``. Returned projection helpers live in
-``coker.dynamics.system``; they are not root namespace constructor APIs.
+Symbolic representations
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: coker.dynamics.VariationalIterationCallback
-   :members: __call__
-
-.. autoclass:: coker.dynamics.ConstraintSpec
-   :members: from_expression
-
-.. autoclass:: coker.dynamics.QuadratureSpec
-
-.. autoclass:: coker.dynamics.SymbolicSystem
-
-.. autoclass:: coker.dynamics.SymbolicDAESystem
+These lower-level interfaces expose ordered SymPy data for advanced analysis.
+Unlike the analysis entry points, lowering raises
+:class:`~coker.dynamics.UnsupportedSystemError` for unsupported models.
 
 .. autofunction:: coker.dynamics.lower_system
 
+   Return :class:`~coker.dynamics.SymbolicSystem` for a supported ODE.
+   Passing an existing ``SymbolicSystem`` returns it unchanged.
+   Algebraic constraints require ``lower_dae_system`` instead.
+
 .. autofunction:: coker.dynamics.lower_dae_system
+
+   Return :class:`~coker.dynamics.SymbolicDAESystem` for a semi-explicit
+   ``DynamicalSystem``, retaining algebraic variables rather than solving
+   constraints. Index-one regularity is checked when an analysis constructs
+   the constraint-manifold geometry.
+
+.. autoclass:: coker.dynamics.SymbolicSystem
+
+   ``state``, ``parameters`` and ``controls`` are ordered tuples of SymPy
+   symbols. ``dynamics`` and ``outputs`` are ordered scalar-expression tuples.
+   ``dynamics`` has one entry per differential state.
+
+.. autoclass:: coker.dynamics.SymbolicDAESystem
+
+   Adds ordered ``algebraic`` symbols and ``constraints`` expressions to the
+   ODE fields. Constraints must be independent of controls; their Jacobian
+   with respect to ``algebraic`` must be square and generically nonsingular
+   for analysis.
 
 .. autoexception:: coker.dynamics.UnsupportedSystemError
 
-.. autoclass:: coker.dynamics.system.ProjectionSet
+Variational problems
+--------------------
 
-.. autoclass:: coker.dynamics.system.CompositionOperator
-   :members: inverse, as_matrices
+Use ``VariationalProblemBuilder`` inside ``with`` to construct symbolic objectives
+and comparisons. Allowed time bindings are ``builder.t`` (the default), numeric
+``0`` and ``builder.t_final``. Arbitrary numeric times and foreign tracers raise
+``ValueError``. ``state(time)`` is differential state; ``output(time)`` is the
+observed output, which may include algebraic and quadrature channels.
+``integrate(expr)`` registers a scalar physical-time integral accumulated from
+zero. Path-time comparisons become path constraints, initial-time comparisons
+become initial constraints, and remaining comparisons, including parameter-only
+ones, become terminal constraints. Path constraints are enforced at transcription
+nodes, not certified between them.
+
+``build(Minimise(expr), subject_to=[...])`` constructs a problem without solving.
+The problem remains valid after context exit; builder symbolic access then raises
+``RuntimeError``. A numeric horizon is fixed; a ``BoundedVariable`` horizon is
+optimised and requires a strictly positive lower bound.
+
+Finite scalar/vector system parameters use ordered scalar decisions or an
+explicit ``system_parameter_map`` of shape ``(system_width, declaration_width)``.
+For tuple parameter spaces, supply one declaration per slot: a scalar decision
+or fixed scalar, ``BoundVector``/``DenseTensorVariable`` for a vector, and a named
+``FunctionParameter`` realisation for a function space. Specialisation flattens
+solver decisions while retaining the public parameter layout.
+
+``VariationalProblem`` also accepts a loss callback taking
+``(trajectory, parameters)`` without controls or
+``(trajectory, control_function, parameters)`` with controls.
+``problem()`` creates and solves a new backend solver. Retain
+``solver = problem.get_solver()`` for repeated solves; ``solver.parameters``
+lists free scalar fixing names, and ``solver.solve(**fixed_parameters)`` fixes
+values by name.
+
+CasADi is the default variational backend and supports constrained collocation,
+controls, algebraic states, quadratures and free horizons, subject to the
+callback-lowering limits described in :doc:`../dynamics`. PyTorch supports
+fixed-horizon, bound-only ODE fitting and quadratures, but not declared controls,
+algebraic states or comparison constraints. NumPy, SymPy and JAX do not provide
+variational solvers. The model construction backend and problem solve backend
+are independent choices. ``TranscriptionOptions`` configures discretisation and
+backend-specific solve policy.
 
 
-Current exports also include ``InterpolatingPoly``,
-``InterpolatingPolyCollection``, ``lgr_points``, ``legendre_coefficient``,
-``evaluate_legendre_polynomial``, ``expand_coefficients``,
-``generate_discritisation_operators`` (current spelling), and
-``split_at_non_differentiable_points``. These are advanced collocation/mesh
-helpers, not the recommended model-construction route. ``ControlLaw``,
-``ControlVariable``, ``ControlSolution``, ``Solution``, and ``LossFunction`` are
-annotation aliases. Private trace adapters, parameter partitions, and backend
-transcription factories are implementation internals; no all-members autodoc
-contract is intended for them.
+.. autoclass:: coker.dynamics.VariationalProblemBuilder
+   :members: t,t_final,state,input,output,parameters,integrate,build
+
+.. autoclass:: coker.dynamics.TranscriptionOptions
+
+.. autoclass:: coker.dynamics.VariationalProblem
+   :members: get_solver,horizon_decision,decision_declarations
+   :special-members: __call__
+
+Solutions and diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``VariationalSolution`` accessors take scalar physical time on
+``[0, solution.t_final]``. ``state(t)``, ``algebraic(t)`` and ``quadratures(t)``
+return flat ``(n_x,)``, ``(n_z,)`` and ``(n_q,)`` arrays. Absent algebraic and
+quadrature channels return ``None``. ``control_law(t)`` returns ordered control
+values as a NumPy array or ``None``. Values are assembled without flattening:
+scalar-valued controls give ``(n_controls,)``, while CasADi constant controls
+retain singleton dimensions and give ``(n_controls, 1, 1)``. Do not assume a
+backend-independent flat shape. Stored paths and controls use normalised time;
+public accessors perform the conversion. Piecewise controls have half-open bins
+and may not include the terminal boundary.
+
+``solution(t)`` evaluates observed output, not concatenated state. Stack scalar
+evaluations to sample a trajectory. ``as_raw()`` contains physical knot times in
+row zero and concatenated path knots below, not output samples. ``to_poly()``
+maps path knots through the output callback and returns an output interpolant
+on physical-time intervals.
+
+``parameters`` maps names to floats, shaped NumPy arrays or ``FittedFunction``
+objects. Inspect ``solve_info.success`` and status; failed numerical solves raise
+``coker.toolkits.codesign.SolveFailure`` with solve metadata. Iteration callback
+solutions are candidates, not success certificates.
+``path_constraints(t)`` and ``terminal_constraints()`` return nonnegative
+violations of retained compiled half-space expressions only, not a full
+transcription feasibility certificate. They return empty flat arrays when no
+expressions are retained and reject components with both finite bounds.
+
+``segment_defects`` contains full physical segment residuals with mesh
+provenance. ``segment_defect_tolerance`` records their reference tolerance; it
+does not add NLP constraints. CasADi's optional adaptive diagnostics are
+``adaptive_refinement_rounds`` and ``adaptive_maximum_defect``.
+
+.. autoclass:: coker.dynamics.VariationalSolution
+   :members: state,algebraic,quadratures,control_law,as_raw,to_poly,path_constraints,terminal_constraints
+   :special-members: __call__
+
+.. autoclass:: coker.dynamics.ConstantControlVariable
+
+.. autoclass:: coker.dynamics.PiecewiseConstantVariable
+
+.. autoclass:: coker.dynamics.SpikeVariable
+
+.. autoclass:: coker.dynamics.ConstantControlSolution
+
+.. autoclass:: coker.dynamics.PiecewiseControlSolution
+
+.. autoclass:: coker.dynamics.SpikeControlSolution
+
+Backend extension hooks
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``VariationalIterationCallback`` returns ``True`` to continue.
+``VariationalSolution.from_solver`` constructs results from backend-owned
+normalised interpolation data and numerical parameter vectors.
+``ConstraintSpec`` and ``QuadratureSpec`` are builder/transcription records in
+``coker.dynamics.variational.problem``, not dynamics namespace exports.
+``ControlLaw``, ``ControlVariable``, ``ControlSolution``, ``Solution`` and
+``LossFunction`` are annotation aliases, not model constructors.
+
+.. autoclass:: coker.dynamics.VariationalIterationCallback
+   :members: __call__

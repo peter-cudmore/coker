@@ -1,202 +1,198 @@
-Codesign mathematical programs
-==============================
+Mathematical programs
+=====================
 
-Supported import paths
-----------------------
+Import ordinary optimisation builders, objective and constraint helpers, and
+solve results from ``coker.toolkits.codesign``. See :doc:`../toolkits` for
+worked construction examples and :doc:`dynamics` for variational problems.
 
-Ordinary user entry points live in ``coker.toolkits.codesign``: import
-``ProblemBuilder``, ``Minimise``, ``MathematicalProgram``, ``bounded``,
-``BoundedConstraint``, ``norm``, ``weighted_norm``, ``SolverOptions``,
-``SolveInfo``, and ``SolveFailure`` explicitly from that module. They are not
-root ``coker`` exports. ``MathematicalProgram`` is available by explicit import
-but is currently absent from the module's ``__all__``; do not rely on wildcard
-imports. This reference records the current exports, not a future export
-inventory or backend-default change.
+``MathematicalProgram`` is included in the toolkit's explicit public exports.
+Solver implementation classes, private capture records and
+``solve_info_from_*`` normalisation helpers are not application entry points.
 
-``OptimisationModule`` and ``WeightedNorm`` are advanced extension interfaces,
-not ordinary stable solver plumbing. Private capture records, backend solver
-classes, and the ``solve_info_from_*`` normalisation functions are implementation
-helpers, not recommended application entry points.
+.. Author notes
 
-Construction and lifecycle
---------------------------
+   - Audience: users who can construct symbolic functions and need exact
+     ordinary optimisation construction, call, result and failure contracts.
+   - Keep solver-specific options in the backend reference and callable
+     parameter declarations in the parameter reference.
 
-Declare runtime argument spaces in ``ProblemBuilder(arguments=...)`` and obtain
-their symbolic values from ``builder.arguments``. Decisions created by
-``new_variable`` or ``new_function_parameter`` are distinct from runtime inputs.
-Set ``builder.objective`` to ``Minimise(scalar_expression)`` and set a nonempty
-sequence of symbolic ``builder.outputs`` before building. A vector residual is
-not a scalar objective: reduce it with a dot product, a norm, or
-``weighted_norm`` first. All expressions must use the builder's tape; operation
-and shape support remain backend-specific.
-
-The builder owns a tape immediately, even outside a ``with`` block. Entering
-and exiting its convenience context neither starts a solve nor closes the
-builder. ``build()`` constructs the solver without solving or consuming the
-builder. Subsequent builds use the current configuration. Changing the builder
-is not a way to reconfigure an already-created solver. Omitting the backend
-selects the current backend, rather than guaranteeing CasADi or NumPy.
-
-Missing objective or outputs raise ``ValueError``; an objective not wrapped in
-``Minimise`` raises ``TypeError``; a builder without a tape raises
-``RuntimeError``. These errors are deliberate public exceptions, not assertions.
-This does not imply a general builder validation pass: unsupported expressions
-or incompatible backend settings can still fail during backend construction.
-
-``initial_conditions`` starts as an index-to-value mapping populated by decision
-declarations. A sequence may instead be supplied in decision declaration order,
-excluding runtime arguments. Function decisions expand to concrete coefficient
-blocks; those blocks participate in the same initial-guess order.
-
-Constraints and solver support
-------------------------------
-
-``bounded(residual, lower_bound, upper_bound)`` creates inclusive componentwise
-bounds. Equal bounds impose equality; infinite constants leave one side
-unbounded. Symbolic bounds must share the residual's tape and may depend on
-runtime arguments. CasADi converts symbolic bounds to residual inequalities
-rather than freezing them at build time. Symbolic comparisons are also accepted;
-strict ``<`` and ``>`` comparisons become non-strict numerical constraints, not
-constraints with a guaranteed strict feasibility margin.
-
-Current standalone NLP implementations are:
-
-* ``casadi``: CasADi/IPOPT, with
-  ``coker.backends.casadi.CasadiNLPSolverOptions``. Its flat
-  ``optimiser_options`` mapping configures the CasADi solver constructor, for
-  example ``"ipopt.max_iter"``. It is copied at construction. The current
-  codesign implementation always starts from its original initial guess; the
-  inherited ``warm_start`` flag does not enable CasADi warm starts here.
-* ``numpy``: SciPy ``trust-constr``. ``solver_options`` must be ``None``.
-* ``pytorch``: the native PyTorch NLP implementation, configured through
-  ``coker.backends.pytorch.PytorchNLPSolverOptions``. Its tensor/device and
-  algorithm limitations are backend-specific; this wrapper's public numeric
-  results are still NumPy arrays.
-
-JAX and SymPy do not currently implement standalone codesign NLP solves.
-``weighted_norm`` retains structured quadratic metadata but does not select a
-QP solver. A solver reporting success does not establish global optimality.
-Standalone solving and backend support for nested optimiser calls in a symbolic
-graph are separate capabilities.
-
-Complete CasADi example
------------------------
-
-This example requires the optional CasADi dependency with its IPOPT plugin.
-Solver printing is disabled explicitly so the doctest checks results, not logs.
-The runtime target also appears in an equality bound.
-
-.. doctest::
-
-   >>> import numpy as np
-   >>> from coker import VectorSpace
-   >>> from coker.backends.casadi import CasadiNLPSolverOptions
-   >>> from coker.toolkits.codesign import Minimise, ProblemBuilder, bounded
-   >>> options = CasadiNLPSolverOptions(optimiser_options={
-   ...     "ipopt.print_level": 0, "ipopt.sb": "yes", "print_time": False,
-   ...     "ipopt.max_iter": 50,
-   ... })
-   >>> with ProblemBuilder(arguments=[VectorSpace("target", 2)], solver_options=options) as builder:
-   ...     (target,) = builder.arguments
-   ...     x = builder.new_variable("x", shape=(2,), initial_value=np.zeros(2))
-   ...     delta = x - target
-   ...     builder.objective = Minimise(np.dot(delta, delta))
-   ...     builder.constraints = [bounded(x[0], target[0], target[0])]
-   ...     builder.outputs = [x]
-   ...     problem = builder.build("casadi")
-   >>> assert problem.parameters == {} and problem.solve_info is None
-   >>> result = problem(np.array([3.0, -1.0]))
-   >>> objective, x_value = result
-   >>> assert len(result) == 2 and isinstance(objective, float)
-   >>> assert abs(objective) < 1e-6
-   >>> np.testing.assert_allclose(x_value, [3.0, -1.0], atol=1e-6)
-   >>> np.testing.assert_allclose(problem.parameters["x"], x_value, atol=1e-6)
-   >>> assert problem.solve_info is not None and problem.solve_info.success
-   >>> assert problem.solve_info.backend == "casadi"
-   >>> assert problem.solve_info.solver == "ipopt"
-
-Results and failure state
--------------------------
-
-A concrete program call returns the tuple ``(objective, *outputs)`` in requested
-output order, never hidden decision captures. The objective is a Python float;
-outputs are shaped NumPy arrays, including shape ``(1,)`` for scalar outputs
-(the current ``Dimension.scalar().shape`` convention). ``output_shape`` excludes
-the objective, whereas ``result_shape``
-includes its scalar dimension first.
-
-``program.parameters`` starts empty and is replaced after each successful
-numeric solve with a dictionary of named decisions. Scalar decisions are floats;
-vector/tensor decisions are NumPy arrays. Function decisions are
-``coker.parameters.function_parameters.FittedFunction`` objects exposing the
-original ``specification``, declared ``space``, native callable ``function``, and
-fitted ``parameters``. The returned arrays and mapping have no isolation/copy
-guarantee. Copy values if storing a snapshot or mutating them. The program owns
-its current metadata, not a history; concurrent calls are not a supported
-state-management interface.
-
-``solve_info`` starts as ``None``. A solver-reported failure raises
-``SolveFailure`` instead of returning a tuple and updates ``solve_info`` with
-that exception's metadata. ``parameters`` keeps the preceding successful values,
-or stays empty if there has been no successful solve: it must not be interpreted
-as a solution to the failed call. Argument validation and native backend errors
-may occur before new metadata is recorded and may leave an older status intact.
-Directly constructed callable wrappers do not provide solver metadata.
-
-.. doctest::
-
-   >>> from coker.toolkits.codesign import SolveFailure
-   >>> try:
-   ...     objective, values = problem(np.array([2.0, 1.0]))
-   ... except SolveFailure as error:
-   ...     assert problem.solve_info == error.solve_info
-   ...     assert not error.solve_info.success
-   ... else:
-   ...     assert problem.solve_info.success
-   ...     np.testing.assert_allclose(values, [2.0, 1.0], atol=1e-6)
-
-Deliberate lowering difference
-------------------------------
-
-``MathematicalProgram.lower()`` takes no options and returns a Coker
-``Function`` wrapping the program with objective-first outputs. It retains the
-solver backend, or uses NumPy for a directly constructed wrapper without a
-backend. By contrast, ``Function.lower(options=...)`` returns a backend
-``LoweredFunction`` execution handle. These are intentionally different return
-contracts, not interchangeable lowering interfaces. Symbolic calls require an
-active tracing context and cannot compose a backend-bound program into a graph
-using another backend. Execution of nested solves depends on the backend's
-native-call support.
-
-User reference
---------------
+Problem construction
+--------------------
 
 .. autoclass:: coker.toolkits.codesign.ProblemBuilder
    :members: new_variable, new_function_parameter, input_shape, output_shape, build
 
+``arguments`` declares the scalar or vector runtime inputs in order.
+``builder.arguments`` contains their symbolic values; these are not solver
+decisions. ``new_variable(name, shape=None, initial_value=None)`` returns a
+symbolic decision: a scalar when ``shape`` is omitted, otherwise an array of
+that shape. The default initial value is zero.
+
+Set ``builder.objective`` to ``Minimise(scalar_expression)``,
+``builder.constraints`` to a list of comparisons or ``bounded`` constraints,
+and ``builder.outputs`` to a non-empty list of symbolic expressions. All
+expressions must belong to the builder's graph. ``build(backend=None)`` returns
+a :class:`~coker.toolkits.codesign.MathematicalProgram`. Missing objective or
+outputs raise ``ValueError``; an objective not wrapped in ``Minimise`` raises
+``TypeError``; a builder without a tape raises ``RuntimeError``. These are
+deliberate exceptions, not assertions or a general validation pass. The
+builder's ``input_shape`` and ``output_shape`` are tuple properties, not methods.
+
+The builder creates its tape immediately. Its convenience context neither
+solves nor closes it. ``build()`` constructs the solver without consuming the
+builder; later builds use its current configuration. Mutating a builder does
+not reconfigure a previously built solver.
+
+``new_function_parameter(target, declaration)`` returns a symbolic callable
+whose concrete decisions, guesses and bounds come from the declaration.
+``target`` must be a :class:`~coker.FunctionSpace` and ``declaration`` must
+implement :class:`~coker.parameters.function_parameters.FunctionParameter`;
+wrong types raise ``TypeError``. The declaration and its concrete blocks need
+non-empty names, otherwise ``ValueError`` is raised. Incompatible target shapes
+also raise ``ValueError``. See :doc:`parameters` for declaration contracts.
+
+Initial guesses are recorded by ``new_variable`` and
+``new_function_parameter``. To replace them, assign ``initial_conditions`` a
+mapping from symbolic decision indices to values, or a sequence in concrete
+decision declaration order. A sequence of the wrong length raises
+``ValueError``; an unsupported container raises ``TypeError``.
+
+``build()`` uses the explicitly named backend, or the current backend when
+omitted, without changing the current selection. NumPy uses SciPy's
+``trust-constr`` solver; CasADi uses IPOPT; PyTorch supplies its own optimiser.
+The optional backends require their corresponding extras. JAX and SymPy do not
+provide ordinary optimisation solvers. Backend-specific restrictions and option
+types are described in :doc:`backends`.
+
+Objectives and constraints
+--------------------------
+
 .. autoclass:: coker.toolkits.codesign.Minimise
 
-.. autoclass:: coker.toolkits.codesign.MathematicalProgram
-   :members: __call__, result_shape, lower
+Wrap the scalar objective expression; this wrapper does not perform a solve.
 
 .. autofunction:: coker.toolkits.codesign.bounded
 
-.. autoclass:: coker.toolkits.codesign.BoundedConstraint
+Returns a :class:`~coker.toolkits.codesign.BoundedConstraint` representing
+``lower_bound <= residual <= upper_bound`` component-wise. Bounds may be
+constants or symbolic runtime parameters from the residual's graph. Use equal
+bounds for an explicit equality constraint and infinite bounds for an unbounded
+side. This helper does not validate bound ordering or shape; the selected
+backend checks and lowers the constraint.
 
-.. autofunction:: coker.toolkits.codesign.norm
+.. autoclass:: coker.toolkits.codesign.BoundedConstraint
+   :members: as_halfplane_bound
+
+Comparisons such as ``x == target`` and ``x <= limit`` also form constraints.
+Their residual convention uses a tolerance of ``1e-9`` for equality and
+non-strict inequality: equality bounds ``rhs - lhs`` within
+``[-1e-9, 1e-9]``, and ``lhs <= rhs`` requires ``rhs - lhs >= -1e-9``.
+A strict comparison requires ``rhs - lhs >= 0``; it does not enforce a positive
+margin. Use ``bounded`` when explicit numerical bounds matter.
 
 .. autofunction:: coker.toolkits.codesign.weighted_norm
 
+Returns the scalar squared Euclidean norm ``||weight @ residual||²``, not its
+square root. Both arguments must support symbolic matrix multiplication and
+the resulting vector's dot product. The helper retains factor metadata for
+backends that recognise quadratic objectives; it does not itself select a QP
+solver.
+
+.. autofunction:: coker.toolkits.codesign.norm
+
+Returns ``numpy.linalg.norm(arg, ord=order)``. Symbolic vectors support orders
+``1`` and ``2``; other orders and matrix norms depend on the backend. This is
+an unsquared norm, unlike ``weighted_norm``.
+
+Program calls and lowering
+--------------------------
+
+.. autoclass:: coker.toolkits.codesign.MathematicalProgram
+   :members: input_shape, output_shape, result_shape, lower
+   :special-members: __call__
+
+A numeric call ``program(*arguments)`` solves for the supplied runtime inputs
+and returns ``(objective, *outputs)``. The objective is a Python ``float``;
+requested outputs are NumPy arrays reshaped to their declared dimensions,
+including shape ``(1,)`` for scalar outputs, following
+``Dimension.scalar().shape``. The public result never includes private
+parameter captures.
+
+``input_shape()`` describes runtime inputs in declaration order.
+``output_shape()`` describes only requested outputs. The ``result_shape``
+property prepends the scalar objective dimension. The wrong number of arguments
+raises ``ValueError``; symbolic arguments with incompatible dimensions also
+raise ``ValueError``. Numeric argument validation is backend-specific. An
+invalid backend result count raises ``ValueError`` and a non-scalar objective
+raises ``TypeError``.
+
+After a successful numeric solve, ``program.parameters`` maps decision names
+to reconstructed scalar, array or :class:`~coker.parameters.function_parameters.FittedFunction`
+values. Their numeric representation follows the solver backend; the public
+output tuple remains NumPy-based. ``program.solve_info`` holds the most recent
+backend solve status and is initially ``None``. A failed solve does not replace
+the previously reconstructed parameters.
+
+The returned arrays and mutable parameter mapping have no copy/isolation
+guarantee. Copy values when retaining a snapshot or mutating results. Metadata
+describes the latest call, not a per-call history or concurrent-solve interface.
+
+``program.lower()`` returns a solver-pinned :class:`~coker.Function`, not a
+``LoweredFunction``. Calling this function runs the solve and returns only the
+objective and requested outputs. It does not select another solver backend or
+change the current backend. A program called with symbolic arguments can only
+be embedded in a graph with the same backend; a mismatch raises ``ValueError``.
+For the separate ``Function.lower(options)`` execution-handle contract, see
+:ref:`backend-lowering-contract`.
+
+Solver options and status
+-------------------------
+
 .. autoclass:: coker.toolkits.codesign.SolverOptions
+   :members: warm_start
+
+``SolverOptions`` is the frozen base for solver configuration, separate from
+ODE ``SolverParameters``. ``warm_start`` defaults to ``False`` and must be a
+``bool``; another type raises ``TypeError``. Pass supported backend-specific
+subclasses through ``ProblemBuilder(solver_options=...)``. The base is not a
+portable configuration accepted by every solver: NumPy rejects all non-``None``
+options; supplied CasADi and PyTorch settings must use their own option types.
+CasADi copies its flat ``optimiser_options`` mapping at construction and
+reuses its original initial guess on later calls; ``warm_start`` does not
+enable codesign warm starts there. PyTorch supports its own warm-start state.
+See :doc:`backends` for algorithm, device and dtype restrictions.
 
 .. autoclass:: coker.toolkits.codesign.SolveInfo
 
+The immutable status records ``backend``, ``solver``, ``success`` and the
+backend's ``return_status`` string. ``unified_return_status`` and
+``iteration_count`` may be ``None`` when unavailable. Inspect these fields
+rather than parsing a backend's raw return values.
+
 .. autoexception:: coker.toolkits.codesign.SolveFailure
 
-Advanced extension reference
-----------------------------
+An unsuccessful solve raises ``SolveFailure`` with the status available as
+``exception.solve_info``. For builder-produced programs, ``program.solve_info``
+is refreshed from the solver even when its call raises. Invalid inputs, backend
+configuration errors and native solver exceptions are not necessarily wrapped
+in ``SolveFailure``.
+The parameter mapping retains the preceding successful solution, or stays
+empty if no solve has succeeded; it is not a solution to the failed call.
+An argument or native-backend error may leave an older status intact. Direct
+callable wrappers have no solver metadata. Solver success does not establish
+global optimality.
+
+Solver extension interface
+--------------------------
 
 .. autoclass:: coker.toolkits.codesign.OptimisationModule
-   :members: __call__
+   :special-members: __call__
+
+Solver implementations provide ``last_solve_info`` before returning or raising
+``SolveFailure``. This interface is not a model builder.
 
 .. autoclass:: coker.toolkits.codesign.WeightedNorm
+
+``WeightedNorm`` stores the ``weight`` and ``residual`` recognition metadata
+created by ``weighted_norm``. Ordinary model code should call the helper
+rather than construct this record.

@@ -40,6 +40,17 @@ from coker.backends.casadi.optimiser import (
     CasadiNLPSolverOptions,
     build_optimisation_problem,
 )
+from coker.backends.casadi.residual import (
+    evaluate_residual_integrals as evaluate_collocation_residual_integrals,
+)
+from coker.backends.casadi.residual_options import (
+    CasadiResidualSolver,
+    CasadiResidualSolverOptions,
+)
+from coker.backends.casadi.sundials import (
+    evaluate_residual_integrals as evaluate_idas_residual_integrals,
+    is_available as idas_is_available,
+)
 from coker.backends.casadi.lowered import CasadiLoweredFunction
 from coker.backends.casadi.variational.options import (  # noqa: F401
     CasadiVariationalOptions,
@@ -47,9 +58,20 @@ from coker.backends.casadi.variational.options import (  # noqa: F401
 from coker.backends.casadi.variational.transcription import (
     create_variational_solver,
 )
-from coker.dynamics import VariationalProblem
+from coker.dynamics.residual import (
+    ResidualDynamicalSystem,
+    _normalise_direct_integration_functions,
+)
+from coker.dynamics.variational.problem import VariationalProblem
 
-__all__ = ["CasadiBackend", "CasadiVariationalOptions"]
+__all__ = [
+    "CasadiBackend",
+    "CasadiResidualSolver",
+    "CasadiResidualSolverOptions",
+    "CasadiLoweredFunction",
+    "CasadiNLPSolverOptions",
+    "CasadiVariationalOptions",
+]
 
 scalar_types = (float, int)
 
@@ -127,33 +149,25 @@ class CasadiBackend(Backend):
     def _materialize_parameter(self, target, declaration, blocks):
         flat_values = self._concatenate_parameter_blocks(blocks)
         if isinstance(target, FunctionSpace):
-            return self._fit_function_parameter(
-                declaration, target, flat_values
-            )
+            return self._fit_function_parameter(declaration, target, flat_values)
         if isinstance(target, VectorSpace):
-            return np.asarray(
-                self.to_numpy_array(flat_values), dtype=float
-            ).reshape(target.dimension)
+            return np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(
+                target.dimension
+            )
         if isinstance(target, Scalar):
             if flat_values.numel() != 1:
                 raise ValueError("scalar parameter must have one solver value")
             return float(
-                np.asarray(
-                    self.to_numpy_array(flat_values), dtype=float
-                ).reshape(-1)[0]
+                np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(-1)[0]
             )
-        raise TypeError(
-            "parameter target must be a scalar, vector, or function space"
-        )
+        raise TypeError("parameter target must be a scalar, vector, or function space")
 
     def _fit_function_parameter(self, declaration, target, flat_values):
         from coker.parameters.function_parameters import FittedFunction
 
         parameters = split_function_parameter_values(
             declaration,
-            np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(
-                -1
-            ),
+            np.asarray(self.to_numpy_array(flat_values), dtype=float).reshape(-1),
         )
         return FittedFunction(
             declaration,
@@ -168,15 +182,11 @@ class CasadiBackend(Backend):
     def _concatenate_parameter_blocks(self, blocks):
         if not blocks:
             raise ValueError("parameter blocks must not be empty")
-        return ca.vertcat(
-            *(self._as_parameter_column(block) for block in blocks)
-        )
+        return ca.vertcat(*(self._as_parameter_column(block) for block in blocks))
 
     @staticmethod
     def _as_parameter_column(block):
-        value = (
-            block if isinstance(block, (ca.DM, ca.MX, ca.SX)) else ca.DM(block)
-        )
+        value = block if isinstance(block, (ca.DM, ca.MX, ca.SX)) else ca.DM(block)
         return ca.reshape(value, value.numel(), 1)
 
     @staticmethod
@@ -186,9 +196,7 @@ class CasadiBackend(Backend):
             return ca.reshape(values, shape[0], 1)
         if len(shape) == 2:
             return ca.reshape(values, shape[1], shape[0]).T
-        raise ValueError(
-            "CasADi parameter tensors must have one or two dimensions"
-        )
+        raise ValueError("CasADi parameter tensors must have one or two dimensions")
 
     name = "casadi"
 
@@ -212,17 +220,13 @@ class CasadiBackend(Backend):
             TypeError: The native function or signature has the wrong type.
         """
         if not isinstance(ca_function, ca.Function):
-            raise TypeError(
-                "CasadiBackend.import_function expects a casadi.Function"
-            )
+            raise TypeError("CasadiBackend.import_function expects a casadi.Function")
         signature = (
             _signature_from_casadi_function(ca_function)
             if signature is None
             else signature
         )
-        return import_native_function(
-            ca_function, signature, backend=self.name
-        )
+        return import_native_function(ca_function, signature, backend=self.name)
 
     def to_numpy_array(self, array: Union[ca.MX, ca.DM]) -> ArrayLike:
         return to_numpy_array(array)
@@ -311,26 +315,19 @@ class CasadiBackend(Backend):
     ) -> CasadiLoweredFunction:
 
         if any(
-            isinstance(shape, FunctionSpace)
-            for shape in function.input_shape()
+            isinstance(shape, FunctionSpace) for shape in function.input_shape()
         ) or any(output is None for output in function.output):
             return CasadiLoweredFunction(self, function)
 
-        ca_inputs, ca_outputs = _lower_to_casadi(
-            function.tape, function.output
-        )
+        ca_inputs, ca_outputs = _lower_to_casadi(function.tape, function.output)
         return CasadiLoweredFunction(
             self, function, ca.Function("f", ca_inputs, ca_outputs)
         )
 
-    def evaluate(
-        self, function: Function, inputs: Sequence[Any]
-    ) -> list[Any | None]:
+    def evaluate(self, function: Function, inputs: Sequence[Any]) -> list[Any | None]:
         workspace: dict[int, Any] = {}
 
-        for idx, (space, arg) in enumerate(
-            zip(function.input_shape(), inputs)
-        ):
+        for idx, (space, arg) in enumerate(zip(function.input_shape(), inputs)):
             assert not isinstance(arg, Tracer)
             index = function.tape.input_indicies[idx]
             if isinstance(arg, np.ndarray):
@@ -396,10 +393,42 @@ class CasadiBackend(Backend):
         inputs,
         solver_parameters=None,
     ):
-        dxdt, g, dqdt = functions
+        if isinstance(functions, ResidualDynamicalSystem) and functions.legacy is None:
+            if isinstance(solver_parameters, CasadiResidualSolverOptions):
+                evaluator = (
+                    evaluate_idas_residual_integrals
+                    if solver_parameters.solver is CasadiResidualSolver.IDAS
+                    else evaluate_collocation_residual_integrals
+                )
+                options = (
+                    solver_parameters.idas_options
+                    if solver_parameters.solver is CasadiResidualSolver.IDAS
+                    else solver_parameters.variational_options
+                )
+            else:
+                evaluator = (
+                    evaluate_idas_residual_integrals
+                    if idas_is_available()
+                    else evaluate_collocation_residual_integrals
+                )
+                options = solver_parameters
+            return evaluator(
+                functions,
+                initial_conditions,
+                end_point,
+                inputs,
+                options,
+            )
 
-        is_dae = g is not Noop()
-        has_quadrature = dqdt is not Noop()
+        dxdt, g, dqdt = _normalise_direct_integration_functions(functions)
+        if g is None or isinstance(g, Noop):
+            algebraic_function = None
+        else:
+            algebraic_function = g
+        if dqdt is None or isinstance(dqdt, Noop):
+            quadrature_function = None
+        else:
+            quadrature_function = dqdt
         x0, z0, q0 = (self.to_backend_array(a) for a in initial_conditions)
         if isinstance(end_point, (int, float)):
             if end_point == 0:
@@ -416,9 +445,9 @@ class CasadiBackend(Backend):
 
         dx_sym = dxdt(t, x, z, u, *parameters)
 
-        if has_quadrature:
+        if quadrature_function is not None:
             q = ca.MX.sym("q", q0.shape)
-            dq_sym = dqdt(t, x, z, u, *parameters)
+            dq_sym = quadrature_function(t, x, z, u, *parameters)
             txq = ca.vertcat(t, x, q)
             txq0 = ca.vertcat(ca.DM(0), x0, q0)
             xq_to_x_q = ca.Function("txq_to_x_q", [txq], [x, q])
@@ -436,28 +465,24 @@ class CasadiBackend(Backend):
             "x": txq,
             "ode": dtxq,
         }
-        if is_dae:
+        if algebraic_function is not None:
             dae["z"] = z
-            dae["alg"] = g(t, x, z, u, *parameters)
+            dae["alg"] = algebraic_function(t, x, z, u, *parameters)
             initial_conditions["z0"] = z0
 
         solver = ca.integrator("solver", "idas", dae, 0, t_eval, {})
         xq_final = solver(**initial_conditions)
-
-        if has_quadrature:
+        if quadrature_function is not None:
             x_final, q_final = xq_to_x_q(xq_final["xf"])
         else:
             x_final = xq_to_x_q(xq_final["xf"])
             q_final = None
-        if is_dae:
+        if algebraic_function is not None:
             z_final = xq_final["zf"]
         else:
             z_final = None
 
         return x_final, z_final, q_final
-
-
-__all__ = ["CasadiBackend", "CasadiLoweredFunction", "CasadiNLPSolverOptions"]
 
 
 register_backend("casadi", CasadiBackend)

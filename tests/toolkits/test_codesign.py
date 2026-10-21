@@ -3,6 +3,12 @@ import pytest
 from scipy.optimize import OptimizeResult
 
 from coker import Dimension, FunctionSpace, Scalar, VectorSpace, function
+from coker.backends import (
+    evaluate,
+    get_backend_by_name,
+    get_current_backend,
+)
+from coker.backends.lowered import LoweringOptions
 from coker.toolkits.codesign import (
     MathematicalProgram,
     Minimise,
@@ -66,7 +72,6 @@ def test_mathematical_program_composes_symbolically_and_compiles():
         backend="numpy",
     )
 
-    assert not hasattr(program, "impl")
     assert composed(3) == 8
 
     compiled = program.lower()
@@ -135,21 +140,99 @@ def test_problem_builder_requires_nonempty_outputs():
             builder.build("numpy")
 
 
-def test_problem_builder_uses_current_backend_when_unspecified(monkeypatch):
-    from coker.backends import get_backend_by_name
+def test_problem_builder_uses_current_backend_when_unspecified(
+    variational_backend,
+):
+    original = get_current_backend()
+    try:
+        selected = get_backend_by_name(variational_backend, set_current=True)
 
-    current_backend = get_backend_by_name("numpy", set_current=False)
-    monkeypatch.setattr(
-        "coker.backends.get_current_backend", lambda: current_backend
-    )
+        with ProblemBuilder() as builder:
+            x = builder.new_variable(name="x")
+            builder.objective = Minimise(x**2)
+            builder.outputs = [x]
+            problem = builder.build()
 
-    with ProblemBuilder() as builder:
-        x = builder.new_variable(name="x")
-        builder.objective = Minimise(x**2)
+        assert problem.backend == selected.name
+        objective, output = problem()
+        assert objective == pytest.approx(0.0, abs=1e-8)
+        assert output == pytest.approx(0.0, abs=1e-6)
+    finally:
+        get_backend_by_name(original.name, set_current=True)
+
+
+def test_evaluation_and_lowering_preserve_later_implicit_optimisation(
+    variational_backend,
+):
+    original = get_current_backend()
+    try:
+        selected = get_backend_by_name(variational_backend, set_current=True)
+
+        square = function([Scalar("x")], lambda x: x**2)
+        assert square.backend == "numpy"
+        assert square(3.0) == pytest.approx(9.0)
+        assert get_current_backend() is selected
+        square.lower(LoweringOptions(backend="sympy"))
+        assert get_current_backend() is selected
+        assert square(4.0) == pytest.approx(16.0)
+        assert get_current_backend() is selected
+
+        with ProblemBuilder() as builder:
+            x = builder.new_variable(name="x")
+            builder.objective = Minimise((x - 2.0) ** 2)
+            builder.outputs = [x]
+            problem = builder.build()
+
+        assert problem.backend == variational_backend
+        objective, output = problem()
+        assert objective == pytest.approx(0.0, abs=1e-8)
+        assert output == pytest.approx(2.0, abs=1e-6)
+        assert get_current_backend() is selected
+    finally:
+        get_backend_by_name(original.name, set_current=True)
+
+
+def test_explicit_program_build_lower_and_evaluation_preserve_selection(
+    backend,
+):
+    original = get_current_backend()
+    try:
+        selected = get_backend_by_name(backend, set_current=True)
+        square = function([Scalar("x")], lambda x: x**2)
+        assert evaluate(square, [3.0], backend="numpy")[0] == pytest.approx(
+            9.0
+        )
+        assert square.call_inline(3.0) == pytest.approx(9.0)
+        assert get_current_backend() is selected
+
+        with ProblemBuilder() as builder:
+            x = builder.new_variable(name="x")
+            builder.objective = Minimise(x**2)
+            builder.outputs = [x]
+            program = builder.build("numpy")
+
+        assert get_current_backend() is selected
+        lowered = program.lower()
+        assert get_current_backend() is selected
+        assert lowered()[0] == pytest.approx(0.0, abs=1e-8)
+        assert program()[0] == pytest.approx(0.0, abs=1e-8)
+        assert get_current_backend() is selected
+    finally:
+        get_backend_by_name(original.name, set_current=True)
+
+
+def test_lowered_built_program_returns_public_results_and_restores_decisions():
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        x = builder.new_variable(name="x", initial_value=0.0)
+        builder.objective = Minimise((x - builder.arguments[0]) ** 2)
         builder.outputs = [x]
-        problem = builder.build()
+        program = builder.build("numpy")
 
-    assert problem.backend == "numpy"
+    objective, output = program.lower()(2.0)
+
+    assert objective == pytest.approx(0.0, abs=1e-8)
+    assert output == pytest.approx(2.0, abs=1e-6)
+    assert program.parameters["x"] == pytest.approx(2.0, abs=1e-6)
 
 
 def test_symbolic_program_results_share_one_invocation():
@@ -196,8 +279,8 @@ def test_optimisation_zero_input_problem(variational_backend):
         ]
         problem = builder.build(variational_backend)
 
-    assert not problem.input_shape
-    assert problem.output_shape == (
+    assert not problem.input_shape()
+    assert problem.output_shape() == (
         Dimension((3,)),
         Dimension((2,)),
         Dimension.scalar(),
@@ -234,8 +317,8 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
         builder.outputs = [x]
         problem = builder.build(variational_backend)
 
-    assert problem.input_shape == (Dimension((3,)),)
-    assert problem.output_shape == (Dimension((2,)),)
+    assert problem.input_shape() == (Dimension((3,)),)
+    assert problem.output_shape() == (Dimension((2,)),)
 
     objective, x_val = problem(np.array([3.0, -1.0, 7.0]))
     assert objective == pytest.approx(0.0, abs=1e-6)
@@ -338,42 +421,34 @@ def test_mathematical_program_fits_monotone_piecewise_linear_cubic(
     assert problem.solve_info.success
 
 
-def test_casadi_optimisation_passes_options_at_solver_construction(
-    monkeypatch,
-):
+@pytest.mark.parametrize("maximum_iterations", [0, 50])
+def test_casadi_optimisation_respects_iteration_limit(maximum_iterations):
     pytest.importorskip("casadi")
     from coker.backends.casadi import CasadiNLPSolverOptions
-    import coker.backends.casadi.optimiser as casadi_optimiser
 
-    nlpsol = casadi_optimiser.ca.nlpsol
-    calls = []
-
-    def capture_nlpsol(*args, **kwargs):
-        calls.append((args, kwargs))
-        return nlpsol(*args, **kwargs)
-
-    monkeypatch.setattr(casadi_optimiser.ca, "nlpsol", capture_nlpsol)
     solver_options = CasadiNLPSolverOptions(
         optimiser_options={
-            "ipopt.max_iter": 50,
+            "ipopt.max_iter": maximum_iterations,
             "ipopt.max_cpu_time": 30.0,
         }
     )
-
     with ProblemBuilder(solver_options=solver_options) as builder:
         x = builder.new_variable(name="x", initial_value=0.0)
         builder.objective = Minimise((x - 1.0) ** 2)
         builder.outputs = [x]
         problem = builder.build("casadi")
 
-    objective, x_value = problem()
-
-    assert objective == pytest.approx(0.0, abs=1e-6)
-    assert x_value == pytest.approx(1.0, abs=1e-6)
-    assert len(calls) == 1
-    casadi_options = calls[0][0][3]
-    assert casadi_options == solver_options.optimiser_options
-    assert casadi_options is not solver_options.optimiser_options
+    if maximum_iterations == 0:
+        with pytest.raises(SolveFailure) as error:
+            problem()
+        assert not error.value.solve_info.success
+        assert error.value.solve_info.iteration_count == 0
+    else:
+        objective, x_value = problem()
+        assert objective == pytest.approx(0.0, abs=1e-6)
+        assert x_value == pytest.approx(1.0, abs=1e-6)
+        assert problem.solve_info.success
+        assert 0 < problem.solve_info.iteration_count <= maximum_iterations
 
 
 def test_optimisation_supports_parameter_dependent_constraint_bounds(

@@ -20,6 +20,7 @@ from coker.parameters import (
     ParameterVariable,
 )
 from coker.parameters.function_parameters import FunctionParameter
+from coker.dynamics.residual import ResidualDynamicalSystem
 from coker.dynamics.model import DynamicalSystem
 from coker.dynamics.variational.problem import (
     ConstraintSpec,
@@ -46,18 +47,13 @@ def _validation_t_final(t_final: float | BoundedVariable) -> None:
             raise ValueError("t_final must be positive")
     elif isinstance(t_final, BoundedVariable):
         if t_final.lower_bound <= 0:
-            raise ValueError(
-                "t_final BoundedVariable lower_bound must be positive"
-            )
+            raise ValueError("t_final BoundedVariable lower_bound must be positive")
         if t_final.upper_bound < t_final.lower_bound:
             raise ValueError(
-                "t_final BoundedVariable upper_bound must not be below "
-                "lower_bound"
+                "t_final BoundedVariable upper_bound must not be below " "lower_bound"
             )
         if not t_final.lower_bound <= t_final.guess <= t_final.upper_bound:
-            raise ValueError(
-                "t_final BoundedVariable guess must be within bounds"
-            )
+            raise ValueError("t_final BoundedVariable guess must be within bounds")
     else:
         raise TypeError("t_final must be a positive float or BoundedVariable")
 
@@ -66,14 +62,14 @@ class VariationalProblemBuilder:
     """Build a problem inside one context-owned symbolic trace.
 
     Args:
-        system: Traced differential/algebraic system.
+        system: Explicit, semi-explicit or residual dynamic system.
         t_final: Positive fixed duration, or a ``BoundedVariable`` with a
-            strictly positive lower bound for an optimized duration.
+            strictly positive lower bound for an optimised duration.
         control: Ordered scalar control declarations matching system inputs.
         parameters: Parameter declarations. For a tuple system space, provide
             one declaration per slot: scalar variables, ``BoundVector`` or
             ``DenseTensorVariable`` for vectors, and named
-            ``FunctionParameter`` realizations for function spaces.
+            ``FunctionParameter`` realisations for function spaces.
         backend: Solver/trace backend; defaults to ``"casadi"``.
         transcription_options: Mesh and backend-specific solve policy.
         system_parameter_map: Optional matrix mapping solver parameters to
@@ -84,11 +80,17 @@ class VariationalProblemBuilder:
     does not. Building does not solve. CasADi supports constrained collocation;
     PyTorch supports fixed-horizon, bound-only ODE fitting without declared
     controls or algebraic states.
+
+    Examples:
+        Build a problem inside the context manager::
+
+            with VariationalProblemBuilder(system, t_final=1.0) as problem:
+                built = problem.build(Minimise(problem.state() @ problem.state()))
     """
 
     def __init__(
         self,
-        system: DynamicalSystem,
+        system: DynamicalSystem | ResidualDynamicalSystem,
         t_final: float | BoundedVariable,
         *,
         control: Optional[Sequence[ControlVariable]] = None,
@@ -113,9 +115,7 @@ class VariationalProblemBuilder:
                 self.system,
                 self._parameter_declarations,
                 self._parameter_layout,
-            ) = specialize_system_parameters(
-                self.system, self._parameter_declarations
-            )
+            ) = specialize_system_parameters(self.system, self._parameter_declarations)
         self._trace = Tape(backend)
         self._context: Optional[TraceContext] = None
         self._closed = False
@@ -131,9 +131,7 @@ class VariationalProblemBuilder:
                 "Number of parameters does not match tuple: expected "
                 f"{len(space)} but got {len(declarations)}"
             )
-        for index, (element, declaration) in enumerate(
-            zip(space, declarations)
-        ):
+        for index, (element, declaration) in enumerate(zip(space, declarations)):
             if isinstance(element, FunctionSpace):
                 if isinstance(declaration, FunctionParameter):
                     continue
@@ -142,9 +140,7 @@ class VariationalProblemBuilder:
                 if isinstance(declaration, (BoundVector, DenseTensorVariable)):
                     continue
                 expected = "BoundVector or DenseTensorVariable"
-            elif isinstance(
-                declaration, (ParameterVariable, float, np.number)
-            ):
+            elif isinstance(declaration, (ParameterVariable, float, np.number)):
                 continue
             else:
                 expected = "a finite parameter declaration"
@@ -225,9 +221,7 @@ class VariationalProblemBuilder:
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
-        return self._state(
-            time if isinstance(time, Tracer) else self._t_initial
-        )
+        return self._state(time if isinstance(time, Tracer) else self._t_initial)
 
     def input(self, time: Optional[object] = None) -> Tracer:
         """Return control values at an allowed time binding.
@@ -242,9 +236,7 @@ class VariationalProblemBuilder:
         time = self._t if time is None else time
         self._validate_time(time)
         if isinstance(self._input, Tracer):
-            return self._input(
-                time if isinstance(time, Tracer) else self._t_initial
-            )
+            return self._input(time if isinstance(time, Tracer) else self._t_initial)
         return self._input
 
     def output(self, time: Optional[object] = None) -> Tracer:
@@ -259,9 +251,7 @@ class VariationalProblemBuilder:
         self._require_open()
         time = self._t if time is None else time
         self._validate_time(time)
-        return self._output(
-            time if isinstance(time, Tracer) else self._t_initial
-        )
+        return self._output(time if isinstance(time, Tracer) else self._t_initial)
 
     @property
     def parameters(self) -> Tracer:
@@ -274,13 +264,10 @@ class VariationalProblemBuilder:
             if float(time) == 0:
                 return _INITIAL_SITE
             raise ValueError(
-                "unsupported concrete time; allowed bindings are "
-                "0, t, and t_final"
+                "unsupported concrete time; allowed bindings are " "0, t, and t_final"
             )
         if not isinstance(time, Tracer) or time.tape is not self._trace:
-            raise ValueError(
-                "time marker belongs to a foreign or unrecognised trace"
-            )
+            raise ValueError("time marker belongs to a foreign or unrecognised trace")
         if time.index == self._t.index:
             return _PATH_SITE
         if time.index == self._t_final.index:
@@ -355,9 +342,7 @@ class VariationalProblemBuilder:
             raise TypeError("build requires a Minimise objective")
         loss = objective.expression
         if not isinstance(loss, Tracer):
-            raise TypeError(
-                "Minimise cost must be a scalar symbolic expression"
-            )
+            raise TypeError("Minimise cost must be a scalar symbolic expression")
         self._validate_trace(loss, "cost")
         if not loss.dim.is_scalar():
             raise ValueError("Minimise cost must be scalar")
@@ -398,8 +383,7 @@ class VariationalProblemBuilder:
             system_parameter_map=self.system_parameter_map,
             terminal_constraints=terminal,
             initial_constraints=initial,
-            transcription_options=self.transcription_options
-            or TranscriptionOptions(),
+            transcription_options=self.transcription_options or TranscriptionOptions(),
             backend=self.backend,
         )
         problem.parameter_layout = self._parameter_layout

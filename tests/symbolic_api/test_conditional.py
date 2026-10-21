@@ -31,6 +31,23 @@ def test_case(backend):
         ), f"For x={test_value}, got {result}, expected {expected}"
 
 
+@pytest.mark.parametrize("value, expected", [(0.0, 0.0), (-2.0, -0.5), (2.0, 0.5)])
+def test_sympy_case_selects_value_over_zero_division(value, expected):
+    guarded = function(
+        [Scalar("x")],
+        lambda x: if_then_else(x == 0, 0, 1 / x),
+        backend="sympy",
+    )
+
+    assert float(guarded(value)) == expected
+
+
+def test_sympy_zero_division_returns_nan_when_selected():
+    reciprocal = function([Scalar("x")], lambda x: 1 / x, backend="sympy")
+
+    assert np.isnan(float(reciprocal(0.0)))
+
+
 def test_case_mismatched_branches_raises():
     """Branches of different shapes must raise InvalidShape at trace time."""
     with pytest.raises(InvalidShape):

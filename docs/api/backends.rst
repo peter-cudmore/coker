@@ -1,182 +1,324 @@
-Backend selection and integration
-=================================
+Backend API
+============
 
-User configuration
-------------------
+This reference defines backend selection, lowering handles and solver options.
+See :doc:`../backends` for capability and selection advice,
+:doc:`../tutorials/backends` for an introduction, and
+:doc:`../how_to/backend_interoperability` for native import and export recipes.
 
-``function(..., backend="numpy")`` defaults to the base NumPy backend. Always
-supply the backend when building mathematical or variational programs. In this
-checkout, the unresolved ambient default from ``get_current_backend()`` is
-``"coker"`` (an external plugin), and ``get_backend_by_name(name)`` as well as
-``Function.lower()`` set the current backend. Lowering to an alternate backend
-does not change ``Function.backend``, but can affect later implicit builders.
-These current semantics are documented rather than changed here; explicit
-selection avoids this dependency on evaluation order.
+Lookup and selection
+--------------------
 
-The registry uses extensible string/plugin names, not a closed enum. Instances
-are lazily discovered through the ``coker.backends`` package entry points and
-cached process-wide. ``get_backend_by_name(name, set_current=False)`` performs a
-lookup without changing ambient selection. A missing name raises
-``NotImplementedError``; conflicting registrations raise ``ValueError``;
-missing optional dependencies raise their import errors.
-
-.. list-table:: Execution and solve support
-   :header-rows: 1
-
-   * - Name / install
-     - Function values
-     - Solving limits
-   * - ``numpy`` / base
-     - Host scalars and NumPy arrays
-     - SciPy initial-value integration and host NLP; no symbolic autograd
-   * - ``sympy`` / base
-     - Symbolic expressions and named callable expressions
-     - Inspection/rank analysis; no numeric optimisation solver
-   * - ``casadi`` / ``pip install 'coker[casadi]'``
-     - Public numeric functions adapt to NumPy; lowered/native calls use CasADi
-     - NLP and ODE/DAE variational transcription; 3.7.x, not 3.8.x
-   * - ``pytorch`` / ``pip install 'coker[pytorch]'``
-     - Tensors, device/dtype policy and eager autograd
-     - CPU/CUDA NLP; fixed-horizon bound-only ODE fitting with quadratures.
-       Fitting does not support algebraic DAEs, declared controls, comparison
-       constraints or optimized horizons.
-   * - ``jax`` / ``pip install 'coker[jax]'``
-     - JAX arrays
-     - No optimisation program construction
-   * - ``coker`` / separately installed ``coker_backend``
-     - Plugin-specific native/workspace execution
-     - Not available in the base package; see :doc:`../backend_architecture`
-
-Backend operation coverage is not identical. Do not infer support for an
-operation/solver from numeric function support alone. See :doc:`dynamics` for
-quadrature and transcription restrictions and :doc:`optimisation` for solve
-status/failure contracts.
+The public lookup functions are exported by ``coker.backends``. Names are
+resolved through registered factories or the ``coker.backends`` entry-point
+group. A backend instance is cached per name.
 
 .. autofunction:: coker.backends.get_backend_by_name
 
+   Return the named backend. The default ``set_current=False`` does not change
+   the current selection; ``set_current=True`` selects the returned instance.
+   An unknown name raises ``NotImplementedError``. Conflicting plugin
+   registrations raise ``ValueError``. Optional backend dependencies must be
+   installed before their plugins can be loaded.
+
 .. autofunction:: coker.backends.get_current_backend
 
-Signatures and lowering handles
--------------------------------
+   Return the selected backend, or NumPy if none has been selected.
 
-``Function.lower(LoweringOptions(backend=None))`` caches an executable handle
-for each backend-instance/options pair. ``execute([*inputs])`` is the packed ABI
-and returns a tuple in signature order, including absent ``None`` slots.
-``handle(*inputs)`` unwraps one declared output. Input spaces are named domains;
-output shapes are dimensional metadata, not runtime values.
+.. autofunction:: coker.backends.register_backend
 
-Handles retain their execution plans and referenced callables/constants; they
-are not portable serialized functions. NumPy and PyTorch reuse compiled plans;
-PyTorch tensors preserve autograd. CasADi exposes ``ca_function`` when available
-and otherwise uses an evaluator fallback. No common ownership, mutation,
-thread-safety or differentiation-through-solves guarantee is implied by
-``LoweringCapabilities``. Backend-native values can share storage: make an
-explicit copy when a mutable snapshot is required.
+   The factory takes no arguments and returns a backend instance.
+
+.. py:function:: coker.backends.evaluate(function, args, backend=None)
+
+   Evaluate a Coker function through the interpreter with an ordered sequence
+   of arguments. Return a list of outputs, including absent ``None`` slots.
+   ``backend=None`` uses the current selection, not ``function.backend``;
+   an explicit backend name does not change the selection.
+
+Ordinary :func:`coker.function` construction defaults to ``backend="numpy"``.
+Concrete :class:`coker.Function` calls use that function's backend rather than
+the current selection. An implicit
+:meth:`coker.toolkits.codesign.ProblemBuilder.build` uses the current selection;
+explicit construction and lowering do not change it. Variational problems
+have a separate CasADi solver default.
+
+.. _backend-lowering-contract:
+
+Lowering and execution
+----------------------
+
+:meth:`coker.Function.lower` accepts ``options=None`` or a
+:class:`~coker.backends.lowered.LoweringOptions` instance and returns a
+:class:`~coker.backends.lowered.LoweredFunction`. ``None`` selects the function's
+backend. ``LoweringOptions(backend="sympy")``, for example, requests another
+backend without changing the function or current selection. Handles are cached
+per backend instance and options value. An object of another options type raises
+``TypeError``. A native imported callable cannot be lowered by a different
+backend; this raises ``RuntimeError``.
+
+:meth:`coker.toolkits.codesign.MathematicalProgram.lower` instead takes no
+options and returns a :class:`coker.Function` pinned to the program's configured
+solver backend (NumPy when unset). Calling the returned function solves the
+program; it does not return a lowered execution handle. Its outputs are the
+objective followed by the declared outputs. To obtain a handle, lower that
+returned function. This does not permit moving its solver to another backend.
+
+The common execution ABI is positional and ordered:
+
+* ``handle.execute(inputs)`` takes one sequence containing all arguments in
+  ``signature.inputs`` order. It always returns a tuple in
+  ``signature.outputs`` order, retaining absent ``None`` outputs.
+* ``handle(*inputs)`` takes separate positional arguments and unwraps a
+  one-output tuple. Zero or multiple outputs remain tuples.
+* A concrete ``Function`` call additionally restores the public output
+  representation. A single returned expression is unwrapped; an implementation
+  returning a list or tuple retains tuple output, even with one element.
+
+Native handle results need not have the same representation as public function
+results. In particular, native CasADi handles retain CasADi values, while
+``Function`` restores numerical scalars and NumPy arrays where conversion is
+possible. With tensor inputs, PyTorch handles retain tensors and their autograd
+graph; without tensor inputs, their numerical outputs are converted to NumPy
+values. Shapes and output order come from the signature, not argument names
+passed as keywords.
+
+Handles retain execution plans and referenced callables or constants for their
+lifetime; they are not portable serialised functions. The common interface
+does not guarantee copies, reentrancy or thread safety. Backend-native outputs
+can share storage, so copy a mutable value when a retained snapshot is needed.
+Keep traced constants unchanged rather than assuming mutations update a cached
+lowering. Registry backend instances are shared; changing device or dtype on
+one affects later users of that instance.
+
+Signature records
+~~~~~~~~~~~~~~~~~
+
+The canonical records are imported from ``coker.backends.lowered``. They are
+frozen dataclasses. Input and output tuples preserve declaration order; names
+describe the interface rather than enabling keyword dispatch. Native imports
+need an explicit signature unless their backend can derive one.
 
 .. autoclass:: coker.backends.lowered.FunctionInputSpec
 
+   ``space`` is a ``Scalar``, ``VectorSpace`` or ``FunctionSpace`` declaration.
+
 .. autoclass:: coker.backends.lowered.FunctionOutputSpec
+
+   ``shape`` is a ``Dimension``, ``Scalar``, ``VectorSpace``, ``FunctionSpace``
+   or ``None``. ``None`` declares an absent output slot.
 
 .. autoclass:: coker.backends.lowered.FunctionSignature
 
+   ``inputs`` is a tuple of ``FunctionInputSpec`` records; ``outputs`` is a
+   tuple of ``FunctionOutputSpec`` records. These are the public record names,
+   not ``InputSpec`` or ``OutputSpec``.
+
 .. autoclass:: coker.backends.lowered.LoweringOptions
+
+   ``backend=None`` retains the function's backend; a string selects a
+   registered backend for this lowering.
 
 .. autoclass:: coker.backends.lowered.LoweringCapabilities
 
+   The ``eager_execution``, ``symbolic_execution`` and ``autograd`` flags
+   describe the handle. They do not certify every operation or device.
+
 .. autoclass:: coker.backends.lowered.LoweredFunction
-   :members: backend_name, signature, capabilities, execute, restore_public_outputs
+   :members: backend_name,signature,capabilities,execute,restore_public_outputs
    :special-members: __call__
 
-Native CasADi import
---------------------
+CasADi
+-------
 
-Install ``coker[casadi]``. The imported signature normally comes from native
-ordered names and matrix dimensions: a ``(1, 1)`` is scalar and a column is a
-one-dimensional vector. An explicit signature may override that declaration.
-Native imports are pinned to their owning backend; lowering or composing them
-with another backend raises ``RuntimeError``.
-
-.. doctest::
-
-   >>> import casadi as ca
-   >>> import numpy as np
-   >>> from coker.backends import get_backend_by_name
-   >>> from coker.backends.lowered import LoweringOptions
-   >>> x = ca.MX.sym("x", 2)
-   >>> native = ca.Function("double", [x], [2 * x], ["x"], ["y"])
-   >>> casadi_backend = get_backend_by_name("casadi", set_current=False)
-   >>> imported = casadi_backend.import_function(native)
-   >>> np.testing.assert_allclose(imported(np.array([1., 2.])), [2., 4.])
-   >>> result = imported.lower().execute([np.array([1., 2.])])[0]
-   >>> assert isinstance(result, ca.DM)
+Install ``coker[casadi]`` to use these objects. For mathematical programs, pass
+``CasadiNLPSolverOptions`` as ``ProblemBuilder(solver_options=...)`` before
+building with ``"casadi"``. For a worked solve, see
+:doc:`../how_to/casadi_solver_tuning`.
 
 .. autoclass:: coker.backends.casadi.CasadiBackend
    :members: import_function
 
-.. autoclass:: coker.backends.casadi.optimiser.CasadiNLPSolverOptions
+   ``import_function`` derives ordered names and matrix dimensions from a
+   native ``casadi.Function`` when no signature is supplied. Scalars have
+   native shape ``(1, 1)``; column vectors map to one-dimensional Coker vectors.
+   See :ref:`backend-import-casadi`.
+
+.. autoclass:: coker.backends.casadi.CasadiLoweredFunction
+   :members: ca_function
+
+   ``ca_function`` is a native ``casadi.Function`` when the graph supports native
+   lowering, otherwise ``None``. Function-space inputs and absent outputs use
+   the evaluation fallback. See :ref:`backend-export-casadi`.
+
+.. autoclass:: coker.backends.casadi.CasadiNLPSolverOptions
+
+   ``optimiser_options`` is a flat mapping passed to the IPOPT ``nlpsol``
+   constructor, copied when the solver is built. IPOPT settings use the
+   ``ipopt.`` prefix. The inherited ``warm_start=False`` field does not enable
+   a Coker-managed warm start on this solver path.
+
+.. autoclass:: coker.backends.casadi.CasadiResidualSolver
+   :members:
+
+.. autoclass:: coker.backends.casadi.CasadiResidualSolverOptions
+
+   Use with independent residual-DAE integration, not mathematical programs.
+   ``solver`` is required and must be a ``CasadiResidualSolver`` member.
+   ``idas_options`` and ``variational_options`` are separate option mappings;
+   only the selected solver's mapping is used. Without explicit selection,
+   integration uses IDAS when available, otherwise variational collocation.
+   A solver failure does not trigger an algorithm switch.
 
 .. autoclass:: coker.backends.casadi.CasadiVariationalOptions
 
-Native PyTorch import and eager module export
----------------------------------------------
+   Supply through ``TranscriptionOptions(backend_options=options)`` on the
+   variational problem. These settings configure transcription, IPOPT, scaling
+   and optional adaptive refinement, not independent IDAS integration.
+   Refinement is disabled by default. The callback keyword is spelt
+   ``interation_callback``.
 
-Install ``coker[pytorch]``. Provide an explicit ``FunctionSignature`` for native
-imports; the module's parameters, buffers, training mode, device and dtype
-remain authoritative. The wrapper retains a strong reference (logical ownership
-transfer does not invalidate Python aliases). Mutating an alias changes the
-imported module too. Configure the shared backend instance deliberately; tensor
-conversion may move/cast inputs when device/dtype is set.
+NumPy
+------
 
-``as_module(function)`` creates an eager ``torch.nn.Module`` wrapper, not a
-TorchScript or ``torch.compile`` target. For an ordinary traced graph its
-constants stay closure state, not trainable parameters/registered buffers. An
-imported module retains its native trainable state and gradients.
-``import_as_parameter`` is different: it snapshots buffers and exposes floating
-parameters as solver decisions without mutating the caller's module.
+NumPy is included in the base installation.
 
-.. doctest::
+.. autoclass:: coker.backends.numpy.NumpyBackend
 
-   >>> import torch
-   >>> from coker import Dimension, VectorSpace, function
-   >>> from coker.backends import get_backend_by_name
-   >>> from coker.backends.lowered import FunctionInputSpec, FunctionOutputSpec, FunctionSignature
-   >>> backend = get_backend_by_name("pytorch", set_current=False)
-   >>> signature = FunctionSignature(
-   ...     inputs=(FunctionInputSpec("x", VectorSpace("x", 2)),),
-   ...     outputs=(FunctionOutputSpec("y", Dimension((2,))),),
-   ... )
-   >>> native_module = torch.nn.Linear(2, 2, bias=False, dtype=torch.float64)
-   >>> with torch.no_grad():
-   ...     _ = native_module.weight.copy_(2 * torch.eye(2, dtype=torch.float64))
-   >>> imported = backend.import_module(native_module, signature)
-   >>> composed = function([VectorSpace("x", 2)], lambda x: imported(x) + x, backend="pytorch")
-   >>> tensor = torch.tensor([1., 3.], dtype=torch.float64, requires_grad=True)
-   >>> output = backend.as_module(composed)(tensor)
-   >>> torch.testing.assert_close(output, 3 * tensor)
-   >>> output.sum().backward()
-   >>> torch.testing.assert_close(tensor.grad, torch.tensor([3., 3.], dtype=torch.float64))
-   >>> torch.testing.assert_close(native_module.weight.grad, torch.tensor([[1., 3.], [1., 3.]], dtype=torch.float64))
+.. autoclass:: coker.backends.numpy.Solver
+   :members:
+
+.. autoclass:: coker.backends.numpy.NumpySolverParameters
+
+   ``solver`` selects SciPy ``solve_ivp`` for explicit ODEs: ``RK45`` (default),
+   ``LSODA``, ``Radau`` or ``BDF``. For independent square residual DAEs,
+   ``implicit_maximum_time_step`` (default ``1e-3``) bounds the implicit step,
+   and ``implicit_nonlinear_tolerance`` (default ``sqrt(machine epsilon)``)
+   controls the nonlinear solve. Both implicit settings must be finite and
+   positive; the explicit ODE method does not select the residual algorithm.
+
+NumPy mathematical programs use SciPy's ``trust-constr`` path and do not expose
+a backend-specific public NLP options class.
+
+PyTorch
+--------
+
+Install ``coker[pytorch]`` to use these objects. Device and dtype are backend
+properties, separate from solver options. The documentation recipes use CPU
+tensors; CUDA execution remains experimental and unverified.
 
 .. autoclass:: coker.backends.pytorch.PytorchBackend
-   :members: as_module, import_function, import_module, import_as_parameter
+   :members: as_module,import_function,import_module,import_as_parameter
+
+   ``as_module`` returns an eager module accepting one positional input per
+   signature input. Closure constants are not registered parameters or buffers.
+   The adapter supports eager autograd, not TorchScript or ``torch.compile``.
+   See :ref:`backend-export-pytorch`.
+
+   ``import_module`` retains the supplied module and its authoritative
+   parameters and buffers; it does not transfer or copy ownership. Both native
+   import methods require a ``FunctionSignature``. The callable runs only on
+   its owning backend. See :ref:`backend-import-pytorch`.
+
+   ``import_as_parameter(module, input_space, output_space, name=None)`` instead
+   exposes floating module parameters as solver decisions and snapshots buffers.
+   Fitting this declaration does not mutate the caller's module. It describes
+   one scalar/vector tensor input and output; see :doc:`parameters` for fitted
+   callable reconstruction.
 
 .. autoclass:: coker.backends.pytorch.PytorchModule
    :members: forward
 
-.. autoclass:: coker.backends.pytorch.PytorchNLPSolverOptions
+.. py:class:: coker.backends.pytorch.PytorchNLPSolverOptions
+
+   Frozen solver-options dataclass accepted by
+   ``ProblemBuilder(solver_options=...)`` when building with ``"pytorch"``.
+   It inherits the Boolean ``warm_start`` field (default ``False``), which
+   enables reuse of compatible decisions and multipliers from a prior solve.
+
+   ``optimiser_method`` selects ``"LBFGS"`` (default) or ``"Adam"``;
+   ``optimiser_options`` is a mapping forwarded to that PyTorch optimiser
+   (default: empty). Adam performs explicit optimiser steps. For LBFGS, the
+   dedicated iteration, tolerance and history fields override corresponding
+   mapping entries, and ``line_search_fn`` is fixed to ``"strong_wolfe"``.
+
+   .. list-table:: Numerical settings
+      :header-rows: 1
+
+      * - Field
+        - Default
+        - Purpose
+      * - ``inner_iterations``
+        - ``25``
+        - Objective optimisation iteration limit.
+      * - ``restoration_iterations``
+        - ``25``
+        - Feasibility-restoration iteration limit.
+      * - ``barrier_stages``
+        - ``8``
+        - Maximum barrier stages.
+      * - ``augmented_lagrangian_stages``
+        - ``10``
+        - Maximum augmented-Lagrangian stages.
+      * - ``barrier_reduction``
+        - ``0.2``
+        - Barrier reduction factor, strictly between zero and one.
+      * - ``penalty_growth``
+        - ``10.0``
+        - Positive penalty growth factor.
+      * - ``tolerance_grad``, ``tolerance_change``
+        - ``1e-4``, ``1e-5``
+        - Positive LBFGS stopping tolerances.
+      * - ``tolerance_constraint``
+        - ``1e-4``
+        - Positive constraint tolerance.
+      * - ``interior_margin``
+        - ``1e-4``
+        - Positive interior margin for inequality handling.
+      * - ``history_size``
+        - ``10``
+        - Positive LBFGS history size.
+
+   Iteration counts, stage counts and history size must be positive integers.
+   Invalid optimiser names raise ``ValueError``; a non-mapping
+   ``optimiser_options`` raises ``TypeError``. Constraint handling combines
+   feasibility restoration, barrier and augmented-Lagrangian stages.
 
 .. autoclass:: coker.backends.pytorch.PytorchODESolverParameters
 
-Advanced PyTorch variational configuration
-------------------------------------------
-
-The ordinary ``problem.get_solver()`` path uses backend defaults. For direct
-shooting configuration, import ``PytorchVariationalSolverOptions`` and
-``create_variational_solver`` from ``coker.backends.pytorch.variational``.
-Its ``ode`` configures ``torchdiffeq`` and ``optimiser_options`` are forwarded
-to the selected PyTorch optimizer. This is a backend-specific interface, not
-an interchangeable CasADi transcription policy.
+   ``method="dopri5"``, ``rtol=1e-6``, ``atol=1e-8`` and ``options=None``
+   map to ``torchdiffeq.odeint``. This initial-value path supports ODEs and
+   quadratures, not algebraic constraints.
 
 .. autoclass:: coker.backends.pytorch.variational.PytorchVariationalSolverOptions
 
-.. autofunction:: coker.backends.pytorch.variational.create_variational_solver
+   Import from ``coker.backends.pytorch.variational`` and pass as ``options``
+   to ``PytorchVariationalSolver(problem, options)``. The ordinary
+   ``problem.get_solver("pytorch")`` path constructs default options; it does
+   not consume ``TranscriptionOptions.backend_options``.
+
+   ``ode`` holds ``PytorchODESolverParameters``. ``optimiser_method`` accepts
+   ``"LBFGS"`` (default) or ``"Adam"``; ``optimiser_options`` is forwarded to
+   its constructor. The defaults are ``max_iter=100``, ``tolerance_grad=1e-6``,
+   ``tolerance_change=1e-9`` and ``line_search_fn="strong_wolfe"``. Replace these
+   LBFGS-specific options when selecting Adam; each solve makes one optimiser
+   ``step`` call.
+
+   ``trajectory_degree=8`` and ``trajectory_n_intervals=4`` must be positive
+   integers. They configure the returned state and quadrature interpolants,
+   not the ODE solver's time steps. The inherited ``warm_start`` field defaults
+   to ``False`` but is not used by this solver.
+
+   This solver fits parameters for fixed-horizon, bound-only ODE problems,
+   including quadratures. Algebraic DAEs, control declarations, variational
+   constraints and optimised horizons are not supported.
+
+.. autoclass:: coker.backends.pytorch.variational.PytorchVariationalSolver
+   :members: solve
+
+.. Author notes
+
+   - Audience: users integrating native libraries or configuring backend solvers.
+   - Own ordered signatures, lowering return types, execution ABI and solver-option contracts here.
+   - Keep native interoperability walkthroughs in the cookbook and selection advice in the guide.
+   - Check solver-option routing against each backend; variational configuration is not uniform.

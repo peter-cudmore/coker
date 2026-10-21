@@ -13,8 +13,8 @@ import torch
 from coker.backends.pytorch import PytorchNLPSolverOptions
 from coker.toolkits.codesign import Minimise, ProblemBuilder
 from coker.algebra.dimensions import Scalar, VectorSpace
-from coker.dynamics import BoundedVariable, VariationalProblem
-from coker.dynamics.system import create_autonomous_ode
+from coker.dynamics import VariationalProblem, create_autonomous_ode
+from coker.parameters import BoundedVariable
 
 
 def _problem(kind: str):

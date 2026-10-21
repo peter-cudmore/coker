@@ -44,9 +44,10 @@ class Function(SymbolicCallable, FunctionSignatureValue):
     """A compiled Coker function.
 
     Created by :func:`function`.  Holds the traced computation graph and
-    dispatches to a backend for evaluation.  Calling a ``Function`` with
-    concrete numpy arrays returns the result; calling it inside a tracing
-    context records the operations on the outer tape.
+    dispatches to a backend for evaluation. Concrete calls return backend
+    values; calls with symbolic arguments record operations on the outer tape.
+    For example, create ``f = function([Scalar("x")], lambda x: x + 1)``
+    and evaluate it with ``f(2.0)``.
 
     Attributes:
         tape: The recorded computation graph.
@@ -67,9 +68,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         self.name = name
         self.tape = tape
         self.backend = backend
-        self._lowered_cache: dict[
-            tuple[int, LoweringOptions], LoweredFunction
-        ] = {}
+        self._lowered_cache: dict[tuple[int, LoweringOptions], LoweredFunction] = {}
         self.output: list[Tracer | None]
         if isinstance(outputs, Tracer) or outputs is None:
             self.output = [outputs]
@@ -93,6 +92,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
     @property
     def arguments(self) -> list[str]:
+        """Return a copy of the argument names in declaration order."""
         return self.tape.input_names.copy()
 
     def __repr__(self):
@@ -161,9 +161,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
     def _emit_symbol_value(self, tape: Tape) -> Tracer:
         """Emit this unbound target as a symbol value on ``tape``."""
-        return tape.insert_symbol_value(
-            tape.intern_symbol(self._symbol_entry())
-        )
+        return tape.insert_symbol_value(tape.intern_symbol(self._symbol_entry()))
 
     def _append_symbolic_call(
         self, tape: Tape, inputs: Sequence[Any]
@@ -197,9 +195,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
                 return arg
 
             try:
-                return function(
-                    self.tape.dim[index].arguments, arg, self.backend
-                )
+                return function(self.tape.dim[index].arguments, arg, self.backend)
             except DanglingTracerError as ex:
                 return self._lift_closure(
                     arg, self.tape.dim[index], ex
@@ -292,13 +288,9 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         if any(isinstance(a, Tracer) for a in args):
             outer_tape = TraceContext.get_local_tape()
             if outer_tape is None:
-                outer_tape = next(
-                    arg.tape for arg in args if isinstance(arg, Tracer)
-                )
+                outer_tape = next(arg.tape for arg in args if isinstance(arg, Tracer))
             backend_name = (
-                outer_tape.backend
-                or self.backend
-                or get_current_backend().name
+                outer_tape.backend or self.backend or get_current_backend().name
             )
             backend = get_backend_by_name(backend_name, set_current=False)
             output = backend.append_native_call(self, args, outer_tape)
@@ -330,15 +322,15 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             RuntimeError: A native import is lowered by another backend.
 
         Note:
-            The current registry lookup sets the ambient backend. Use explicit
-            backend names for subsequent program construction. Lowering does
-            not change ``self.backend``.
+            Lowering changes neither ``self.backend`` nor the ambient backend.
         """
 
         options = LoweringOptions() if options is None else options
         if not isinstance(options, LoweringOptions):
             raise TypeError("options must be a LoweringOptions instance")
-        backend = get_backend_by_name(options.backend or self.backend)
+        backend = get_backend_by_name(
+            options.backend or self.backend, set_current=False
+        )
         if self._native_callable is not None and backend.name != self.backend:
             raise RuntimeError(
                 "Cannot lower native callable for backend "
@@ -356,9 +348,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         # self < other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
         dim = self.output_shape()[0]
-        assert dim.shape == get_dim_by_class(
-            other
-        ), "Arguments have different shapes"
+        assert dim.shape == get_dim_by_class(other), "Arguments have different shapes"
         ones = np.ones_like(other)
         return InequalityExpression(self, -np.inf * ones, other, is_equal=True)
 
@@ -366,9 +356,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         # self => other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
         (dim,) = self.output_shape()
-        assert dim == get_dim_by_class(
-            other
-        ), "Arguments have different shapes"
+        assert dim == get_dim_by_class(other), "Arguments have different shapes"
         ones = np.ones_like(other)
         return InequalityExpression(self, other, ones * np.inf, is_equal=True)
 
@@ -376,13 +364,9 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         # self <= other
         assert len(self.output_shape()) == 1, "Cannot compare tensors"
         (dim,) = self.output_shape()
-        assert dim == get_dim_by_class(
-            other
-        ), "Arguments have different shapes"
+        assert dim == get_dim_by_class(other), "Arguments have different shapes"
         ones = np.ones_like(other)
-        return InequalityExpression(
-            self, -np.inf * ones, other, is_equal=False
-        )
+        return InequalityExpression(self, -np.inf * ones, other, is_equal=False)
 
     def __gt__(self, other):
         # self > other
@@ -394,7 +378,20 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
 
 class BoundCallable(SymbolicCallable, FunctionSignatureValue):
-    """A public callable view over a target with explicit bound arguments."""
+    """Expose a target's public arguments while binding trailing tracer inputs.
+
+    Args:
+        target: Coker function accepting public inputs followed by captures.
+        public_space: Signature visible to callers.
+        bound_arguments: Captured tracer dependencies in trailing-input order.
+
+    Raises:
+        ValueError: The target input count does not match public and bound inputs.
+
+    Example:
+        Tracing a Python closure over an outer symbolic value creates this view
+        automatically when the closure is passed as a function-space argument.
+    """
 
     def __init__(
         self,
@@ -403,13 +400,10 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         bound_arguments: tuple[Tracer, ...],
     ) -> None:
         present_input_count = sum(
-            input_spec.space is not None
-            and not isinstance(input_spec.space, Noop)
+            input_spec.space is not None and not isinstance(input_spec.space, Noop)
             for input_spec in target.signature.inputs
         )
-        if present_input_count != (
-            len(public_space.arguments) + len(bound_arguments)
-        ):
+        if present_input_count != (len(public_space.arguments) + len(bound_arguments)):
             raise ValueError(
                 "Bound callable target signature does not match public and "
                 "bound arguments"
@@ -422,23 +416,28 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         """Emit the target symbol followed by one BIND node per capture."""
         captures = self.bound_arguments
         if not all(isinstance(capture, Tracer) for capture in captures):
-            raise TypeError(
-                "BoundCallable arguments must be tracer dependencies"
-            )
-        invalid_captures = [
-            capture for capture in captures if capture.tape is not tape
-        ]
+            raise TypeError("BoundCallable arguments must be tracer dependencies")
+        invalid_captures = [capture for capture in captures if capture.tape is not tape]
         if invalid_captures:
             raise DanglingTracerError(tracers=invalid_captures)
         value = self.target._emit_symbol_value(tape)
         position = len(self.public_space.arguments)
         for capture in captures:
-            value = Tracer(
-                tape, tape.append(OP.BIND, value, capture, position)
-            )
+            value = Tracer(tape, tape.append(OP.BIND, value, capture, position))
         return value
 
     def __call__(self, *arguments: Any) -> Any:
+        """Call the target with public arguments followed by bound captures.
+
+        Args:
+            *arguments: Values in public argument order.
+
+        Returns:
+            The target's result, including its single/tuple output convention.
+
+        Raises:
+            TypeError: The public positional argument count is incorrect.
+        """
         if len(arguments) != len(self.public_space.arguments):
             raise TypeError(
                 f"Expected {len(self.public_space.arguments)} arguments, "
@@ -447,12 +446,22 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         return self.target(*arguments, *self.bound_arguments)
 
     def lower(self, options=None) -> LoweredFunction:
+        """Lower the underlying target, retaining its full unbound signature.
+
+        Args:
+            options: Optional immutable backend lowering configuration.
+
+        Returns:
+            The target's cached handle; captures are not applied to this handle.
+        """
         return self.target.lower(options)
 
     def input_shape(self):
+        """Return the public input dimensions, excluding bound captures."""
         return tuple(self.public_space.input_dimensions())
 
     def output_shape(self):
+        """Return the public output dimensions in result order."""
         return tuple(self.public_space.output_dimensions())
 
 
@@ -511,8 +520,9 @@ def function(
             will be called once during tracing with symbolic
             :class:`~coker.algebra.graph.Tracer` arguments.
         backend: Registered execution backend name. Built-in integrations are
-            ``"numpy"`` (default), ``"casadi"``, ``"sympy"``, ``"jax"``, and
-            ``"pytorch"``. ``"coker"`` requires a separately installed plugin.
+            ``"numpy"``, ``"casadi"``, ``"sympy"``, ``"jax"`` and ``"pytorch"``.
+            Defaults to ``"numpy"`` independently of the current backend.
+            ``"coker"`` requires a separately installed plugin.
         name: Optional human-readable name attached to the returned
             :class:`Function`.
 
@@ -538,7 +548,13 @@ def function(
         array([1., 0., 0.])
     """
     with TraceContext(backend=backend) as tape:
-        args = [tape.input(v) for v in arguments]
+        args = []
+        for argument in arguments:
+            if argument is not None and not isinstance(
+                argument, (Scalar, VectorSpace, FunctionSpace, Noop)
+            ):
+                raise TypeError(f"Invalid input type {argument}: of {type(argument)}")
+            args.append(tape.input(argument))
         output = implementation(*args)
         result = _normalise_result(output, tape)
         return Function(tape, result, backend, name)

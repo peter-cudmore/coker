@@ -20,13 +20,16 @@ class ParameterMixin(abc.ABC):
 
 @dataclass
 class BoundedVariable(ParameterMixin):
-    """Declare one scalar decision with finite lower and upper bounds.
+    """Declare one scalar decision with lower and upper bounds.
 
     Args:
         name: Solver parameter name.
-        lower_bound: Inclusive lower bound.
-        upper_bound: Inclusive upper bound.
+        lower_bound: Inclusive lower bound; may be negative infinity.
+        upper_bound: Inclusive upper bound; may be positive infinity.
         guess: Initial scalar value; choose a feasible value within the bounds.
+
+    Note:
+        Construction stores these values without validating bounds or guesses.
     """
 
     name: str
@@ -45,7 +48,7 @@ class UnboundedVariable(ParameterMixin):
 
     Args:
         name: Solver parameter name.
-        guess: Finite initial scalar value.
+        guess: Initial scalar value, stored without constructor validation.
     """
 
     name: str

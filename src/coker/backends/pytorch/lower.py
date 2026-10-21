@@ -47,13 +47,22 @@ class PytorchLoweredFunction(LoweredFunction):
         )
 
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
+        """Execute ordered inputs, retaining tensors when any input is a tensor.
+
+        Args:
+            inputs: Values in signature input order.
+
+        Returns:
+            A tuple retaining absent output slots. Tensor inputs preserve
+            tensor outputs and autograd; otherwise numeric outputs are
+            converted to NumPy arrays or Python scalars.
+        """
         workspace = self._plan.execute(inputs)
         outputs = cast_torch_outputs(self._function, workspace)
         if any(isinstance(arg, torch.Tensor) for arg in inputs):
             return tuple(outputs)
         return tuple(
-            None if output is None else _to_numpy_array(output)
-            for output in outputs
+            None if output is None else _to_numpy_array(output) for output in outputs
         )
 
     def as_module(self) -> "PytorchModule":
@@ -84,9 +93,7 @@ class PytorchModule(torch.nn.Module):
             TypeError: The argument count differs from the signature.
         """
         if len(inputs) != self._input_count:
-            raise TypeError(
-                f"Expected {self._input_count} inputs, got {len(inputs)}"
-            )
+            raise TypeError(f"Expected {self._input_count} inputs, got {len(inputs)}")
         return self._lowered(*inputs)
 
 

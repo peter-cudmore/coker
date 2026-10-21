@@ -129,14 +129,13 @@ class MathematicalProgram(SymbolicCallable):
             builder-created programs retain their selected solver backend.
 
     Attributes:
-        input_shape: Runtime input dimensions.
-        output_shape: Output dimensions excluding the objective.
         backend: Selected solver backend, or None for an unspecified direct
             wrapper.
         parameters: Dictionary of named decisions reconstructed after a
             successful concrete call. Initially empty; replaced on each
-            success, but retained on solver failure. Scalar values are floats,
-            tensors are shaped NumPy arrays, and function decisions are
+            success, but retained on solver failure. NumPy and CasADi restore
+            scalars as floats and tensors as shaped NumPy arrays; PyTorch
+            preserves native tensors. Function decisions are
             :class:`coker.parameters.function_parameters.FittedFunction`
             instances. Private decision captures never enter the public tuple.
         solve_info: Latest backend outcome, initially None. Updated on success
@@ -153,6 +152,8 @@ class MathematicalProgram(SymbolicCallable):
         Symbolic calls create graph nodes rather than immediately solving.
         Backend support for executing such nested solves is separate from
         support for constructing a standalone optimisation problem.
+        ``input_shape()`` and ``output_shape()`` return dimension tuples;
+        unlike the builder's corresponding properties, they are methods.
     """
 
     def __init__(
@@ -162,8 +163,8 @@ class MathematicalProgram(SymbolicCallable):
         implementation: Callable[..., Any],
         backend: Optional[str] = None,
     ):
-        self.input_shape = input_shape
-        self.output_shape = output_shape
+        self._input_shape = input_shape
+        self._output_shape = output_shape
         self._impl = implementation
         self.backend = backend
         self._optimisation_module: OptimisationModule | None = None
@@ -185,21 +186,27 @@ class MathematicalProgram(SymbolicCallable):
         program._parameter_captures = tuple(captures)
         return program
 
+    def input_shape(self) -> Tuple[Dimension, ...]:
+        """Return runtime argument shapes in declaration order."""
+        return self._input_shape
+
+    def output_shape(self) -> Tuple[Dimension, ...]:
+        """Return requested output shapes, excluding the objective."""
+        return self._output_shape
+
     @property
     def result_shape(self) -> Tuple[Dimension, ...]:
-        """Tuple of objective-first dimensions, unlike ``output_shape``."""
-        return (Dimension.scalar(), *self.output_shape)
+        """Return the objective-first shapes produced by this program."""
+        return (Dimension.scalar(), *self.output_shape())
 
     def _validate_arguments(self, args) -> None:
-        if len(args) != len(self.input_shape):
-            raise ValueError(
-                f"Expected {len(self.input_shape)} arguments, got {len(args)}"
-            )
-        for index, (arg, expected) in enumerate(zip(args, self.input_shape)):
+        input_shape = self.input_shape()
+        if len(args) != len(input_shape):
+            raise ValueError(f"Expected {len(input_shape)} arguments, got {len(args)}")
+        for index, (arg, expected) in enumerate(zip(args, input_shape)):
             if isinstance(arg, Tracer) and arg.dim != expected:
                 raise ValueError(
-                    f"Argument {index} has shape {arg.dim}, "
-                    f"expected {expected}"
+                    f"Argument {index} has shape {arg.dim}, " f"expected {expected}"
                 )
 
     def _call_numeric(self, *args):
@@ -230,9 +237,7 @@ class MathematicalProgram(SymbolicCallable):
         captured_blocks = []
         offset = 0
         for size in capture_sizes:
-            captured_blocks.append(
-                tuple(captured_values[offset : offset + size])
-            )
+            captured_blocks.append(tuple(captured_values[offset : offset + size]))
             offset += size
         self.parameters = self._reconstruct_parameters(captured_blocks)
         objective_array = np.asarray(objective)
@@ -245,7 +250,7 @@ class MathematicalProgram(SymbolicCallable):
             float(objective_array.reshape(-1)[0]),
             *(
                 np.reshape(np.asarray(output), dim.shape)
-                for output, dim in zip(outputs, self.output_shape)
+                for output, dim in zip(outputs, self.output_shape())
             ),
         )
 
@@ -255,16 +260,12 @@ class MathematicalProgram(SymbolicCallable):
         """Rebuild public decision values from private solver captures."""
         from coker.backends import get_backend_by_name
 
-        backend = get_backend_by_name(
-            self.backend or "numpy", set_current=False
-        )
+        backend = get_backend_by_name(self.backend or "numpy", set_current=False)
         return {
             metadata.name: backend._materialize_parameter(
                 metadata.target, metadata.declaration, blocks
             )
-            for metadata, blocks in zip(
-                self._parameter_captures, captured_blocks
-            )
+            for metadata, blocks in zip(self._parameter_captures, captured_blocks)
         }
 
     def _call_symbolic(self, *args):
@@ -273,8 +274,7 @@ class MathematicalProgram(SymbolicCallable):
         tape = TraceContext.get_local_tape()
         if tape is None:
             raise RuntimeError(
-                "symbolic program calls require an active Coker "
-                "tracing context"
+                "symbolic program calls require an active Coker " "tracing context"
             )
         if self.backend is not None and tape.backend != self.backend:
             raise ValueError(
@@ -282,23 +282,15 @@ class MathematicalProgram(SymbolicCallable):
                 f"but the enclosing graph uses {tape.backend!r}"
             )
         arguments = [
-            dim.to_space(f"input_{i}")
-            for i, dim in enumerate(self.input_shape)
+            dim.to_space(f"input_{i}") for i, dim in enumerate(self.input_shape())
         ]
         result_dimensions = self.result_shape
-        capture_dimensions = tuple(
-            block.dim
-            for capture in self._parameter_captures
-            for block in capture.blocks
-        )
         function_space = FunctionSpace(
             "program",
             arguments,
             [
                 dimension.to_space(f"result_{index}")
-                for index, dimension in enumerate(
-                    (*result_dimensions, *capture_dimensions)
-                )
+                for index, dimension in enumerate(result_dimensions)
             ],
         )
         symbol = tape.intern_symbol(
@@ -319,7 +311,7 @@ class MathematicalProgram(SymbolicCallable):
         """Solve numerically or compose symbolically for tracer arguments.
 
         Args:
-            *args: Positional runtime inputs matching ``input_shape``.
+            *args: Positional runtime inputs matching ``input_shape()``.
 
         Returns:
             Tuple ``(objective, *outputs)``. Concrete calls return a float
@@ -357,8 +349,7 @@ class MathematicalProgram(SymbolicCallable):
         get_backend_by_name(backend_name, set_current=False)
         return function(
             arguments=[
-                dim.to_space(f"input_{i}")
-                for i, dim in enumerate(self.input_shape)
+                dim.to_space(f"input_{i}") for i, dim in enumerate(self.input_shape())
             ],
             implementation=cast(Callable, self._call_symbolic),
             backend=backend_name,
@@ -379,9 +370,9 @@ class ProblemBuilder:
     Args:
         arguments: Scalar or vector/tensor spaces for runtime inputs, in
             positional call order. None creates a zero-input program.
-        solver_options: Options accepted by the chosen backend. NumPy accepts
-            only None; CasADi and PyTorch require their respective NLP options
-            classes. These are not ODE ``SolverParameters``.
+        solver_options: Optional settings accepted by the chosen backend.
+            NumPy accepts only None; supplied CasADi and PyTorch settings must
+            use their respective NLP options classes, not ODE SolverParameters.
 
     Attributes:
         arguments: Symbolic runtime inputs, not optimisation decisions.
@@ -395,6 +386,17 @@ class ProblemBuilder:
             decision declaration order, excluding runtime arguments.
         solver_options: Backend-specific solver construction settings.
         tape: Tape owning the builder's expressions; must exist when building.
+
+    Examples:
+        >>> import numpy as np
+        >>> from coker.toolkits.codesign import Minimise, ProblemBuilder
+        >>> with ProblemBuilder() as builder:
+        ...     x = builder.new_variable("x")
+        ...     builder.objective = Minimise((x - 2.0) ** 2)
+        ...     builder.outputs = [x]
+        ...     program = builder.build("numpy")
+        >>> objective, value = program()
+        >>> np.testing.assert_allclose(value, [2.0], atol=1e-6)
     """
 
     def __init__(
@@ -404,9 +406,7 @@ class ProblemBuilder:
         solver_options: SolverOptions | None = None,
     ):
         self.tape: Optional[Tape] = Tape()
-        self.arguments = (
-            [self.tape.input(a) for a in arguments] if arguments else []
-        )
+        self.arguments = [self.tape.input(a) for a in arguments] if arguments else []
         self.objective = None
         self.constraints = []
         self.outputs = []
@@ -422,9 +422,7 @@ class ProblemBuilder:
         else:
             variable = self.tape.input(VectorSpace(name, shape))
             initial_value = (
-                np.zeros(shape=shape)
-                if initial_value is None
-                else initial_value
+                np.zeros(shape=shape) if initial_value is None else initial_value
             )
         self.initial_conditions[variable.index] = initial_value
         return variable
@@ -480,9 +478,7 @@ class ProblemBuilder:
         if not isinstance(declaration, FunctionParameter):
             raise TypeError("declaration must implement FunctionParameter")
         if not isinstance(declaration.name, str) or not declaration.name:
-            raise ValueError(
-                "function parameter name must be a non-empty string"
-            )
+            raise ValueError("function parameter name must be a non-empty string")
         target = declaration.validate_target(target)
         concrete_declarations = declaration.list_concrete_parameters()
         concrete_values = []
@@ -492,9 +488,7 @@ class ProblemBuilder:
                     "concrete parameter declaration name must be non-empty"
                 )
             if isinstance(concrete, (BoundedVariable, UnboundedVariable)):
-                value = self._add_decision(
-                    concrete.name, initial_value=concrete.guess
-                )
+                value = self._add_decision(concrete.name, initial_value=concrete.guess)
             elif isinstance(concrete, (BoundVector, DenseTensorVariable)):
                 value = self._add_decision(
                     concrete.name,
@@ -599,7 +593,7 @@ class ProblemBuilder:
             backend_name = current.name
         else:
             backend_name = backend
-        backend_impl = get_backend_by_name(backend_name)
+        backend_impl = get_backend_by_name(backend_name, set_current=False)
 
         implementation = backend_impl.build_optimisation_problem(
             self.objective.expression,
@@ -657,6 +651,7 @@ def norm(arg, order=2):
 
 __all__ = [
     "BoundedConstraint",
+    "MathematicalProgram",
     "OptimisationModule",
     "Minimise",
     "ProblemBuilder",

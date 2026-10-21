@@ -49,17 +49,13 @@ class DecisionLayout:
 
     def guess(self, path, control, parameters):
         horizon = (
-            ca.DM([self.horizon_guess])
-            if self.horizon_size
-            else ca.DM.zeros(0, 1)
+            ca.DM([self.horizon_guess]) if self.horizon_size else ca.DM.zeros(0, 1)
         )
         return self.vector(horizon, path, control, parameters)
 
     def upper_bounds(self, path_upper, control_upper, parameter_upper):
         horizon = (
-            ca.DM([self.horizon_upper])
-            if self.horizon_size
-            else ca.DM.zeros(0, 1)
+            ca.DM([self.horizon_upper]) if self.horizon_size else ca.DM.zeros(0, 1)
         )
         return self.vector(
             horizon,

@@ -23,10 +23,11 @@ copyright = f"2024, {author}"
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
-    "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.doctest",
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
+    "matplotlib.sphinxext.plot_directive",
 ]
 
 # Napoleon — Google-style docstrings
@@ -34,6 +35,13 @@ napoleon_google_docstring = True
 napoleon_numpy_docstring = False
 napoleon_include_init_with_doc = True
 napoleon_attr_annotations = True
+
+# Plain doctest blocks must opt into this group. Sphinx also executes explicit
+# doctest directives and autodoc examples.
+doctest_test_doctest_blocks = "residual_dae"
+
+# Plot directives execute the displayed source and publish the resulting figures.
+plot_formats = ["png"]
 
 # autodoc defaults
 autodoc_default_options = {
@@ -43,9 +51,6 @@ autodoc_default_options = {
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
 
-# Execute only explicitly designated documentation examples. Autodoc usage
-# snippets remain illustrative; complete runnable examples use doctest blocks.
-doctest_test_doctest_blocks = ""
 doctest_global_setup = """
 import os
 os.environ.setdefault("MPLBACKEND", "Agg")

@@ -25,29 +25,23 @@ must fail rather than silently claim another backend's execution semantics.
 Native imports must preserve owning-backend execution and output slots. The
 flags describe execution support, not reentrancy or memory ownership.
 
-.. autofunction:: coker.backends.register_backend
-
 .. autoclass:: coker.backends.backend.Backend
    :members: to_numpy_array, to_backend_array, reshape, call, get_evaluator, evaluate, lower, append_native_call, build_optimisation_problem, make_optimisation_module, evaluate_integrals, create_variational_solver
 
 .. autoclass:: coker.backends.backend.VariationalSolver
    :members: parameters, solve
 
-Function realizations
+Function realisations
 ---------------------
 
 Implement a shallow ``FunctionParameter`` subclass. Validate the target domain,
-return finite named concrete decision declarations in stable order, and evaluate
-from structured blocks using traceable operations. ``build_function`` traces a
-function of the target arguments followed by concrete blocks. The default
-implementation uses one public target argument; realizations with more inputs
-must provide a compatible implementation rather than assume arbitrary arity.
+return finite named concrete decision declarations in stable order and evaluate
+from structured blocks using traceable operations. See the
+:ref:`custom declaration contract <custom-parameter-declarations>` for the
+single-argument default builder and the required methods.
 
-.. autoclass:: coker.parameters.function_parameters.FunctionParameter
-   :members: validate_target, list_concrete_parameters, evaluate, build_function
-
-.. autoclass:: coker.parameters.ParameterMixin
-   :members: degrees_of_freedom
+The separate :class:`coker.parameters.ParameterMixin` supplies a decision-count
+interface for scalar and array declarations; it is not the callable interface.
 
 Numerical program modules
 -------------------------
@@ -62,6 +56,6 @@ result tuple and reconstructs ``parameters`` separately.
 See :class:`coker.toolkits.codesign.OptimisationModule` in the codesign
 extension reference for the callable interface.
 
-The external mapped runtime's allocation, bytecode alignment and caller-workspace
-contracts are separate from Python handle ownership; see
-:doc:`../backend_architecture`.
+Mapped runtime allocation, bytecode alignment and caller-workspace contracts are
+separate from Python handle ownership; see
+:doc:`../architecture/evaluation_pipeline`.

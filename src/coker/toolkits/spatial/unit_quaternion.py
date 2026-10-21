@@ -69,9 +69,7 @@ class UnitQuaternion:
         if isinstance(other, UnitQuaternion):
             return quaternion_mul(self, other)
 
-        assert other.shape == (
-            3,
-        ), f"Cannot mul a vector of shape {other.shape}"
+        assert other.shape == (3,), f"Cannot mul a vector of shape {other.shape}"
         p = UnitQuaternion(0, other)
 
         return quaternion_mul(self, p)
@@ -83,9 +81,7 @@ class UnitQuaternion:
         elif isinstance(other, UnitQuaternion):
             p = other
         else:
-            raise NotImplementedError(
-                "Can't right multiply by {}".format(other)
-            )
+            raise NotImplementedError("Can't right multiply by {}".format(other))
 
         return quaternion_mul(p, self)
 
@@ -97,12 +93,12 @@ class UnitQuaternion:
         """Rotate a vector or conjugate a quaternion.
 
         Args:
-            other: Numeric ``(3,)`` vector, traceable vector with leading
-                dimension three, or UnitQuaternion.
+            other: Numeric or traceable vector of shape ``(3,)``, or a
+                UnitQuaternion. Column vectors are not supported.
 
         Returns:
             Array or UnitQuaternion: ``self * other * self.inverse()``.
-                Traceable vectors retain their input shape.
+                Vector inputs produce a flat ``(3,)`` array.
         """
         if isinstance(other, UnitQuaternion):
             return self * other * self.inverse()

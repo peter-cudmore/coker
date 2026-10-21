@@ -12,7 +12,7 @@ from coker.backends.lowered import (
     LoweringOptions,
 )
 from coker.dynamics import DynamicsSpec, VariationalProblemBuilder
-from coker.dynamics.system import create_dynamics_from_spec
+from coker.dynamics import create_dynamics_from_spec
 from coker.parameters import BoundedVariable
 from coker.parameters.function_parameters import (
     ClosureParameter,

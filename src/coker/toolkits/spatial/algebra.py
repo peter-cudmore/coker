@@ -43,6 +43,8 @@ class Rotation3:
     Prefer ``Isometry3`` for conventional rightmost-first composition.
 
     Examples:
+        >>> import numpy as np
+        >>> from coker.toolkits.spatial import Rotation3
         >>> r = Rotation3(np.array([0., 0., 1.]), np.pi / 2)
         >>> np.testing.assert_allclose(r.apply(np.array([1., 0., 0.])),
         ...                            [0., 1., 0.], atol=1e-12)
@@ -61,11 +63,13 @@ class Rotation3:
 
     @property
     def axis(self):
+        """Return the materialised axis vector of shape ``(3,)``."""
         self._materialise_axis_angle()
         return self._axis
 
     @property
     def angle(self):
+        """Return the materialised rotation angle in radians."""
         self._materialise_axis_angle()
         return self._angle
 
@@ -85,6 +89,17 @@ class Rotation3:
 
     @staticmethod
     def cast(other) -> "Rotation3":
+        """Return a rotation from Rotation3, UnitQuaternion or a ``(3,)`` array.
+
+        Args:
+            other: Existing rotation value or numeric rotation vector.
+
+        Returns:
+            Rotation3, preserving an existing instance.
+
+        Raises:
+            NotImplementedError: If the representation is unsupported.
+        """
 
         if isinstance(other, Rotation3):
             return other
@@ -105,6 +120,7 @@ class Rotation3:
 
     @staticmethod
     def zero():
+        """Return the identity rotation, for example ``Rotation3.zero()``."""
         return Rotation3(
             np.array(
                 e_z.copy(),
@@ -131,9 +147,7 @@ class Rotation3:
     def as_quaternion(self):
         """Return the cached unit quaternion representation."""
         if self._quaternion is None:
-            self._quaternion = UnitQuaternion.from_axis_angle(
-                self._axis, self._angle
-            )
+            self._quaternion = UnitQuaternion.from_axis_angle(self._axis, self._angle)
         return self._quaternion
 
     @staticmethod
@@ -184,6 +198,12 @@ class Isometry3:
 
     ``a @ b`` applies ``b`` first, then ``a``; ``a @ point`` rotates and
     translates a numeric point. For traceable points use ``apply``.
+
+    Examples:
+        >>> import numpy as np
+        >>> from coker.toolkits.spatial import Isometry3
+        >>> pose = Isometry3(translation=np.array([1., 0., 0.]))
+        >>> np.testing.assert_allclose(pose.apply(np.zeros(3)), [1., 0., 0.])
     """
 
     def __init__(
@@ -193,9 +213,7 @@ class Isometry3:
     ):
 
         self.rotation = (
-            Rotation3.zero()
-            if rotation is None
-            else (Rotation3.cast(rotation))
+            Rotation3.zero() if rotation is None else (Rotation3.cast(rotation))
         )
 
         self.translation = (
@@ -207,9 +225,7 @@ class Isometry3:
         )
 
     def __repr__(self):
-        return (
-            f"Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})"
-        )
+        return f"Isometry3(r={repr(self.rotation)}, t={repr(self.translation)})"
 
     def __eq__(self, other):
         return (
@@ -220,6 +236,7 @@ class Isometry3:
 
     @staticmethod
     def identity():
+        """Return an identity pose, for example ``Isometry3.identity()``."""
         return Isometry3(
             Rotation3.zero(),
             translation=np.array(
@@ -236,10 +253,7 @@ class Isometry3:
             )
             return Isometry3(rotation, translation)
         elif isinstance(other, np.ndarray) and other.shape == (3,):
-            return (
-                self.rotation.as_quaternion().conjugate(other)
-                + self.translation
-            )
+            return self.rotation.as_quaternion().conjugate(other) + self.translation
         elif isinstance(other, np.ndarray) and other.shape == (4, 1):
             result = np.reshape(
                 self.rotation.as_quaternion().conjugate(other[0:3, 0])
@@ -253,9 +267,7 @@ class Isometry3:
     def apply(self, other):
         """Map a numeric or traceable point of shape ``(3,)`` to the parent."""
         assert other.shape == (3,)
-        return (
-            self.rotation.as_quaternion().conjugate(other) + self.translation
-        )
+        return self.rotation.as_quaternion().conjugate(other) + self.translation
 
     def transpose(self):
         """Return the inverse rigid transform (not a raw matrix transpose)."""
@@ -307,6 +319,13 @@ class Screw:
 
     Components are ordered angular then linear. Twists use radians and length
     per unit coordinate; wrenches use moment then force. No units are enforced.
+
+    Examples:
+        >>> import numpy as np
+        >>> from coker.toolkits.spatial import Screw
+        >>> axis = Screw.w_z()
+        >>> np.testing.assert_allclose(axis.to_array(), [0, 0, 1, 0, 0, 0])
+        >>> pose = axis.exp(np.pi / 2)
     """
 
     __slots__ = ("rotation", "translation", "magnitude")
@@ -317,9 +336,7 @@ class Screw:
         translation: Optional[Vec3] = None,
         magnitude: float = 1,
     ):
-        self.rotation = (
-            rotation if rotation is not None else np.array([0, 0, 0])
-        )
+        self.rotation = rotation if rotation is not None else np.array([0, 0, 0])
         self.translation = (
             translation if translation is not None else np.array([0, 0, 0])
         )
@@ -331,26 +348,32 @@ class Screw:
 
     @staticmethod
     def w_z():
+        """Return a unit angular z-axis screw."""
         return Screw(rotation=e_z.copy())
 
     @staticmethod
     def w_x():
+        """Return a unit angular x-axis screw."""
         return Screw(rotation=e_x.copy())
 
     @staticmethod
     def w_y():
+        """Return a unit angular y-axis screw."""
         return Screw(rotation=e_y.copy())
 
     @staticmethod
     def e_z():
+        """Return a unit translational z-axis screw."""
         return Screw(translation=e_z.copy())
 
     @staticmethod
     def e_x():
+        """Return a unit translational x-axis screw."""
         return Screw(translation=e_x.copy())
 
     @staticmethod
     def e_y():
+        """Return a unit translational y-axis screw."""
         return Screw(translation=e_y.copy())
 
     def __neg__(self):
@@ -370,9 +393,7 @@ class Screw:
 
     def to_array(self) -> np.ndarray:
         """Return scaled angular-then-linear components, shape ``(6,)``."""
-        return (
-            np.concatenate([self.rotation, self.translation]) * self.magnitude
-        )
+        return np.concatenate([self.rotation, self.translation]) * self.magnitude
 
     @staticmethod
     def from_array(array):
@@ -392,6 +413,7 @@ class Screw:
 
     @staticmethod
     def zero():
+        """Return a zero-magnitude screw, for example ``Screw.zero()``."""
         return Screw(
             rotation=np.array(
                 [1, 0, 0],
@@ -439,10 +461,7 @@ class Screw:
         else:
             alpha = angle
 
-        if (
-            isinstance(self.rotation, np.ndarray)
-            and (self.rotation == 0).all()
-        ):
+        if isinstance(self.rotation, np.ndarray) and (self.rotation == 0).all():
             return Isometry3(
                 rotation=Rotation3.zero(), translation=self.translation * alpha
             )
@@ -461,6 +480,10 @@ class Screw:
         return Isometry3(rotation=rotation, translation=translation)
 
     def as_matrix(self):
+        """Attempt the legacy matrix conversion; currently raises ValueError.
+
+        Use ``to_array()`` for six components or ``exp()`` for an Isometry3.
+        """
         w_hat = hat(self.rotation)
         return np.concatenate(
             np.concatenate([w_hat, self.translation]),
@@ -592,9 +615,9 @@ class SE3CoAdjoint:
         p = self.transform.translation
 
         translation = q_inv.conjugate(zeta.translation)
-        rotation = -q_inv.conjugate(
-            hat(p) @ zeta.translation
-        ) + q_inv.conjugate(zeta.rotation)
+        rotation = -q_inv.conjugate(hat(p) @ zeta.translation) + q_inv.conjugate(
+            zeta.rotation
+        )
 
         return Screw(
             rotation=rotation,
@@ -657,8 +680,8 @@ class se3CoAdjoint:
     Args:
         vector: Screw generating the operator.
 
-    Currently ``apply`` raises TypeError because its result uses an unsupported
-    Screw keyword. This exported path is not a supported working operation.
+    The result uses angular-then-linear ordering and multiplies the two
+    screws' stored magnitudes.
     """
 
     def __init__(self, vector: Screw):
@@ -670,7 +693,7 @@ class se3CoAdjoint:
         return self.apply(other)
 
     def apply(self, other: Screw) -> Screw:
-        """Apply the dual cross operation; currently raises TypeError."""
+        """Return the dual cross operation as an angular-then-linear Screw."""
         w = np.cross(self.vector.rotation, other.rotation) + np.cross(
             self.vector.translation, other.translation
         )
@@ -679,7 +702,7 @@ class se3CoAdjoint:
 
         m = self.vector.magnitude * other.magnitude
 
-        return Screw(translation=-v, rotation=-w, angle=m)
+        return Screw(translation=-v, rotation=-w, magnitude=m)
 
     def transpose(self) -> se3Adjoint:
         """Return the paired lowercase se3Adjoint operator."""
@@ -687,19 +710,18 @@ class se3CoAdjoint:
 
 
 def se3_bracket(left: Screw, right: Screw) -> Screw:
-    """Compute a Lie bracket; currently raises TypeError constructing Screw.
+    """Compute the Lie bracket of two angular-then-linear screws.
 
     Args:
         left: Left angular-then-linear Screw.
         right: Right angular-then-linear Screw.
 
-    The exported helper is documented for discovery, not as a working path.
+    Returns:
+        Screw with the bracket components and the product of both magnitudes.
     """
     w = np.cross(left.rotation, right.rotation)
     v = np.cross(left.rotation, right.translation) - np.cross(
         right.rotation, left.translation
     )
 
-    return Screw(
-        translation=v, rotation=w, angle=right.magnitude * left.magnitude
-    )
+    return Screw(translation=v, rotation=w, magnitude=right.magnitude * left.magnitude)

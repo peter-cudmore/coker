@@ -14,6 +14,10 @@ from coker.algebra.function import BoundCallable, function
 from coker.algebra.ops import Noop
 from coker.backends.backend import get_backend_by_name
 from coker.parameters.function_parameters import FunctionParameter
+from coker.dynamics.residual import (
+    LegacyFormCertificate,
+    ResidualDynamicalSystem,
+)
 from coker.dynamics.model import DynamicalSystem
 from coker.parameters import (
     BoundVector,
@@ -41,9 +45,7 @@ class ParameterValueLayout:
             zip(self.targets, self.declarations, self.offsets)
         ):
             literal = (
-                None
-                if self.literal_values is None
-                else self.literal_values[index]
+                None if self.literal_values is None else self.literal_values[index]
             )
             if literal is not None:
                 result[self._name(target, declaration)] = literal
@@ -56,8 +58,8 @@ class ParameterValueLayout:
                     for block_start, block_end in self.concrete_offsets[index]
                 )
             )
-            result[self._name(target, declaration)] = (
-                backend._materialize_parameter(target, declaration, blocks)
+            result[self._name(target, declaration)] = backend._materialize_parameter(
+                target, declaration, blocks
             )
         return result
 
@@ -88,9 +90,7 @@ def _function_concrete_declarations(
         raise ValueError("function parameter name must be a non-empty string")
     values = declaration.list_concrete_parameters()
     if not isinstance(values, tuple):
-        raise TypeError(
-            "function parameter concrete declarations must be a tuple"
-        )
+        raise TypeError("function parameter concrete declarations must be a tuple")
     return values
 
 
@@ -122,9 +122,7 @@ def _flatten_declaration(
     ),
 ) -> list[BoundedVariable | UnboundedVariable]:
     if not isinstance(declaration.name, str) or not declaration.name:
-        raise ValueError(
-            "concrete parameter declaration name must be non-empty"
-        )
+        raise ValueError("concrete parameter declaration name must be non-empty")
     if isinstance(declaration, (BoundedVariable, UnboundedVariable)):
         return [declaration]
     if isinstance(declaration, (BoundVector, DenseTensorVariable)):
@@ -135,9 +133,7 @@ def _flatten_declaration(
     )
 
 
-def _literal_value(
-    target: Scalar | VectorSpace, value: object
-) -> float | np.ndarray:
+def _literal_value(target: Scalar | VectorSpace, value: object) -> float | np.ndarray:
     """Validate and normalize a numeric literal for one system parameter."""
     if isinstance(target, Scalar):
         if isinstance(value, bool) or not isinstance(value, Real):
@@ -151,9 +147,7 @@ def _literal_value(
         raise TypeError("vector parameter literals must be numeric arrays")
     literal = np.array(value, dtype=float, copy=True)
     expected_shape = (
-        (target.dimension,)
-        if isinstance(target.dimension, int)
-        else target.dimension
+        (target.dimension,) if isinstance(target.dimension, int) else target.dimension
     )
     if literal.shape != expected_shape:
         raise ValueError(
@@ -172,9 +166,7 @@ def _reconstruct_concrete_values(
     offsets: Sequence[tuple[int, int]],
 ) -> tuple[object, ...]:
     if len(declarations) != len(offsets):
-        raise ValueError(
-            "function parameter layout does not match its declarations"
-        )
+        raise ValueError("function parameter layout does not match its declarations")
     result = []
     for declaration, (start, end) in zip(declarations, offsets):
         size = (
@@ -196,8 +188,13 @@ def _reconstruct_concrete_values(
 
 
 def specialize_system_parameters(
-    system: DynamicalSystem, declarations: Sequence[object]
-) -> tuple[DynamicalSystem, list[object], ParameterValueLayout | None]:
+    system: DynamicalSystem | ResidualDynamicalSystem,
+    declarations: Sequence[object],
+) -> tuple[
+    DynamicalSystem | ResidualDynamicalSystem,
+    list[object],
+    ParameterValueLayout | None,
+]:
     """Bind function-valued parameters and return a numeric solver system."""
     space = system.parameters
     if not isinstance(space, tuple):
@@ -213,10 +210,7 @@ def specialize_system_parameters(
     concrete_blocks: dict[
         str,
         tuple[
-            BoundedVariable
-            | UnboundedVariable
-            | BoundVector
-            | DenseTensorVariable,
+            BoundedVariable | UnboundedVariable | BoundVector | DenseTensorVariable,
             tuple[int, int],
         ],
     ] = {}
@@ -229,9 +223,7 @@ def specialize_system_parameters(
                     f"{type(declaration).__name__}"
                 )
             declaration.validate_target(target)
-            concrete_declarations = _function_concrete_declarations(
-                declaration
-            )
+            concrete_declarations = _function_concrete_declarations(declaration)
             function_declarations.append(concrete_declarations)
             literal_values.append(None)
         else:
@@ -254,14 +246,11 @@ def specialize_system_parameters(
             function_declarations.append(None)
 
         flattened_blocks = tuple(
-            _flatten_declaration(concrete)
-            for concrete in concrete_declarations
+            _flatten_declaration(concrete) for concrete in concrete_declarations
         )
         size = sum(len(block) for block in flattened_blocks)
         if not isinstance(target, FunctionSpace):
-            expected_size = (
-                target.size if isinstance(target, VectorSpace) else 1
-            )
+            expected_size = target.size if isinstance(target, VectorSpace) else 1
             if size != expected_size:
                 raise ValueError(
                     f"Parameter {index} declares {size} decisions, expected "
@@ -269,9 +258,7 @@ def specialize_system_parameters(
                 )
 
         ranges = []
-        for concrete, flattened in zip(
-            concrete_declarations, flattened_blocks
-        ):
+        for concrete, flattened in zip(concrete_declarations, flattened_blocks):
             assert isinstance(concrete.name, str)
             existing = concrete_blocks.get(concrete.name)
             if existing is None:
@@ -299,7 +286,7 @@ def specialize_system_parameters(
 
     parameterizations = tuple(
         (
-            declaration.build_function(target, system.backend())
+            declaration.build_function(target, system.backend)
             if isinstance(target, FunctionSpace)
             else None
         )
@@ -339,34 +326,40 @@ def specialize_system_parameters(
                 )
             elif isinstance(target, VectorSpace):
                 ((start, end),) = ranges
-                values.append(
-                    np.reshape(parameters[start:end], declaration.shape)
-                )
+                values.append(np.reshape(parameters[start:end], declaration.shape))
             else:
                 ((start, _),) = ranges
                 values.append(parameters[start])
         return values
 
     def bind_initial_conditions(original):
-        if original is Noop():
+        if isinstance(original, Noop):
             return Noop()
         spaces = original.input_spaces()
         return function(
             [spaces[0], spaces[1], numeric_parameters],
             lambda z, u, p: original(z, u, *reconstruct_parameters(p)),
-            backend=system.backend(),
+            backend=system.backend,
         )
 
     def bind_dynamics(original):
-        if original is Noop():
+        if isinstance(original, Noop):
             return Noop()
         spaces = original.input_spaces()
         return function(
             [*spaces[:4], numeric_parameters],
-            lambda t, x, z, u, p: original(
-                t, x, z, u, *reconstruct_parameters(p)
+            lambda t, x, z, u, p: original(t, x, z, u, *reconstruct_parameters(p)),
+            backend=system.backend,
+        )
+
+    def bind_residual(original):
+        spaces = original.input_spaces()
+        return function(
+            [*spaces[:5], numeric_parameters],
+            lambda t, w, wdot, z, u, p: original(
+                t, w, wdot, z, u, *reconstruct_parameters(p)
             ),
-            backend=system.backend(),
+            backend=system.backend,
         )
 
     def bind_outputs(original):
@@ -376,11 +369,33 @@ def specialize_system_parameters(
             lambda t, x, z, u, p, q: original(
                 t, x, z, u, *reconstruct_parameters(p), q
             ),
-            backend=system.backend(),
+            backend=system.backend,
         )
 
-    return (
-        DynamicalSystem(
+    if isinstance(system, ResidualDynamicalSystem):
+        certificate = (
+            LegacyFormCertificate(
+                rate=bind_dynamics(system.legacy.rate),
+                quadrature=bind_dynamics(system.legacy.quadrature),
+                algebraic=bind_dynamics(system.legacy.algebraic),
+            )
+            if system.legacy is not None
+            else None
+        )
+        specialized_system = ResidualDynamicalSystem(
+            inputs=system.inputs,
+            parameters=numeric_parameters,
+            x0=bind_initial_conditions(system.x0),
+            F=bind_residual(system.F),
+            y=bind_outputs(system.y),
+            differential=system.differential,
+            algebraic=system.algebraic,
+            quadrature=system.quadrature,
+            solver_parameters=system.solver_parameters,
+            legacy=certificate,
+        )
+    else:
+        specialized_system = DynamicalSystem(
             system.inputs,
             numeric_parameters,
             bind_initial_conditions(system.x0),
@@ -389,7 +404,10 @@ def specialize_system_parameters(
             bind_dynamics(system.dqdt),
             bind_outputs(system.y),
             solver_parameters=system.solver_parameters,
-        ),
+        )
+
+    return (
+        specialized_system,
         solver_declarations,
         ParameterValueLayout(
             tuple(space),

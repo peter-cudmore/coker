@@ -1,4 +1,8 @@
-"""Backend registry and lazy interpreter entry point."""
+"""Plugin lookup and explicit selection.
+
+Lookup is nonmutating unless ``set_current=True`` is requested. Implicit
+backend consumers use NumPy until an application deliberately selects a plugin.
+"""
 
 from coker.backends.backend import (
     get_backend_by_name,

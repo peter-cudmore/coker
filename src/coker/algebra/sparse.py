@@ -15,6 +15,12 @@ from coker.algebra.tensor import SymbolicVector
 class SparseMatrixPattern:
     """Immutable CSC structure and symbolic source data for a sparse matrix.
 
+    Args:
+        shape: Two-dimensional matrix shape.
+        indptr: CSC column offsets.
+        indices: CSC row indices.
+        data: Symbolic values in CSC order.
+
     ``indptr`` and ``indices`` use the canonical CSC ordering: columns are
     visited from left to right and row indices within each column are sorted.
     ``data`` contains the symbolic values in exactly that order.
@@ -29,11 +35,20 @@ class SparseMatrixPattern:
 class SparseMatrixBuilder:
     """Construct symbolic matrices from a fixed boolean CSC sparsity pattern.
 
-    Pattern canonicalisation happens once during construction.  Every call to
+    Args:
+        pattern: Two-dimensional boolean dense mask or SciPy sparse mask.
+
+    Pattern canonicalisation happens once during construction. Every call to
     :meth:`matrix` then interprets its flat data vector in canonical CSC
     order, making the resulting sparsity structure stable across backends and
-    runs.  The builder owns only the small structural arrays; callers own the
+    runs. The builder owns only the small structural arrays; callers own the
     data vectors.
+
+    Examples:
+        Build a sparse numeric matrix from its stored values::
+
+            builder = SparseMatrixBuilder(np.array([[True, False]]))
+            matrix = builder.matrix(np.array([2.0]))
     """
 
     def __init__(self, pattern: np.ndarray | scipy.sparse.sparray):
@@ -50,9 +65,7 @@ class SparseMatrixBuilder:
         else:
             dense = np.asarray(pattern)
             if dense.ndim != 2 or dense.dtype != bool:
-                raise TypeError(
-                    "pattern must be a two-dimensional boolean matrix"
-                )
+                raise TypeError("pattern must be a two-dimensional boolean matrix")
             compressed = scipy.sparse.csc_array(dense)
         compressed.eliminate_zeros()
         compressed.sort_indices()
@@ -62,9 +75,7 @@ class SparseMatrixBuilder:
         flat_indices = [
             row * self.shape[1] + column
             for column in range(self.shape[1])
-            for row in self.indices[
-                self.indptr[column] : self.indptr[column + 1]
-            ]
+            for row in self.indices[self.indptr[column] : self.indptr[column + 1]]
         ]
         self._flat_indices = np.asarray(flat_indices, dtype=np.intp)
 
@@ -77,8 +88,10 @@ class SparseMatrixBuilder:
         """Return the flat input space for this pattern's CSC data values."""
         return VectorSpace(name, self.nnz)
 
-    def matrix(self, data: Tracer | np.ndarray) -> np.ndarray | Tracer:
-        """Scatter CSC data into a matrix with this builder's fixed pattern."""
+    def matrix(
+        self, data: Tracer | np.ndarray
+    ) -> scipy.sparse.csc_array | np.ndarray | Tracer:
+        """Return a fixed matrix, retaining numeric values as SciPy CSC."""
         if isinstance(data, Tracer):
             if data.dim.flat() != self.nnz:
                 raise ValueError(
@@ -98,9 +111,7 @@ class SparseMatrixBuilder:
 
         values = np.asarray(data)
         if values.shape != (self.nnz,):
-            raise ValueError(
-                f"expected data shape ({self.nnz},), got {values.shape}"
-            )
+            raise ValueError(f"expected data shape ({self.nnz},), got {values.shape}")
         return scipy.sparse.csc_array(
             (values, self.indices, self.indptr), shape=self.shape
-        ).toarray()
+        )

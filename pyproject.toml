@@ -28,6 +28,12 @@ dependencies = [
     "typing-extensions",
 ]
 
+[project.urls]
+Documentation = "https://peter-cudmore.github.io/coker/"
+Source = "https://github.com/peter-cudmore/coker"
+Issues = "https://github.com/peter-cudmore/coker/issues"
+Changelog = "https://github.com/peter-cudmore/coker/blob/main/CHANGELOG.md"
+
 [project.entry-points."coker.backends"]
 numpy = "coker.backends.numpy:NumpyBackend"
 jax = "coker.backends.jax:JaxBackend"
@@ -65,7 +71,7 @@ docs = [
     "sphinx>=7.0",
     "furo",
     "sphinx-autodoc-typehints",
-    "matplotlib>=3.8",
+    "matplotlib>=3.7",
 ]
 
 [tool.pytest.ini_options]
@@ -78,7 +84,7 @@ markers = [
     "perf: machine-dependent performance assertions run only in the dedicated perf suite",
 ]
 [tool.black]
-line-length = 79
+line-length = 88
 target-version = ["py310", "py311", "py312", "py313"]
 
 [[tool.uv.index]]

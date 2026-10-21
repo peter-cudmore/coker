@@ -11,30 +11,37 @@ connections. ``Integrator`` declares state but does not integrate;
 execute. The PID script illustrates model construction, not a supported
 end-to-end simulation contract.
 
-Import container and metadata types from ``coker.toolkits.system_modelling``.
-Import standard blocks from
+Import container and metadata types, including discovery, from
+``coker.toolkits.system_modelling``. Import standard blocks from
 ``coker.toolkits.system_modelling.std_lib.common.signal_processing``.
-Import discovery explicitly from ``coker.toolkits.system_modelling.api``;
-``list_components`` is not currently exported by the toolkit root. Importing
-component modules registers their classes: discovery does not scan or import
-libraries and its hints are currently always ``None``.
+Importing component modules registers their classes: discovery does not scan
+or import libraries and its hints are always ``None``.
 
-.. doctest::
+.. testcode:: modelling_wiring
 
-   >>> from coker.toolkits.system_modelling import BlockContainer, Signal
-   >>> from coker.toolkits.system_modelling.std_lib.common.signal_processing import Gain, Integrator
-   >>> from coker.toolkits.system_modelling.api import list_components
-   >>> assert ("Gain", "coker/toolkits/system_modelling/std_lib/common/signal_processing", None) in list_components()
-   >>> plant = BlockContainer("plant")
-   >>> gain, integrator = Gain(2.0, name="gain"), Integrator(name="state")
-   >>> plant.add_models(gain, integrator)
-   >>> external_input = plant.add_input(Signal("u"))
-   >>> external_output = plant.add_output(Signal("y"))
-   >>> plant.add_connections((gain.input, external_input), (integrator.input, gain.output), (external_output, integrator.output))
-   >>> assert len(plant.connections) == 3
-   >>> assert plant.connections[integrator.input.resolve()] == gain.output.resolve()
-   >>> assert gain.spec().parameters[0].value == 2.0
-   >>> assert len(plant.spec().state) == 1
+   from coker.toolkits.system_modelling import (
+       BlockContainer, Signal, list_components,
+   )
+   from coker.toolkits.system_modelling.std_lib.common.signal_processing import (
+       Gain, Integrator,
+   )
+
+   library = "coker/toolkits/system_modelling/std_lib/common/signal_processing"
+   assert ("Gain", library, None) in list_components()
+   plant = BlockContainer("plant")
+   gain, integrator = Gain(2.0, name="gain"), Integrator(name="state")
+   plant.add_models(gain, integrator)
+   external_input = plant.add_input(Signal("u"))
+   external_output = plant.add_output(Signal("y"))
+   plant.add_connections(
+       (gain.input, external_input),
+       (integrator.input, gain.output),
+       (external_output, integrator.output),
+   )
+   assert len(plant.connections) == 3
+   assert plant.connections[integrator.input.resolve()] == gain.output.resolve()
+   assert gain.spec().parameters[0].value == 2.0
+   assert len(plant.spec().state) == 1
 
 Connections have one driver per input. Components must be attached before
 resolving their ports, and one component cannot be attached to two parents.
@@ -46,7 +53,7 @@ act as internal sources; container output handles act as internal sinks.
 Ordinary user API
 -----------------
 
-.. autofunction:: coker.toolkits.system_modelling.api.list_components
+.. autofunction:: coker.toolkits.system_modelling.list_components
 
 .. autoclass:: coker.toolkits.system_modelling.BlockContainer
    :members: spec, add_models, add_connection, add_connections, add_input, add_output
@@ -112,17 +119,19 @@ than private maps or generated-I/O internals.
 
 .. autoclass:: coker.toolkits.system_modelling.BlockSpec
 
-Exported machinery and unsupported paths
-----------------------------------------
+Registration and wiring internals
+---------------------------------
 
-The root currently also exports ``BlockIndex``, ``PortIndex``,
-``LazyPortHandle``, ``LazyInputHandle``, ``LazyOutputHandle``, ``PortForwarder``,
-``CokerListableSubclasses``, ``CokerModel``, ``model``, ``is_model``,
-``is_component_def`` and ``get_component_registry``. These are registration,
-indexing, decorator and wiring machinery, not independent simulation entry
-points. The model decorator wraps a factory and retains its function name;
-it does not compile or run a dynamical system. Lazy handles' ``resolve`` method
-exposes container-local ``(component_index, port_index)`` pairs for inspection.
+``CokerModel``, ``model``, ``is_model`` and ``is_component_def`` are public
+factory-registration utilities, not independent simulation entry points. The
+model decorator wraps a factory and retains its function name; it does not
+compile or run a dynamical system.
+
+Indices, lazy handles, forwarding components, subclass-registration machinery
+and ``get_component_registry`` remain in the ``modelling`` implementation
+module rather than the toolkit's public exports. Lazy handles' ``resolve``
+method exposes container-local ``(component_index, port_index)`` pairs for
+inspection. Applications should obtain handles through blocks and containers.
 
 ``Step`` is discoverable after importing its module, but its constructor
 currently passes unsupported arguments to ``Block`` and raises ``TypeError``.

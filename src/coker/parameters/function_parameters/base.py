@@ -18,7 +18,7 @@ from coker.interfaces import FunctionSignatureValue
 
 
 class FittedFunction(FunctionSignatureValue):
-    """Retain a solved finite realization as a callable.
+    """Retain a solved finite realisation as a callable.
 
     Args:
         specification: Original function-parameter declaration.
@@ -33,17 +33,8 @@ class FittedFunction(FunctionSignatureValue):
         parameters: Backend-specific fitted arrays/tensors or scalar values.
 
     Example:
-        >>> from coker import FunctionSpace, Scalar
-        >>> from coker.parameters.function_parameters import (
-        ...     FittedFunction, RadialBasisFunction,
-        ... )
-        >>> declaration = RadialBasisFunction([0.0], 1.0, name="response")
-        >>> space = FunctionSpace("response", [Scalar("t")], [Scalar("value")])
-        >>> fitted = FittedFunction(
-        ...     declaration, space, lambda t: 2 * t, (2.0,),
-        ... )
-        >>> fitted(3.0)
-        6.0
+        A solver's fitted result can be called as ``fitted(3.0)``; inspect
+        ``fitted.parameters`` for its retained concrete decision blocks.
     """
 
     def __init__(
@@ -97,15 +88,12 @@ class FunctionParameter(ABC):
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
         """Evaluate the declared function from structured parameter values."""
 
-    def build_function(
-        self, target: FunctionSpace, backend: str | None
-    ) -> Function:
+    def build_function(self, target: FunctionSpace, backend: str | None) -> Function:
         """Build a function of the target argument and concrete blocks."""
         target = self.validate_target(target)
         declarations = self.list_concrete_parameters()
         parameter_spaces = [
-            _concrete_parameter_space(declaration)
-            for declaration in declarations
+            _concrete_parameter_space(declaration) for declaration in declarations
         ]
         argument_count = len(target.arguments)
         return function(
@@ -125,6 +113,4 @@ def _concrete_parameter_space(
         return Scalar(declaration.name)
     if isinstance(declaration, (BoundVector, DenseTensorVariable)):
         return VectorSpace(declaration.name, declaration.shape)
-    raise TypeError(
-        "function parameter declarations must be scalar or dense variables"
-    )
+    raise TypeError("function parameter declarations must be scalar or dense variables")

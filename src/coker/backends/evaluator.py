@@ -94,9 +94,7 @@ class FunctionSymbolResolver:
         if self.is_native(symbol):
             return _NativeCallable(
                 target,
-                ResultBundleDimension(
-                    tuple(symbol.function_space.output_dimensions())
-                ),
+                ResultBundleDimension(tuple(symbol.function_space.output_dimensions())),
             )
 
         try:
@@ -105,9 +103,7 @@ class FunctionSymbolResolver:
             lowered = self._backend.lower(target)
             self._lowered_function_targets[target] = lowered
 
-        input_spaces = tuple(
-            input_spec.space for input_spec in target.signature.inputs
-        )
+        input_spaces = tuple(input_spec.space for input_spec in target.signature.inputs)
         output_indices = tuple(
             index
             for index, output_spec in enumerate(target.signature.outputs)
@@ -121,8 +117,7 @@ class FunctionSymbolResolver:
         def invoke(*arguments):
             if len(arguments) != input_count:
                 raise TypeError(
-                    f"Expected {input_count} present inputs, got "
-                    f"{len(arguments)}"
+                    f"Expected {input_count} present inputs, got " f"{len(arguments)}"
                 )
             supplied_index = 0
             target_inputs = []
@@ -202,16 +197,13 @@ class CompiledPlan:
             if ws_idx >= 0:
                 ws[ws_idx] = (
                     arg
-                    if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES)
-                    or callable(arg)
+                    if isinstance(arg, _SYMBOLIC_CALLABLE_TYPES) or callable(arg)
                     else self._to_backend_array(arg)
                 )
 
         for step in self._steps:
             value = step.fn(*[ws[i] for i in step.arg_indices])
-            if step.scalar_dimension is not None and not _is_symbolic_value(
-                value
-            ):
+            if step.scalar_dimension is not None and not _is_symbolic_value(value):
                 value = self._reshape(value, step.scalar_dimension)
             ws[step.out_idx] = value
 
@@ -228,13 +220,9 @@ class Evaluator(ABC):
     def build_plan(self, graph: Tape) -> CompiledPlan:
         """Compile ``graph`` into a reusable execution plan."""
 
-    def evaluate(
-        self, function: Function, inputs: Sequence[Any]
-    ) -> list[Any | None]:
+    def evaluate(self, function: Function, inputs: Sequence[Any]) -> list[Any | None]:
         workspace = self.build_plan(function.tape).execute(inputs)
-        return _cast_outputs(
-            function.output, function.tape, workspace, self.backend
-        )
+        return _cast_outputs(function.output, function.tape, workspace, self.backend)
 
 
 class GenericEvaluator(Evaluator):
@@ -253,9 +241,7 @@ class GenericEvaluator(Evaluator):
         self._function_symbols = FunctionSymbolResolver(backend)
 
     def _resolve_operation(self, op) -> Callable[..., Any]:
-        special_operation = _resolve_special_operation(
-            op, self._function_symbols
-        )
+        special_operation = _resolve_special_operation(op, self._function_symbols)
         if special_operation is not None:
             return special_operation
         try:
@@ -441,11 +427,7 @@ def evaluate_inner(
         op, *nodes = graph.nodes[w]
 
         args = [
-            (
-                node
-                if op == OP.BIND and argument_index == 2
-                else cast_node(node)
-            )
+            (node if op == OP.BIND and argument_index == 2 else cast_node(node))
             for argument_index, node in enumerate(nodes)
         ]
         special_operation = _resolve_special_operation(op, function_symbols)
@@ -479,8 +461,6 @@ def evaluate(
     from coker.backends import get_backend_by_name, get_current_backend
 
     backend_impl: Backend = (
-        get_current_backend()
-        if backend is None
-        else get_backend_by_name(backend)
+        get_current_backend() if backend is None else get_backend_by_name(backend)
     )
     return backend_impl.evaluate(function, args)

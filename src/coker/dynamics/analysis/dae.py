@@ -104,9 +104,7 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
             control-dependent algebraic constraints.
     """
     if not isinstance(system.g, Function):
-        raise UnsupportedSystemError(
-            "DAE constraints must be a Coker Function"
-        )
+        raise UnsupportedSystemError("DAE constraints must be a Coker Function")
     if system.dqdt is not None and not isinstance(system.dqdt, Noop):
         raise UnsupportedSystemError("quadrature states are not supported")
 
@@ -121,9 +119,7 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
         or len(constraint_shapes) != 4 + parameter_slots
         or len(output_shapes) != 5 + parameter_slots
     ):
-        raise UnsupportedSystemError(
-            "DAE has an unsupported argument signature"
-        )
+        raise UnsupportedSystemError("DAE has an unsupported argument signature")
 
     state_dimension = _require_finite_dimension(dynamics_shapes[1], "state")
     algebraic_dimension = _require_finite_dimension(
@@ -133,9 +129,7 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
         system.dxdt.output_shape()[0], "dynamics output"
     )
     if dynamics_dimension != state_dimension:
-        raise UnsupportedSystemError(
-            "dynamics output shape does not match state"
-        )
+        raise UnsupportedSystemError("dynamics output shape does not match state")
 
     backend = SympyBackend()
     try:
@@ -143,9 +137,7 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
         constraint_args, raw_constraints = backend.lower_to_symbolic(system.g)
         output_args, raw_outputs = backend.lower_to_symbolic(system.y)
     except (NotImplementedError, TypeError, ValueError) as error:
-        raise UnsupportedSystemError(
-            f"SymPy cannot lower this DAE: {error}"
-        ) from error
+        raise UnsupportedSystemError(f"SymPy cannot lower this DAE: {error}") from error
 
     time = _scalar_symbol(dynamics_args[0], "dynamics time")
     state = _argument_symbols(dynamics_args[1], state_dimension, "state")
@@ -158,9 +150,7 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
     _ensure_distinct_symbols((time,), state, algebraic, parameters)
 
     dynamics = _function_expressions(system.dxdt, raw_dynamics, "dynamics")
-    constraints = _function_expressions(
-        system.g, raw_constraints, "constraints"
-    )
+    constraints = _function_expressions(system.g, raw_constraints, "constraints")
     outputs = _function_expressions(system.y, raw_outputs, "outputs")
     if len(constraints) != len(algebraic):
         raise UnsupportedSystemError(
@@ -228,9 +218,7 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
         _scalar_symbol(output_args[0], "output time"): time,
         **dict(
             zip(
-                _argument_symbols(
-                    output_args[1], state_dimension, "output state"
-                ),
+                _argument_symbols(output_args[1], state_dimension, "output state"),
                 state,
             )
         ),
@@ -266,9 +254,7 @@ def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
         _reject_non_autonomous_or_implicit(expressions, time, subject)
         _reject_nonsmooth(expressions, subject)
     if any(expression.has(*controls) for expression in constraints):
-        raise UnsupportedSystemError(
-            "DAE constraints must not depend on controls"
-        )
+        raise UnsupportedSystemError("DAE constraints must not depend on controls")
 
     return SymbolicDAESystem(
         state, algebraic, parameters, controls, dynamics, constraints, outputs

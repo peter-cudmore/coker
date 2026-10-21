@@ -10,7 +10,7 @@ from coker.dynamics import (
     create_autonomous_ode,
 )
 from coker.parameters import UnboundedVariable
-from coker.dynamics.system import create_control_system
+from coker.dynamics import create_control_system
 
 
 def _assert_rank_result(result, *, status, rank, required_rank):

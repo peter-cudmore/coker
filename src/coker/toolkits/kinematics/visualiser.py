@@ -114,8 +114,7 @@ class KinematicsVisualiser:
         ]
 
         self.end_effector_coords = [
-            JointWidget(t, scale)
-            for t in model.forward_kinematics(rest_config)
+            JointWidget(t, scale) for t in model.forward_kinematics(rest_config)
         ]
 
         for mass in self.masses:

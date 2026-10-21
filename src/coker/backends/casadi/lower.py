@@ -35,11 +35,7 @@ class _CasadiFunctionTableTarget:
             (
                 None
                 if input_spec.space is None
-                else (
-                    Noop()
-                    if isinstance(input_spec.space, Noop)
-                    else next(arguments)
-                )
+                else (Noop() if isinstance(input_spec.space, Noop) else next(arguments))
             )
             for input_spec in self._function.signature.inputs
         )
@@ -74,11 +70,7 @@ class _CasadiFunctionTableTarget:
             for value, output_spec in zip(result, output_specs)
             if output_spec.shape is not None
         )
-        return (
-            present_results[0]
-            if len(present_results) == 1
-            else present_results
-        )
+        return present_results[0] if len(present_results) == 1 else present_results
 
 
 class _PartiallyLoweredFunctionTarget:
@@ -93,9 +85,7 @@ class _PartiallyLoweredFunctionTarget:
     def __call__(self, *arguments: Any) -> Any:
         workspace = {
             index: argument
-            for index, argument in zip(
-                self._target.tape.input_indicies, arguments
-            )
+            for index, argument in zip(self._target.tape.input_indicies, arguments)
             if index >= 0
         }
         result = substitute(
@@ -119,17 +109,12 @@ class _FunctionTableResolver:
         if not isinstance(target, coker.Function):
             return _NativeCallable(
                 target,
-                ResultBundleDimension(
-                    tuple(symbol.function_space.output_dimensions())
-                ),
+                ResultBundleDimension(tuple(symbol.function_space.output_dimensions())),
             )
         try:
             return self._targets[target]
         except KeyError:
-            if any(
-                isinstance(space, FunctionSpace)
-                for space in target.input_shape()
-            ):
+            if any(isinstance(space, FunctionSpace) for space in target.input_shape()):
                 native_target = _PartiallyLoweredFunctionTarget(target, self)
             else:
                 inputs, outputs = lower(
@@ -322,9 +307,7 @@ def extract_symbols(arg: ca.MX):
     if arg.is_symbolic():
         return {arg}
     return {
-        arg.dep(index)
-        for index in range(arg.n_dep())
-        if arg.dep(index).is_symbolic()
+        arg.dep(index) for index in range(arg.n_dep()) if arg.dep(index).is_symbolic()
     }
 
 
@@ -375,11 +358,7 @@ def substitute(
                 v = call_parameterised_op(op, *args)
         try:
             if not node.dim.is_scalar():
-                shape = (
-                    node.shape
-                    if not node.dim.is_vector()
-                    else (*node.dim.shape, 1)
-                )
+                shape = node.shape if not node.dim.is_vector() else (*node.dim.shape, 1)
                 v = v.reshape(shape)
         except AttributeError:
             pass

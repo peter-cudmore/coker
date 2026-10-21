@@ -28,32 +28,28 @@ from coker.dynamics.analysis import (
     lower_dae_system,
     lower_system,
 )
-from coker.dynamics.system import create_autonomous_ode, direct_sum
-from coker.interfaces import SolverParameters
+from coker.dynamics.system import (
+    CompositionOperator,
+    ProjectionSet,
+    StructuredParameterProjection,
+    create_autonomous_ode,
+    create_control_system,
+    create_dynamics_from_spec,
+    direct_sum,
+)
 
 from coker.dynamics.model import DynamicsSpec, DynamicalSystem
-from coker.dynamics.transcription.collocation import (
-    InterpolatingPoly,
-    InterpolatingPolyCollection,
-    evaluate_legendre_polynomial,
-    expand_coefficients,
-    generate_discritisation_operators,
-    legendre_coefficient,
-    lgr_points,
-)
-from coker.dynamics.variational.mesh import (
-    split_at_non_differentiable_points,
+from coker.dynamics.residual import (
+    ResidualDynamicalSystem,
+    to_residual_dynamical_system,
 )
 from coker.dynamics.variational.builder import VariationalProblemBuilder
 from coker.dynamics.variational.problem import (
-    ConstraintSpec,
-    QuadratureSpec,
     TranscriptionOptions,
     VariationalIterationCallback,
     VariationalProblem,
 )
 from coker.dynamics.variational.solution import VariationalSolution
-from coker.toolkits.codesign.optimisation import SolveFailure, SolveInfo
 
 __all__ = [
     "AnalysisResult",
@@ -61,45 +57,39 @@ __all__ = [
     "ControllabilityResult",
     "ConstantControlSolution",
     "ConstantControlVariable",
-    "ConstraintSpec",
+    "CompositionOperator",
     "ControlLaw",
     "ControlSolution",
     "ControlVariable",
     "DynamicalSystem",
     "DynamicsSpec",
+    "ResidualDynamicalSystem",
+    "to_residual_dynamical_system",
     "SymbolicDAESystem",
     "SymbolicSystem",
     "UnsupportedSystemError",
     "IdentifiabilityResult",
     "ObservabilityResult",
-    "InterpolatingPoly",
-    "InterpolatingPolyCollection",
     "LossFunction",
     "PiecewiseConstantVariable",
     "PiecewiseControlSolution",
-    "QuadratureSpec",
+    "ProjectionSet",
     "Solution",
-    "SolverParameters",
     "SpikeControlSolution",
     "SpikeVariable",
+    "StructuredParameterProjection",
     "TranscriptionOptions",
     "VariationalProblem",
     "VariationalProblemBuilder",
     "VariationalSolution",
     "VariationalIterationCallback",
-    "SolveFailure",
-    "SolveInfo",
     "analyse_controllability",
     "analyse_identifiability",
     "analyse_observability",
     "create_autonomous_ode",
+    "create_control_system",
+    "create_dynamics_from_spec",
     "direct_sum",
-    "evaluate_legendre_polynomial",
-    "expand_coefficients",
-    "generate_discritisation_operators",
-    "legendre_coefficient",
-    "lgr_points",
-    "split_at_non_differentiable_points",
     "lower_dae_system",
     "lower_system",
 ]

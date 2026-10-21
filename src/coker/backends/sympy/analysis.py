@@ -38,18 +38,14 @@ class ConstraintGeometry:
         parameter_gradient = sp.Matrix(
             1,
             len(self.parameters),
-            [
-                sp.diff(expression, coordinate)
-                for coordinate in self.parameters
-            ],
+            [sp.diff(expression, coordinate) for coordinate in self.parameters],
         )
         constrained_gradient = self.constraint_jacobian.T.LUsolve(
             algebraic_gradient.T
         ).T
         return sp.Matrix.hstack(
             state_gradient - constrained_gradient * self.state_jacobian,
-            parameter_gradient
-            - constrained_gradient * self.parameter_jacobian,
+            parameter_gradient - constrained_gradient * self.parameter_jacobian,
         )
 
 
@@ -82,28 +78,20 @@ def constraint_geometry(
     )
 
 
-def empty_matrix(
-    rows: int, columns: int, *, immutable: bool = False
-) -> sp.MatrixBase:
+def empty_matrix(rows: int, columns: int, *, immutable: bool = False) -> sp.MatrixBase:
     """Create an empty matrix while preserving the requested matrix kind."""
     matrix_type = sp.ImmutableMatrix if immutable else sp.Matrix
     return matrix_type(rows, columns, [])
 
 
-def generic_rank_witnesses(
-    matrix: sp.MatrixBase, rank: int
-) -> tuple[sp.Expr, ...]:
+def generic_rank_witnesses(matrix: sp.MatrixBase, rank: int) -> tuple[sp.Expr, ...]:
     """Return a nonzero maximal minor that witnesses ``matrix``'s rank."""
     if rank == 0:
         return ()
     rows, columns = matrix.shape
     for row_indices in sp.utilities.iterables.combinations(range(rows), rank):
-        for column_indices in sp.utilities.iterables.combinations(
-            range(columns), rank
-        ):
-            witness = sp.factor(
-                matrix.extract(row_indices, column_indices).det()
-            )
+        for column_indices in sp.utilities.iterables.combinations(range(columns), rank):
+            witness = sp.factor(matrix.extract(row_indices, column_indices).det())
             if witness != 0:
                 return (witness,)
     return ()
@@ -147,9 +135,7 @@ def extract_control_affine_fields(
     zero_controls = {control: sp.S.Zero for control in controls}
     try:
         control_fields = tuple(
-            create_field(
-                tuple(sp.diff(component, control) for component in dynamics)
-            )
+            create_field(tuple(sp.diff(component, control) for component in dynamics))
             for control in controls
         )
         if any(
