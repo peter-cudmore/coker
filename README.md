@@ -1,179 +1,181 @@
 # Coker
 
-Coker is a mathematical programming toolkit and compiler pipeline for technical computing in Python. You define computations as ordinary Python callables, compile them into a symbolic representation, and lower that representation to multiple execution backends. The project is aimed at numerical modelling, optimisation, dynamics, and embedded-oriented execution workflows.
+**Build mathematical models in Python. Use them for simulation, parameter fitting,
+and optimisation.**
 
-The current package metadata marks Coker as **alpha** software (`Development Status :: 3 - Alpha`).
+Moving from a numerical prototype to an optimisation problem often means
+rewriting the same equations for a different tool. Coker lets you express
+supported computations as Python functions and reuse them through numerical,
+symbolic, and tensor backends.
 
-## What Coker does
+Use NumPy for numerical evaluation, CasADi for solver-backed optimisation and
+dynamics, SymPy for symbolic inspection, or PyTorch for tensor and autograd
+workflows. Coker also provides tools for composing dynamical systems, fitting
+model parameters, and building robotics models.
 
-Coker combines a few layers that usually live in separate tools:
+**Coker is alpha software.** Backend capabilities differ; check the supported
+workflows and limitations before choosing a backend.
 
-- **Backend lowering** to `numpy`, `casadi`, `jax`, `pytorch`, and `sympy`.
-- **Differentiable execution models** that support evaluation, composition, and conditional expressions.
-- **Dynamics and variational problem tooling** for ODE systems, transcription helpers, and solver-backed optimisation workflows.
-- **Domain toolkits** for spatial algebra, rigid-body kinematics, and codesign-style mathematical programs.
+**[Get started](docs/basics/getting_started.rst) ·
+[Browse practical examples](docs/how_to/index.rst) ·
+[Backend support](docs/backends.rst)**
 
-## Core capabilities
+## Install and try
 
-### 1. Compile Python callables into reusable functions
-
-The primary entry point is `coker.function`. You describe argument spaces explicitly, provide a Python implementation, and choose a backend.
-
-Start with [the basics](docs/basics/index.rst) for installation and a first
-calculation; use [the API reference](docs/api/index.rst) for canonical imports
-and contracts. NumPy is the base-install default; backend lookup, evaluation,
-and lowering do not change ambient selection unless the application explicitly
-requests `get_backend_by_name(name, set_current=True)`.
-
-```python
-import numpy as np
-from coker import function, Scalar, VectorSpace
-
-f = function(
-    arguments=[Scalar("x")],
-    implementation=lambda x: 2 * x + 1,
-    backend="numpy",
-)
-print(f(3))  # 7
-
-A = np.array([[1.0, 0.0], [0.0, -1.0]])
-g = function(
-    arguments=[VectorSpace("x", 2)],
-    implementation=lambda x: A @ x,
-    backend="numpy",
-)
-print(g(np.array([1.0, 2.0])))  # [ 1. -2.]
-```
-### 2. Swap execution backends without rewriting the model
-
-The same traced function can be lowered to different execution backends depending on the job:
-
-- `numpy` for direct numerical execution
-- `casadi` for optimisation-oriented symbolic workflows
-- `jax` for alternate array execution
-- `pytorch` for tensor-valued execution, autograd, and optional ODE/quadrature integration
-- `sympy` for symbolic inspection and printing
-
-```python
-from coker import function, Scalar
-
-f_casadi = function(
-    arguments=[Scalar("x")],
-    implementation=lambda x: x**2,
-    backend="casadi",
-)
-```
-
-Optional extras declared by the package:
-
-```bash
-pip install "coker[casadi]"
-pip install "coker[jax]"
-pip install "coker[pytorch]"
-```
-
-Base installation:
+The base package requires Python 3.10 or newer and includes NumPy and SymPy:
 
 ```bash
 pip install coker
 ```
 
-See the [backend guide](docs/backends.rst) for backend limits. Base NumPy/SymPy
-installed-wheel CI covers Ubuntu, Windows, and macOS on Python 3.10 and 3.13;
-each optional extra is checked separately on Ubuntu on Python 3.11 and 3.13.
-JAX requires Python 3.11 or newer. These are CI coverage targets, not a claim
-of observed success on every platform or backend feature parity. All accelerator
-checks are CPU-only: CUDA tensor execution/autograd, NLP, ODE/quadratures where
-implemented, and fitting remain experimental and unverified pending GPU release
-evidence. Optional extras on Windows/macOS are outside this isolated-wheel boundary.
+### Evaluate a model, then fit it to measurements
 
-## Toolkit areas in this repository
-
-### Symbolic algebra and function composition
-
-`src/coker/algebra/` contains the tracing and function model used throughout the project. The test suite exercises:
-
-- scalar and vector symbolic ops
-- higher-order composition with `FunctionSpace`
-- conditional expressions via `if_then_else`
-- backend-specific lowering paths
-
-### Dynamics and optimisation
-
-`src/coker/dynamics/` exposes:
-
-- `create_autonomous_ode`
-- `direct_sum`
-- `VariationalProblem`
-- transcription helpers such as Legendre/LGR utilities
-- backend-specific solver parameters and solve status reporting
-
-The dynamics tests cover variational solvers, callbacks, direct-sum composition, and constrained parameter-fitting style problems.
-
-### Robotics and modelling toolkits
-
-The repository also includes domain-focused toolkits under `src/coker/toolkits/`:
-
-- **spatial**: rotations, isometries, screws, adjoint operators, quaternions
-- **kinematics**: rigid-body trees, joints, inertias, forward kinematics, dynamics examples
-- **codesign**: a small problem-builder API for optimisation-style programs
-
-The kinematics tests cover joint coordinate contracts, two-link and branched-tree forward kinematics and Jacobians, single-pendulum energy and inverse dynamics, and hexapod-leg models. See `tests/toolkits/kinematics/test_kinematics.py`; `scripts/double_pendulum.py` provides a separate two-link visualisation example.
-
-## Repository layout
-
-```text
-src/coker/        Python package source
-examples/         Small runnable examples
-scripts/          Standalone modelling scripts
-tests/            Backend, symbolic, dynamics, and toolkit coverage
-docs/             Sphinx documentation
-```
-
-## Example files worth reading first
-
-- [Your first calculation](docs/basics/getting_started.rst) — minimal symbolic function workflow
-- `scripts/double_pendulum.py` — rigid-body visualisation (`uv run scripts/double_pendulum.py` installs its inline dependencies, including the local Coker checkout; set `MPLBACKEND=Agg` for headless startup)
-- `tests/benchmarks/benchmark_backends.py` — benchmark scenarios for backend evaluation, ODE integration, and variational problems
-
-## Development
-
-The repository uses `uv` in CI for environment management.
-
-Install a development environment:
+For a spring, force is stiffness times extension: `F = kx`. Define that
+relationship once, evaluate it numerically, then use the same function in a
+constrained least-squares fit. Install the CasADi extra for this example:
 
 ```bash
-uv sync --group dev --extra casadi --extra jax --extra pytorch
+pip install "coker[casadi]"
 ```
 
-Run the test suite:
+```python
+import numpy as np
+from coker import Scalar, function
+from coker.toolkits.codesign import Minimise, ProblemBuilder
+
+force = function(
+    [Scalar("extension"), Scalar("stiffness")],
+    lambda extension, stiffness: stiffness * extension,
+    backend="casadi",
+)
+print(float(force(0.02, 150.0)))  # 3.0 N
+
+extensions = np.array([0.01, 0.02, 0.03])  # metres
+measurements = np.array([1.5, 3.0, 4.5])  # newtons
+with ProblemBuilder() as builder:
+    k = builder.new_variable("stiffness", initial_value=100.0)
+    residuals = [force(x, k) - y for x, y in zip(extensions, measurements)]
+    builder.objective = Minimise(sum(r * r for r in residuals))
+    builder.constraints = [k >= 0]
+    builder.outputs = [k]
+    fit = builder.build("casadi")
+
+loss, stiffness = fit()
+assert fit.solve_info is not None and fit.solve_info.success
+np.testing.assert_allclose(stiffness, 150.0, atol=1e-5)
+print(round(np.asarray(stiffness).item(), 1))  # 150.0 N/m
+```
+
+The fit recovers a stiffness of **150 N/m**. CasADi uses IPOPT, which also
+prints its solver log. See the [solver tuning recipe](docs/how_to/casadi_solver_tuning.rst)
+for solver options and result inspection.
+
+### Inspect symbolic matrix maths, then differentiate with PyTorch
+
+For coupled springs, the elastic energy is `E(x, K) = ½ xᵀKx`: `x` is a
+displacement vector and `K` is a symmetric stiffness matrix. Trace the formula
+once, inspect its symbolic expression with SymPy, then evaluate and differentiate
+it using PyTorch tensors:
 
 ```bash
-uv run pytest
+pip install "coker[pytorch]"
 ```
 
-Build the documentation:
+```python
+import numpy as np
+import torch
+from coker import VectorSpace, function
+from coker.backends.sympy import SympyBackend
 
-```bash
-uv sync --group docs --extra casadi --extra pytorch
-uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
-uv run sphinx-build docs/ docs/_build/html -W --keep-going
+energy = function(
+    [VectorSpace("x", 2), VectorSpace("K", (2, 2))],
+    lambda x, K: 0.5 * np.dot(x, K @ x),
+    backend="pytorch",
+)
+_, expression = SympyBackend().lower_to_symbolic(energy)
+print(expression)  # The same quadratic form, as a symbolic expression.
+
+x = torch.tensor([1.0, 2.0], requires_grad=True)
+K = torch.tensor([[4.0, -1.0], [-1.0, 2.0]])
+value = energy(x, K)
+value.backward()
+print(value.item())  # 4.0
+print(x.grad)       # tensor([2., 3.])
+torch.testing.assert_close(value, torch.tensor(4.0))
+torch.testing.assert_close(x.grad, K @ x.detach())
 ```
 
-See [the documentation authoring guide](docs/AUTHORING.md) for section goals,
-writing conventions, and executable examples. Source-only `Author notes`
-record page-specific directions and planned additions.
+With displacements in metres and stiffness in N/m, the energy is **4 J**.
+For symmetric `K`, the gradient is `Kx`; its negative gives the restoring
+forces, here **[-2, -3] N**. The NumPy-style formula becomes a Coker graph,
+not a conversion of the input tensors to NumPy, so PyTorch retains the gradient
+path. See the [backend interoperability recipes](docs/how_to/backend_interoperability.rst)
+to export functions as PyTorch modules.
 
-Formatting and linting used in CI:
+## What can I build?
 
-```bash
-uv run black --check --diff src
-uv run flake8 src tests docs examples scripts
-```
+- **Simulate a dynamical system:** define an ODE and evaluate its state and
+  outputs over time. [Simulation recipe](docs/how_to/simulation.rst).
+- **Fit model parameters:** estimate unknown parameters from observations.
+  [System identification recipe](docs/how_to/system_identification.rst).
+- **Solve a constrained path-planning problem:** optimise waypoints subject to
+  geometric constraints. [Path-planning recipe](docs/how_to/path_planning.rst).
+- **Build a robot-arm model:** compose joints and rigid bodies, evaluate forward
+  kinematics, and plot the result. [Robot-arm recipe](docs/how_to/robot_arm.rst).
+- **Work with PyTorch modules:** export a Coker function as a module or use a
+  native module inside a Coker computation.
+  [Backend interoperability recipes](docs/how_to/backend_interoperability.rst).
 
-## Project status
-The package metadata marks Coker as alpha-stage software. The repository already includes automated coverage for symbolic operations, backend lowering, dynamics, and toolkit examples.
+For the execution model and design rationale, read the
+[architecture guide](docs/architecture/index.rst).
+
+## Choose a backend
+
+| Backend | Intended use | Installation |
+| --- | --- | --- |
+| NumPy | Numerical evaluation and small-system reference workflows | `pip install coker` |
+| CasADi | Solver-backed optimisation, dynamics, and symbolic workflows | `pip install "coker[casadi]"` |
+| SymPy | Symbolic inspection and expression manipulation | Included in the base package |
+| PyTorch | Tensor execution, autograd, and supported fitting workflows | `pip install "coker[pytorch]"` |
+| JAX | Alternate array execution; Python 3.11 or newer | `pip install "coker[jax]"` |
+
+Backends are not interchangeable for every operation or solver. Follow the
+[backend tutorial](docs/tutorials/backends.rst) to compare numerical and symbolic
+execution, the [backend guide](docs/backends.rst) for capability limits, and the
+[CasADi tuning recipe](docs/how_to/casadi_solver_tuning.rst) for solver options.
+
+## Status and limitations
+
+Coker is in active, alpha-stage development. Public APIs may change, and support
+for a workflow on one backend does not imply support on the others.
+
+Installed-wheel CI covers the base NumPy/SymPy package on Ubuntu, Windows, and
+macOS with Python 3.10 and 3.13. Individual CasADi, JAX, and PyTorch extras are
+checked on Ubuntu with Python 3.11 and 3.13; optional extras on Windows/macOS are
+outside this isolated-wheel coverage. These checks do not certify every backend
+feature on every platform.
+
+Backend CI checks use CPU execution. CUDA support remains experimental and
+unverified; see the [backend support boundaries](docs/backends.rst). See
+[CHANGELOG.md](CHANGELOG.md) for changes and the
+[issue tracker](https://github.com/peter-cudmore/coker/issues) for known problems.
+
+## Contributing and credit
+
+We encourage small, ready-to-integrate contributions such as documentation
+improvements and bug fixes. Significant contributions will rarely be accepted
+unless they come from existing contributors. CI must pass before maintainer
+review begins.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and submission rules;
+PRs target `develop`. We give credit by name to all contributors and expect
+accurate attribution. Add your name to [AUTHORS.md](AUTHORS.md) when contributing
+and follow the [credit policy](CREDITS.md).
 
 ## License
 
-Coker is licensed under the **MPL-2.0**. See `LICENSE.TXT` for the full text.
+Copyright (c) 2026 **Pneumatica Bio**. **Peter Cudmore** is the sole author to date.
+
+Coker is licensed under **MPL-2.0**. See [LICENSE.TXT](LICENSE.TXT).
+External contributions are accepted under the same licence without copyright
+assignment; see [contribution licensing](CONTRIBUTING.md#contribution-licensing).

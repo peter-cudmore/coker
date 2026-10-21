@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Added
+- Contribution and credit policies, with CI passing required before review and a named contributor list in `AUTHORS.md`.
+- A model-focused README with executable spring-parameter fitting and symbolic matrix/PyTorch autograd examples, checked directly by documentation CI.
 - Five-section documentation with introductory tutorials, a task-focused cookbook, architecture guides, API reference, and source-only author notes.
 - Executable examples for installation, scalar and vector functions, symbolic loops and conditionals, backend selection and import/export, simulation, parameter fitting, path planning, robot-arm kinematics, solver configuration, and lowering, with rendered plots and CI-backed numerical checks.
 - Installed-wheel CI profiles for isolated base NumPy/SymPy installations on Ubuntu, Windows, and macOS (Python 3.10/3.13), and individual CasADi/JAX/PyTorch extras on Ubuntu (Python 3.11/3.13), retaining the all-extra Ubuntu suite and verifying wheel provenance for copied or symlinked installs; classify CUDA support as experimental and unverified pending GPU release evidence ([#98](https://github.com/peter-cudmore/coker/issues/98)). Broader support-boundary alignment remains tracked in [#89](https://github.com/peter-cudmore/coker/issues/89).
@@ -24,6 +26,9 @@
 - Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
 ### Changed
+- Record Pneumatica Bio as the copyright holder of Peter Cudmore's assigned work, retaining him as the sole author to date and preserving the MPL-2.0 license.
+- Explicitly accept external contributions under MPL-2.0 with copyright retained by their rights holders, without requiring a separate CLA or copyright assignment.
+- Record user-visible changes in PR-local Added, Changed, and Fixed sections, preserving squash metadata for maintainer release preparation instead of editing the cumulative changelog in normal PRs.
 - Trim collocation implementation types from the `coker.dynamics` root API while retaining the public `DynamicsSpec` construction route.
 - Consolidate onboarding into Basics and tutorials, remove migration advice, and add task-specific reading routes, simpler backend calls, JAX selection guidance, and precise recipe adaptation checks.
 - Default implicit backend selection to the base-install NumPy plugin; backend lookup selects ambient state only with explicit `set_current=True`. Plugin names remain extensible.

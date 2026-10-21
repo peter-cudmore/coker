@@ -1,0 +1,22 @@
+name: Validate PR metadata
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-metadata:
+    name: PR metadata and changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Validate PR metadata
+        run: python scripts/check_pr_metadata.py
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}

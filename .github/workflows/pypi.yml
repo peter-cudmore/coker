@@ -110,6 +110,39 @@ jobs:
               github.event.pull_request.head.sha ||
               github.sha
             }}
+      - name: Validate prepared release notes
+        shell: python
+        env:
+          HEAD_VERSION: ${{ needs.detect-version-bump.outputs.head_version }}
+        run: |
+          import datetime
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["HEAD_VERSION"]
+          if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]*", version):
+              raise RuntimeError("Package version must be safe for a release-notes filename")
+          notes_path = Path("release-notes") / f"{version}.md"
+          notes = notes_path.read_bytes()
+          changelog = Path("CHANGELOG.md").read_bytes()
+          headings = list(re.finditer(rb"^## ([^\r\n]+)\r?$", changelog, re.MULTILINE))
+          version_prefix = f"{version} - ".encode()
+          matching = [
+              index for index, heading in enumerate(headings)
+              if heading.group(1).startswith(version_prefix)
+          ]
+          if len(matching) != 1:
+              raise RuntimeError(f"Expected exactly one CHANGELOG.md section for {version}")
+          index = matching[0]
+          heading = headings[index]
+          date_text = heading.group(1)[len(version_prefix):].decode("ascii")
+          if datetime.date.fromisoformat(date_text).isoformat() != date_text:
+              raise RuntimeError("Release date must use YYYY-MM-DD")
+          end = headings[index + 1].start() if index + 1 < len(headings) else len(changelog)
+          section = changelog[heading.start():end]
+          if notes != section:
+              raise RuntimeError(f"{notes_path} must exactly match its CHANGELOG.md section")
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
@@ -165,3 +198,76 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: [detect-version-bump, publish-to-pypi]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Publish prepared release notes
+        shell: python
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_VERSION: ${{ needs.detect-version-bump.outputs.head_version }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          version = os.environ["HEAD_VERSION"]
+          tag = f"v{version}"
+          notes_path = Path("release-notes") / f"{version}.md"
+          notes = notes_path.read_text(encoding="utf-8")
+          release_sha = subprocess.run(
+              ["git", "rev-parse", f"{os.environ['RELEASE_SHA']}^{{commit}}"],
+              check=True, capture_output=True, text=True, encoding="utf-8",
+          ).stdout.strip()
+          remote_tag = subprocess.run(
+              ["gh", "api", f"repos/{os.environ['GH_REPO']}/commits/refs/tags/{tag}"],
+              capture_output=True, text=True, encoding="utf-8",
+          )
+          if remote_tag.returncode == 0:
+              tag_sha = json.loads(remote_tag.stdout)["sha"]
+              if tag_sha != release_sha:
+                  raise RuntimeError(
+                      f"Existing tag {tag} resolves to {tag_sha}, not {release_sha}; refusing to overwrite"
+                  )
+          elif "HTTP 404" in remote_tag.stderr:
+              tag_sha = None
+          else:
+              raise RuntimeError(remote_tag.stderr)
+          existing = subprocess.run(
+              ["gh", "api", f"repos/{os.environ['GH_REPO']}/releases/tags/{tag}"],
+              capture_output=True, text=True, encoding="utf-8",
+          )
+          if existing.returncode == 0:
+              release = json.loads(existing.stdout)
+              if tag_sha is None:
+                  raise RuntimeError(f"Existing release {tag} has no matching remote tag")
+              if release["draft"]:
+                  raise RuntimeError(f"Existing release {tag} is a draft; refusing to report it as published")
+              if release["body"] != notes:
+                  raise RuntimeError(f"Existing release {tag} has different notes; refusing to overwrite")
+              print(f"Release {tag} already exists with the prepared notes")
+          elif "HTTP 404" in existing.stderr:
+              subprocess.run(
+                  [
+                      "gh", "release", "create", tag,
+                      "--target", os.environ["RELEASE_SHA"],
+                      "--title", version,
+                      "--notes-file", str(notes_path),
+                  ],
+                  check=True,
+              )
+          else:
+              raise RuntimeError(existing.stderr)

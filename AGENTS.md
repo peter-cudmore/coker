@@ -68,17 +68,28 @@ and helpers or branches that can be inlined without reducing clarity.
 
 ## Pull requests
 
-Pull requests MUST target `develop`, never `main`. Verify the base branch
+Normal pull requests MUST target `develop`, never `main`. Verify the base branch
 before creating or updating a pull request. If host tooling cannot select
-`develop`, escalate instead of using `main`.
+`develop`, escalate instead of using `main`. Maintainer release promotion is the
+exception documented in `CONTRIBUTING.md`.
 
-Pull requests SHOULD be squash-merged by default. Their descriptions MUST
-include a changelog of user-visible changes.
+Normal pull requests MUST be squash-merged into `develop`. Preserve the PR title
+with its `#N` reference and the complete body in the squash commit. The body MUST
+contain a single `Changelog` section with `Added`, `Changed`, and `Fixed`
+categories in that order, listing only this PR's user-visible changes. Unused
+categories MUST stay empty without filler; if all are empty, `Description` MUST
+explain why the work has no user-visible changes. Every post-cutover commit,
+including internal and release-preparation work, MUST retain this PR metadata.
 
-Commits with user-facing or functional changes MUST use the headline format
-`(type): Description`, where `type` is `fix` for a bug fix, `add` for a new
-feature, `mod` for modified functionality, or `rem` for a removed feature.
-Only formatted headlines are aggregated when a pull request is squash-merged;
-internal documentation, test, tooling, and refactoring commits MUST omit the
-format to avoid changelog noise.
+Commits and PR titles with user-facing or functional changes MUST use the
+headline format `(type): Description`, where `type` is `fix` for a bug fix, `add`
+for a new feature, `mod` for modified functionality, or `rem` for a removed
+feature. Internal documentation, test, tooling, and refactoring titles MUST omit
+the format. Headlines are NOT the source of release-note entries.
+
+Normal PRs MUST NOT edit cumulative `CHANGELOG.md` or copy its entries into their
+PR bodies. Maintainer release preparation aggregates the preserved PR-local
+changelog metadata into `CHANGELOG.md` and the reviewed versioned release-notes
+file. Follow the release procedure in `CONTRIBUTING.md`; publication MUST reuse
+that file rather than regenerate notes from `main`.
 
