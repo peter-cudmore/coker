@@ -2,131 +2,72 @@ name: Publish Coker
 
 on:
   pull_request:
-    branches: ["main"]
-    types: [opened, synchronize, reopened]
+    branches: ["main", "develop"]
+    types: [opened, synchronize, reopened, edited]
   push:
-    branches: ["main"]
+    tags: ["v*"]
 
 permissions:
   contents: read
 
 jobs:
-  detect-version-bump:
-    name: Detect version bump
+  runtime-checks:
+    uses: ./.github/workflows/test-and-lint.yml
+
+  verify:
+    name: Verify release distributions
     runs-on: ubuntu-latest
     outputs:
-      version_bumped: ${{ steps.compare.outputs.version_bumped }}
-      head_version: ${{ steps.compare.outputs.head_version }}
-      base_version: ${{ steps.compare.outputs.base_version }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          ref: >-
-            ${{
-              github.event_name == 'pull_request' &&
-              github.event.pull_request.head.sha ||
-              github.sha
-            }}
-      - name: Fetch base branch
-        if: github.event_name == 'pull_request'
-        run: git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
-      - name: Compare package versions
-        id: compare
-        shell: python
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          import os
-          import subprocess
-          import tomllib
-          from pathlib import Path
-
-          def parse_simple_version(version: str):
-              version_parts = version.split(".")
-              if all(part.isdigit() for part in version_parts):
-                  return tuple(int(part) for part in version_parts)
-              return None
-
-          def version_is_bumped(head_version: str, base_version: str):
-              head_simple_version = parse_simple_version(head_version)
-              base_simple_version = parse_simple_version(base_version)
-
-              if head_simple_version is not None and base_simple_version is not None:
-                  return head_simple_version > base_simple_version
-              return head_version != base_version
-
-          event_name = os.environ["EVENT_NAME"]
-          head_pyproject = Path("pyproject.toml").read_bytes()
-          head_version = tomllib.loads(head_pyproject.decode())["project"]["version"]
-
-          if event_name == "pull_request":
-              base_ref = os.environ["BASE_REF"]
-              base_pyproject = subprocess.check_output(
-                  ["git", "show", f"origin/{base_ref}:pyproject.toml"]
-              )
-              base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
-              version_bumped = version_is_bumped(head_version, base_version)
-          elif event_name == "push":
-              before_sha = os.environ["BEFORE_SHA"]
-              if before_sha and before_sha != "0000000000000000000000000000000000000000":
-                  base_pyproject = subprocess.check_output(
-                      ["git", "show", f"{before_sha}:pyproject.toml"]
-                  )
-                  base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
-                  version_bumped = version_is_bumped(head_version, base_version)
-              else:
-                  base_version = ""
-                  version_bumped = False
-          else:
-              raise RuntimeError(f"Unsupported event: {event_name}")
-
-          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output_file:
-              output_file.write(f"head_version={head_version}\n")
-              output_file.write(f"base_version={base_version}\n")
-              output_file.write(
-                  f"version_bumped={'true' if version_bumped else 'false'}\n"
-              )
-
-  build:
-    name: Build distribution
-    needs: detect-version-bump
-    if: >-
-      needs.detect-version-bump.outputs.version_bumped == 'true' &&
-      (
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
-    runs-on: ubuntu-latest
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-          ref: >-
-            ${{
-              github.event_name == 'pull_request' &&
-              github.event.pull_request.head.sha ||
-              github.sha
-            }}
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.13"
           enable-cache: true
-      - name: Build distribution packages
+      - name: Build distribution packages once
         run: uv build
-      - name: Store distribution packages
+      - name: Check distribution versions and release identity
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            uv run --no-project scripts/check_release.py --tag "$RELEASE_TAG"
+          else
+            uv run --no-project scripts/check_release.py
+          fi
+      - name: Exercise installed wheel outside the checkout
+        env:
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+        run: |
+          smoke_dir=$(mktemp -d)
+          trap 'rm -rf "$smoke_dir"' EXIT
+          uv venv "$smoke_dir/venv"
+          wheel=("$GITHUB_WORKSPACE"/dist/*.whl)
+          uv pip install --python "$smoke_dir/venv/bin/python" "${wheel[0]}[casadi]"
+          cp scripts/smoke_release.py "$smoke_dir/smoke_release.py"
+          cd "$smoke_dir"
+          "$smoke_dir/venv/bin/python" -I smoke_release.py
+      - name: Store only verified distribution packages
+        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
-          path: dist/
+          name: verified-python-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
 
   publish-to-test-pypi:
-    name: Publish to TestPyPI
-    needs: [detect-version-bump, build]
-    if: github.event_name == 'pull_request'
+    name: Publish verified artifacts to TestPyPI
+    needs: [runtime-checks, verify]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -134,21 +75,22 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Download distribution packages
+      - name: Download verified distribution packages
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          artifact-ids: ${{ needs.verify.outputs.artifact-id }}
           path: dist/
-      - name: Publish distribution packages to TestPyPI
+          merge-multiple: true
+      - name: Publish verified packages to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
   publish-to-pypi:
-    name: Publish to PyPI
-    needs: [detect-version-bump, build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Publish verified artifacts to PyPI
+    needs: [runtime-checks, verify]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -156,12 +98,11 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Download distribution packages
+      - name: Download verified distribution packages
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          artifact-ids: ${{ needs.verify.outputs.artifact-id }}
           path: dist/
-      - name: Publish distribution packages to PyPI
+          merge-multiple: true
+      - name: Publish verified packages to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          skip-existing: true

@@ -1,0 +1,33 @@
+name: Check documentation
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        default: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --group docs --extra casadi --extra pytorch
+      - name: Run documentation examples
+        run: uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
+      - name: Build docs
+        run: uv run sphinx-build docs/ docs/_build/html -W --keep-going
+      - name: Upload pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
