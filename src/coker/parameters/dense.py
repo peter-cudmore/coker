@@ -10,7 +10,16 @@ from .scalar import ParameterMixin
 
 @dataclass
 class DenseTensorVariable(ParameterMixin):
-    """Finite dense decision block reconstructed with its declared shape."""
+    """Declare a finite dense block reconstructed with its initial shape.
+
+    Args:
+        name: Solver parameter name.
+        guess: Finite non-scalar array or sequence defining shape and initial
+            values. Array conversion may retain the caller's storage.
+
+    Raises:
+        ValueError: The guess is scalar or contains a non-finite value.
+    """
 
     name: str
     guess: np.ndarray | Sequence[float]
@@ -23,19 +32,33 @@ class DenseTensorVariable(ParameterMixin):
 
     @property
     def shape(self) -> tuple[int, ...]:
+        """Return the dense shape inferred from the guess."""
         return self.guess.shape
 
     @property
     def size(self) -> int:
+        """Return the number of scalar decisions in this block."""
         return self.guess.size
 
     def degrees_of_freedom(self, *interval):
+        """Return the block size, independently of the interval."""
         return self.size
 
 
 @dataclass
 class BoundVector(ParameterMixin):
-    """One-dimensional finite decision block with component-wise bounds."""
+    """Declare a vector decision with inclusive component-wise bounds.
+
+    Args:
+        name: Solver parameter name.
+        lower_bound: Lower-bound vector with the same shape as ``guess``.
+        upper_bound: Upper-bound vector with the same shape as ``guess``.
+        guess: Finite one-dimensional feasible initial vector.
+
+    Raises:
+        ValueError: Shapes differ, bounds are reversed, or the guess is
+            non-finite or outside the bounds.
+    """
 
     name: str
     lower_bound: np.ndarray | Sequence[float]
@@ -59,11 +82,14 @@ class BoundVector(ParameterMixin):
 
     @property
     def shape(self) -> tuple[int, ...]:
+        """Return the one-dimensional shape of this block."""
         return self.guess.shape
 
     @property
     def size(self) -> int:
+        """Return the number of scalar decisions in this block."""
         return self.guess.size
 
     def degrees_of_freedom(self, *interval):
+        """Return the vector size, independently of the interval."""
         return self.size

@@ -44,9 +44,10 @@ class Function(SymbolicCallable, FunctionSignatureValue):
     """A compiled Coker function.
 
     Created by :func:`function`.  Holds the traced computation graph and
-    dispatches to a backend for evaluation.  Calling a ``Function`` with
-    concrete numpy arrays returns the result; calling it inside a tracing
-    context records the operations on the outer tape.
+    dispatches to a backend for evaluation. Concrete calls return backend
+    values; calls with symbolic arguments record operations on the outer tape.
+    For example, create ``f = function([Scalar("x")], lambda x: x + 1)``
+    and evaluate it with ``f(2.0)``.
 
     Attributes:
         tape: The recorded computation graph.
@@ -91,6 +92,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
     @property
     def arguments(self) -> list[str]:
+        """Return a copy of the argument names in declaration order."""
         return self.tape.input_names.copy()
 
     def __repr__(self):
@@ -254,10 +256,29 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return output
 
     def __call__(self, *args: Any) -> Any:
-        assert len(args) == len(self.tape.input_indicies), (
-            f"Expected {len(self.tape.input_indicies)} arguments but got "
-            f"{len(args)}"
-        )
+        """Evaluate concrete values or compose a call into an enclosing trace.
+
+        Args:
+            *args: One value per declared argument, in declaration order.
+                Function-space arguments accept Coker or traceable Python
+                callables. Numeric inputs follow the selected backend's
+                conversion and reshape rules.
+
+        Returns:
+            The value for a single implementation result, or a tuple when the
+            implementation returned a list/tuple of results. During tracing,
+            values are symbolic rather than numeric.
+
+        Raises:
+            TypeError: The positional argument count is incorrect.
+            RuntimeError: A native imported callable is composed into a
+                different backend.
+        """
+        if len(args) != len(self.tape.input_indicies):
+            raise TypeError(
+                f"Expected {len(self.tape.input_indicies)} arguments but got "
+                f"{len(args)}"
+            )
 
         args = [
             (self._prepare_argument(arg, idx))
@@ -285,7 +306,24 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return tuple(output)
 
     def lower(self, options: LoweringOptions | None = None) -> LoweredFunction:
-        """Return a cached backend-specific executable lowering handle."""
+        """Return a cached backend-specific executable handle.
+
+        Args:
+            options: Immutable lowering configuration. ``None`` uses this
+                function's backend; ``LoweringOptions(backend=...)`` selects
+                another registered backend for a non-native graph.
+
+        Returns:
+            A cached ``LoweredFunction`` retaining its ordered signature.
+            ``execute(inputs)`` returns a packed tuple of native values.
+
+        Raises:
+            TypeError: ``options`` is not a ``LoweringOptions`` instance.
+            RuntimeError: A native import is lowered by another backend.
+
+        Note:
+            Lowering changes neither ``self.backend`` nor the ambient backend.
+        """
 
         options = LoweringOptions() if options is None else options
         if not isinstance(options, LoweringOptions):
@@ -340,7 +378,20 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
 
 class BoundCallable(SymbolicCallable, FunctionSignatureValue):
-    """A public callable view over a target with explicit bound arguments."""
+    """Expose a target's public arguments while binding trailing tracer inputs.
+
+    Args:
+        target: Coker function accepting public inputs followed by captures.
+        public_space: Signature visible to callers.
+        bound_arguments: Captured tracer dependencies in trailing-input order.
+
+    Raises:
+        ValueError: The target input count does not match public and bound inputs.
+
+    Example:
+        Tracing a Python closure over an outer symbolic value creates this view
+        automatically when the closure is passed as a function-space argument.
+    """
 
     def __init__(
         self,
@@ -376,6 +427,17 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         return value
 
     def __call__(self, *arguments: Any) -> Any:
+        """Call the target with public arguments followed by bound captures.
+
+        Args:
+            *arguments: Values in public argument order.
+
+        Returns:
+            The target's result, including its single/tuple output convention.
+
+        Raises:
+            TypeError: The public positional argument count is incorrect.
+        """
         if len(arguments) != len(self.public_space.arguments):
             raise TypeError(
                 f"Expected {len(self.public_space.arguments)} arguments, "
@@ -384,12 +446,22 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         return self.target(*arguments, *self.bound_arguments)
 
     def lower(self, options=None) -> LoweredFunction:
+        """Lower the underlying target, retaining its full unbound signature.
+
+        Args:
+            options: Optional immutable backend lowering configuration.
+
+        Returns:
+            The target's cached handle; captures are not applied to this handle.
+        """
         return self.target.lower(options)
 
     def input_shape(self):
+        """Return the public input dimensions, excluding bound captures."""
         return tuple(self.public_space.input_dimensions())
 
     def output_shape(self):
+        """Return the public output dimensions in result order."""
         return tuple(self.public_space.output_dimensions())
 
 
@@ -447,14 +519,21 @@ def function(
         implementation: A Python callable that defines the computation.  It
             will be called once during tracing with symbolic
             :class:`~coker.algebra.graph.Tracer` arguments.
-        backend: Registered plugin name used for concrete evaluation.
+        backend: Registered execution backend name. Built-in integrations are
+            ``"numpy"``, ``"casadi"``, ``"sympy"``, ``"jax"`` and ``"pytorch"``.
             Defaults to ``"numpy"`` independently of the current backend.
+            ``"coker"`` requires a separately installed plugin.
         name: Optional human-readable name attached to the returned
             :class:`Function`.
 
     Returns:
-        A compiled :class:`Function` that can be called with concrete numpy
-        arrays or symbolic tracers.
+        A traced :class:`Function`. A scalar/array implementation result is one
+        output; a list/tuple declares multiple output slots, even with one
+        element. Numeric value types depend on the selected backend.
+
+    Raises:
+        TypeError: An argument declaration has an unsupported type, or the
+            implementation cannot accept the declared positional arguments.
 
     Example:
         >>> import numpy as np
@@ -469,7 +548,13 @@ def function(
         array([1., 0., 0.])
     """
     with TraceContext(backend=backend) as tape:
-        args = [tape.input(v) for v in arguments]
+        args = []
+        for argument in arguments:
+            if argument is not None and not isinstance(
+                argument, (Scalar, VectorSpace, FunctionSpace, Noop)
+            ):
+                raise TypeError(f"Invalid input type {argument}: of {type(argument)}")
+            args.append(tape.input(argument))
         output = implementation(*args)
         result = _normalise_result(output, tape)
         return Function(tape, result, backend, name)

@@ -83,6 +83,14 @@ graph; without tensor inputs, their numerical outputs are converted to NumPy
 values. Shapes and output order come from the signature, not argument names
 passed as keywords.
 
+Handles retain execution plans and referenced callables or constants for their
+lifetime; they are not portable serialised functions. The common interface
+does not guarantee copies, reentrancy or thread safety. Backend-native outputs
+can share storage, so copy a mutable value when a retained snapshot is needed.
+Keep traced constants unchanged rather than assuming mutations update a cached
+lowering. Registry backend instances are shared; changing device or dtype on
+one affects later users of that instance.
+
 Signature records
 ~~~~~~~~~~~~~~~~~
 
@@ -200,7 +208,7 @@ properties, separate from solver options. The documentation recipes use CPU
 tensors; CUDA execution remains experimental and unverified.
 
 .. autoclass:: coker.backends.pytorch.PytorchBackend
-   :members: as_module,import_function,import_module
+   :members: as_module,import_function,import_module,import_as_parameter
 
    ``as_module`` returns an eager module accepting one positional input per
    signature input. Closure constants are not registered parameters or buffers.
@@ -211,6 +219,12 @@ tensors; CUDA execution remains experimental and unverified.
    parameters and buffers; it does not transfer or copy ownership. Both native
    import methods require a ``FunctionSignature``. The callable runs only on
    its owning backend. See :ref:`backend-import-pytorch`.
+
+   ``import_as_parameter(module, input_space, output_space, name=None)`` instead
+   exposes floating module parameters as solver decisions and snapshots buffers.
+   Fitting this declaration does not mutate the caller's module. It describes
+   one scalar/vector tensor input and output; see :doc:`parameters` for fitted
+   callable reconstruction.
 
 .. autoclass:: coker.backends.pytorch.PytorchModule
    :members: forward

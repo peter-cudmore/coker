@@ -49,7 +49,27 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class MonotonePiecewiseLinear(FunctionParameter):
-    """Bounded monotone scalar realization over normalized-domain knots."""
+    """Declare a bounded monotone scalar realisation.
+
+    The function interpolates at the supplied knots and remains constant
+    outside their domain.
+
+    Args:
+        domain_knots: At least two finite strictly increasing domain knots.
+        lower_bound: Finite lower output bound.
+        upper_bound: Finite upper output bound greater than the lower bound.
+        guess: Initial unconstrained basis values, one per knot; defaults to
+            zeros. These are not the final bounded function values.
+        name: Public name used to reconstruct the fitted callable.
+
+    Raises:
+        TypeError: Knots, bounds or guesses have incompatible types.
+        ValueError: Knot order, sizes or finite bound requirements are invalid.
+
+    Example:
+        ``MonotonePiecewiseLinear([0.0, 1.0], 0.0, 2.0)`` declares a
+        nondecreasing scalar function with values between zero and two.
+    """
 
     domain_knots: Sequence[Real]
     lower_bound: Real
@@ -104,12 +124,15 @@ class MonotonePiecewiseLinear(FunctionParameter):
 
     @property
     def size(self) -> int:
+        """Return the number of knots and unconstrained basis decisions."""
         return len(self.domain_knots)
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate that the target has one scalar input and scalar output."""
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return the single dense block of unconstrained basis decisions."""
         return self.parameters
 
     def _values(self, theta: Any) -> list[Any]:
@@ -124,6 +147,7 @@ class MonotonePiecewiseLinear(FunctionParameter):
         return values[: self.size]
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Interpolate bounded knot values derived from the basis block."""
         (basis,) = parameters
         values = self._values(basis)
         result = values[-1]

@@ -59,16 +59,27 @@ def _validation_t_final(t_final: float | BoundedVariable) -> None:
 
 
 class VariationalProblemBuilder:
-    """Build a variational problem from one context-owned symbolic trace.
+    """Build a problem inside one context-owned symbolic trace.
 
     Args:
-        system: Explicit, semi-explicit, or residual dynamic system.
-        t_final: Fixed positive horizon or bounded horizon decision.
-        control: Optional control-variable declarations.
-        parameters: Optional fitted parameter declarations.
-        backend: Name of the backend that will solve the problem.
-        transcription_options: Mesh and backend solve configuration.
-        system_parameter_map: Map solver parameters into system parameters.
+        system: Explicit, semi-explicit or residual dynamic system.
+        t_final: Positive fixed duration, or a ``BoundedVariable`` with a
+            strictly positive lower bound for an optimised duration.
+        control: Ordered scalar control declarations matching system inputs.
+        parameters: Parameter declarations. For a tuple system space, provide
+            one declaration per slot: scalar variables, ``BoundVector`` or
+            ``DenseTensorVariable`` for vectors, and named
+            ``FunctionParameter`` realisations for function spaces.
+        backend: Solver/trace backend; defaults to ``"casadi"``.
+        transcription_options: Mesh and backend-specific solve policy.
+        system_parameter_map: Optional matrix mapping solver parameters to
+            finite system parameters.
+
+    Use ``with`` to trace expressions and call ``build`` before leaving the
+    context. The built problem survives context exit; builder symbolic access
+    does not. Building does not solve. CasADi supports constrained collocation;
+    PyTorch supports fixed-horizon, bound-only ODE fitting without declared
+    controls or algebraic states.
 
     Examples:
         Build a problem inside the context manager::
@@ -188,22 +199,24 @@ class VariationalProblemBuilder:
 
     @property
     def t(self) -> Tracer:
-        """Return the symbolic marker for path-time expressions."""
+        """Return the path-time marker used for running expressions."""
         self._require_open()
         return self._t
 
     @property
     def t_final(self) -> Tracer:
-        """Return the symbolic marker for terminal-time expressions."""
+        """Return the symbolic terminal-time marker, not its numeric value."""
         self._require_open()
         return self._t_final
 
     def state(self, time: Optional[object] = None) -> Tracer:
-        """Return the symbolic differential state at ``time``.
+        """Return differential state at ``t`` (default), ``0``, or ``t_final``.
 
         Args:
-            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
-                :attr:`t`.
+            time: A builder-owned time marker or numeric zero.
+
+        Returns:
+            A symbolic vector with flattened differential-state width.
         """
         self._require_open()
         time = self._t if time is None else time
@@ -211,11 +224,13 @@ class VariationalProblemBuilder:
         return self._state(time if isinstance(time, Tracer) else self._t_initial)
 
     def input(self, time: Optional[object] = None) -> Tracer:
-        """Return the symbolic input at ``time``.
+        """Return control values at an allowed time binding.
 
         Args:
-            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
-                :attr:`t`.
+            time: ``t`` (default), numeric zero, or ``t_final``.
+
+        Returns:
+            A symbolic control value, or ``Noop()`` without declared inputs.
         """
         self._require_open()
         time = self._t if time is None else time
@@ -225,11 +240,13 @@ class VariationalProblemBuilder:
         return self._input
 
     def output(self, time: Optional[object] = None) -> Tracer:
-        """Return the symbolic system output at ``time``.
+        """Return observed output at an allowed time binding.
 
         Args:
-            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
-                :attr:`t`.
+            time: ``t`` (default), numeric zero, or ``t_final``.
+
+        Returns:
+            A symbolic vector of flattened output width, distinct from state.
         """
         self._require_open()
         time = self._t if time is None else time
@@ -238,7 +255,7 @@ class VariationalProblemBuilder:
 
     @property
     def parameters(self) -> Tracer:
-        """Return the symbolic system-parameter vector or tuple."""
+        """Return the specialized finite parameter vector for expressions."""
         self._require_open()
         return self._parameters
 
@@ -265,14 +282,18 @@ class VariationalProblemBuilder:
         self._time_binding(time)
 
     def integrate(self, expression: Tracer) -> Tracer:
-        """Register a scalar integrand and return its accumulated state.
+        """Register a running scalar integral over the physical horizon.
 
         Args:
-            expression: Scalar path expression to integrate over the horizon.
+            expression: Scalar expression from this builder's trace.
 
         Returns:
-            Symbolic quadrature value, which is available in the objective and
-            terminal constraints.
+            A quadrature tracer accumulated from zero over ``[0, t_final]``.
+            This denotes an integration channel, not sampled quadrature.
+
+        Raises:
+            TypeError: The integrand is not a symbolic expression.
+            ValueError: It is nonscalar or belongs to a foreign trace.
         """
         self._require_open()
         if not isinstance(expression, Tracer):
@@ -298,15 +319,23 @@ class VariationalProblemBuilder:
         *,
         subject_to: Optional[Sequence[object]] = None,
     ) -> VariationalProblem:
-        """Build a problem from an objective and symbolic constraints.
+        """Construct a problem without executing a numerical solve.
 
         Args:
-            objective: Scalar :class:`~coker.toolkits.codesign.Minimise`
-                expression.
-            subject_to: Path, initial, or terminal symbolic comparisons.
+            objective: ``Minimise`` wrapping a scalar expression from this
+                trace.
+            subject_to: Symbolic comparisons. Expressions depending on ``t``
+                are path constraints; initial-time expressions are initial
+                constraints; remaining expressions are terminal constraints.
 
         Returns:
-            Backend-neutral variational problem ready for ``get_solver()``.
+            A ``VariationalProblem`` usable after context exit.
+
+        Raises:
+            RuntimeError: The builder context has already closed.
+            TypeError: Objective or constraints have unsupported types.
+            ValueError: Expressions are nonscalar where required or belong
+                to another trace.
         """
         self._require_open()
         if not isinstance(objective, Minimise):

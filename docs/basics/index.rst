@@ -19,4 +19,3 @@ learn the tracing limits before starting the tutorials.
    - Keep the first successful application independent of optional backends.
    - Decide which details belong in tutorials rather than onboarding.
    - Keep the sharp-edges guide explicit about unsupported symbolic conditionals.
-

@@ -28,6 +28,7 @@ Public entry points include:
 - :class:`coker.parameters.function_parameters.DenseLayer`
 - :class:`coker.parameters.function_parameters.RadialBasisFunction`
 
+
 ``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
 from initial-condition and ``xdot`` functions. Declare a parameter space to
 use the system in a :class:`~coker.dynamics.VariationalProblem`.
@@ -67,6 +68,11 @@ sentinel:
    general_output = general(0.25)
    assert general_output.shape == (1,)
    np.testing.assert_allclose(general_output, [np.exp(-0.25)], rtol=1e-5)
+   print(general.backend)
+
+.. testoutput:: dynamics_construction
+
+   numpy
 
 ``DynamicsSpec.initial_conditions(z, u, p)`` returns ``(x0, z0)``. Its dynamics,
 constraints, and quadrature callbacks receive ``(t, x, z, u, p)``; outputs
@@ -144,67 +150,104 @@ weak-form model may supply its residual DAE.
 This CasADi example solves the coupled residual equations
 ``xdot + z - 1 = 0`` and ``x + 2 * xdot - z = 0``:
 
-.. doctest:: residual_dae
+.. testcode:: residual_dae
 
-   >>> import numpy as np
-   >>> from coker import Dimension, Scalar, VectorSpace, function
-   >>> from coker.dynamics import ResidualDynamicalSystem
-   >>> residual = ResidualDynamicalSystem(
-   ...     inputs=None,
-   ...     parameters=None,
-   ...     x0=function(
-   ...         [VectorSpace("z", 1), None, None],
-   ...         lambda z, _u, _p: (np.array([0.0]), z),
-   ...         backend="casadi",
-   ...     ),
-   ...     F=function(
-   ...         [
-   ...             Scalar("t"),
-   ...             VectorSpace("w", 1),
-   ...             VectorSpace("wdot", 1),
-   ...             VectorSpace("z", 1),
-   ...             None,
-   ...             None,
-   ...         ],
-   ...         lambda _t, w, wdot, z, _u, _p: np.array(
-   ...             [wdot[0] + z[0] - 1.0, w[0] + 2.0 * wdot[0] - z[0]]
-   ...         ),
-   ...         backend="casadi",
-   ...     ),
-   ...     y=function(
-   ...         [Scalar("t"), VectorSpace("x", 1), VectorSpace("z", 1),
-   ...          None, None, None],
-   ...         lambda _t, x, _z, _u, _p, _q: x,
-   ...         backend="casadi",
-   ...     ),
-   ...     differential=Dimension(1),
-   ...     algebraic=Dimension(1),
-   ...     quadrature=None,
-   ... )
-   >>> np.testing.assert_allclose(
-   ...     residual(0.25),
-   ...     [1.0 - np.exp(-0.25 / 3.0)],
-   ...     rtol=1e-4,
-   ... )
+   import numpy as np
+   from coker import Dimension, Scalar, VectorSpace, function
+   from coker.dynamics import ResidualDynamicalSystem
+
+   residual = ResidualDynamicalSystem(
+       inputs=None,
+       parameters=None,
+       x0=function(
+           [VectorSpace("z", 1), None, None],
+           lambda z, _u, _p: (np.array([0.0]), z),
+           backend="casadi",
+       ),
+       F=function(
+           [
+               Scalar("t"),
+               VectorSpace("w", 1),
+               VectorSpace("wdot", 1),
+               VectorSpace("z", 1),
+               None,
+               None,
+           ],
+           lambda _t, w, wdot, z, _u, _p: np.array(
+               [wdot[0] + z[0] - 1.0, w[0] + 2.0 * wdot[0] - z[0]]
+           ),
+           backend="casadi",
+       ),
+       y=function(
+           [Scalar("t"), VectorSpace("x", 1), VectorSpace("z", 1),
+            None, None, None],
+           lambda _t, x, _z, _u, _p, _q: x,
+           backend="casadi",
+       ),
+       differential=Dimension(1),
+       algebraic=Dimension(1),
+       quadrature=None,
+   )
+   np.testing.assert_allclose(
+       residual(0.25),
+       [1.0 - np.exp(-0.25 / 3.0)],
+       rtol=1e-4,
+   )
 
 Keep a semi-explicit model's ODE/DAE declaration and convert it when residual
 access is needed:
 
-.. doctest:: residual_dae
+.. testcode:: residual_dae
 
-   >>> from coker.dynamics import create_autonomous_ode, to_residual_dynamical_system
-   >>> explicit = create_autonomous_ode(
-   ...     x0=np.array([1.0]),
-   ...     xdot=lambda x, _parameters: x,
-   ...     backend="numpy",
-   ... )
-   >>> converted = to_residual_dynamical_system(explicit)
-   >>> np.testing.assert_allclose(
-   ...     converted.F(
-   ...         0.0, np.array([2.0]), np.array([2.0]), np.empty((0,)), None, None
-   ...     ),
-   ...     [0.0],
-   ... )
+   from coker.dynamics import create_autonomous_ode, to_residual_dynamical_system
+   explicit = create_autonomous_ode(
+       x0=np.array([1.0]),
+       xdot=lambda x, _parameters: x,
+       backend="numpy",
+   )
+   converted = to_residual_dynamical_system(explicit)
+   np.testing.assert_allclose(
+       converted.F(
+           0.0, np.array([2.0]), np.array([2.0]), np.empty((0,)), None, None
+       ),
+       [0.0],
+   )
+
+The converted residual orders rows as differential-rate equations, quadrature-rate
+equations, then algebraic constraints. Direct ``DynamicalSystem`` evaluation
+rejects quadratures; the converted residual trajectory initialises them at zero.
+This NumPy example integrates a constant rate and returns state plus its integral:
+
+.. testcode:: dynamics_quadratures
+
+   import numpy as np
+   from coker.dynamics import (
+       DynamicsSpec, create_dynamics_from_spec, to_residual_dynamical_system,
+   )
+
+   system = create_dynamics_from_spec(DynamicsSpec(
+       inputs=None,
+       parameters=None,
+       algebraic=None,
+       initial_conditions=lambda z, u, p: (np.array([2.0]), None),
+       dynamics=lambda t, x, z, u, p: 0 * x,
+       constraints=None,
+       outputs=lambda t, x, z, u, p, q: x + q,
+       quadratures=lambda t, x, z, u, p: x,
+   ))
+   try:
+       system(1.0)
+   except NotImplementedError:
+       pass
+   else:
+       raise AssertionError("Evaluate model quadratures through the residual route")
+   converted = to_residual_dynamical_system(system)
+   np.testing.assert_allclose(converted(1.0), [4.0], atol=1e-6)
+   times = np.array([0.0, 0.5, 1.0])
+   sampled = converted(times)
+   assert sampled.shape == (3,)
+   np.testing.assert_allclose(sampled, 2.0 + 2.0 * times, atol=1e-6)
+
 
 Functional problem building
 ---------------------------
@@ -223,7 +266,7 @@ This fixed-horizon path-planning example constrains the input and terminal
 state. It constructs a symbolic problem only: the current CasADi solve path
 cannot lower its control-dependent callbacks.
 
-.. code-block:: python
+.. testcode:: dynamics_path_construction
 
    import numpy as np
    from coker import FunctionSpace, Scalar
@@ -298,6 +341,15 @@ fits its initial value:
    np.testing.assert_allclose(fit.parameters["value"], observed, atol=1e-5)
    np.testing.assert_allclose(fit(0.0), [observed], atol=1e-5)
    np.testing.assert_allclose(fit(1.0), [observed], atol=1e-5)
+   assert fit.cost < 1e-6
+   assert fit.state(0.5).shape == (1,)
+   assert fit.algebraic(0.5) is None
+   assert fit.quadratures(0.5) is None
+   assert fit.control_law(0.5) is None
+   sampled = np.vstack([fit(t) for t in [0.0, 0.5, 1.0]])
+   assert sampled.shape == (3, 1)
+   np.testing.assert_allclose(sampled, observed, atol=1e-5)
+   assert fit.as_raw().shape[0] == 2
 
 The builder classifies comparisons by their time binding:
 
@@ -311,6 +363,11 @@ decision. ``integrate(expr)`` denotes the dynamic quadrature
 ``\int_0^T expr(t) dt``, not numerical sampling in the builder.
 ``state(time)`` exposes the differential state. ``output(time)`` exposes the
 observed output, which may include algebraic or quadrature channels.
+``build`` does not solve, and the constructed problem survives context exit.
+Builder symbolic access is valid only inside its context; allowed time bindings
+are ``t``, numeric zero and ``t_final``. Path constraints hold at transcription
+nodes, not necessarily between them. The model's function backend and the
+problem's solver backend are independent choices.
 
 Function-valued parameters
 --------------------------
@@ -336,7 +393,7 @@ This declaration constructs a fitting problem whose dense layer maps a
 two-component state to a one-component response with an identity activation;
 it does not run a solver:
 
-.. code-block:: python
+.. testcode:: dynamics_dense_layer
 
    import numpy as np
    from coker import FunctionSpace, VectorSpace, function
@@ -383,6 +440,7 @@ are unbounded by default. Pass both ``lower_bound`` and ``upper_bound`` to
 output bounds and monotonicity are enforced by its parameterisation.
 
 
+
 Adaptive CasADi transcription
 -----------------------------
 
@@ -398,7 +456,7 @@ when that limit is reached. Refinement stops when every interval is at or below
 The following fragment configures a problem without invoking the adaptive
 solve:
 
-.. code-block:: python
+.. testcode:: dynamics_adaptive_configuration
 
    from coker.backends.casadi import CasadiVariationalOptions
    from coker.dynamics import TranscriptionOptions, VariationalProblem, create_autonomous_ode
@@ -433,11 +491,11 @@ below that normalised width. ``maximum_degree`` must be no less than
 a single transcription solve.
 
 ``absolute_tolerance`` bounds initial-condition, continuity, and algebraic
-residuals. Set ``segment_defect_tolerance`` and
-``derivative_defect_tolerance`` independently to bound the integrated
-per-segment defects and the collocation derivative defects. Both default to
-``None`` and therefore inherit ``absolute_tolerance``; either may be ``0.0``
-to require an exact NLP equality.
+residuals. ``derivative_defect_tolerance`` independently bounds collocation
+derivative defects; ``None`` inherits ``absolute_tolerance`` and ``0.0`` requires
+an exact NLP equality. ``segment_defect_tolerance`` records the reference
+tolerance for physical post-solve segment-defect diagnostics; it does not add
+NLP constraints.
 
 During an adaptive solve, CasADi retains the model setup and compiles only the
 mesh-dependent NLPs. Each refined mesh interpolates the preceding path and
@@ -466,7 +524,7 @@ input placeholder to the no-input form.
 
 Declare and supply all three parameter slots in the same order:
 
-.. code-block:: python
+.. testcode:: dynamics_parameter_order
 
    import numpy as np
 
@@ -496,11 +554,14 @@ Declare and supply all three parameter slots in the same order:
    gain_curve_value = lambda time: 1.0 + time
 
    trajectory = system(time, offset, bias, gain_curve_value)
+   assert trajectory.shape == (3, 2)
+   expected = time[:, None] * (bias + offset + 1.0) + 0.5 * time[:, None] ** 2
+   np.testing.assert_allclose(trajectory, expected, atol=1e-5)
 
 Continuing with ``spec`` and the parameter values above, a system with a
 declared input takes its input value immediately after time:
 
-.. code-block:: python
+.. testcode:: dynamics_parameter_order
 
    from dataclasses import replace
 
@@ -515,6 +576,9 @@ declared input takes its input value immediately after time:
    )
    input_value = lambda _time: 0.5
    trajectory_with_input = input_system(time, input_value, offset, bias, gain_curve_value)
+   np.testing.assert_allclose(
+       trajectory_with_input, expected + 0.5 * time[:, None], atol=1e-5,
+   )
 
 Values for a declared ``FunctionSpace`` parameter may be Python callables,
 :class:`coker.Function` objects, or
@@ -528,7 +592,7 @@ declares a bounded vector decision block. ``DenseTensorVariable`` declares an
 unbounded dense block with the shape of its initial guess. This fragment
 constructs the symbolic problem without solving it:
 
-.. code-block:: python
+.. testcode:: dynamics_parameter_order
 
    from coker.dynamics import VariationalProblemBuilder
    from coker.parameters.function_parameters import MonotonePiecewiseLinear
@@ -639,6 +703,19 @@ output interpolant on physical intervals. CasADi and PyTorch store ``fit.path``
 on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time
 mapping. CasADi control coefficients and defect estimation also use normalized
 time; do not pass physical times directly to the underlying path.
+
+``solution(t)`` returns observed output, while ``state(t)``, ``algebraic(t)``
+and ``quadratures(t)`` return flat state channels. Absent algebraic, quadrature
+and control channels return ``None``. Stack scalar evaluations to sample a
+trajectory; the accessors do not accept a vector of times. Piecewise controls
+use half-open bins and may not include the terminal boundary.
+``as_raw()`` stores time in row zero and concatenated path knots below, not
+output samples.
+
+Retain ``solver = problem.get_solver()`` for repeated solves.
+``solver.parameters`` lists free scalar fixing names;
+``solver.solve(**fixed_parameters)`` fixes values by name. ``problem()``
+creates a new solver on each call.
 
 By default, PyTorch assembles its returned state and quadrature channels into
 four degree-eight LGR polynomials on normalized subintervals. Integration

@@ -1,6 +1,11 @@
 Dynamics API
 ============
 
+Import the constructors, trajectory objects, composition helpers and variational
+interfaces below from :mod:`coker.dynamics`. Finite decision declarations belong
+to :mod:`coker.parameters`; function-valued realisations belong to
+:mod:`coker.parameters.function_parameters`.
+
 System construction
 -------------------
 
@@ -93,8 +98,35 @@ Call a system as ``system(time, input_trajectory, *parameter_values)``, omitting
 the input argument if none is declared and passing one positional value per
 parameter declaration. ``time`` is an endpoint or a one-dimensional time grid.
 The result is the declared output, not a tuple of internal state channels.
-On a grid, scalar and one-element-vector outputs form a one-dimensional
-series; larger vectors are stacked with one row per requested time.
+For NumPy vector outputs, a grid produces shape ``(n_times,)`` for a declared
+shape of ``(1,)``; larger vectors have shape ``(n_times, n_output)``.
+Genuinely scalar outputs are distinct from one-element vectors: NumPy grid
+evaluation currently raises ``ValueError`` for scalar outputs. Stack
+separate scalar-time evaluations instead:
+
+.. testcode:: numpy_scalar_sampling
+
+   import numpy as np
+   from coker.dynamics import create_autonomous_ode
+
+   scalar_system = create_autonomous_ode(
+       x0=0.0, xdot=lambda x, p: 1.0, backend="numpy",
+   )
+   times = np.array([0.0, 0.5, 1.0])
+   samples = np.stack([scalar_system(float(time)) for time in times])
+   np.testing.assert_allclose(samples, times, rtol=1e-6, atol=1e-8)
+   assert samples.shape == (3,)
+
+Integration starts at time zero. Function-valued parameter slots accept matching
+Coker ``Function`` and ``FittedFunction`` objects or traceable Python callables;
+Coker functions must use the system's backend. Argument-count and function-space
+mismatches raise ``ValueError``; noncallable function values raise ``TypeError``.
+
+``system.backend`` is a read-only property, not a method.
+``get_state_dimensions()`` returns differential, algebraic and quadrature
+dimensions, with ``None`` for absent channels. ``output_as_function_space()``
+describes the public time/input/parameter argument order.
+
 
 ``DynamicalSystem.__call__`` currently rejects systems with quadratures with
 ``NotImplementedError``. Convert them with
@@ -115,6 +147,7 @@ callbacks can be traced:
   For independent residual models, select the IDAS or variational path with
   :class:`~coker.backends.casadi.CasadiResidualSolverOptions`.
 * SymPy provides symbolic lowering and analysis, not numerical integration.
+* JAX does not provide a dynamics integrator or variational solver.
 
 .. autoclass:: coker.dynamics.DynamicalSystem
    :members: backend,get_state_dimensions,output_as_function_space
@@ -350,17 +383,116 @@ Unlike the analysis entry points, lowering raises
 Variational problems
 --------------------
 
-Use ``VariationalProblemBuilder`` to construct symbolic objectives and
-constraints. ``VariationalProblem`` also accepts a loss callback.
-``TranscriptionOptions`` configures discretisation; backend-specific options
-select solver behaviour. See :doc:`../dynamics` for CasADi solve support and
-current lowering limits.
+Use ``VariationalProblemBuilder`` inside ``with`` to construct symbolic objectives
+and comparisons. Allowed time bindings are ``builder.t`` (the default), numeric
+``0`` and ``builder.t_final``. Arbitrary numeric times and foreign tracers raise
+``ValueError``. ``state(time)`` is differential state; ``output(time)`` is the
+observed output, which may include algebraic and quadrature channels.
+``integrate(expr)`` registers a scalar physical-time integral accumulated from
+zero. Path-time comparisons become path constraints, initial-time comparisons
+become initial constraints, and remaining comparisons, including parameter-only
+ones, become terminal constraints. Path constraints are enforced at transcription
+nodes, not certified between them.
+
+``build(Minimise(expr), subject_to=[...])`` constructs a problem without solving.
+The problem remains valid after context exit; builder symbolic access then raises
+``RuntimeError``. A numeric horizon is fixed; a ``BoundedVariable`` horizon is
+optimised and requires a strictly positive lower bound.
+
+Finite scalar/vector system parameters use ordered scalar decisions or an
+explicit ``system_parameter_map`` of shape ``(system_width, declaration_width)``.
+For tuple parameter spaces, supply one declaration per slot: a scalar decision
+or fixed scalar, ``BoundVector``/``DenseTensorVariable`` for a vector, and a named
+``FunctionParameter`` realisation for a function space. Specialisation flattens
+solver decisions while retaining the public parameter layout.
+
+``VariationalProblem`` also accepts a loss callback taking
+``(trajectory, parameters)`` without controls or
+``(trajectory, control_function, parameters)`` with controls.
+``problem()`` creates and solves a new backend solver. Retain
+``solver = problem.get_solver()`` for repeated solves; ``solver.parameters``
+lists free scalar fixing names, and ``solver.solve(**fixed_parameters)`` fixes
+values by name.
+
+CasADi is the default variational backend and supports constrained collocation,
+controls, algebraic states, quadratures and free horizons, subject to the
+callback-lowering limits described in :doc:`../dynamics`. PyTorch supports
+fixed-horizon, bound-only ODE fitting and quadratures, but not declared controls,
+algebraic states or comparison constraints. NumPy, SymPy and JAX do not provide
+variational solvers. The model construction backend and problem solve backend
+are independent choices. ``TranscriptionOptions`` configures discretisation and
+backend-specific solve policy.
 
 
 .. autoclass:: coker.dynamics.VariationalProblemBuilder
-   :members: state,input,output,integrate,build
+   :members: t,t_final,state,input,output,parameters,integrate,build
 
 .. autoclass:: coker.dynamics.TranscriptionOptions
 
 .. autoclass:: coker.dynamics.VariationalProblem
-   :members: get_solver
+   :members: get_solver,horizon_decision,decision_declarations
+   :special-members: __call__
+
+Solutions and diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``VariationalSolution`` accessors take scalar physical time on
+``[0, solution.t_final]``. ``state(t)``, ``algebraic(t)`` and ``quadratures(t)``
+return flat ``(n_x,)``, ``(n_z,)`` and ``(n_q,)`` arrays. Absent algebraic and
+quadrature channels return ``None``. ``control_law(t)`` returns ordered control
+values as a NumPy array or ``None``. Values are assembled without flattening:
+scalar-valued controls give ``(n_controls,)``, while CasADi constant controls
+retain singleton dimensions and give ``(n_controls, 1, 1)``. Do not assume a
+backend-independent flat shape. Stored paths and controls use normalised time;
+public accessors perform the conversion. Piecewise controls have half-open bins
+and may not include the terminal boundary.
+
+``solution(t)`` evaluates observed output, not concatenated state. Stack scalar
+evaluations to sample a trajectory. ``as_raw()`` contains physical knot times in
+row zero and concatenated path knots below, not output samples. ``to_poly()``
+maps path knots through the output callback and returns an output interpolant
+on physical-time intervals.
+
+``parameters`` maps names to floats, shaped NumPy arrays or ``FittedFunction``
+objects. Inspect ``solve_info.success`` and status; failed numerical solves raise
+``coker.toolkits.codesign.SolveFailure`` with solve metadata. Iteration callback
+solutions are candidates, not success certificates.
+``path_constraints(t)`` and ``terminal_constraints()`` return nonnegative
+violations of retained compiled half-space expressions only, not a full
+transcription feasibility certificate. They return empty flat arrays when no
+expressions are retained and reject components with both finite bounds.
+
+``segment_defects`` contains full physical segment residuals with mesh
+provenance. ``segment_defect_tolerance`` records their reference tolerance; it
+does not add NLP constraints. CasADi's optional adaptive diagnostics are
+``adaptive_refinement_rounds`` and ``adaptive_maximum_defect``.
+
+.. autoclass:: coker.dynamics.VariationalSolution
+   :members: state,algebraic,quadratures,control_law,as_raw,to_poly,path_constraints,terminal_constraints
+   :special-members: __call__
+
+.. autoclass:: coker.dynamics.ConstantControlVariable
+
+.. autoclass:: coker.dynamics.PiecewiseConstantVariable
+
+.. autoclass:: coker.dynamics.SpikeVariable
+
+.. autoclass:: coker.dynamics.ConstantControlSolution
+
+.. autoclass:: coker.dynamics.PiecewiseControlSolution
+
+.. autoclass:: coker.dynamics.SpikeControlSolution
+
+Backend extension hooks
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``VariationalIterationCallback`` returns ``True`` to continue.
+``VariationalSolution.from_solver`` constructs results from backend-owned
+normalised interpolation data and numerical parameter vectors.
+``ConstraintSpec`` and ``QuadratureSpec`` are builder/transcription records in
+``coker.dynamics.variational.problem``, not dynamics namespace exports.
+``ControlLaw``, ``ControlVariable``, ``ControlSolution``, ``Solution`` and
+``LossFunction`` are annotation aliases, not model constructors.
+
+.. autoclass:: coker.dynamics.VariationalIterationCallback
+   :members: __call__

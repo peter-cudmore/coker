@@ -88,6 +88,16 @@ class LimbWidget:
 
 
 class KinematicsVisualiser:
+    """Plot numeric articulated-body configurations using optional Matplotlib.
+
+    Args:
+        model: Constructed RigidBody; keep its topology fixed after creation.
+        scale: Frame-axis length in the model's length units.
+
+    Import from ``coker.toolkits.kinematics.visualiser``, not the package root.
+    Construction creates a Matplotlib figure and three-dimensional axes.
+    """
+
     def __init__(self, model: RigidBody, scale=0.25):
         self.model = model
         self.figure = plt.figure()
@@ -133,6 +143,7 @@ class KinematicsVisualiser:
         ax.set_zlabel("z")
 
     def update_values(self, angles):
+        """Update plot artists using numeric coordinates of shape ``(n,)``."""
         joint_locations = self.model.joint_transforms(angles)
         fk = self.model.forward_kinematics(angles)
 
@@ -149,6 +160,7 @@ class KinematicsVisualiser:
             mass.set_transform(joint_locations)
 
     def get_artists(self):
+        """Return grouped Matplotlib artists for the current model."""
         return (
             [j.get_artists() for j in self.joints]
             + [e.get_artists() for e in self.end_effectors]
@@ -157,6 +169,7 @@ class KinematicsVisualiser:
         )
 
     def set_view(self, x_lim=None, y_lim=None, z_lim=None):
+        """Set optional ``(lower, upper)`` limits for each world-frame axis."""
         if x_lim is not None:
             self.ax.set_xlim(*x_lim)
         if y_lim is not None:
@@ -166,6 +179,17 @@ class KinematicsVisualiser:
         self.ax.set_aspect("equal")
 
     def animate_sweep(self, angles_over_time, loop=False, interval=100):
+        """Show an animation and return its Matplotlib FuncAnimation.
+
+        Args:
+            angles_over_time: Numeric sequence of shape ``(frames, n)``.
+            loop: Whether to repeat the animation.
+            interval: Delay between frames in milliseconds, default 100.
+
+        Returns:
+            FuncAnimation: Keep a reference while the animation is displayed.
+        """
+
         def update(frame):
             angles = angles_over_time[frame]
             self.update_values(angles)

@@ -18,7 +18,22 @@ from .base import FunctionParameter, _concrete_parameter_space
 
 
 class ClosureParameter(FunctionParameter):
-    """Realize a function parameter by binding decisions to a function."""
+    """Declare a function whose leading inputs become solver decisions.
+
+    Args:
+        function: Coker function with concrete blocks before public inputs.
+            Its name becomes the fitted-function name.
+        parameters: Nonempty scalar/dense decision declarations, matching the
+            leading input shapes in order.
+
+    Raises:
+        TypeError: The function or concrete declaration types are unsupported.
+        ValueError: No concrete parameters are supplied.
+
+    Example:
+        Use ``ClosureParameter(f, [UnboundedVariable("gain", 1.0)])`` when
+        ``f`` takes a scalar gain followed by the public function argument.
+    """
 
     def __init__(
         self, function: Function, parameters: Sequence[ParameterVariable]
@@ -45,6 +60,7 @@ class ClosureParameter(FunctionParameter):
         self.name = function.name
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Return the target after checking ordered input and output shapes."""
         if not isinstance(target, FunctionSpace):
             raise TypeError("target must be a FunctionSpace")
         expected_inputs = FunctionSpace(
@@ -68,9 +84,11 @@ class ClosureParameter(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return the leading concrete decision declarations in input order."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Evaluate the function with concrete blocks before its public input."""
         return self.function(*parameters, argument)
 
     @staticmethod
@@ -82,7 +100,23 @@ class ClosureParameter(FunctionParameter):
         name: str | None = None,
         backend: str = "numpy",
     ) -> ClosureParameter:
-        """Trace an implementation whose concrete blocks precede its inputs."""
+        """Trace an implementation whose concrete blocks precede its inputs.
+
+        Args:
+            implementation: Python callable accepting decision blocks first.
+            parameters: Ordered scalar/dense decision declarations.
+            inputs: Public input spaces following the concrete blocks.
+            name: Function name; defaults to the implementation name prefixed
+                by ``"bound_"``.
+            backend: Execution backend, defaulting to ``"numpy"``.
+
+        Returns:
+            A closure declaration wrapping the traced Coker function.
+
+        Example:
+            Bind ``lambda gain, x: gain * x`` with one scalar gain declaration
+            and ``inputs=[Scalar("x")]``.
+        """
         function_name = name or f"bound_{implementation.__name__}"
         return ClosureParameter(
             function(

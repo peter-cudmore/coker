@@ -104,6 +104,27 @@ and calls of fitted multi-input or fully bound functions also depend on the
 backend adapter; the declaration's shape validation alone does not establish
 backend support.
 
+Bind a slope input while retaining time as the public argument. This example
+uses only the base NumPy dependency; solving and fitted-callable inspection are
+covered in :doc:`optimisation`.
+
+.. testcode:: bound_parameter_contract
+
+   from coker import FunctionSpace, Scalar, function
+   from coker.parameters import UnboundedVariable
+   from coker.parameters.function_parameters import BoundFunctionParameter
+
+   affine = function(
+       [Scalar("time"), Scalar("slope")],
+       lambda time, slope: slope * time,
+   )
+   declaration = BoundFunctionParameter(
+       affine, {1: UnboundedVariable("slope", 2.)}, name="response",
+   )
+   target = FunctionSpace("response", [Scalar("time")], [Scalar("value")])
+   declaration.validate_target(target)
+   assert declaration.evaluate((3.,), 2.) == 6.
+
 Dense layers
 ~~~~~~~~~~~~
 
@@ -210,6 +231,8 @@ outputs to NumPy, guarantee a scalar return type, or add shape validation.
 ``input_shape()`` and ``output_shape()`` return tuples of dimensions from
 ``space``, excluding private concrete blocks. A fitted function is callable,
 but does not itself provide ``Function.lower()`` or other compilation methods.
+
+.. _custom-parameter-declarations:
 
 Custom declarations
 -------------------

@@ -141,7 +141,6 @@ jobs:
       - name: Run perf suite
         run: uv run pytest -m perf
 
-
   linter-name:
     name: runner / black and flake8
     runs-on: ubuntu-latest

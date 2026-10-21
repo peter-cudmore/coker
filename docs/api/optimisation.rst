@@ -5,6 +5,10 @@ Import ordinary optimisation builders, objective and constraint helpers, and
 solve results from ``coker.toolkits.codesign``. See :doc:`../toolkits` for
 worked construction examples and :doc:`dynamics` for variational problems.
 
+``MathematicalProgram`` is included in the toolkit's explicit public exports.
+Solver implementation classes, private capture records and
+``solve_info_from_*`` normalisation helpers are not application entry points.
+
 .. Author notes
 
    - Audience: users who can construct symbolic functions and need exact
@@ -28,9 +32,21 @@ Set ``builder.objective`` to ``Minimise(scalar_expression)``,
 ``builder.constraints`` to a list of comparisons or ``bounded`` constraints,
 and ``builder.outputs`` to a non-empty list of symbolic expressions. All
 expressions must belong to the builder's graph. ``build(backend=None)`` returns
-a :class:`~coker.toolkits.codesign.MathematicalProgram`; a missing ``Minimise``
-objective or empty output list raises ``AssertionError``. The builder's
-``input_shape`` and ``output_shape`` are tuple properties, not methods.
+a :class:`~coker.toolkits.codesign.MathematicalProgram`. Missing objective or
+outputs raise ``ValueError``; an objective not wrapped in ``Minimise`` raises
+``TypeError``; a builder without a tape raises ``RuntimeError``. These are
+deliberate exceptions, not assertions or a general validation pass. The
+builder's ``input_shape`` and ``output_shape`` are tuple properties, not methods.
+
+The builder creates its tape immediately. Its convenience context neither
+solves nor closes it. ``build()`` constructs the solver without consuming the
+builder; later builds use its current configuration. Replacing configuration
+fields is not a supported way to reconfigure an already-built solver. Structural
+graph changes are different: NumPy programs retain the builder's mutable tape
+but snapshot input bindings. Adding decisions with ``new_variable`` or
+``new_function_parameter`` extends that shared tape and can invalidate an
+existing NumPy program. Use a separate builder when existing programs must
+remain usable.
 
 ``new_function_parameter(target, declaration)`` returns a symbolic callable
 whose concrete decisions, guesses and bounds come from the declaration.
@@ -50,8 +66,9 @@ decision declaration order. A sequence of the wrong length raises
 omitted, without changing the current selection. NumPy uses SciPy's
 ``trust-constr`` solver; CasADi uses IPOPT; PyTorch supplies its own optimiser.
 The optional backends require their corresponding extras. JAX and SymPy do not
-provide ordinary optimisation solvers. Backend-specific restrictions and option
-types are described in :doc:`backends`.
+provide ordinary optimisation solvers; unsupported-backend failures raise
+backend-specific exceptions rather than a uniform ``NotImplementedError``.
+Backend-specific restrictions and option types are described in :doc:`backends`.
 
 Objectives and constraints
 --------------------------
@@ -103,8 +120,9 @@ Program calls and lowering
 A numeric call ``program(*arguments)`` solves for the supplied runtime inputs
 and returns ``(objective, *outputs)``. The objective is a Python ``float``;
 requested outputs are NumPy arrays reshaped to their declared dimensions,
-including zero-dimensional arrays for scalar outputs. The public result never
-includes private parameter captures.
+including shape ``(1,)`` for scalar outputs, following
+``Dimension.scalar().shape``. The public result never includes private
+parameter captures.
 
 ``input_shape()`` describes runtime inputs in declaration order.
 ``output_shape()`` describes only requested outputs. The ``result_shape``
@@ -120,6 +138,10 @@ values. Their numeric representation follows the solver backend; the public
 output tuple remains NumPy-based. ``program.solve_info`` holds the most recent
 backend solve status and is initially ``None``. A failed solve does not replace
 the previously reconstructed parameters.
+
+The returned arrays and mutable parameter mapping have no copy/isolation
+guarantee. Copy values when retaining a snapshot or mutating results. Metadata
+describes the latest call, not a per-call history or concurrent-solve interface.
 
 ``program.lower()`` returns a solver-pinned :class:`~coker.Function`, not a
 ``LoweredFunction``. Calling this function runs the solve and returns only the
@@ -140,11 +162,13 @@ ODE ``SolverParameters``. ``warm_start`` defaults to ``False`` and must be a
 ``bool``; another type raises ``TypeError``. Pass supported backend-specific
 subclasses through ``ProblemBuilder(solver_options=...)``. The base is not a
 portable configuration accepted by every solver: NumPy rejects all non-``None``
-options, while CasADi and PyTorch require their own option types. Warm-start
-behaviour is defined by the selected solver; see :doc:`backends`.
+options; supplied CasADi and PyTorch settings must use their own option types.
+CasADi copies its flat ``optimiser_options`` mapping at construction and
+reuses its original initial guess on later calls; ``warm_start`` does not
+enable codesign warm starts there. PyTorch supports its own warm-start state.
+See :doc:`backends` for algorithm, device and dtype restrictions.
 
 .. autoclass:: coker.toolkits.codesign.SolveInfo
-   :members:
 
 The immutable status records ``backend``, ``solver``, ``success`` and the
 backend's ``return_status`` string. ``unified_return_status`` and
@@ -158,6 +182,11 @@ An unsuccessful solve raises ``SolveFailure`` with the status available as
 is refreshed from the solver even when its call raises. Invalid inputs, backend
 configuration errors and native solver exceptions are not necessarily wrapped
 in ``SolveFailure``.
+The parameter mapping retains the preceding successful solution, or stays
+empty if no solve has succeeded; it is not a solution to the failed call.
+An argument or native-backend error may leave an older status intact. Direct
+callable wrappers have no solver metadata. Solver success does not establish
+global optimality.
 
 Solver extension interface
 --------------------------

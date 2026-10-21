@@ -5,6 +5,15 @@ from coker.toolkits.spatial.types import Scalar, Vec3
 
 
 def quaternion_mul(q, p):
+    """Return the Hamilton product of two UnitQuaternion values.
+
+    Args:
+        q: Left quaternion.
+        p: Right quaternion.
+
+    Returns:
+        UnitQuaternion: Product applying ``p`` before ``q``.
+    """
 
     qp_0 = q.q_0 * p.q_0 - np.dot(q.v, p.v)
     qp_v = q.q_0 * p.v + p.q_0 * q.v + np.cross(q.v, p.v)
@@ -13,6 +22,17 @@ def quaternion_mul(q, p):
 
 
 class UnitQuaternion:
+    """Represent a scalar-first unit quaternion without enforcing unit norm.
+
+    Args:
+        q_0: Numeric or traceable scalar component.
+        v: Numeric or traceable vector component of shape ``(3,)``.
+
+    Use ``from_axis_angle`` for rotations in radians. Direct construction
+    assumes ``q_0**2 + dot(v, v) == 1``; inverse is conjugation under that
+    assumption.
+    """
+
     __slots__ = ["q_0", "v"]
 
     def __str__(self):
@@ -31,6 +51,7 @@ class UnitQuaternion:
 
     @staticmethod
     def from_axis_angle(axis: Vec3, angle: Scalar):
+        """Construct from a nonzero ``(3,)`` axis and an angle in radians."""
         try:
             if not axis.nonzero():
                 return UnitQuaternion(1, np.array([0, 0, 0]))
@@ -65,9 +86,20 @@ class UnitQuaternion:
         return quaternion_mul(p, self)
 
     def inverse(self):
+        """Return the conjugate, equal to the inverse for unit quaternions."""
         return UnitQuaternion(self.q_0, -self.v)
 
     def conjugate(self, other):
+        """Rotate a vector or conjugate a quaternion.
+
+        Args:
+            other: Numeric or traceable vector of shape ``(3,)``, or a
+                UnitQuaternion. Column vectors are not supported.
+
+        Returns:
+            Array or UnitQuaternion: ``self * other * self.inverse()``.
+                Vector inputs produce a flat ``(3,)`` array.
+        """
         if isinstance(other, UnitQuaternion):
             return self * other * self.inverse()
         elif isinstance(other, Vec3):
@@ -85,7 +117,9 @@ class UnitQuaternion:
 
     @staticmethod
     def from_elements(q_0, q_1, q_2, q_3):
+        """Construct from scalar-first components ``(w, x, y, z)``."""
         return UnitQuaternion(q_0, np.array([q_1, q_2, q_3]))
 
     def to_elements(self):
+        """Return the four scalar-first components as a list."""
         return [self.q_0, self.v[0], self.v[1], self.v[2]]

@@ -51,6 +51,11 @@ autodoc_default_options = {
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
 
+doctest_global_setup = """
+import os
+os.environ.setdefault("MPLBACKEND", "Agg")
+"""
+
 # intersphinx — link to numpy/scipy/python docs
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

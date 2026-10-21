@@ -20,6 +20,8 @@
 - Symbolic local accessibility, observability, and structural identifiability analysis for supported ODE and semi-explicit index-one DAE systems.
 - Literal scalar and vector system parameters can be bound without solver decisions.
 - CasADi transcriptions remove exact duplicate constraint rows and reject conflicting duplicates before IPOPT.
+- Spatial/robotics and component-modelling API references covering frames, adjoints, plotting, discovery, and released simulation limitations.
+- Public callable and solver-result ownership/lifecycle contracts with executable construction, fitting, and result-inspection examples.
 - Inline `uv` dependencies for the double-pendulum visualisation script, using the local Coker checkout and Matplotlib without adding a package extra.
 - Configurable PyTorch variational trajectory degree and interval count through `PytorchVariationalSolverOptions`, defaulting to degree eight and four intervals.
 
@@ -39,6 +41,8 @@
 - Exclude CasADi 3.8.x from the optional dependency because the failure reproduces with a CasADi-only replay, indicating a regression in CasADi or its bundled solver stack.
 
 ### Fixed
+- Invalid function argument counts and declaration types now raise `TypeError` rather than assertions.
+- Incomplete `ProblemBuilder.build()` configuration now raises deliberate `ValueError`, `TypeError`, or `RuntimeError`, including when Python assertions are disabled.
 - Missing optional CasADi, JAX, and PyTorch backend dependencies now report the requested backend and installation command, including JAX's Python requirement, while preserving the original exception cause and broken-plugin diagnostics.
 - SymPy numerical division returns `NaN` for `ZeroDivisionError`, allowing conditionals to select a valid branch instead of failing on inactive division by zero.
 - Preserve node-major value layout when evaluating multidimensional polynomial knot derivatives and coupled residual diagnostics.

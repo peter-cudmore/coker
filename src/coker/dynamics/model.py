@@ -22,29 +22,42 @@ DynamicsParameters: TypeAlias = (
 
 @dataclass
 class DynamicsSpec:
-    """Describe a semi-explicit dynamic system before it is traced.
+    """Describe callbacks for an explicit or semi-explicit dynamic system.
+
+    Trace with :func:`~coker.dynamics.create_dynamics_from_spec`. Missing
+    inputs, constraints and quadratures accept ``None`` or ``Noop()``;
+    absent algebraic and parameter spaces use ``None``.
 
     Args:
-        inputs: Optional input trajectory declaration; ``None`` means no input.
-        parameters: Optional scalar, vector, or function parameter declarations.
-        algebraic: Optional algebraic-state declaration.
-        initial_conditions: Callable returning ``(x0, z0)``.
-        dynamics: Callable computing ``dxdt(t, x, z, u, p)``.
-        constraints: Callable computing ``g(t, x, z, u, p)``.
-        outputs: Callable computing ``y(t, x, z, u, p, q)``.
-        quadratures: Callable computing ``dqdt(t, x, z, u, p)``.
+        inputs: A time-to-control ``FunctionSpace``, or no input.
+        parameters: One scalar/vector/function declaration, a positional
+            tuple or list of declarations, or ``None``. Tuple declarations
+            reach callbacks as one final ``p`` tuple; a single declaration
+            is passed directly.
+        algebraic: Algebraic variable space, or ``None``.
+        initial_conditions: Callback ``(z, u, p) -> (x0, z0)``. Its first
+            argument is the algebraic slot, not time. Return ``None`` for
+            absent algebraic initial values.
+        dynamics: Callback ``(t, x, z, u, p) -> dxdt``.
+        constraints: Callback ``(t, x, z, u, p) -> g`` for ``g = 0``.
+        outputs: Callback ``(t, x, z, u, p, q) -> y``.
+        quadratures: Callback ``(t, x, z, u, p) -> dqdt``. Convert to a
+            residual system for direct evaluation of this channel.
+
+    Input callbacks receive the control function, not its value; evaluate
+    ``u(t)`` where needed. State and derivative shapes must match.
 
     Examples:
-        Build a system with :func:`create_dynamics_from_spec`::
+        Trace a specification after defining its callbacks::
 
-            spec = DynamicsSpec(...)
+            system = create_dynamics_from_spec(spec, backend="numpy")
     """
 
     inputs: FunctionSpace | Noop | None
     parameters: DynamicsParameters
     algebraic: Optional[VectorSpace]
     initial_conditions: Callable
-    """[x, z] = initial_conditions(z, u, p)."""
+    """``(x0, z0) = initial_conditions(z, u, p)``."""
 
     dynamics: Callable
     """dx = dynamics(t, x, z, u, p)"""
@@ -103,23 +116,27 @@ def _output_function_space(
 
 @dataclass
 class DynamicalSystem:
-    """Define an explicit or semi-explicit system and its output.
+    """Hold traced dynamics, initial conditions and observed outputs.
+
+    Prefer the constructors in :mod:`coker.dynamics` over assembling
+    component functions manually. Construction and numerical integration
+    are separate: the function backend selects direct evaluation, while a
+    variational problem independently selects its solver backend.
 
     Args:
-        inputs: Optional input trajectory declaration; ``None`` means no input.
-        parameters: Optional model parameter declarations.
-        x0: Initial-condition function.
-        dxdt: Differential-rate function.
-        g: Optional algebraic residual function.
-        dqdt: Optional quadrature-rate function.
-        y: Output function.
-        solver_parameters: Backend-specific integration settings.
+        inputs: Control function space, or ``None``/``Noop()`` when absent.
+        parameters: Ordered parameter declarations, or ``None``.
+        x0: Function ``(z, u, *p) -> (x0, z0)``.
+        dxdt: Function ``(t, x, z, u, *p) -> dxdt``.
+        g: Algebraic residual function, or ``None``/``Noop()``.
+        dqdt: Quadrature derivative function, or ``None``/``Noop()``.
+        y: Observed output function ``(t, x, z, u, *p, q) -> y``.
+        solver_parameters: Backend-specific direct integration settings.
 
     Examples:
-        Create a simple explicit system with
-        :func:`~coker.dynamics.create_autonomous_ode`::
+        Create an explicit system with the autonomous constructor::
 
-            system = create_autonomous_ode(x0, xdot)
+            system = create_autonomous_ode([1.0], lambda x, p: -x)
     """
 
     inputs: FunctionSpace | Noop | None
@@ -146,17 +163,47 @@ class DynamicalSystem:
         return _output_function_space(self.y, self.inputs, self.parameters)
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
-        """Return the differential, algebraic, and quadrature dimensions."""
+        """Return differential, algebraic and quadrature dimensions.
+
+        Returns:
+            An ``(x, z, q)`` tuple of dimensions; absent channels are ``None``.
+        """
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]
 
     @property
     def backend(self) -> str:
-        """Return the backend used by the differential-rate callback."""
+        """Return the backend name of the differential-rate function."""
         return self.dxdt.backend
 
     def __call__(self, *args):
-        """Evaluate a non-quadrature trajectory at time or a time grid."""
+        """Integrate from time zero and return the declared output.
+
+        Args:
+            *args: ``(time, *parameters)`` without inputs, or
+                ``(time, input_function, *parameters)`` with inputs.
+                ``time`` is a numeric endpoint or a one-dimensional NumPy
+                sampling array. Parameters follow declaration order;
+                function-valued slots accept compatible Coker functions,
+                fitted functions or traceable Python callables.
+
+        Returns:
+            The output at an endpoint in its declared shape. With NumPy,
+            sampled vector outputs have shape ``(n_times,)`` for a declared
+            shape of ``(1,)``, or ``(n_times, n_output)`` for larger vectors.
+            NumPy grid evaluation of genuinely scalar outputs currently raises
+            ValueError; stack scalar-time evaluations with ``numpy.stack``
+            instead.
+
+        Raises:
+            ValueError: Argument count or function parameter shape/backend
+                does not match the declaration, or NumPy grid sampling is
+                requested for a scalar output.
+            TypeError: A function-valued parameter is not callable.
+            NotImplementedError: Quadratures are present, or the selected
+                backend does not support the required integration. Convert
+                quadrature systems with ``to_residual_dynamical_system``.
+        """
         if not isinstance(self.dqdt, Noop):
             raise NotImplementedError
         from coker.dynamics.residual import to_residual_dynamical_system

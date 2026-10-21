@@ -20,7 +20,17 @@ class ParameterMixin(abc.ABC):
 
 @dataclass
 class BoundedVariable(ParameterMixin):
-    """Declare one scalar decision with finite lower and upper bounds."""
+    """Declare one scalar decision with lower and upper bounds.
+
+    Args:
+        name: Solver parameter name.
+        lower_bound: Inclusive lower bound; may be negative infinity.
+        upper_bound: Inclusive upper bound; may be positive infinity.
+        guess: Initial scalar value; choose a feasible value within the bounds.
+
+    Note:
+        Construction stores these values without validating bounds or guesses.
+    """
 
     name: str
     lower_bound: float
@@ -28,17 +38,24 @@ class BoundedVariable(ParameterMixin):
     guess: float = 0
 
     def degrees_of_freedom(self, *interval):
+        """Return one scalar decision, independently of the interval."""
         return 1
 
 
 @dataclass
 class UnboundedVariable(ParameterMixin):
-    """Scalar decision variable with a finite initial guess and no bounds."""
+    """Declare a scalar decision without bounds.
+
+    Args:
+        name: Solver parameter name.
+        guess: Initial scalar value, stored without constructor validation.
+    """
 
     name: str
     guess: float = 0
 
     def degrees_of_freedom(self, *interval):
+        """Return one scalar decision, independently of the interval."""
         return 1
 
     @property

@@ -35,7 +35,15 @@ class _UnsupportedShapeError(UnsupportedSystemError):
 
 @dataclass(frozen=True)
 class SymbolicSystem:
-    """Finite symbolic ODE data in the order declared by a Coker model."""
+    """Expose finite symbolic ODE data in declared component order.
+
+    Attributes:
+        state: Differential-state SymPy symbols.
+        parameters: Unknown finite parameter symbols.
+        controls: Known control-value symbols.
+        dynamics: Differential rates corresponding to ``state``.
+        outputs: Observed scalar output expressions.
+    """
 
     state: tuple[sp.Symbol, ...]
     parameters: tuple[sp.Symbol, ...]
@@ -45,7 +53,18 @@ class SymbolicSystem:
 
 
 def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
-    """Validate and lower a supported autonomous ODE."""
+    """Validate and lower a supported autonomous ODE.
+
+    Args:
+        system: Traced dynamics or an already symbolic ODE.
+
+    Returns:
+        A ``SymbolicSystem`` in declared component order.
+
+    Raises:
+        UnsupportedSystemError: Shapes, operations, time dependence, or
+            quadrature/function-valued channels lie outside analysis scope.
+    """
     if isinstance(system, SymbolicSystem):
         return system
     _validate_system(system)

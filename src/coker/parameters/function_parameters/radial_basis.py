@@ -67,7 +67,26 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class RadialBasisFunction(FunctionParameter):
-    """Fixed-width scalar Gaussian basis expansion with fitted coefficients."""
+    """Declare a fixed-width scalar Gaussian expansion with a constant term.
+
+    Args:
+        centers: Nonempty finite scalar Gaussian centres.
+        width: Finite positive Gaussian width in the domain's units.
+        lower_bound: Optional inclusive coefficient lower bound.
+        upper_bound: Optional inclusive coefficient upper bound; set both
+            bounds or neither. These bound coefficients, not function values.
+        guess: Finite initial coefficients, one per centre followed by one
+            constant term; defaults to zeros.
+        name: Public name used to reconstruct the fitted callable.
+
+    Raises:
+        TypeError: Numeric declarations have incompatible types.
+        ValueError: Centres, width, bounds or initial coefficients are invalid.
+
+    Example:
+        ``RadialBasisFunction([0.0], 1.0, guess=[2.0, 0.5])`` declares
+        ``2 * exp(-0.5 * x**2) + 0.5`` as its initial function.
+    """
 
     centers: Sequence[Real]
     width: Real
@@ -119,12 +138,15 @@ class RadialBasisFunction(FunctionParameter):
         object.__setattr__(self, "parameters", (parameter,))
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate that the target has one scalar input and scalar output."""
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return the coefficient block, including its trailing constant."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Evaluate Gaussian terms and the trailing constant coefficient."""
         (basis,) = parameters
         value = basis[len(self.centers)]
         for index, center in enumerate(self.centers):

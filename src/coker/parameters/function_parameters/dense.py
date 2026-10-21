@@ -103,7 +103,27 @@ def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
 
 @dataclass(frozen=True)
 class DenseLayer(FunctionParameter):
-    """Affine scalar or vector layer followed by a Coker activation."""
+    """Declare an affine layer followed by a traceable Coker activation.
+
+    Args:
+        input_size: Positive number of affine input components. A scalar
+            activation requires one.
+        activation: Single-input/output Coker activation function. For vector
+            activations, its input width determines the affine output width;
+            its output width determines the layer's final output width.
+        name: Public fitted-function name and concrete decision-name prefix.
+
+    Attributes:
+        parameters: Weight and bias declarations in reconstruction order.
+
+    Raises:
+        TypeError: The activation is not a supported Coker callable.
+        ValueError: Widths or the activation signature are incompatible.
+
+    Example:
+        Declare ``DenseLayer(1, function([Scalar("x")], np.tanh))`` for a
+        scalar affine transformation followed by a hyperbolic tangent.
+    """
 
     input_size: int
     activation: Function | BoundCallable
@@ -155,13 +175,24 @@ class DenseLayer(FunctionParameter):
 
     @property
     def hidden_size(self) -> int:
+        """Return the affine output width for a vector activation.
+
+        Raises:
+            ValueError: The activation has a scalar rather than vector input.
+        """
         return _activation_widths(self.activation)[0]
 
     @property
     def output_size(self) -> int:
+        """Return the vector activation's output width.
+
+        Raises:
+            ValueError: The activation has a scalar rather than vector input.
+        """
         return _activation_widths(self.activation)[1]
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate a scalar target or the layer's vector input/output widths."""
         if _is_scalar_activation(self.activation):
             return _validate_scalar_target(target)
 
@@ -182,9 +213,11 @@ class DenseLayer(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return weight and bias decisions in reconstruction order."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Apply weight and bias blocks, then evaluate the activation."""
         weight, bias = parameters
         if _is_scalar_activation(self.activation):
             return self.activation(weight * argument + bias)

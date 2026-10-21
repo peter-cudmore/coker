@@ -18,7 +18,12 @@ OutputShape: TypeAlias = Dimension | Scalar | VectorSpace | FunctionSpace | None
 
 @dataclass(frozen=True)
 class FunctionInputSpec:
-    """One canonical input, preserving its declaration name and space."""
+    """Declare one named argument without discarding callable-space metadata.
+
+    Args:
+        name: Argument name in the native/imported signature.
+        space: Named scalar, vector/tensor, or function argument space.
+    """
 
     name: str
     space: InputSpace
@@ -26,7 +31,13 @@ class FunctionInputSpec:
 
 @dataclass(frozen=True)
 class FunctionOutputSpec:
-    """One canonical output, preserving its declaration order and shape."""
+    """Declare one ordered output slot.
+
+    Args:
+        name: Output name in the native/imported signature.
+        shape: Numeric dimension or callable space. ``None`` retains an absent
+            output slot rather than removing it from the public signature.
+    """
 
     name: str
     shape: OutputShape
@@ -34,7 +45,12 @@ class FunctionOutputSpec:
 
 @dataclass(frozen=True)
 class FunctionSignature:
-    """Backend-independent ordered input and output declaration."""
+    """Declare backend-independent ordered arguments and results.
+
+    Args:
+        inputs: Input declarations in positional call order.
+        outputs: Output declarations in result order.
+    """
 
     inputs: tuple[FunctionInputSpec, ...]
     outputs: tuple[FunctionOutputSpec, ...]
@@ -42,14 +58,25 @@ class FunctionSignature:
 
 @dataclass(frozen=True)
 class LoweringOptions:
-    """Immutable options selecting a backend lowering configuration."""
+    """Select an immutable lowering configuration and cache key.
+
+    Args:
+        backend: Registry name overriding the function's execution backend.
+            ``None`` retains that backend; it does not select an ambient one.
+    """
 
     backend: str | None = None
 
 
 @dataclass(frozen=True)
 class LoweringCapabilities:
-    """Execution semantics exposed by a lowered handle."""
+    """Describe execution support, not ownership or thread-safety guarantees.
+
+    Args:
+        eager_execution: Support concrete numeric evaluation.
+        symbolic_execution: Support the backend's native symbolic values.
+        autograd: Preserve the backend's automatic differentiation graph.
+    """
 
     eager_execution: bool = False
     symbolic_execution: bool = False
@@ -72,11 +99,19 @@ class LoweredFunction(ABC):
     @property
     @abstractmethod
     def capabilities(self) -> LoweringCapabilities:
-        """Execution, lifecycle, and sharing guarantees for this handle."""
+        """Return eager, symbolic and autograd execution support flags."""
 
     @abstractmethod
     def execute(self, inputs: Sequence[Any]) -> tuple[Any | None, ...]:
-        """Execute ordered inputs and return ordered outputs as a tuple."""
+        """Execute the packed positional ABI.
+
+        Args:
+            inputs: One backend-compatible value per signature input.
+
+        Returns:
+            A tuple in signature output order, retaining absent ``None`` slots.
+            Conversion, aliasing and differentiability depend on the backend.
+        """
 
     def restore_public_outputs(
         self, outputs: Sequence[Any | None]

@@ -7,22 +7,24 @@ programming through the symbolic tracing and backend model.
 Spatial algebra
 ---------------
 
-:mod:`coker.toolkits.spatial` provides rigid-motion primitives:
+Import rigid-motion values from ``coker.toolkits.spatial``. An ``Isometry3``
+maps child-frame coordinates into the parent frame, and ``a @ b`` applies
+``b`` first. Angles are radians; vector inputs normally have shape ``(3,)``.
+The capitalised ``SE3Adjoint``/``SE3CoAdjoint`` act on finite transforms;
+lowercase ``se3*`` operators take screws and are not interchangeable.
 
-- :class:`coker.toolkits.spatial.Rotation3`
-- :class:`coker.toolkits.spatial.Isometry3`
-- :class:`coker.toolkits.spatial.Screw`
-- adjoint and Lie-algebra helpers such as ``hat`` and ``se3_bracket``
-
+See :doc:`api/robotics` for value/member contracts, a spatial composition example,
+and limitations of exported helpers.
 
 Rigid-body kinematics and dynamics
 ----------------------------------
 
 :mod:`coker.toolkits.kinematics` provides
 :class:`~coker.toolkits.kinematics.RigidBody`, joint types, and inertia
-declarations for articulated models. Supported joints include welded,
-revolute, prismatic, and free joints. Use the model to calculate forward
-kinematics, Jacobians, energy, mass matrices, and inverse dynamics.
+declarations for articulated models. The exported joint types are ``Weld``,
+``Revolute``, ``Planar`` and ``Free``. A translational screw supplied to
+``Revolute`` defines a one-coordinate prismatic joint. Use the model to calculate
+forward kinematics, Jacobians, energy, mass matrices, and inverse dynamics.
 
 Define links and effectors, then wrap the required calculation in a Coker
 function:
@@ -67,6 +69,18 @@ To visualise your own model, install Matplotlib and import
 ``KinematicsVisualiser`` from ``coker.toolkits.kinematics.visualiser``. The main
 kinematics module does not import Matplotlib.
 
+System modelling
+----------------
+
+The system-modelling toolkit supports component metadata and port wiring, not
+an executable simulation/compiler pipeline. Import ``BlockContainer``,
+``Signal`` and ``list_components`` from ``coker.toolkits.system_modelling``;
+standard blocks live in
+``coker.toolkits.system_modelling.std_lib.common.signal_processing``.
+Import component libraries before discovery: ``list_components()`` lists
+registered classes as ``(name, slash_separated_module_path, None)`` tuples.
+See :doc:`api/modelling` for wiring examples and precise limitations.
+
 Mathematical programs
 ---------------------
 
@@ -77,6 +91,12 @@ problems. ``ProblemBuilder.build`` returns a public
 :class:`~coker.toolkits.codesign.MathematicalProgram` callable with the declared
 runtime arguments.
 
+Declare runtime inputs separately from optimisation decisions, then set a
+scalar ``Minimise`` objective and a nonempty output list. The builder context
+does not solve or consume it; calling the built program performs the solve.
+``build()`` uses the current backend when none is named, without changing that
+selection. See :doc:`api/optimisation` for results and backend limits.
+
 These examples require ``pip install "coker[casadi]"``, which includes NumPy.
 
 .. testcode:: toolkits_runtime_target
@@ -84,7 +104,7 @@ These examples require ``pip install "coker[casadi]"``, which includes NumPy.
    import numpy as np
    from coker import VectorSpace
    from coker.backends.casadi import CasadiNLPSolverOptions
-   from coker.toolkits.codesign import Minimise, ProblemBuilder
+   from coker.toolkits.codesign import Minimise, ProblemBuilder, bounded
 
    options = CasadiNLPSolverOptions(
        optimiser_options={
@@ -100,18 +120,24 @@ These examples require ``pip install "coker[casadi]"``, which includes NumPy.
        x = builder.new_variable(name="x", shape=(2,), initial_value=np.ones(2))
        delta = x - target
        builder.objective = Minimise(np.dot(delta, delta))
+       builder.constraints = [bounded(x[0], target[0], target[0])]
        builder.outputs = [x]
        problem = builder.build("casadi")
+   assert problem.parameters == {} and problem.solve_info is None
 
    objective, x_val = problem(np.array([3.0, -1.0]))
    np.testing.assert_allclose(objective, 0.0, atol=1e-8)
    assert x_val.shape == (2,)
    np.testing.assert_allclose(x_val, [3.0, -1.0], atol=1e-6)
    np.testing.assert_allclose(problem.parameters["x"], x_val, atol=1e-6)
+   assert isinstance(objective, float)
+   assert problem.solve_info.success
 
-Use ``bounded(residual, lower, upper)`` when bounds are part of the model.
+Use ``bounded(residual, lower, upper)`` for inclusive componentwise bounds.
+Equal bounds express equality, and infinite bounds leave a side unbounded.
 Bounds may depend on runtime parameters; CasADi evaluates them as residual
-constraints at solve time.
+constraints at solve time. Symbolic ``<`` and ``>`` constraints are implemented
+as non-strict numerical bounds.
 
 Use ``new_function_parameter`` to declare a function-valued decision with a
 ``FunctionSpace`` and finite ``FunctionParameter`` realisation. Use the returned
@@ -123,7 +149,7 @@ callable in objectives and constraints:
 
    from coker import FunctionSpace, Scalar
    from coker.backends.casadi import CasadiNLPSolverOptions
-   from coker.parameters.function_parameters import RadialBasisFunction
+   from coker.parameters.function_parameters import FittedFunction, RadialBasisFunction
    from coker.toolkits.codesign import Minimise, ProblemBuilder
 
    rate = FunctionSpace("rate", [Scalar("t")], [Scalar("rate")])
@@ -138,20 +164,29 @@ callable in objectives and constraints:
    with ProblemBuilder(solver_options=options) as builder:
        response = builder.new_function_parameter(rate, declaration)
        value = response(0.0)
-       builder.objective = Minimise((value - 0.5) ** 2)
+       builder.objective = Minimise(
+           (value - 0.5) ** 2 + (response(1.0) - 0.25) ** 2
+       )
        builder.outputs = [value]
        problem = builder.build("casadi")
 
    objective, value = problem()
    fitted_response = problem.parameters["response"]
+   assert isinstance(fitted_response, FittedFunction)
+   assert fitted_response.specification is declaration
+   assert fitted_response.space is rate
    np.testing.assert_allclose(objective, 0.0, atol=1e-8)
    np.testing.assert_allclose(value, 0.5, atol=1e-6)
    assert fitted_response.parameters[0].shape == (2,)
    np.testing.assert_allclose(fitted_response(0.0), value, atol=1e-6)
+   np.testing.assert_allclose(fitted_response(1.0), 0.25, atol=1e-6)
+   assert value.shape == (1,)
+   assert problem.solve_info.success
 
 After a numeric solve, ``problem.parameters`` maps named decisions to their
-reconstructed values. Scalars become floats; vectors and tensors become shaped
-NumPy arrays. Function-valued decisions become ``FittedFunction`` instances
+reconstructed values. NumPy and CasADi return floats for scalar decisions and
+shaped NumPy arrays for vectors/tensors; PyTorch preserves native tensors.
+Function-valued decisions become ``FittedFunction`` instances
 with these attributes:
 
 - ``specification``: the original parameter declaration;
@@ -161,6 +196,11 @@ with these attributes:
 
 Private solver captures are not part of the public ``(objective, *outputs)``
 return tuple.
+The mapping and result arrays have no copy/isolation guarantee. Copy values
+when keeping a snapshot. ``solve_info`` starts as ``None`` and is updated on
+solver success or ``SolveFailure``. A failed solve returns no tuple and keeps
+the previous successful parameters; configuration or argument errors may leave
+the previous status unchanged. Success does not guarantee global optimality.
 
 ``MathematicalProgram.input_shape()`` describes the runtime arguments.
 ``output_shape()`` excludes the objective; ``result_shape`` includes it.
@@ -174,7 +214,9 @@ model builder. ``WeightedNorm`` is backend recognition metadata produced by
 
 Pass flat IPOPT options through ``solver_options`` for CasADi/IPOPT solves:
 
-.. code-block:: python
+.. testcode:: toolkits_solver_options
+
+   import numpy as np
 
    from coker.backends.casadi import CasadiNLPSolverOptions
    from coker.toolkits.codesign import Minimise, ProblemBuilder, bounded
@@ -184,6 +226,9 @@ Pass flat IPOPT options through ``solver_options`` for CasADi/IPOPT solves:
            optimiser_options={
                "ipopt.max_iter": 50,
                "ipopt.max_cpu_time": 30.0,
+               "ipopt.print_level": 0,
+               "ipopt.sb": "yes",
+               "print_time": False,
            }
        )
    ) as builder:
@@ -194,6 +239,9 @@ Pass flat IPOPT options through ``solver_options`` for CasADi/IPOPT solves:
        problem = builder.build("casadi")
 
    objective, value = problem()
+   np.testing.assert_allclose(objective, 0.0, atol=1e-8)
+   assert value.shape == (1,)
+   np.testing.assert_allclose(value, [0.5], atol=1e-6)
 
 Further reading
 ----------------
