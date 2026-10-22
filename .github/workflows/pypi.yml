@@ -2,8 +2,8 @@ name: Publish Coker
 
 on:
   pull_request:
-    branches: ["main", "develop"]
-    types: [opened, synchronize, reopened]
+    branches: ["main"]
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: ["main"]
 
@@ -19,12 +19,27 @@ jobs:
   detect-version-bump:
     name: Detect version bump
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
     outputs:
       version_bumped: ${{ steps.compare.outputs.version_bumped }}
       head_version: ${{ steps.compare.outputs.head_version }}
       base_version: ${{ steps.compare.outputs.base_version }}
       release-sha: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
+      - name: Reject non-promotion pull requests before checkout
+        if: >-
+          github.event_name == 'pull_request' &&
+          (github.event.pull_request.base.ref != 'main' ||
+           github.event.pull_request.head.ref != 'develop' ||
+           github.event.pull_request.head.repo.full_name != github.repository ||
+           github.event.pull_request.base.repo.full_name != github.repository)
+        run: |
+          echo "::error::Release candidates must be same-repository develop -> main PRs"
+          exit 1
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -40,64 +55,17 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: git fetch --no-tags origin "$BASE_SHA"
-      - name: Compare package versions
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install release validation tooling
+        run: python -m pip install "packaging>=24,<27"
+      - name: Validate promotion and compare package versions
         id: compare
-        shell: python
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          import os
-          import subprocess
-          import tomllib
-          from pathlib import Path
-
-          def parse_simple_version(version: str):
-              version_parts = version.split(".")
-              if all(part.isdigit() for part in version_parts):
-                  return tuple(int(part) for part in version_parts)
-              return None
-
-          def version_is_bumped(head_version: str, base_version: str):
-              head_simple_version = parse_simple_version(head_version)
-              base_simple_version = parse_simple_version(base_version)
-
-              if head_simple_version is not None and base_simple_version is not None:
-                  return head_simple_version > base_simple_version
-              return head_version != base_version
-
-          event_name = os.environ["EVENT_NAME"]
-          head_pyproject = Path("pyproject.toml").read_bytes()
-          head_version = tomllib.loads(head_pyproject.decode())["project"]["version"]
-
-          if event_name == "pull_request":
-              base_sha = os.environ["BASE_SHA"]
-              base_pyproject = subprocess.check_output(
-                  ["git", "show", f"{base_sha}:pyproject.toml"]
-              )
-              base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
-              version_bumped = version_is_bumped(head_version, base_version)
-          elif event_name == "push":
-              before_sha = os.environ["BEFORE_SHA"]
-              if before_sha and before_sha != "0000000000000000000000000000000000000000":
-                  base_pyproject = subprocess.check_output(
-                      ["git", "show", f"{before_sha}:pyproject.toml"]
-                  )
-                  base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
-                  version_bumped = version_is_bumped(head_version, base_version)
-              else:
-                  base_version = ""
-                  version_bumped = False
-          else:
-              raise RuntimeError(f"Unsupported event: {event_name}")
-
-          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output_file:
-              output_file.write(f"head_version={head_version}\n")
-              output_file.write(f"base_version={base_version}\n")
-              output_file.write(
-                  f"version_bumped={'true' if version_bumped else 'false'}\n"
-              )
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python scripts/release_promotion.py
 
   prepare-release:
     name: Validate prepared release
@@ -120,7 +88,7 @@ jobs:
           from pathlib import Path
 
           version = os.environ["HEAD_VERSION"]
-          if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]*", version):
+          if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.!+-]*", version):
               raise RuntimeError("Package version must be safe for a release-notes filename")
           notes_path = Path("release-notes") / f"{version}.md"
           notes = notes_path.read_bytes()
@@ -190,9 +158,11 @@ jobs:
 
   publish-to-test-pypi:
     name: Publish to TestPyPI
-    needs: release-checks
+    needs: [detect-version-bump, prepare-release, release-checks]
     if: >-
       github.event_name == 'pull_request' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'develop' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment:
@@ -211,6 +181,30 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  release-promotion-gate:
+    name: Release promotion gate
+    needs: [detect-version-bump, prepare-release, release-checks, publish-to-test-pypi]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every release promotion prerequisite
+        shell: python
+        env:
+          PREREQUISITES: ${{ toJSON(needs) }}
+        run: |
+          import json
+          import os
+
+          prerequisites = json.loads(os.environ["PREREQUISITES"])
+          failures = {
+              name: job["result"] for name, job in prerequisites.items()
+              if job["result"] != "success"
+          }
+          if failures:
+              raise RuntimeError(f"Release promotion prerequisites failed: {failures}")
+          if prerequisites["detect-version-bump"]["outputs"].get("version_bumped") != "true":
+              raise RuntimeError("Promotion requires a strictly increased prepared version")
 
   publish-to-pypi:
     name: Publish to PyPI

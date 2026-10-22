@@ -101,7 +101,8 @@ record page-specific directions and planned additions.
 
 ## Submit a pull request
 
-- Target **`develop`**, never `main`.
+- Target **`develop`**, never `main`, except for maintainer release promotion
+  from the same repository's `develop` branch as described below.
 - Use the pull request template. Explain the problem, the change, and the checks
   you ran, including any checks you could not run locally.
 - In the template's single `Changelog` section, list only this PR's user-visible
@@ -209,23 +210,36 @@ dropping changes. Do not substitute formatted commit headlines for the PR-local
    records already documented changes and prepares the release. Preserve this
    complete metadata when squash-merging it, too.
 
-5. After the preparation PR is reviewed and merged, promote the prepared
-   `develop` snapshot to `main` through the maintainer release PR (the exception
-   to the contributor rule to target `develop`). Do not include unrecorded
-   user-visible changes after the selected source snapshot; if the release
-   scope changes, prepare and review notes for the new source range first.
-   The production publication workflow consumes the reviewed
-   `release-notes/$VERSION.md` unchanged for the GitHub release and tags the
-   published `main` SHA. It does not regenerate notes from `main` history.
-   Keep the generated file committed: the next release uses its recorded source
-   endpoint, not that publication tag.
+5. The preparation PR into `develop` runs normal contribution CI; it does **not**
+   trial-publish to TestPyPI. After review and squash-merge, open the maintainer
+   release PR from this repository's `develop` branch into `main`. Only this
+   same-repository branch pair is a release candidate; fork PRs and other source
+   branches cannot pass the release gate. The prepared package version must
+   strictly increase over `main`, with matching dated `CHANGELOG.md` and
+   `release-notes/$VERSION.md` sections.
+   Do not include unrecorded user-visible changes after the selected source
+   snapshot; if the release scope changes, prepare and review notes for the new
+   source range first.
 
-6. Wait for runtime tests, executable documentation, strict HTML and the
-   installed-wheel matrix on the **exact publication commit**. The matrix
-   verifies NumPy scalar/vector workflows and the CasADi spring fit, including
-   numerical results and successful solve status. The wheel and `.tar.gz`
-   sdist are version-checked before upload; publication reuses those immutable
-   artifacts without a second build or smoke-test job.
+6. Before merging that PR, require **Release promotion gate** to pass. The trial
+   runs runtime tests, executable documentation, strict HTML and the installed
+   artifact matrix for the exact candidate commit, then uploads the tested wheel
+   and `.tar.gz` sdist to TestPyPI for real. The matrix verifies NumPy
+   scalar/vector workflows and the CasADi spring fit, including numerical results
+   and successful solve status. Both artifacts are version-checked before upload
+   and reused unchanged without a second build. The final gate runs even when
+   prerequisites fail or skip and fails closed; a skipped upload is not success.
+
+7. Merge only after that gate succeeds for the PR's current source head.
+   Production requires the `main` commit to be attributable to this merged
+   `develop`-to-`main` PR and its successful exact-source-head trial gate; a
+   direct or arbitrary version-bump commit on `main` is not a release.
+   Production repeats the exact-publication-commit runtime, documentation and
+   installed-artifact checks and publishes only their tested immutable artifacts.
+   It consumes the reviewed `release-notes/$VERSION.md` unchanged for the GitHub
+   release and matching `vVERSION` tag on the published `main` SHA; it does not
+   regenerate notes from `main` history. Keep the generated file committed: the
+   next release uses its recorded source endpoint, not that publication tag.
 
    Production additionally deploys the verified HTML, without rebuilding it,
    and checks the public Documentation URL advertised in package metadata and
@@ -236,15 +250,15 @@ dropping changes. Do not substitute formatted commit headlines for the PR-local
    Ensure GitHub Pages uses GitHub Actions and the `github-pages` environment
    permits the production release workflow.
 
-   Version-bump PRs into `develop` exercise the non-production gates; they do
-   not deploy production documentation or publish to PyPI. Production remains
-   a prepared version bump on `main`, followed by the matching `vVERSION` tag
-   and GitHub Release using the reviewed notes. Do not bump to 0.5 or publicise
-   it until the remaining release blockers are resolved.
-
+   TestPyPI versions are immutable: never enable `skip-existing` or ignore an
+   upload failure. After a successful trial upload, any change to the release
+   artifacts requires an unused version and newly prepared matching notes.
+   If an upload succeeds but a downstream job fails, rerun only the failed
+   downstream jobs; do not rebuild or reupload the successful trial artifacts.
+   Apply the same downstream-only rerun rule to production publication.
    Do not bypass a failed gate, reuse a version for different artifacts, or
-   overwrite a conflicting tag. If package upload succeeds but a downstream
-   step fails, rerun only the failed downstream jobs; do not rebuild or republish.
+   overwrite a conflicting tag. Do not bump to 0.5 or publicise it until the
+   remaining release blockers are resolved.
 
    To exercise artifact verification locally after updating the package version:
 
@@ -257,3 +271,21 @@ dropping changes. Do not substitute formatted commit headlines for the PR-local
    The verifier uses disposable environments outside the checkout and isolated
    Python imports. Keep `dist/` limited to the selected wheel and `.tar.gz`
    sdist; ambiguous, mismatched or unexpected publication files are rejected.
+
+### Repository transfer setup
+
+The active links target `pneumatica-bio/coker` and
+`https://pneumatica-bio.github.io/coker/`; these destinations are not claimed
+live before the repository transfer and successful Pages deployment.
+
+- After transfer, set GitHub Pages to **GitHub Actions** and confirm the
+  `github-pages` environment permits the production workflow and its new URL.
+- Preserve/configure the `testpypi` and `pypi` environments and their deployment
+  permissions. Configure Trusted Publishers on TestPyPI and PyPI with owner
+  `pneumatica-bio`, repository `coker`, workflow `pypi.yml`, and environment
+  `testpypi` or `pypi`, respectively. Keep the package name `coker`.
+- Protect `main` with the required **Release promotion gate** check before
+  allowing release merges; do not bypass it for direct pushes.
+- Preserve the repository's `develop` ancestry, squash PR title/body metadata
+  conventions, and immutable release-source comments through transfer. The
+  release range must continue to use source ancestry, not a `main` tag.

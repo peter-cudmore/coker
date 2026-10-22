@@ -294,8 +294,10 @@ pytorch = [
 ci = [
     { name = "black" },
     { name = "flake8" },
+    { name = "packaging" },
     { name = "pytest" },
     { name = "pytest-mypy" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 dev = [
     { name = "black" },
@@ -333,8 +335,10 @@ provides-extras = ["casadi", "jax", "pytorch"]
 ci = [
     { name = "black", specifier = "==25.1.0" },
     { name = "flake8", specifier = ">=7.1.1,<8" },
+    { name = "packaging", specifier = ">=24,<27" },
     { name = "pytest", specifier = ">=8.0.0,<9" },
     { name = "pytest-mypy" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2,<3" },
 ]
 dev = [
     { name = "black", specifier = "==25.1.0" },

@@ -29,10 +29,10 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://peter-cudmore.github.io/coker/"
-Source = "https://github.com/peter-cudmore/coker"
-Issues = "https://github.com/peter-cudmore/coker/issues"
-Changelog = "https://github.com/peter-cudmore/coker/blob/main/CHANGELOG.md"
+Documentation = "https://pneumatica-bio.github.io/coker/"
+Source = "https://github.com/pneumatica-bio/coker"
+Issues = "https://github.com/pneumatica-bio/coker/issues"
+Changelog = "https://github.com/pneumatica-bio/coker/blob/main/CHANGELOG.md"
 
 [project.entry-points."coker.backends"]
 numpy = "coker.backends.numpy:NumpyBackend"
@@ -66,6 +66,8 @@ ci = [
     "pytest-mypy",
     "black==25.1.0",
     "flake8>=7.1.1,<8",
+    "packaging>=24,<27",
+    "tomli>=2,<3; python_version < '3.11'",
 ]
 docs = [
     "sphinx>=7.0",

@@ -8,7 +8,7 @@ use :doc:`tutorials/index`; for task-focused instructions, use
 README examples
 ---------------
 
-The `README <https://github.com/peter-cudmore/coker/blob/develop/README.md#install-and-try>`_
+The `README <https://github.com/pneumatica-bio/coker/blob/develop/README.md#install-and-try>`_
 demonstrates reusing a spring-force model for parameter fitting and inspecting
 symbolic vector/matrix maths before differentiating it with PyTorch. Each Python
 block is standalone and includes numerical checks. The documentation doctest
