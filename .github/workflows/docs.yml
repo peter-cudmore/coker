@@ -1,51 +1,64 @@
-name: Build and deploy docs
+name: Deploy verified release docs
 
 on:
-  push:
-    branches: ["main"]
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact release commit that produced release-documentation
+        required: true
+        type: string
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          python-version: "3.12"
-          enable-cache: true
-
-      - name: Install dependencies
-        run: uv sync --frozen --group docs --extra casadi --extra pytorch
-
-      - name: Run documentation examples
-        run: uv run sphinx-build -b doctest docs/ docs/_build/doctest -W --keep-going
-
-      - name: Build docs
-        run: uv run sphinx-build docs/ docs/_build/html -W --keep-going
-
-      - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/_build/html
-
   deploy:
-    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - name: Download tested release documentation
+        uses: actions/download-artifact@v4
+        with:
+          name: release-documentation
+          path: release-documentation/
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+      - name: Check artifact provenance before deployment
+        shell: python
+        env:
+          RELEASE_SHA: ${{ inputs.ref }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          import tomllib
+
+          manifest = json.loads(Path("release-documentation/release.json").read_text())
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          if manifest["commit"] != os.environ["RELEASE_SHA"] or manifest["version"] != version:
+              raise RuntimeError("Documentation artifact does not match the exact release commit/version")
+      - name: Upload tested HTML to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: release-documentation/
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verify public release metadata and page contents
+        run: >-
+          uv run --no-project python scripts/release_docs.py verify
+          --manifest release-documentation/release.json

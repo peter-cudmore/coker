@@ -219,3 +219,41 @@ dropping changes. Do not substitute formatted commit headlines for the PR-local
    published `main` SHA. It does not regenerate notes from `main` history.
    Keep the generated file committed: the next release uses its recorded source
    endpoint, not that publication tag.
+
+6. Wait for runtime tests, executable documentation, strict HTML and the
+   installed-wheel matrix on the **exact publication commit**. The matrix
+   verifies NumPy scalar/vector workflows and the CasADi spring fit, including
+   numerical results and successful solve status. The wheel and `.tar.gz`
+   sdist are version-checked before upload; publication reuses those immutable
+   artifacts without a second build or smoke-test job.
+
+   Production additionally deploys the verified HTML, without rebuilding it,
+   and checks the public Documentation URL advertised in package metadata and
+   the README. The deployed `release.json` records the version, commit and
+   page hashes. The live check requires the matching manifest and content for
+   Basics, Tutorials, How-to, Architecture, API, Getting Started and the
+   README's linked recipes. A successful local build is not live-site sign-off.
+   Ensure GitHub Pages uses GitHub Actions and the `github-pages` environment
+   permits the production release workflow.
+
+   Version-bump PRs into `develop` exercise the non-production gates; they do
+   not deploy production documentation or publish to PyPI. Production remains
+   a prepared version bump on `main`, followed by the matching `vVERSION` tag
+   and GitHub Release using the reviewed notes. Do not bump to 0.5 or publicise
+   it until the remaining release blockers are resolved.
+
+   Do not bypass a failed gate, reuse a version for different artifacts, or
+   overwrite a conflicting tag. If package upload succeeds but a downstream
+   step fails, rerun only the failed downstream jobs; do not rebuild or republish.
+
+   To exercise artifact verification locally after updating the package version:
+
+   ```bash
+   uv sync --python 3.13 --frozen --group ci --group docs --extra casadi --extra pytorch
+   uv build
+   uv run --no-sync python scripts/verify_release_artifacts.py --dist dist --version "$VERSION"
+   ```
+
+   The verifier uses disposable environments outside the checkout and isolated
+   Python imports. Keep `dist/` limited to the selected wheel and `.tar.gz`
+   sdist; ambiguous, mismatched or unexpected publication files are rejected.
