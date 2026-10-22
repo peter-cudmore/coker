@@ -271,21 +271,3 @@ dropping changes. Do not substitute formatted commit headlines for the PR-local
    The verifier uses disposable environments outside the checkout and isolated
    Python imports. Keep `dist/` limited to the selected wheel and `.tar.gz`
    sdist; ambiguous, mismatched or unexpected publication files are rejected.
-
-### Repository transfer setup
-
-The active links target `pneumatica-bio/coker` and
-`https://pneumatica-bio.github.io/coker/`; these destinations are not claimed
-live before the repository transfer and successful Pages deployment.
-
-- After transfer, set GitHub Pages to **GitHub Actions** and confirm the
-  `github-pages` environment permits the production workflow and its new URL.
-- Preserve/configure the `testpypi` and `pypi` environments and their deployment
-  permissions. Configure Trusted Publishers on TestPyPI and PyPI with owner
-  `pneumatica-bio`, repository `coker`, workflow `pypi.yml`, and environment
-  `testpypi` or `pypi`, respectively. Keep the package name `coker`.
-- Protect `main` with the required **Release promotion gate** check before
-  allowing release merges; do not bypass it for direct pushes.
-- Preserve the repository's `develop` ancestry, squash PR title/body metadata
-  conventions, and immutable release-source comments through transfer. The
-  release range must continue to use source ancestry, not a `main` tag.
