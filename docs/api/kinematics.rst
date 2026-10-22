@@ -99,3 +99,4 @@ Declarations
 
 .. autoclass:: coker.toolkits.kinematics.RigidBody
    :members:
+   :exclude-members: joints,inertia,parents,transforms,end_effectors
