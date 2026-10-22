@@ -35,11 +35,7 @@ class Inertia:
 
     @staticmethod
     def zero() -> "Inertia":
-        """Return zero mass and moments at the link origin.
-
-        Returns:
-            Inertia: Massless inertia with an identity centre-of-mass pose.
-        """
+        """Return massless inertia with an identity centre-of-mass pose."""
         return Inertia(Isometry3.identity(), 0, np.zeros((6,)))
 
     def as_matrix(self):
@@ -318,11 +314,7 @@ class RigidBody:
         return idx
 
     def total_joints(self):
-        """Return the total number of scalar motion coordinates.
-
-        Returns:
-            int: Sum of axis counts, not the number of links.
-        """
+        """Return the sum of motion-axis counts, not the number of links."""
         return sum([len(j) for j in self.joint_bases])
 
     def potential_energy(self, angles, gravity_vector):
@@ -510,9 +502,6 @@ class RigidBody:
 
         Args:
             angles: Complete coordinate vector of shape ``(n,)``.
-
-        Returns:
-            List[Isometry3]: One pose per end effector.
         """
         xforms = self.joint_transforms(angles)
         return [xforms[parent] @ xform for parent, xform in self.end_effectors]

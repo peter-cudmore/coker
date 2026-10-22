@@ -233,11 +233,7 @@ class DenseLayer(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        """Return the weight and bias declarations, in that order.
-
-        Returns:
-            tuple[ParameterVariable, ...]: Two scalar or dense declarations.
-        """
+        """Return the scalar or dense weight and bias declarations as a tuple."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:

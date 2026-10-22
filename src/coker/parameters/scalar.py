@@ -53,14 +53,7 @@ class BoundedVariable(ParameterMixin):
     guess: float = 0
 
     def degrees_of_freedom(self, *interval):
-        """Return one scalar decision, ignoring optional interval arguments.
-
-        Args:
-            *interval: Accepted for the decision-count interface; ignored.
-
-        Returns:
-            int: One.
-        """
+        """Return one scalar decision, ignoring optional interval arguments."""
         return 1
 
 
@@ -86,14 +79,7 @@ class UnboundedVariable(ParameterMixin):
     guess: float = 0
 
     def degrees_of_freedom(self, *interval):
-        """Return one scalar decision, ignoring optional interval arguments.
-
-        Args:
-            *interval: Accepted for the decision-count interface; ignored.
-
-        Returns:
-            int: One.
-        """
+        """Return one scalar decision, ignoring optional interval arguments."""
         return 1
 
     @property

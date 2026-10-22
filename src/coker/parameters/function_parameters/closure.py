@@ -106,11 +106,7 @@ class ClosureParameter(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        """Return the supplied concrete declarations in source input order.
-
-        Returns:
-            tuple[ParameterVariable, ...]: Concrete declarations.
-        """
+        """Return the supplied declarations as a tuple in source-input order."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:

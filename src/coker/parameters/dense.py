@@ -54,14 +54,7 @@ class DenseTensorVariable(ParameterMixin):
         return self.guess.size
 
     def degrees_of_freedom(self, *interval):
-        """Return the number of scalar entries in the decision block.
-
-        Args:
-            *interval: Accepted for the decision-count interface; ignored.
-
-        Returns:
-            int: The array size, independent of the interval.
-        """
+        """Return the array size, ignoring optional interval arguments."""
         return self.size
 
 
@@ -125,12 +118,5 @@ class BoundVector(ParameterMixin):
         return self.guess.size
 
     def degrees_of_freedom(self, *interval):
-        """Return the number of scalar components in the vector.
-
-        Args:
-            *interval: Accepted for the decision-count interface; ignored.
-
-        Returns:
-            int: The vector size, independent of the interval.
-        """
+        """Return the vector size, ignoring optional interval arguments."""
         return self.size

@@ -65,11 +65,11 @@ def analyse_controllability(
             until full rank or closure. Zero tests the initial control fields.
 
     Returns:
-        Rank evidence with independent vector fields as matrix columns.
-        ``TRUE`` means full differential-state rank, ``FALSE`` means closure
-        below full rank, and ``INCONCLUSIVE`` means unsupported input, invalid
-        options, or an expansion limit. Inspect ``reason`` and nonvanishing
-        ``rank_conditions``; a deficient intermediate matrix is not a verdict.
+        ControllabilityResult: Independent vector-field columns and rank
+        evidence. See :class:`AnalysisStatus` for verdicts and
+        :class:`AnalysisResult` for generic-rank conditions. Unsupported input,
+        invalid options or an expansion limit give ``INCONCLUSIVE`` with
+        ``reason``, not a deficient-rank verdict.
 
     Examples:
         >>> import sympy as sp

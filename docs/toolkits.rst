@@ -7,13 +7,10 @@ programming through the symbolic tracing and backend model.
 Spatial algebra
 ---------------
 
-:mod:`coker.toolkits.spatial` provides rigid-motion primitives:
-
-- :class:`coker.toolkits.spatial.Rotation3`
-- :class:`coker.toolkits.spatial.Isometry3`
-- :class:`coker.toolkits.spatial.Screw`
-- adjoint and Lie-algebra helpers such as ``hat`` and ``se3_bracket``
-
+Use :mod:`coker.toolkits.spatial` for rotations, rigid transforms and
+angular-first twists and wrenches. The :doc:`spatial reference <api/spatial>`
+explains composition order, array ownership, tracing limits and the existing
+Lie-algebra sign conventions with executable examples.
 
 Rigid-body kinematics and dynamics
 ----------------------------------
@@ -155,28 +152,13 @@ callable in objectives and constraints:
    assert fitted_response.parameters[0].shape == (2,)
    np.testing.assert_allclose(fitted_response(0.0), value, atol=1e-6)
 
-After a numeric solve, ``problem.parameters`` maps named decisions to their
-reconstructed values. Scalars become floats; vectors and tensors become shaped
-NumPy arrays. Function-valued decisions become ``FittedFunction`` instances
-with these attributes:
-
-- ``specification``: the original parameter declaration;
-- ``space``: the declared ``FunctionSpace``;
-- ``function``: the native callable;
-- ``parameters``: the fitted basis.
-
-Private solver captures are not part of the public ``(objective, *outputs)``
-return tuple.
-
-``MathematicalProgram.input_shape()`` describes the runtime arguments.
-``output_shape()`` excludes the objective; ``result_shape`` includes it.
-``backend`` names the solver backend. ``lower()`` returns a solver-pinned
-``Function``, not a ``LoweredFunction``. Calling it solves the program and
-returns ``(objective, *outputs)``.
-
-``OptimisationModule`` is a supported solver implementation interface, not a
-model builder. ``WeightedNorm`` is backend recognition metadata produced by
-``weighted_norm``; model code should use the helper, not construct the record.
+After a numeric solve, inspect named decisions through ``problem.parameters``;
+they are separate from the public ``(objective, *outputs)`` tuple.
+Callable decisions become
+:class:`~coker.parameters.function_parameters.FittedFunction` values; see
+:doc:`api/parameters` for their attributes and backend-valued coefficients.
+See :doc:`api/optimisation` for program shapes, lowering, solver status and
+the separate solver extension interface.
 
 Pass flat IPOPT options through ``solver_options`` for CasADi/IPOPT solves:
 

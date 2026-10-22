@@ -207,33 +207,25 @@ class VariationalSolution:
         path_constraint_exprs: List[InequalityExpression] | None = None,
         terminal_constraint_exprs: List[InequalityExpression] | None = None,
     ) -> "VariationalSolution":
-        """Assemble a result with numeric parameter vectors for evaluation.
+        """Attach numeric parameter vectors to a :class:`VariationalSolution`.
 
-        This low-level constructor is intended for solver implementations;
-        ordinary callers obtain results from a variational solve. Inputs are
-        retained, not defensively copied.
+        Solver-facing constructor; arguments shared with the class follow its
+        contract, including time coordinates and ownership. It neither solves
+        nor validates solver success.
 
         Args:
-            cost: Final scalar objective value.
-            path: Combined interpolant on normalised time ``[0, 1]``.
-            projectors: State, algebraic and quadrature projection matrices.
-            control_solutions: Normalised-time controls in declaration order.
-            parameters: Named, backend-materialised parameter values.
-            output: Evaluator ``output(t, x, z, u, p, q)``.
             parameter_vector: Numeric system parameter vector passed to output
                 and stored constraint evaluators, distinct from named values.
             solver_parameter_vector: Optional full solver decision-parameter
                 vector retained for solver reuse.
-            t_final: Positive physical horizon for trajectory evaluation.
-            solve_info: Solver metadata, or ``None`` if unavailable.
-            path_constraint_exprs: Stored path inequalities, or ``None`` for
+            t_final: Physical horizon; the default is not an evaluable solution.
+            path_constraint_exprs: Stored path inequalities; ``None`` becomes
                 an empty list.
-            terminal_constraint_exprs: Stored terminal inequalities, or
-                ``None`` for an empty list.
+            terminal_constraint_exprs: Stored terminal inequalities; ``None``
+                becomes an empty list.
 
         Returns:
-            VariationalSolution: Result with its evaluator parameter vectors
-            attached. This method does not run a solve or validate success.
+            VariationalSolution: Result retaining the supplied vectors.
         """
         solution = cls(
             cost,
@@ -337,13 +329,11 @@ class VariationalSolution:
         return np.hstack(points)
 
     def state(self, t):
-        """Evaluate the differential state at a physical time.
+        """Return the flat differential-state NumPy vector.
 
         Args:
-            t: Scalar physical time within ``[0, t_final]``.
-
-        Returns:
-            numpy.ndarray: Flat differential-state vector.
+            t: Scalar physical time in ``[0, t_final]``; time grids and
+                extrapolation are unsupported, as described in the class notes.
 
         Raises:
             ValueError: The time is outside the path intervals.
@@ -353,49 +343,43 @@ class VariationalSolution:
         return proj @ v
 
     def algebraic(self, t):
-        """Evaluate the optional algebraic channel at a physical time.
+        """Return the flat algebraic NumPy vector, or ``None`` if absent.
 
         Args:
-            t: Scalar physical time within ``[0, t_final]``.
-
-        Returns:
-            numpy.ndarray | None: Flat algebraic vector, or ``None`` if no
-            algebraic projector is present.
+            t: Scalar physical time, following :meth:`state`.
 
         Raises:
-            ValueError: The channel is present and time is outside the path.
+            ValueError: A present channel is evaluated outside the path.
         """
         if self.projectors[1] is None:
             return None
         return self.projectors[1] @ self.path(t / self.t_final)
 
     def quadratures(self, t):
-        """Evaluate the optional accumulated quadratures at a physical time.
+        """Return the flat accumulated-quadrature NumPy vector, or ``None``.
 
         Args:
-            t: Scalar physical time within ``[0, t_final]``.
-
-        Returns:
-            numpy.ndarray | None: Flat quadrature vector, or ``None`` if no
-            quadrature projector is present.
+            t: Scalar physical time, following :meth:`state`. An absent
+                quadrature projector returns ``None`` without path evaluation.
 
         Raises:
-            ValueError: The channel is present and time is outside the path.
+            ValueError: A present channel is evaluated outside the path.
         """
         if self.projectors[2] is None:
             return None
         return self.projectors[2] @ self.path(t / self.t_final)
 
     def control_law(self, t):
-        """Evaluate the optional controls at a physical time.
+        """Evaluate controls at a scalar physical time.
 
         Args:
-            t: Scalar physical time within ``[0, t_final]``.
+            t: Physical time in ``[0, t_final]``, converted to normalised time
+                for each stored control.
 
         Returns:
-            numpy.ndarray | None: Values stacked in control declaration order,
-            or ``None`` when no control solutions are stored. Shape and
-            boundary behaviour otherwise follow the stored control types.
+            numpy.ndarray | None: Values stacked in declaration order, or
+            ``None`` without controls. Shape and boundary behaviour follow the
+            stored control types.
 
         Raises:
             AssertionError: A stored piecewise control selects a coefficient
@@ -409,7 +393,7 @@ class VariationalSolution:
         """Evaluate the declared output, rather than the internal path.
 
         Args:
-            t: Scalar physical time within ``[0, t_final]``.
+            t: Scalar physical time, following :meth:`state`.
 
         Returns:
             object: Output from ``output(t, x, z, u, p, q)`` with the

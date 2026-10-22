@@ -95,8 +95,7 @@ class ControllabilityResult(AnalysisResult):
 
     A full-rank result establishes the implemented accessibility rank
     criterion, not global controllability or small-time local controllability.
-    ``matrix`` contains independent vector-field columns and ``generators``
-    contains those fields. See ``analyse_controllability`` for runnable usage.
+    ``matrix`` and ``generators`` contain independent vector-field columns.
 
     Examples:
         >>> import sympy as sp
@@ -118,7 +117,7 @@ class ObservabilityResult(AnalysisResult):
 
     ``matrix`` contains output/Lie-derivative gradient rows, restricted to the
     constraint tangent space for DAEs. This is not a global reconstruction
-    guarantee. See ``analyse_observability`` for runnable usage.
+    guarantee.
 
     Examples:
         >>> import sympy as sp
@@ -140,7 +139,7 @@ class IdentifiabilityResult(AnalysisResult):
 
     Columns correspond to differential states followed by fitted parameters.
     Full rank certifies the implemented joint state/parameter local criterion,
-    not global parameter uniqueness. See ``analyse_identifiability`` for usage.
+    not global parameter uniqueness.
 
     Examples:
         >>> import sympy as sp

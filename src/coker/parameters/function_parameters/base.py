@@ -24,14 +24,9 @@ class FittedFunction(FunctionSignatureValue):
         specification: Original function-parameter declaration.
         space: Public function space, excluding concrete decision blocks.
         function: Backend callable to invoke without input or output conversion.
-        parameters: Reconstructed concrete values in declaration order.
-            Solver-produced values are tuples; numeric types depend on backend.
-
-    Attributes:
-        specification: Original declaration.
-        space: Validated public function space.
-        function: Concrete backend callable.
-        parameters: Fitted concrete values, retaining their scalar or array shapes.
+        parameters: Reconstructed concrete values in declaration order,
+            retaining their scalar or array shapes. Solver-produced values are
+            tuples; numeric types depend on backend.
 
     Examples:
         >>> from coker import FunctionSpace, Scalar
@@ -67,26 +62,15 @@ class FittedFunction(FunctionSignatureValue):
 
         Returns:
             Any: The callable's result without conversion.
-
-        Raises:
-            Exception: Any exception raised by the concrete callable propagates.
         """
         return self.function(*arguments, **kwargs)
 
     def input_shape(self):
-        """Return public input dimensions, excluding concrete decision blocks.
-
-        Returns:
-            tuple: Dimensions reported by the public function space.
-        """
+        """Return a tuple of public input dimensions, excluding decision blocks."""
         return tuple(self.space.input_dimensions())
 
     def output_shape(self):
-        """Return public output dimensions.
-
-        Returns:
-            tuple: Dimensions reported by the public function space.
-        """
+        """Return a tuple of dimensions from the public output space."""
         return tuple(self.space.output_dimensions())
 
 

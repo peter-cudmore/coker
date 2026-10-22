@@ -43,15 +43,12 @@ class PiecewiseConstantVariable(_ParameterMixin):
     lower_bound: float = -np.inf
 
     def degrees_of_freedom(self, *interval):
-        """Count coefficients needed over a normalised interval.
+        """Return ``ceil((end - start) * sample_rate)`` scalar decisions.
 
         Args:
-            *interval: Exactly two scalars, ``start`` and ``end``, in
-                normalised time. Transcription supplies ``(0, 1)``.
-
-        Returns:
-            int: ``ceil((end - start) * sample_rate)`` scalar decisions.
-                The start affects the count, not the solution's time origin.
+            *interval: Exactly ``(start, end)`` in normalised time;
+                transcription uses ``(0, 1)``. The start affects only the count,
+                not the solution's time origin.
 
         Examples:
             >>> from coker.dynamics import PiecewiseConstantVariable
@@ -62,17 +59,13 @@ class PiecewiseConstantVariable(_ParameterMixin):
         return int(np.ceil((end - start) * self.sample_rate))
 
     def to_solution(self, value):
-        """Wrap coefficients as a normalised-time control.
+        """Wrap coefficients in a :class:`PiecewiseControlSolution`.
 
         Args:
-            value: Indexable coefficient array with one entry per degree of
-                freedom, ordered from normalised time zero. Values use the
-                model input's units; no copying, reshaping or bound checking
-                is performed.
-
-        Returns:
-            PiecewiseControlSolution: Callable returning the selected entry,
-            retaining the supplied coefficient container's scalar/row shape.
+            value: Indexable coefficients in input units, ordered from
+                normalised time zero with one entry per degree of freedom.
+                Retained without copying, reshaping or bound checks; the
+                callable preserves each indexed entry's scalar/row shape.
 
         Examples:
             >>> import numpy as np
@@ -114,13 +107,10 @@ class SpikeVariable(_ParameterMixin):
     lower_bound: float = -np.inf
 
     def degrees_of_freedom(self, *interval):
-        """Return one amplitude decision, regardless of interval.
+        """Return one amplitude decision, even if the spike is outside the interval.
 
         Args:
-            *interval: Optional normalised interval endpoints; ignored.
-
-        Returns:
-            int: One, even when the spike lies outside the given interval.
+            *interval: Optional normalised endpoints; ignored.
 
         Examples:
             >>> from coker.dynamics import SpikeVariable
@@ -130,15 +120,12 @@ class SpikeVariable(_ParameterMixin):
         return 1
 
     def to_solution(self, value):
-        """Wrap an amplitude as a normalised-time pointwise spike.
+        """Return a :class:`SpikeControlSolution` with tolerance ``1e-9``.
 
         Args:
-            value: Scalar amplitude in the model input's units. Stored as
-                supplied without conversion or bound checking.
-
-        Returns:
-            SpikeControlSolution: Control with this declaration's name and
-            location and the default normalised-time tolerance ``1e-9``.
+            value: Scalar amplitude in input units, stored without conversion
+                or bound checks. The spike retains this declaration's name
+                and normalised-time location.
 
         Examples:
             >>> from coker.dynamics import SpikeVariable
@@ -171,13 +158,10 @@ class ConstantControlVariable(_ParameterMixin):
     lower_bound: float = -np.inf
 
     def degrees_of_freedom(self, *interval):
-        """Return one amplitude decision, regardless of interval.
+        """Return one amplitude decision.
 
         Args:
-            *interval: Optional normalised interval endpoints; ignored.
-
-        Returns:
-            int: One.
+            *interval: Optional normalised endpoints; ignored.
 
         Examples:
             >>> from coker.dynamics import ConstantControlVariable
@@ -187,15 +171,12 @@ class ConstantControlVariable(_ParameterMixin):
         return 1
 
     def to_solution(self, value):
-        """Wrap an amplitude as a constant control.
+        """Return a :class:`ConstantControlSolution` retaining ``value``.
 
         Args:
-            value: Scalar amplitude in the model input's units. Stored as
-                supplied without conversion or bound checking.
-
-        Returns:
-            ConstantControlSolution: Callable retaining the supplied value
-            and its scalar or backend-native one-element shape.
+            value: Amplitude in input units, stored without conversion or bound
+                checks. Its scalar or backend-native one-element shape is
+                preserved.
 
         Examples:
             >>> from coker.dynamics import ConstantControlVariable

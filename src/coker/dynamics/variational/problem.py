@@ -36,10 +36,8 @@ class VariationalIterationCallback:
     """Receive a reconstructed solution at each supported solver iteration.
 
     Subclass and override :meth:`__call__`, or supply a callable with the same
-    signature. The default implementation continues unconditionally. CasADi
-    invokes callbacks with a zero-based counter and an unconverged
-    :class:`VariationalSolution`; a callback does not certify feasibility.
-    Other backends need not support iteration callbacks.
+    signature. The default continues unconditionally. Iteration callbacks are
+    supported by CasADi; other backends need not support them.
 
     Examples:
         Configure a callback without starting a solve:
@@ -111,19 +109,21 @@ class TranscriptionOptions:
         derivative_defect_tolerance: Override for collocation derivative
             defects. ``None`` uses ``absolute_tolerance``; zero enforces
             equality.
-        verbose: Show CasADi/IPOPT solver output when no explicit backend
-            options are supplied.
-        optimiser_options: CasADi/IPOPT solver settings when no explicit
-            backend options are supplied.
+        verbose: Show CasADi/IPOPT solver output.
+        optimiser_options: CasADi/IPOPT solver settings.
         initialise_near_guess: Run CasADi's feasibility initializer before
-            optimization when no explicit backend options are supplied.
-        enable_scaling: Scale CasADi decision variables, constraints, and
-            objective when no explicit backend options are supplied.
-        interation_callback: Receive CasADi solver iterations when no explicit
-            backend options are supplied.
+            optimization.
+        enable_scaling: Scale CasADi decision variables, constraints and
+            objective.
+        interation_callback: Receive CasADi solver iterations.
         backend_options: Backend-specific solve policy. Use
             ``CasadiVariationalOptions`` to configure CasADi, including
             adaptive mesh refinement.
+
+    Notes:
+        Explicit ``backend_options`` replace the CasADi policy supplied by
+        ``verbose``, ``optimiser_options``, ``initialise_near_guess``,
+        ``enable_scaling`` and ``interation_callback``.
 
     Examples:
         >>> from coker.dynamics import TranscriptionOptions
@@ -370,8 +370,7 @@ class VariationalProblem:
 
         Returns:
             VariationalSolution: Objective, reconstructed parameters and
-            trajectory channels evaluated in physical time on
-            ``[0, t_final]``. Output dimensions follow the system declaration.
+            trajectory channels; see its class contract for evaluation.
 
         Raises:
             SolveFailure: The backend reports an unsuccessful solve.

@@ -124,9 +124,6 @@ class Rotation3:
             other: Rotation (returned unchanged), unit quaternion (retained),
                 or native NumPy rotation vector with shape ``(3,)``.
 
-        Returns:
-            Rotation represented by ``other``.
-
         Raises:
             NotImplementedError: The representation is unsupported.
         """
@@ -184,7 +181,7 @@ class Rotation3:
         return Rotation3.from_quaterion(self.as_quaternion().inverse())
 
     def as_quaternion(self):
-        """Return the shared, lazily cached unit quaternion; do not mutate it."""
+        """Return the shared, lazily cached unit quaternion."""
         if self._quaternion is None:
             self._quaternion = UnitQuaternion.from_axis_angle(self._axis, self._angle)
         return self._quaternion
@@ -813,14 +810,7 @@ class SE3CoAdjoint:
         return f"Adj^*[{repr(self.transform)}]"
 
     def apply(self, zeta: Screw) -> Screw:
-        """Apply the transpose group action to a moment-first wrench screw.
-
-        Args:
-            zeta: Screw interpreted as moment then force, including magnitude.
-
-        Returns:
-            Transformed screw with unchanged magnitude.
-        """
+        """Transform a moment-first wrench screw, preserving its magnitude."""
         q_inv = self.transform.rotation.as_quaternion().inverse()
         p = self.transform.translation
 

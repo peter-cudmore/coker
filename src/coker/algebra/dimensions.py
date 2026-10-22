@@ -92,11 +92,7 @@ class Dimension:
         self.dim = tuple_or_none
 
     def flat(self):
-        """Return the product of extents, or one for scalar metadata.
-
-        Returns:
-            int: Number of scalar entries.
-        """
+        """Return the product of extents, or one for scalar metadata."""
         d = 1
         if self.dim is not None:
             for d_i in self.dim:
@@ -286,11 +282,7 @@ class FunctionSpace:
         ]
 
     def output_dimensions(self) -> list[Dimension | FunctionSpace]:
-        """Return ordered logical result dimensions, retaining nested spaces.
-
-        Returns:
-            list[Dimension | FunctionSpace]: One entry per output declaration.
-        """
+        """Return one logical dimension per output, retaining nested spaces."""
         return [
             (
                 out

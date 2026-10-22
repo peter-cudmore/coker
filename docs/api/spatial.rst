@@ -14,7 +14,7 @@ spatial contracts, not a promise of support for the separate system-modelling
 toolkit.
 
 Vectors, units and ownership
------------------------------------
+----------------------------
 
 Native spatial vectors are NumPy arrays with shape ``(3,)``, not lists or
 ``(3, 1)`` columns. Angles and rotation vectors use radians; translations use
@@ -30,14 +30,11 @@ mutating the original axis, wrapped quaternion or returned components does
 not invalidate those caches. Identity constructors and unit screw helpers
 create fresh arrays, but the module-level basis vectors are shared.
 
-``apply`` and selected quaternion/screw arithmetic support compatible Coker
-tracers. Native type dispatch, equality, zero checks, normalisation and
-axis-angle materialisation are not a general symbolic interface.
-``Rotation3.cast`` accepts only a rotation, unit quaternion or native NumPy
-``(3,)`` rotation vector; ``Rotation3.from_vector`` is a native numerical
-constructor. ``Isometry3 @ point`` dispatches on native arrays; traced points
-use ``Isometry3.apply``. These limits do not imply support for arbitrary
-third-party array types.
+Selected ``apply`` and quaternion/screw arithmetic operations accept compatible
+Coker tracers. Casting, native dispatch, equality, zero checks, normalisation
+and axis-angle materialisation are not a general symbolic interface.
+Use ``Isometry3.apply`` for traced points rather than native-array ``@``
+dispatch. Individual methods document the accepted representations.
 
 Composition and application
 ---------------------------
@@ -78,15 +75,9 @@ only for homogeneous points with fourth entry one, not directions.
 Rotations and quaternions
 -------------------------
 
-``Rotation3(axis, angle)`` should receive a unit axis. Quaternion conversion
-normalises a nonzero axis, but ``as_vector()`` multiplies the stored axis by
-the angle without normalising it. A native zero axis selects identity in
-``Rotation3``. Do not pass a zero axis to ``UnitQuaternion.from_axis_angle``;
-construct identity with ``UnitQuaternion.from_elements(1, 0, 0, 0)`` instead.
-``UnitQuaternion`` itself does not enforce unit norm; its ``inverse`` is the
-conjugate and is only an inverse for a unit quaternion. Equality compares
-components exactly, not equivalent rotations or opposite quaternion signs.
-The existing constructor spelling is ``Rotation3.from_quaterion``.
+Use unit rotation axes and unit quaternions for consistent representations.
+The classes below document their normalisation, zero-axis and exact-equality
+rules; these are native numerical conventions, not symbolic equivalence tests.
 
 .. autoclass:: coker.toolkits.spatial.Rotation3
    :members:
@@ -104,15 +95,11 @@ The existing constructor spelling is ``Rotation3.from_quaterion``.
 .. autofunction:: coker.toolkits.spatial.quaternion_mul
 
 Screws and packed representations
-----------------------------------------
+---------------------------------
 
-``Screw.to_array()`` returns ``magnitude * [rotation, translation]`` with
-shape ``(6,)``. ``from_array`` accepts that flat shape; ``from_tuple`` accepts
-six scalar arguments. Both normalise a nonzero native angular block, keeping
-the norm in ``magnitude``; pure translation retains magnitude one.
-``Isometry3.as_vector()`` instead returns a ``(6, 1)`` column containing a
-rotation vector and translation, not an SE(3) logarithm. Flatten that column
-before passing it to ``Isometry3.from_vector``.
+Screws use flat angular-first ``(6,)`` arrays. Isometries instead pack a
+rotation vector and translation into a ``(6, 1)`` column, not an SE(3)
+logarithm; flatten it before passing it to ``Isometry3.from_vector``.
 
 For a unit angular direction, ``Screw.exp(angle)`` uses
 ``alpha = magnitude * angle`` as the rotation angle and computes the
@@ -134,7 +121,7 @@ serialisation, or ``exp(...).as_matrix()`` for a transform matrix.
    :special-members: __mul__, __neg__, __eq__
 
 Transform adjoints and duality
--------------------------------------
+------------------------------
 
 For transform ``(R, p)``, ``SE3Adjoint`` has matrix
 ``A = [[R, 0], [hat(p) @ R, R]]`` on angular-first twists.
@@ -218,10 +205,8 @@ Do not infer twist/wrench duality for this pair from the class names.
 Basis helpers
 -------------
 
-``hat(u) @ v`` equals ``numpy.cross(u, v)``; this fixes the cross-product sign
-used above. The shared native arrays ``e_x``, ``e_y`` and ``e_z`` are unit
-Cartesian basis vectors. ``SE3_BASIS`` has shape ``(3, 3, 3)`` and supplies the
-skew generators used by ``hat``. Do not mutate these module-level arrays.
+``hat(u) @ v`` equals ``numpy.cross(u, v)``, fixing the cross-product sign
+used above. The basis arrays below are shared; do not mutate them.
 
 .. autofunction:: coker.toolkits.spatial.hat
 

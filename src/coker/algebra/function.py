@@ -277,13 +277,11 @@ class Function(SymbolicCallable, FunctionSignatureValue):
     def call_inline(self, *args) -> Tuple[Tracer]:
         """Evaluate explicitly through the NumPy tracing interpreter.
 
-        This path expands the computation for symbolic higher-order
-        evaluation. Ordinary traced calls instead leave composition to the
-        enclosing backend. Supply the same ordered arguments as a normal
-        call.
+        Expands the computation for symbolic higher-order evaluation; ordinary
+        traced calls leave composition to the enclosing backend.
 
         Args:
-            *args: Concrete values or symbolic arguments matching the inputs.
+            *args: Concrete or symbolic values in input declaration order.
 
         Returns:
             The bare output for a single-slot construction, otherwise the
@@ -392,6 +390,13 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             self._lowered_cache[cache_key] = lowered
             return lowered
 
+    def _validate_bound(self, other):
+        if len(self.output) != 1:
+            raise ValueError("Cannot compare tensors: expected exactly one output")
+        (dim,) = self.output_shape()
+        if dim != get_dim_by_class(other):
+            raise ValueError("Arguments have different shapes")
+
     def __le__(self, other: np.ndarray):
         """Construct an inclusive upper bound for one numeric output.
 
@@ -404,12 +409,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         Raises:
             ValueError: There is not exactly one output or shapes differ.
         """
-        # self < other
-        if len(self.output) != 1:
-            raise ValueError("Cannot compare tensors: expected exactly one output")
-        (dim,) = self.output_shape()
-        if dim != get_dim_by_class(other):
-            raise ValueError("Arguments have different shapes")
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, -np.inf * ones, other, is_equal=True)
 
@@ -425,12 +425,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         Raises:
             ValueError: There is not exactly one output or shapes differ.
         """
-        # self => other
-        if len(self.output) != 1:
-            raise ValueError("Cannot compare tensors: expected exactly one output")
-        (dim,) = self.output_shape()
-        if dim != get_dim_by_class(other):
-            raise ValueError("Arguments have different shapes")
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, other, ones * np.inf, is_equal=True)
 
@@ -446,12 +441,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         Raises:
             ValueError: Output count or bound shape does not match.
         """
-        # self <= other
-        if len(self.output) != 1:
-            raise ValueError("Cannot compare tensors: expected exactly one output")
-        (dim,) = self.output_shape()
-        if dim != get_dim_by_class(other):
-            raise ValueError("Arguments have different shapes")
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, -np.inf * ones, other, is_equal=False)
 
@@ -467,12 +457,7 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         Raises:
             ValueError: Output count or bound shape does not match.
         """
-        # self > other
-        if len(self.output) != 1:
-            raise ValueError("Cannot compare tensors: expected exactly one output")
-        (dim,) = self.output_shape()
-        if dim != get_dim_by_class(other):
-            raise ValueError("Arguments have different shapes")
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, other, ones * np.inf, is_equal=False)
 

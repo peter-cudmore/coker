@@ -168,11 +168,7 @@ class RadialBasisFunction(FunctionParameter):
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        """Return the single coefficient-and-offset declaration.
-
-        Returns:
-            tuple[ParameterVariable, ...]: One vector of centre count plus one.
-        """
+        """Return a one-item tuple declaring the coefficients followed by offset."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:

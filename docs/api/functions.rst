@@ -8,18 +8,10 @@ See :doc:`../tutorials/function_evaluation` for a step-by-step introduction.
 Call and shape contracts
 ------------------------
 
-Arguments follow declaration order and calls require exactly the declared
-number of arguments. An arity mismatch raises :class:`ValueError`; argument
-slots are not optional merely because their declaration is ``None``.
-Function-space arguments accept Coker functions or traceable Python
-callables. A non-callable implementation passed to :func:`coker.function`
-raises :class:`TypeError`.
-
-The factory preserves the implementation's output structure. A bare result
-produces a bare return value; a list or tuple produces a tuple of output
-values, including ``None`` slots. The shape methods always return tuples
-in declaration order. ``arguments`` returns a copy of the input names,
-and ``signature`` contains named input and output metadata.
+Calls are positional in declaration order, including explicitly absent slots.
+Output structure follows the implementation: a bare expression returns a bare
+value, while a list or tuple returns an ordered tuple, including ``None``
+slots. Shape and signature metadata describe those ordered inputs and outputs:
 
 .. testcode:: function_metadata
 
@@ -35,28 +27,20 @@ and ``signature`` contains named input and output metadata.
 Lowering and inline calls
 -------------------------
 
-``lower(options=None)`` returns a cached backend-specific executable handle.
-It accepts only :class:`~coker.backends.lowered.LoweringOptions` or ``None``;
-other types raise :class:`TypeError`. An explicit options backend overrides
-the function's backend, except that a native callable cannot be lowered for
-a different backend. That mismatch raises :class:`RuntimeError`.
-
-``call_inline(*args)`` explicitly uses the NumPy tracing interpreter.
-Use it for symbolic higher-order evaluation when the computation should be
-expanded; ordinary traced calls leave composition to the enclosing backend.
+Use :meth:`~coker.Function.lower` for a backend execution handle; see
+:ref:`backend-lowering-contract` for backend selection and the execution ABI.
+Use :meth:`~coker.Function.call_inline` when symbolic higher-order evaluation
+should expand through the NumPy tracing interpreter rather than leave a
+composed call to the enclosing backend.
 
 Inequalities
 ------------
 
-The comparison operators construct bound expressions; they do not evaluate
-the function or return a Boolean. Each requires exactly one numeric output
-and a bound with the same shape. There is no broadcasting. Output-count and
-shape mismatches raise :class:`ValueError`.
-
-The resulting expression stores the function and its lower and upper bounds.
-Strictness is not retained as separate metadata: ``<`` and ``<=`` describe
-the same upper-bound interval, and ``>`` and ``>=`` the same lower-bound
-interval.
+Function comparisons create elementwise bound expressions, not Boolean
+predicates. They require matching output and bound shapes without broadcasting.
+Strict and non-strict operators retain the same bound interval. These
+whole-function bounds are distinct from the symbolic expression comparisons
+used inside :doc:`optimisation` builders.
 
 .. testcode:: function_bounds
 

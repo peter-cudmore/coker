@@ -20,10 +20,6 @@ class WeightedNorm:
     Args:
         weight: Symbolic weighting matrix.
         residual: Symbolic residual vector.
-
-    Attributes:
-        weight: The original weighting matrix.
-        residual: The original residual vector.
     """
 
     weight: Tracer
@@ -36,13 +32,8 @@ class BoundedConstraint:
 
     Args:
         residual: Symbolic expression to constrain.
-        lower_bound: Numeric lower bound or symbolic bound on the same tape.
-        upper_bound: Numeric upper bound or symbolic bound on the same tape.
-
-    Attributes:
-        residual: Expression constrained between the two bounds.
-        lower_bound: Inclusive lower bound.
-        upper_bound: Inclusive upper bound.
+        lower_bound: Inclusive numeric lower bound or symbolic bound on the same tape.
+        upper_bound: Inclusive numeric upper bound or symbolic bound on the same tape.
 
     Bound ordering and shape are checked by the selected backend, not by this
     record. Prefer :func:`bounded` when constructing a model.
@@ -54,19 +45,11 @@ class BoundedConstraint:
 
     @property
     def tape(self):
-        """Return the tape owning the residual and any symbolic bounds.
-
-        Returns:
-            The residual's symbolic tape.
-        """
+        """Return the residual's tape, which must also own any symbolic bounds."""
         return self.residual.tape
 
     def as_halfplane_bound(self):
-        """Expose the residual and its component-wise bounds.
-
-        Returns:
-            Tuple ``(residual, lower_bound, upper_bound)`` without conversion.
-        """
+        """Return ``(residual, lower_bound, upper_bound)`` without conversion."""
         return self.residual, self.lower_bound, self.upper_bound
 
 

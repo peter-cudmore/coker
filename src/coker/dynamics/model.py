@@ -200,23 +200,16 @@ class DynamicalSystem:
         return _output_function_space(self.y, self.inputs, self.parameters)
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
-        """Return dimensions of the channels used by the output evaluator.
+        """Return differential, algebraic and quadrature dimensions, in order.
 
-        Returns:
-            tuple[Dimension, Dimension, Dimension]: Differential, algebraic and
-            quadrature dimensions, in that order. Absent channels retain the
-            output function's absence metadata.
+        Absent channels retain the output evaluator's absence metadata.
         """
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]
 
     @property
     def backend(self) -> str:
-        """Return the backend used by the differential-rate function.
-
-        Returns:
-            str: Registered backend name, such as ``"numpy"`` or ``"casadi"``.
-        """
+        """Return the rate function's registered backend name (e.g. ``"numpy"``)."""
         return self.dxdt.backend
 
     def __call__(self, *args):

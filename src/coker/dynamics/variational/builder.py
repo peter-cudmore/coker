@@ -288,8 +288,7 @@ class VariationalProblemBuilder:
         """Return the symbolic input at ``time``.
 
         Args:
-            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
-                :attr:`t`.
+            time: Physical evaluation site, as for :meth:`state`.
 
         Returns:
             Tracer | Noop: Scalar or vector input expression matching the
@@ -325,8 +324,7 @@ class VariationalProblemBuilder:
         """Return the symbolic system output at ``time``.
 
         Args:
-            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
-                :attr:`t`.
+            time: Physical evaluation site, as for :meth:`state`.
 
         Returns:
             Tracer: Flat vector of declared observables, not the internal

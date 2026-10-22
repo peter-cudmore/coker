@@ -39,12 +39,12 @@ def analyse_observability(
             expand until full rank or closure. Zero tests output gradients.
 
     Returns:
-        Rank evidence with output/Lie-derivative gradients as rows, restricted
+        ObservabilityResult: Output/Lie-derivative gradient rows, restricted
         to differential coordinates along DAE constraints when applicable.
-        ``TRUE`` means full differential-state rank; ``FALSE`` means stabilized
-        deficient rank. Unsupported inputs, invalid options and premature
-        limits produce ``INCONCLUSIVE`` with ``reason``. Nonvanishing
-        ``rank_conditions`` describe generic-rank and DAE regularity witnesses.
+        See :class:`AnalysisStatus` for verdicts and :class:`AnalysisResult`
+        for generic-rank and DAE regularity conditions. Unsupported input,
+        invalid options or premature limits give ``INCONCLUSIVE`` with
+        ``reason``.
 
     Examples:
         >>> import sympy as sp

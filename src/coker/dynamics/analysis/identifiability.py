@@ -92,12 +92,11 @@ def analyse_identifiability(
             continue until full rank or closure. Zero tests output gradients.
 
     Returns:
-        Augmented rank evidence with differential-state then fitted-parameter
-        columns. ``TRUE`` means full augmented rank and ``FALSE`` means closure
-        at deficient rank. Unsupported models, incompatible parameter roles,
-        invalid options or premature limits give ``INCONCLUSIVE`` with
-        ``reason``. Inspect ``rank_conditions`` for nonvanishing generic-rank
-        witnesses and, for DAEs, algebraic-Jacobian regularity.
+        IdentifiabilityResult: Rank evidence with differential-state then
+        fitted-parameter columns. See :class:`AnalysisStatus` for verdicts and
+        :class:`AnalysisResult` for generic-rank and DAE regularity conditions.
+        Unsupported models, incompatible parameter roles, invalid options or
+        premature limits give ``INCONCLUSIVE`` with ``reason``.
 
     Examples:
         >>> import sympy as sp

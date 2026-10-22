@@ -66,9 +66,6 @@ class Minimise:
     Args:
         expression: Scalar symbolic objective on the builder's tape.
 
-    Attributes:
-        expression: The supplied symbolic objective.
-
     Examples:
         >>> from coker.toolkits.codesign import Minimise, ProblemBuilder
         >>> builder = ProblemBuilder()
@@ -213,19 +210,11 @@ class MathematicalProgram(SymbolicCallable):
         return program
 
     def input_shape(self) -> Tuple[Dimension, ...]:
-        """Return runtime argument dimensions in declaration order.
-
-        Returns:
-            Tuple of dimensions, excluding optimisation decisions.
-        """
+        """Return ordered runtime argument dimensions, excluding decisions."""
         return self._input_shape
 
     def output_shape(self) -> Tuple[Dimension, ...]:
-        """Return requested output dimensions.
-
-        Returns:
-            Tuple of dimensions, excluding the objective and private captures.
-        """
+        """Return requested output dimensions, excluding objective and captures."""
         return self._output_shape
 
     @property
@@ -664,25 +653,12 @@ class ProblemBuilder:
         )
 
     def __enter__(self):
-        """Enter the optional configuration context.
-
-        Returns:
-            This builder, without activating a global tracing context.
-        """
+        """Return this builder without activating a global tracing context."""
         assert self.tape is not None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Leave configuration intact and allow exceptions to propagate.
-
-        Args:
-            exc_type: Exception type supplied by the context protocol, if any.
-            exc_val: Exception instance, if any.
-            exc_tb: Exception traceback, if any.
-
-        Returns:
-            None, so exceptions are not suppressed.
-        """
+        """Return ``None``, preserving configuration and propagating exceptions."""
         pass
 
 

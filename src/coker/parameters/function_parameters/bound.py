@@ -173,11 +173,7 @@ class BoundFunctionParameter(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        """Return declarations bound to source inputs in source-input order.
-
-        Returns:
-            tuple[ParameterVariable, ...]: The concrete declarations.
-        """
+        """Return a tuple of bound declarations in source-input order."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:

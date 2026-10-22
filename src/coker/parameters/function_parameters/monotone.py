@@ -157,11 +157,7 @@ class MonotonePiecewiseLinear(FunctionParameter):
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        """Return the single dense coefficient declaration.
-
-        Returns:
-            tuple[ParameterVariable, ...]: One vector with ``size`` entries.
-        """
+        """Return a one-item tuple declaring the ``size``-entry coefficient vector."""
         return self.parameters
 
     def _values(self, theta: Any) -> list[Any]:

@@ -122,10 +122,7 @@ class ResidualDynamicalSystem:
     def get_state_dimensions(
         self,
     ) -> tuple[Dimension, Dimension | None, Dimension | None]:
-        """Return the differential, algebraic, and quadrature dimensions.
-
-        Returns:
-            A ``(differential, algebraic, quadrature)`` dimension tuple.
+        """Return ``(differential, algebraic, quadrature)`` dimensions.
 
         Examples:
             >>> from coker.dynamics import (
@@ -141,10 +138,7 @@ class ResidualDynamicalSystem:
 
     @property
     def backend(self) -> str:
-        """Return the backend used by the residual callback.
-
-        Returns:
-            Registered backend name for this model.
+        """Return the residual callback's registered backend name.
 
         Examples:
             >>> from coker.dynamics import (
