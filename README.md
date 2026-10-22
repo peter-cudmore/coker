@@ -156,7 +156,7 @@ feature on every platform.
 Backend CI checks use CPU execution. CUDA support remains experimental and
 unverified; see the [backend support boundaries][backend-guide].
 See [CHANGELOG.md](CHANGELOG.md) for changes and the
-[issue tracker](https://github.com/peter-cudmore/coker/issues) for known problems.
+[issue tracker](https://github.com/pneumatica-bio/coker/issues) for known problems.
 
 ## Contributing and credit
 
@@ -178,15 +178,15 @@ Coker is licensed under **MPL-2.0**. See [LICENSE.TXT](LICENSE.TXT).
 External contributions are accepted under the same licence without copyright
 assignment; see [contribution licensing](CONTRIBUTING.md#contribution-licensing).
 
-[documentation]: https://peter-cudmore.github.io/coker/
-[getting-started]: https://peter-cudmore.github.io/coker/basics/getting_started.html
-[how-to]: https://peter-cudmore.github.io/coker/how_to/index.html
-[backend-guide]: https://peter-cudmore.github.io/coker/backends.html
-[solver-tuning]: https://peter-cudmore.github.io/coker/how_to/casadi_solver_tuning.html
-[interoperability]: https://peter-cudmore.github.io/coker/how_to/backend_interoperability.html
-[simulation]: https://peter-cudmore.github.io/coker/how_to/simulation.html
-[identification]: https://peter-cudmore.github.io/coker/how_to/system_identification.html
-[path-planning]: https://peter-cudmore.github.io/coker/how_to/path_planning.html
-[robot-arm]: https://peter-cudmore.github.io/coker/how_to/robot_arm.html
-[architecture]: https://peter-cudmore.github.io/coker/architecture/index.html
-[backend-tutorial]: https://peter-cudmore.github.io/coker/tutorials/backends.html
+[documentation]: https://pneumatica-bio.github.io/coker/
+[getting-started]: https://pneumatica-bio.github.io/coker/basics/getting_started.html
+[how-to]: https://pneumatica-bio.github.io/coker/how_to/index.html
+[backend-guide]: https://pneumatica-bio.github.io/coker/backends.html
+[solver-tuning]: https://pneumatica-bio.github.io/coker/how_to/casadi_solver_tuning.html
+[interoperability]: https://pneumatica-bio.github.io/coker/how_to/backend_interoperability.html
+[simulation]: https://pneumatica-bio.github.io/coker/how_to/simulation.html
+[identification]: https://pneumatica-bio.github.io/coker/how_to/system_identification.html
+[path-planning]: https://pneumatica-bio.github.io/coker/how_to/path_planning.html
+[robot-arm]: https://pneumatica-bio.github.io/coker/how_to/robot_arm.html
+[architecture]: https://pneumatica-bio.github.io/coker/architecture/index.html
+[backend-tutorial]: https://pneumatica-bio.github.io/coker/tutorials/backends.html
