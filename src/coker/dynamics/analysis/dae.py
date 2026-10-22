@@ -37,7 +37,36 @@ from .symbolic import (
 
 @dataclass(frozen=True)
 class SymbolicDAESystem:
-    """A semi-explicit DAE ``xdot=f(x, z, u, p), 0=g(x, z, p)``."""
+    """Symbolic semi-explicit DAE ``xdot=f(x, z, u, p), 0=g(x, z, p)``.
+
+    Symbolic analysis uses the index-one region where ``det(dg/dz) != 0``.
+    Constraints are not solved for algebraic variables. Direct construction
+    does not validate data; supply consistent smooth autonomous expressions.
+    This representation does not claim support for general implicit residuals
+    or higher-index DAEs.
+
+    Args:
+        state: Differential-state symbols in rank-matrix coordinate order.
+        algebraic: Algebraic-state symbols in constraint-Jacobian order.
+        parameters: Constant scalar parameter symbols, flattened in declaration
+            order.
+        controls: Symbols for known arbitrary control signal values.
+        dynamics: One differential-rate expression per differential state.
+        constraints: One constraint expression per algebraic variable, without
+            explicit time or control dependence.
+        outputs: Flattened measured expressions.
+
+    Examples:
+        >>> import sympy as sp
+        >>> from coker.dynamics import SymbolicDAESystem, analyse_observability
+        >>> x, z = sp.symbols("x z")
+        >>> dae = SymbolicDAESystem(
+        ...     state=(x,), algebraic=(z,), parameters=(), controls=(),
+        ...     dynamics=(-z,), constraints=(z - x,), outputs=(z,),
+        ... )
+        >>> analyse_observability(dae).rank
+        1
+    """
 
     state: tuple[sp.Symbol, ...]
     algebraic: tuple[sp.Symbol, ...]
@@ -80,7 +109,44 @@ def geometry(system: SymbolicDAESystem) -> ConstraintGeometry:
 
 
 def lower_dae_system(system: DynamicalSystem) -> SymbolicDAESystem:
-    """Lower a supported semi-explicit DAE without solving its constraints."""
+    """Lower a supported autonomous semi-explicit DAE without solving it.
+
+    Args:
+        system: A ``DynamicalSystem`` with smooth traceable rates, constraints
+            and outputs, finite differential/algebraic states, scalar/vector
+            parameters, and optional time-only input ``FunctionSpace``.
+
+    Returns:
+        Symbolic DAE expressions in declaration order. Analysis entry points
+        subsequently require a square generically invertible algebraic
+        constraint Jacobian and work only on its regular index-one region.
+
+    Raises:
+        UnsupportedSystemError: Constraints are absent or have incompatible
+            dimensions/signatures, quadratures or function-valued parameters
+            are present, constraints depend on controls, or expressions cannot
+            be lowered as smooth autonomous symbolic data. General
+            ``ResidualDynamicalSystem`` models are not accepted here.
+
+    Examples:
+        >>> import numpy as np
+        >>> from coker import VectorSpace
+        >>> from coker.dynamics import (
+        ...     DynamicsSpec, create_dynamics_from_spec, lower_dae_system,
+        ... )
+        >>> spec = DynamicsSpec(
+        ...     inputs=None, parameters=None, algebraic=VectorSpace("z", 1),
+        ...     initial_conditions=lambda z, u, p: (np.ones(1), np.ones(1)),
+        ...     dynamics=lambda t, x, z, u, p: -z,
+        ...     constraints=lambda t, x, z, u, p: z - x,
+        ...     quadratures=None, outputs=lambda t, x, z, u, p, q: z,
+        ... )
+        >>> dae = lower_dae_system(
+        ...     create_dynamics_from_spec(spec, backend="numpy")
+        ... )
+        >>> len(dae.state), len(dae.algebraic), len(dae.constraints)
+        (1, 1, 1)
+    """
     if not isinstance(system.g, Function):
         raise UnsupportedSystemError("DAE constraints must be a Coker Function")
     if system.dqdt is not None and not isinstance(system.dqdt, Noop):

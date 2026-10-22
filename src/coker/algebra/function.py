@@ -41,17 +41,25 @@ from coker.backends.lowered import (
 
 
 class Function(SymbolicCallable, FunctionSignatureValue):
-    """A compiled Coker function.
+    """A traced callable with backend-specific concrete evaluation.
 
-    Created by :func:`function`.  Holds the traced computation graph and
-    dispatches to a backend for evaluation.  Calling a ``Function`` with
-    concrete numpy arrays returns the result; calling it inside a tracing
-    context records the operations on the outer tape.
+    Prefer :func:`function` to trace a Python implementation. A direct
+    constructor wraps an existing tape without tracing it again. Concrete
+    calls evaluate through the selected backend; calls containing tracers
+    compose with the enclosing tape.
 
     Attributes:
-        tape: The recorded computation graph.
-        backend: Name of the backend used for concrete evaluation.
-        output: List of output :class:`~coker.algebra.graph.Tracer` nodes.
+        tape: Recorded computation graph.
+        backend: Backend name used for concrete evaluation.
+        output: Ordered output tracers, including absent ``None`` slots.
+        signature: Named input and output metadata.
+        name: Optional human-readable function name.
+
+    Examples:
+        >>> from coker import Scalar, function
+        >>> square = function([Scalar("x")], lambda x: x * x)
+        >>> float(square(3.0))
+        9.0
     """
 
     INLINE_SIZE = 10
@@ -64,6 +72,18 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         name: str | None = None,
         signature: FunctionSignature | None = None,
     ) -> None:
+        """Wrap a recorded computation and its public output slots.
+
+        Args:
+            tape: Tape containing the input declarations and computation.
+            outputs: One output tracer or ``None``, or a sequence of output
+                slots. A sequence preserves tuple-return semantics, even for
+                one output; a single slot produces a bare return value.
+            backend: Registered backend name for evaluation.
+            name: Optional display name.
+            signature: Explicit signature metadata, inferred from the tape
+                and outputs when omitted.
+        """
         self.name = name
         self.tape = tape
         self.backend = backend
@@ -91,9 +111,11 @@ class Function(SymbolicCallable, FunctionSignatureValue):
 
     @property
     def arguments(self) -> list[str]:
+        """list[str]: Copy of input names in declaration order."""
         return self.tape.input_names.copy()
 
     def __repr__(self):
+        """Return the display name and input/output shape metadata."""
         name = self.name if self.name else "<unknown>"
         try:
             out_shape = f"{self.output_shape()}"
@@ -113,7 +135,13 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return list(self.tape.list_inputs())
 
     def input_shape(self) -> tuple[Dimension | FunctionSpace | None, ...]:
-        """Return each input argument shape in declaration order."""
+        """Return input shapes, preserving absent and function-valued slots.
+
+        Returns:
+            Tuple in declaration order. Numeric entries are dimensions;
+            function-valued entries are function spaces and absent entries
+            retain their ``None`` or no-op declaration.
+        """
         special_inputs = {
             Tape.NONE: None,
             Tape.MAP_TO_NONE: Noop().cast_to_function_space(None),
@@ -125,7 +153,12 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         )
 
     def output_shape(self) -> tuple[Dimension | FunctionSpace | None, ...]:
-        """Return each output shape in declaration order."""
+        """Return output shapes in declaration order.
+
+        Returns:
+            Tuple of dimensions or function spaces, with ``None`` for each
+            absent output. This is always a tuple, even for a bare output.
+        """
         return tuple(o.dim if o is not None else None for o in self.output)
 
     def _symbol_entry(self) -> SymbolEntry:
@@ -242,10 +275,23 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return BoundCallable(inner_fn, space, tuple(unique_captured))
 
     def call_inline(self, *args) -> Tuple[Tracer]:
-        """Evaluate through the NumPy tracing interpreter.
+        """Evaluate explicitly through the NumPy tracing interpreter.
 
-        Use this explicit path for symbolic higher-order evaluation. Regular
-        traced calls dispatch composition to the enclosing backend.
+        Expands the computation for symbolic higher-order evaluation; ordinary
+        traced calls leave composition to the enclosing backend.
+
+        Args:
+            *args: Concrete or symbolic values in input declaration order.
+
+        Returns:
+            The bare output for a single-slot construction, otherwise the
+            ordered output collection, including absent slots.
+
+        Examples:
+            >>> from coker import Scalar, function
+            >>> increment = function([Scalar("x")], lambda x: x + 1)
+            >>> float(increment.call_inline(2.0))
+            3.0
         """
         backend = get_backend_by_name("numpy", set_current=False)
         output = backend.evaluate(self, args)
@@ -254,10 +300,30 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return output
 
     def __call__(self, *args: Any) -> Any:
-        assert len(args) == len(self.tape.input_indicies), (
-            f"Expected {len(self.tape.input_indicies)} arguments but got "
-            f"{len(args)}"
-        )
+        """Evaluate numerically or record a call on an enclosing tape.
+
+        Args:
+            *args: Values in input declaration order. Function-space inputs
+                accept Coker functions or traceable Python callables.
+
+        Returns:
+            A bare value when constructed with one bare output, or a tuple
+            for a sequence of outputs. Absent output slots remain ``None``.
+
+        Raises:
+            ValueError: The argument count differs from the declared arity.
+
+        Examples:
+            >>> from coker import Scalar, function
+            >>> pair = function([Scalar("x")], lambda x: (x, x + 1))
+            >>> tuple(float(value) for value in pair(2.0))
+            (2.0, 3.0)
+        """
+        if len(args) != len(self.tape.input_indicies):
+            raise ValueError(
+                f"Expected {len(self.tape.input_indicies)} arguments but got "
+                f"{len(args)}"
+            )
 
         args = [
             (self._prepare_argument(arg, idx))
@@ -285,7 +351,25 @@ class Function(SymbolicCallable, FunctionSignatureValue):
         return tuple(output)
 
     def lower(self, options: LoweringOptions | None = None) -> LoweredFunction:
-        """Return a cached backend-specific executable lowering handle."""
+        """Return a cached backend-specific executable handle.
+
+        Args:
+            options: Immutable lowering options, or ``None`` for defaults.
+                An explicit backend overrides this function's backend.
+
+        Returns:
+            A lowering handle cached by backend identity and options.
+
+        Raises:
+            TypeError: ``options`` is not a ``LoweringOptions`` instance.
+            RuntimeError: A native callable is lowered for a different backend.
+
+        Examples:
+            >>> from coker import Scalar, function
+            >>> increment = function([Scalar("x")], lambda x: x + 1)
+            >>> increment.lower() is increment.lower()
+            True
+        """
 
         options = LoweringOptions() if options is None else options
         if not isinstance(options, LoweringOptions):
@@ -306,41 +390,99 @@ class Function(SymbolicCallable, FunctionSignatureValue):
             self._lowered_cache[cache_key] = lowered
             return lowered
 
+    def _validate_bound(self, other):
+        if len(self.output) != 1:
+            raise ValueError("Cannot compare tensors: expected exactly one output")
+        (dim,) = self.output_shape()
+        if dim != get_dim_by_class(other):
+            raise ValueError("Arguments have different shapes")
+
     def __le__(self, other: np.ndarray):
-        # self < other
-        assert len(self.output_shape()) == 1, "Cannot compare tensors"
-        dim = self.output_shape()[0]
-        assert dim.shape == get_dim_by_class(other), "Arguments have different shapes"
+        """Construct an inclusive upper bound for one numeric output.
+
+        Args:
+            other: Bound with exactly the output's shape; no broadcasting.
+
+        Returns:
+            An inequality expression with an unbounded lower side.
+
+        Raises:
+            ValueError: There is not exactly one output or shapes differ.
+        """
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, -np.inf * ones, other, is_equal=True)
 
     def __ge__(self, other):
-        # self => other
-        assert len(self.output_shape()) == 1, "Cannot compare tensors"
-        (dim,) = self.output_shape()
-        assert dim == get_dim_by_class(other), "Arguments have different shapes"
+        """Construct an inclusive lower bound for one numeric output.
+
+        Args:
+            other: Bound with exactly the output's shape; no broadcasting.
+
+        Returns:
+            An inequality expression with an unbounded upper side.
+
+        Raises:
+            ValueError: There is not exactly one output or shapes differ.
+        """
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, other, ones * np.inf, is_equal=True)
 
     def __lt__(self, other):
-        # self <= other
-        assert len(self.output_shape()) == 1, "Cannot compare tensors"
-        (dim,) = self.output_shape()
-        assert dim == get_dim_by_class(other), "Arguments have different shapes"
+        """Construct a strict upper-bound expression.
+
+        Args:
+            other: Bound with exactly the single numeric output's shape.
+
+        Returns:
+            An inequality expression with an unbounded lower side.
+
+        Raises:
+            ValueError: Output count or bound shape does not match.
+        """
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, -np.inf * ones, other, is_equal=False)
 
     def __gt__(self, other):
-        # self > other
-        assert len(self.output_shape()) == 1, "Cannot compare tensors"
-        dim = self.output_shape()[0]
-        assert dim.shape == other.shape, "Arguments have different shapes"
+        """Construct a strict lower-bound expression.
+
+        Args:
+            other: Bound with exactly the single numeric output's shape.
+
+        Returns:
+            An inequality expression with an unbounded upper side.
+
+        Raises:
+            ValueError: Output count or bound shape does not match.
+        """
+        self._validate_bound(other)
         ones = np.ones_like(other)
         return InequalityExpression(self, other, ones * np.inf, is_equal=False)
 
 
 class BoundCallable(SymbolicCallable, FunctionSignatureValue):
-    """A public callable view over a target with explicit bound arguments."""
+    """A callable view that supplies captured tracer arguments to a target.
+
+    Args:
+        target: Function whose trailing present inputs are captured.
+        public_space: Signature exposed to callers, excluding captures.
+        bound_arguments: Captured tracer dependencies in target input order.
+
+    Raises:
+        ValueError: Public inputs and captures do not match target arity.
+
+    Examples:
+        >>> from coker import FunctionSpace, Scalar, function
+        >>> from coker.algebra.function import BoundCallable
+        >>> target = function([Scalar("x")], lambda x: x + 1)
+        >>> view = BoundCallable(
+        ...     target, FunctionSpace("f", [Scalar("x")], [Scalar("y")]), ()
+        ... )
+        >>> float(view(2.0))
+        3.0
+    """
 
     def __init__(
         self,
@@ -376,6 +518,17 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         return value
 
     def __call__(self, *arguments: Any) -> Any:
+        """Call the target with public inputs followed by captured inputs.
+
+        Args:
+            *arguments: Values matching the public function space.
+
+        Returns:
+            The target's public result, with its original output structure.
+
+        Raises:
+            TypeError: The number of public arguments is incorrect.
+        """
         if len(arguments) != len(self.public_space.arguments):
             raise TypeError(
                 f"Expected {len(self.public_space.arguments)} arguments, "
@@ -384,16 +537,58 @@ class BoundCallable(SymbolicCallable, FunctionSignatureValue):
         return self.target(*arguments, *self.bound_arguments)
 
     def lower(self, options=None) -> LoweredFunction:
+        """Lower the complete target, including its captured input slots.
+
+        Args:
+            options: Optional target lowering options.
+
+        Returns:
+            The target's cached lowering handle; captures are not executed
+            or supplied by this handle automatically.
+        """
         return self.target.lower(options)
 
     def input_shape(self):
+        """Return the public input dimensions, excluding captured inputs.
+
+        Returns:
+            Tuple of dimensions in public argument order.
+        """
         return tuple(self.public_space.input_dimensions())
 
     def output_shape(self):
+        """Return the public output dimensions.
+
+        Returns:
+            Tuple of dimensions in public result order.
+        """
         return tuple(self.public_space.output_dimensions())
 
 
 class InequalityExpression:
+    """Store a function and elementwise lower and upper bounds.
+
+    Args:
+        value: Function whose output is constrained.
+        lower: Lower-bound array, possibly containing negative infinity.
+        upper: Upper-bound array, possibly containing positive infinity.
+        is_equal: Comparison construction flag. The expression currently
+            stores only ``value``, ``lower`` and ``upper``, not strictness.
+
+    Attributes:
+        value: Constrained function.
+        lower: Lower-bound values.
+        upper: Upper-bound values.
+
+    Examples:
+        >>> import numpy as np
+        >>> from coker import VectorSpace, function
+        >>> identity = function([VectorSpace("x", 2)], lambda x: x)
+        >>> constraint = identity > np.zeros(2)
+        >>> constraint.lower.tolist()
+        [0.0, 0.0]
+    """
+
     def __init__(
         self,
         value: Function,
@@ -455,6 +650,9 @@ def function(
     Returns:
         A compiled :class:`Function` that can be called with concrete numpy
         arrays or symbolic tracers.
+
+    Raises:
+        TypeError: ``implementation`` is not callable.
 
     Example:
         >>> import numpy as np

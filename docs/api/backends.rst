@@ -113,12 +113,23 @@ need an explicit signature unless their backend can derive one.
 
 .. autoclass:: coker.backends.lowered.LoweringCapabilities
 
-   The ``eager_execution``, ``symbolic_execution`` and ``autograd`` flags
-   describe the handle. They do not certify every operation or device.
+   These flags advertise execution mechanisms, not numerical correctness,
+   ownership, lifetime or thread-safety guarantees. In particular, advertised
+   JAX autograd support does not resolve the known derivative-correctness
+   limitations tracked in issue 99.
 
 .. autoclass:: coker.backends.lowered.LoweredFunction
    :members: backend_name,signature,capabilities,execute,restore_public_outputs
    :special-members: __call__
+
+Solver configuration interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Lowering options select an execution backend; they do not configure integration
+algorithms, backend device/dtype settings or mathematical-program optimisers.
+Use the concrete options class documented for the selected solver.
+
+.. autoclass:: coker.interfaces.SolverParameters
 
 CasADi
 -------

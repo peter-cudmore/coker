@@ -63,8 +63,38 @@ def _evaluate_violation(raw_value, lower, upper) -> np.ndarray:
 
 @dataclass(frozen=True)
 class SegmentDefectDiagnostic:
-    """Full physical segment residual and mesh provenance from a
-    transcription."""
+    """A segment's coupled physical residual and transcription provenance.
+
+    CasADi records the weighted, signed residual vector over the segment,
+    including differential, algebraic and quadrature equations. This is not
+    the maximum absolute defect used to decide adaptive refinement.
+
+    Args:
+        normalized_interval: Segment endpoints in normalised time on ``[0, 1]``.
+        physical_interval: Corresponding endpoints in physical time.
+        degree: Interpolating polynomial degree.
+        tolerance: Transcription's segment-defect tolerance.
+        full_residual: One-dimensional floating NumPy residual array.
+
+    Raises:
+        TypeError: ``full_residual`` is not a NumPy array with floating dtype.
+        ValueError: ``full_residual`` is missing or is not one-dimensional.
+
+    Notes:
+        Fields cannot be reassigned, but the residual array is not copied or
+        made read-only. Treat solver-provided diagnostics as read-only.
+
+    Examples:
+        >>> import numpy as np
+        >>> from coker.dynamics.variational.solution import SegmentDefectDiagnostic
+        >>> diagnostic = SegmentDefectDiagnostic(
+        ...     (0.0, 0.5), (0.0, 2.0), 3, 1e-6, np.zeros(2)
+        ... )
+        >>> diagnostic.physical_interval
+        (0.0, 2.0)
+        >>> diagnostic.full_residual.shape
+        (2,)
+    """
 
     normalized_interval: Tuple[float, float]
     physical_interval: Tuple[float, float]
@@ -86,10 +116,56 @@ class SegmentDefectDiagnostic:
 
 @dataclass
 class VariationalSolution:
-    """A solved trajectory with physical-time public evaluation.
+    """A solved trajectory evaluated in physical time.
 
-    ``path`` and ``control_solutions`` use normalized time on ``[0, 1]``;
-    ``t_final`` maps that coordinate to physical time.
+    Obtain this result by calling a :class:`coker.dynamics.VariationalProblem`
+    or its solver. ``solution(t)`` evaluates the declared output, whereas
+    :meth:`state`, :meth:`algebraic`, :meth:`quadratures` and :meth:`control_law`
+    inspect individual channels. See the dynamics guide's executable fitting
+    example for construction and result inspection.
+
+    Args:
+        cost: Final scalar objective value.
+        path: Combined state/algebraic/quadrature interpolant in normalised
+            time on ``[0, 1]``, not physical time.
+        projectors: State, algebraic and quadrature projection matrices in
+            that order. Absent optional channels have ``None`` projectors.
+        control_solutions: Control representations in declaration order,
+            evaluated in normalised time; empty or ``None`` means no controls.
+        parameters: Named reconstructed parameter values. CasADi numeric
+            decisions are floats or shaped NumPy arrays; PyTorch decisions
+            can be tensors. Function decisions are ``FittedFunction`` objects.
+        output: Output evaluator with arguments ``(t, x, z, u, p, q)``.
+            Use ``solution(t)`` rather than calling this field directly.
+        t_final: Solved physical horizon. Solver results have a positive
+            horizon; the dataclass default alone is not an evaluable solution.
+        solve_info: Solver status metadata, or ``None`` when not supplied,
+            for example for a manually constructed result.
+        adaptive_refinement_rounds: Completed adaptive refinement rounds,
+            or ``None`` when adaptive refinement was not used.
+        adaptive_maximum_defect: Final maximum absolute sampled coupled
+            residual for adaptive refinement, or ``None`` when not available.
+        segment_defects: Segment diagnostics, empty when not supplied.
+            CasADi supplies these even without adaptive refinement.
+        path_constraint_exprs: Stored path inequalities used by
+            :meth:`path_constraints`; empty when no inequalities are stored.
+        terminal_constraint_exprs: Stored terminal inequalities used by
+            :meth:`terminal_constraints`; empty when none are stored.
+
+    Notes:
+        Channel interpolation and raw samples use NumPy arrays. The declared
+        output retains its evaluator's shape and numeric return convention;
+        fitted parameter values retain their backend's representation.
+        This mutable dataclass does not defensively copy constructor inputs.
+        Treat its stored arrays, mappings, controls and diagnostics as
+        read-only: mutating named parameters does not refit the trajectory or
+        synchronise the numeric parameter vector used for output evaluation.
+
+        Evaluation is for scalar physical times within the solved horizon.
+        Present trajectory channels reject times outside the path intervals
+        with ``ValueError``; no extrapolation or vectorised time-grid contract
+        is provided. Absent optional channels return ``None`` without
+        evaluating the path.
     """
 
     cost: float
@@ -131,6 +207,26 @@ class VariationalSolution:
         path_constraint_exprs: List[InequalityExpression] | None = None,
         terminal_constraint_exprs: List[InequalityExpression] | None = None,
     ) -> "VariationalSolution":
+        """Attach numeric parameter vectors to a :class:`VariationalSolution`.
+
+        Solver-facing constructor; arguments shared with the class follow its
+        contract, including time coordinates and ownership. It neither solves
+        nor validates solver success.
+
+        Args:
+            parameter_vector: Numeric system parameter vector passed to output
+                and stored constraint evaluators, distinct from named values.
+            solver_parameter_vector: Optional full solver decision-parameter
+                vector retained for solver reuse.
+            t_final: Physical horizon; the default is not an evaluable solution.
+            path_constraint_exprs: Stored path inequalities; ``None`` becomes
+                an empty list.
+            terminal_constraint_exprs: Stored terminal inequalities; ``None``
+                becomes an empty list.
+
+        Returns:
+            VariationalSolution: Result retaining the supplied vectors.
+        """
         solution = cls(
             cost,
             path,
@@ -152,6 +248,21 @@ class VariationalSolution:
         return solution
 
     def path_constraints(self, t) -> np.ndarray:
+        """Evaluate nonnegative stored path-inequality violations.
+
+        Args:
+            t: Scalar physical time within the solved horizon.
+
+        Returns:
+            numpy.ndarray: Flat violations in stored expression/component
+            order. Each half-space contributes its distance outside the bound
+            or zero when satisfied. No stored expressions returns an empty
+            array without evaluating the trajectory.
+
+        Raises:
+            ValueError: A component has both finite lower and upper bounds,
+                or the time is outside the path intervals.
+        """
         if not self.path_constraint_exprs:
             return np.zeros((0,))
         args = (
@@ -169,6 +280,20 @@ class VariationalSolution:
         return np.concatenate(violations) if violations else np.zeros((0,))
 
     def terminal_constraints(self) -> np.ndarray:
+        """Evaluate stored terminal-inequality violations at ``t_final``.
+
+        Returns:
+            numpy.ndarray: Flat nonnegative half-space violations in stored
+            expression/component order, or an empty array when no terminal
+            expressions are stored. Zero denotes a satisfied component.
+
+        Raises:
+            ValueError: A component has both finite lower and upper bounds.
+
+        Notes:
+            This does not report all solver constraints: initial point
+            constraints and transcription equations are not included.
+        """
         if not self.terminal_constraint_exprs:
             return np.zeros((0,))
         t = self.t_final
@@ -187,6 +312,16 @@ class VariationalSolution:
         return np.concatenate(violations) if violations else np.zeros((0,))
 
     def as_raw(self) -> np.ndarray:
+        """Return sampled internal channels with physical knot times.
+
+        Returns:
+            numpy.ndarray: New array with one column per retained knot.
+            Row zero contains physical times; remaining rows contain the
+            combined internal path channels, not the declared output. Each
+            segment's right endpoint is omitted, so the final horizon is
+            not included. Interior boundaries occur as the next segment's
+            starting knot.
+        """
         points = [
             np.vstack([np.array([t * self.t_final]), x])
             for t, x, _ in self.path.knot_points()
@@ -194,26 +329,81 @@ class VariationalSolution:
         return np.hstack(points)
 
     def state(self, t):
+        """Return the flat differential-state NumPy vector.
+
+        Args:
+            t: Scalar physical time in ``[0, t_final]``; time grids and
+                extrapolation are unsupported, as described in the class notes.
+
+        Raises:
+            ValueError: The time is outside the path intervals.
+        """
         v = self.path(t / self.t_final)
         proj = self.projectors[0]
         return proj @ v
 
     def algebraic(self, t):
+        """Return the flat algebraic NumPy vector, or ``None`` if absent.
+
+        Args:
+            t: Scalar physical time, following :meth:`state`.
+
+        Raises:
+            ValueError: A present channel is evaluated outside the path.
+        """
         if self.projectors[1] is None:
             return None
         return self.projectors[1] @ self.path(t / self.t_final)
 
     def quadratures(self, t):
+        """Return the flat accumulated-quadrature NumPy vector, or ``None``.
+
+        Args:
+            t: Scalar physical time, following :meth:`state`. An absent
+                quadrature projector returns ``None`` without path evaluation.
+
+        Raises:
+            ValueError: A present channel is evaluated outside the path.
+        """
         if self.projectors[2] is None:
             return None
         return self.projectors[2] @ self.path(t / self.t_final)
 
     def control_law(self, t):
+        """Evaluate controls at a scalar physical time.
+
+        Args:
+            t: Physical time in ``[0, t_final]``, converted to normalised time
+                for each stored control.
+
+        Returns:
+            numpy.ndarray | None: Values stacked in declaration order, or
+            ``None`` without controls. Shape and boundary behaviour follow the
+            stored control types.
+
+        Raises:
+            AssertionError: A stored piecewise control selects a coefficient
+                beyond its available array.
+        """
         if not self.control_solutions:
             return None
         return np.array([c(t / self.t_final) for c in self.control_solutions])
 
     def __call__(self, t) -> np.ndarray:
+        """Evaluate the declared output, rather than the internal path.
+
+        Args:
+            t: Scalar physical time, following :meth:`state`.
+
+        Returns:
+            object: Output from ``output(t, x, z, u, p, q)`` with the
+            evaluator's shape and numeric return convention. Absent optional
+            channels are passed as ``None``; ``p`` is the stored numeric
+            system parameter vector, not the named ``parameters`` mapping.
+
+        Raises:
+            ValueError: The time is outside the path intervals.
+        """
         x = self.state(t)
         q = self.quadratures(t)
         u = self.control_law(t)
@@ -221,6 +411,21 @@ class VariationalSolution:
         return self.output(t, x, z, u, self._parameter_vector, q)
 
     def to_poly(self) -> InterpolatingPolyCollection:
+        """Build a piecewise output interpolant in physical time.
+
+        Returns:
+            InterpolatingPolyCollection: New piecewise polynomial with the
+            path's intervals scaled by ``t_final`` and the same per-segment
+            degrees. Output values are sampled at every interpolation node,
+            converted to NumPy, and flattened into output vectors.
+
+        Notes:
+            Unlike ``solution(t)``, this interpolates sampled outputs instead
+            of evaluating the output function at every query. Nonlinear
+            outputs and discontinuous controls need not be reproduced exactly
+            between nodes. The returned intervals are physical; ``path``
+            remains normalised and is not modified.
+        """
 
         def f(t, v):
             t *= self.t_final

@@ -63,18 +63,59 @@ class VariationalProblemBuilder:
 
     Args:
         system: Explicit, semi-explicit, or residual dynamic system.
-        t_final: Fixed positive horizon or bounded horizon decision.
-        control: Optional control-variable declarations.
-        parameters: Optional fitted parameter declarations.
-        backend: Name of the backend that will solve the problem.
-        transcription_options: Mesh and backend solve configuration.
-        system_parameter_map: Map solver parameters into system parameters.
+        t_final: Positive horizon measured from physical time zero in the
+            model's time units, or a bounded duration decision with positive
+            lower bound and a guess within its bounds.
+        control: Scalar control declarations in system input order. Coefficient
+            rates and spike locations use normalised time ``t / t_final``.
+        parameters: Fitted declarations or fixed numeric values in system
+            parameter order. For heterogeneous parameter tuples, supply one
+            declaration per space, including ``FunctionParameter`` for function
+            spaces and vector/tensor declarations for vector spaces.
+        backend: Name of the variational backend; defaults to CasADi.
+        transcription_options: Collocation and backend solve configuration.
+        system_parameter_map: Numeric map from the finite solver parameter
+            vector into the system parameter vector.
+
+    Symbolic access is context-owned. Use only ``0``, :attr:`t` and
+    :attr:`t_final` as evaluation sites; arbitrary concrete sample times are
+    not supported. Build inside the context and solve the returned problem
+    after leaving it. Constraint and quadrature records are internal lowering
+    details, not ordinary user declarations.
 
     Examples:
-        Build a problem inside the context manager::
+        Construct a terminal objective and a running integral with NumPy
+        tracing. This constructs a problem; it does not request a NumPy
+        variational solver.
 
-            with VariationalProblemBuilder(system, t_final=1.0) as problem:
-                built = problem.build(Minimise(problem.state() @ problem.state()))
+        .. testcode:: variational-builder-source
+
+            import numpy as np
+            from coker import VectorSpace
+            from coker.dynamics import (
+                VariationalProblemBuilder, create_autonomous_ode,
+            )
+            from coker.parameters import BoundedVariable
+            from coker.toolkits.codesign import Minimise
+
+            system = create_autonomous_ode(
+                x0=lambda p: p,
+                xdot=lambda x, p: 0 * x,
+                parameters=VectorSpace("p", 1),
+                backend="numpy",
+            )
+            declarations = [BoundedVariable("initial", 0.0, 2.0, guess=0.5)]
+            with VariationalProblemBuilder(
+                system, t_final=1.0, parameters=declarations, backend="numpy",
+            ) as builder:
+                terminal = builder.output(builder.t_final)[0]
+                running = builder.integrate(builder.state()[0] ** 2)
+                built = builder.build(
+                    Minimise((terminal - 1.0) ** 2 + running),
+                    subject_to=[builder.state(0)[0] >= 0.0],
+                )
+            assert built.t_final == 1.0
+            assert len(built.initial_constraints) == 1
     """
 
     def __init__(
@@ -188,13 +229,35 @@ class VariationalProblemBuilder:
 
     @property
     def t(self) -> Tracer:
-        """Return the symbolic marker for path-time expressions."""
+        """Return the scalar symbolic physical-time marker for path sites.
+
+        Returns:
+            Tracer: Physical time varying across ``[0, t_final]``, not a
+            numerical sample or normalised control coordinate.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    assert builder.t.dim.is_scalar()
+        """
         self._require_open()
         return self._t
 
     @property
     def t_final(self) -> Tracer:
-        """Return the symbolic marker for terminal-time expressions."""
+        """Return the scalar symbolic terminal physical-time marker.
+
+        Returns:
+            Tracer: Horizon in the model's time units. Use it as the terminal
+            evaluation site for a fixed or optimised duration.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    assert builder.t_final.dim.is_scalar()
+        """
         self._require_open()
         return self._t_final
 
@@ -204,6 +267,17 @@ class VariationalProblemBuilder:
         Args:
             time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
                 :attr:`t`.
+
+        Returns:
+            Tracer: Flat differential-state vector, excluding algebraic and
+            quadrature channels, with the system's differential-state width
+            and physical state units.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    assert builder.state(0).shape == (1,)
         """
         self._require_open()
         time = self._t if time is None else time
@@ -214,8 +288,30 @@ class VariationalProblemBuilder:
         """Return the symbolic input at ``time``.
 
         Args:
-            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
-                :attr:`t`.
+            time: Physical evaluation site, as for :meth:`state`.
+
+        Returns:
+            Tracer | Noop: Scalar or vector input expression matching the
+            system input space and units, or the absent-input marker when the
+            system has no control trajectory. Evaluation sites use physical
+            time; control declarations handle their own normalised coordinate.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                from coker import FunctionSpace, Scalar
+                from coker.dynamics import create_control_system
+
+                controlled = create_control_system(
+                    x0=np.array([0.0]),
+                    xdot=lambda t, x, u, p: u + 0 * x,
+                    control=FunctionSpace("u", [Scalar("t")], [Scalar("u(t)")]),
+                    backend="numpy",
+                )
+                with VariationalProblemBuilder(
+                    controlled, 1.0, backend="numpy"
+                ) as builder:
+                    assert builder.input(0).dim.is_scalar()
         """
         self._require_open()
         time = self._t if time is None else time
@@ -228,8 +324,18 @@ class VariationalProblemBuilder:
         """Return the symbolic system output at ``time``.
 
         Args:
-            time: ``0``, :attr:`t`, or :attr:`t_final`. Omitting it uses
-                :attr:`t`.
+            time: Physical evaluation site, as for :meth:`state`.
+
+        Returns:
+            Tracer: Flat vector of declared observables, not the internal
+            differential/algebraic/quadrature state tuple. Its width is the
+            system output's flattened size; entries retain output units.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    assert builder.output(builder.t_final).shape == (1,)
         """
         self._require_open()
         time = self._t if time is None else time
@@ -238,7 +344,20 @@ class VariationalProblemBuilder:
 
     @property
     def parameters(self) -> Tracer:
-        """Return the symbolic system-parameter vector or tuple."""
+        """Return the context-owned symbolic system parameters.
+
+        Returns:
+            Tracer | Noop: System parameter vector or heterogeneous tuple in
+            declaration order, or the absent-parameter marker. Entries retain
+            their declared dimensions and units; these are not control
+            coefficients or the duration decision.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    assert builder.parameters.shape == (1,)
+        """
         self._require_open()
         return self._parameters
 
@@ -268,11 +387,25 @@ class VariationalProblemBuilder:
         """Register a scalar integrand and return its accumulated state.
 
         Args:
-            expression: Scalar path expression to integrate over the horizon.
+            expression: Scalar path expression from this builder's trace,
+                integrated from physical time zero to :attr:`t_final`.
 
         Returns:
-            Symbolic quadrature value, which is available in the objective and
-            terminal constraints.
+            Tracer: Scalar terminal integral with zero initial value and units
+            equal to integrand units times the model's time unit. It is
+            available in the objective and terminal constraints, not as a
+            freely sampled trajectory.
+
+        Raises:
+            TypeError: The integrand is not a symbolic expression.
+            ValueError: The integrand is nonscalar or belongs to another trace.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    running = builder.integrate(builder.state()[0] ** 2)
+                    assert running.dim.is_scalar()
         """
         self._require_open()
         if not isinstance(expression, Tracer):
@@ -302,11 +435,33 @@ class VariationalProblemBuilder:
 
         Args:
             objective: Scalar :class:`~coker.toolkits.codesign.Minimise`
-                expression.
-            subject_to: Path, initial, or terminal symbolic comparisons.
+                wrapping an expression from this builder's trace.
+            subject_to: Symbolic ``==``, ``<=``, ``>=``, ``<`` or ``>``
+                comparisons from this trace. A comparison depending on
+                :attr:`t` is a path constraint; otherwise one depending on
+                time zero is initial; all others are terminal. Mixed-site
+                expressions follow this precedence. Strict comparisons are
+                lowered to bound constraints, not strict numerical margins.
 
         Returns:
-            Backend-neutral variational problem ready for ``get_solver()``.
+            VariationalProblem: Backend-neutral problem ready for
+            :meth:`~VariationalProblem.get_solver`. No solve is performed.
+
+        Raises:
+            TypeError: The objective is not ``Minimise`` around a symbolic
+                expression, or a constraint is not a symbolic comparison.
+            ValueError: The objective is nonscalar or an expression belongs to
+                another trace.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    problem = builder.build(
+                        Minimise(builder.output(builder.t_final)[0] ** 2),
+                        subject_to=[builder.output()[0] <= 2.0],
+                    )
+                assert len(problem.path_constraints) == 1
         """
         self._require_open()
         if not isinstance(objective, Minimise):
@@ -374,11 +529,37 @@ class VariationalProblemBuilder:
             raise ValueError(f"{label} belongs to a foreign trace")
 
     def __enter__(self) -> "VariationalProblemBuilder":
+        """Enter the symbolic trace used by the ``with`` block.
+
+        Returns:
+            VariationalProblemBuilder: This builder, bound as the context value.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    assert builder.state().shape == (1,)
+        """
         self._context = TraceContext(self._trace)
         self._context.__enter__()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit the trace and close symbolic access without suppressing errors.
+
+        Args:
+            exc_type: Exception type supplied by the context manager, or
+                ``None`` on normal exit.
+            exc_val: Exception instance, or ``None`` on normal exit.
+            exc_tb: Exception traceback, or ``None`` on normal exit.
+
+        Examples:
+            .. testcode:: variational-builder-source
+
+                with VariationalProblemBuilder(system, 1.0, backend="numpy") as builder:
+                    problem = builder.build(Minimise(builder.state()[0] ** 2))
+                assert problem.system is system
+        """
         if self._context is not None:
 
             self._context.__exit__(exc_type, exc_val, exc_tb)

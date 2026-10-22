@@ -18,8 +18,10 @@ class VectorSpace:
             of ints for a multi-dimensional array (e.g. ``(3, 3)`` for a
             3×3 matrix).
 
-    Attributes:
-        size: Total number of scalar elements (product of all dimensions).
+    Examples:
+        >>> from coker import VectorSpace
+        >>> VectorSpace("matrix", (2, 3)).size
+        6
     """
 
     name: str
@@ -27,6 +29,7 @@ class VectorSpace:
 
     @property
     def size(self) -> int:
+        """int: Product of all dimensions, without validating their extents."""
         if isinstance(self.dimension, int):
             return self.dimension
         return reduce(mul, self.dimension)
@@ -38,12 +41,18 @@ class Scalar:
 
     Args:
         name: Identifier used in error messages and tape node labels.
+
+    Examples:
+        >>> from coker import Scalar
+        >>> Scalar("time").size
+        1
     """
 
     name: str
 
     @property
     def size(self) -> int:
+        """int: Number of scalar entries, always one."""
         return 1
 
 
@@ -58,6 +67,20 @@ class Dimension:
     Args:
         tuple_or_none: Shape as a tuple of ints, a single int (converted to a
             1-tuple), or ``None`` for a scalar.
+
+    Attributes:
+        dim: Logical shape tuple, or ``None`` for scalar metadata. This is
+            distinct from an absent output slot in a function signature.
+
+    Examples:
+        >>> from coker import Dimension
+        >>> scalar = Dimension.scalar()
+        >>> scalar.dim is None, scalar.shape, scalar.flat()
+        (True, (1,), 1)
+        >>> Dimension(1).is_scalar()
+        False
+        >>> list(Dimension((2, 2)).index_iterator())
+        [(0, 0), (1, 0), (0, 1), (1, 1)]
     """
 
     def __init__(self, tuple_or_none):
@@ -69,6 +92,7 @@ class Dimension:
         self.dim = tuple_or_none
 
     def flat(self):
+        """Return the product of extents, or one for scalar metadata."""
         d = 1
         if self.dim is not None:
             for d_i in self.dim:
@@ -76,11 +100,37 @@ class Dimension:
         return d
 
     def to_space(self, name) -> Union[Scalar, VectorSpace]:
+        """Convert logical shape metadata to a named argument space.
+
+        Args:
+            name: Name assigned to the returned declaration.
+
+        Returns:
+            Scalar | VectorSpace: A scalar for ``dim=None``, otherwise a
+            vector-space declaration retaining the shape tuple.
+        """
         if self.is_scalar():
             return Scalar(name)
         return VectorSpace(name, self.dim)
 
     def index_iterator(self, row_major=False):
+        """Yield array index tuples in the requested flattening order.
+
+        Args:
+            row_major: If true, vary the last index fastest. The default
+                varies the first index fastest (column-major order).
+
+        Yields:
+            tuple[int, ...]: An index for each array entry. Scalar metadata
+            and the empty shape yield no indices.
+
+        Examples:
+            >>> from coker import Dimension
+            >>> list(Dimension((2, 2)).index_iterator(row_major=True))
+            [(0, 0), (0, 1), (1, 0), (1, 1)]
+            >>> list(Dimension.scalar().index_iterator())
+            []
+        """
 
         if not self.dim:
             return (0,)
@@ -112,21 +162,27 @@ class Dimension:
         return self.dim == other.dim
 
     def is_scalar(self):
+        """Return whether logical metadata is ``None``, not shape ``(1,)``."""
         return self.dim is None
 
     def is_vector(self):
+        """Return whether the logical shape has exactly one axis."""
         return self.dim is not None and len(self.dim) == 1
 
     def is_covector(self):
+        """Return whether the shape has two axes and its first extent is one."""
         return not self.is_scalar() and len(self.dim) == 2 and self.dim[0] == 1
 
     def is_matrix(self):
+        """Return whether the shape has two axes and first extent exceeds one."""
         return not self.is_scalar() and len(self.dim) == 2 and self.dim[0] > 1
 
     def is_multilinear_map(self):
+        """Return whether the logical shape has more than two axes."""
         return isinstance(self.dim, tuple) and len(self.dim) > 2
 
     def __iter__(self):
+        """Iterate logical extents; scalar metadata raises ``TypeError``."""
         return iter(self.dim)
 
     def __repr__(self):
@@ -137,12 +193,18 @@ class Dimension:
 
     @property
     def shape(self):
+        """tuple: Physical shape, using ``(1,)`` for scalar metadata.
+
+        This convenience shape does not distinguish a scalar from a vector
+        of length one; use :meth:`is_scalar` for that distinction.
+        """
         if self.dim is None:
             return (1,)
         return self.dim
 
     @staticmethod
     def scalar():
+        """Return a new scalar descriptor with logical metadata ``None``."""
         return Dimension(None)
 
 
@@ -158,19 +220,31 @@ class ResultBundleDimension:
 
 @dataclasses.dataclass
 class FunctionSpace:
-    """Represents a function space, including its domain and codomain.
+    """Declare ordered argument and result spaces for a callable.
 
-    Attributes:
-        name (str): The name of the function space.
-        arguments (List[Scalar | VectorSpace | FunctionSpace]): A list
-            specifying the input arguments.
-        output (List[Scalar | VectorSpace | FunctionSpace]): A list
-            specifying ordered outputs.
-        signature (Optional[Tuple[int]]): Optional list of integers
-            denoting the degree of differentiability for each argument.
-            If not provided, the default is smooth (infinitely
-            differentiable) functions.
+    Args:
+        name: Declaration name.
+        arguments: Ordered scalar, vector or nested function declarations.
+        output: Ordered result declarations; neither the list nor its entries
+            may be ``None``. An empty list declares no results.
+        signature: Optional per-argument differentiability metadata. ``None``
+            denotes smoothness by convention; this declaration does not
+            establish derivative correctness or backend support.
 
+    Raises:
+        TypeError: The output list or an output entry is ``None``.
+
+    Examples:
+        >>> from coker import Dimension, FunctionSpace, Scalar, VectorSpace
+        >>> space = FunctionSpace("scale", [Scalar("a"), VectorSpace("x", 2)],
+        ...                       [VectorSpace("y", 2)])
+        >>> space.input_dimensions()
+        [R, (2,)]
+        >>> space.output_dimensions()
+        [(2,)]
+        >>> bound = space.bind_argument(Dimension.scalar(), 0)
+        >>> len(bound.arguments), bound.evaluation_dimension()
+        (1, (2,))
     """
 
     name: str
@@ -188,6 +262,12 @@ class FunctionSpace:
             raise TypeError("FunctionSpace output spaces must not be None")
 
     def input_dimensions(self):
+        """Return ordered logical input dimensions, retaining nested spaces.
+
+        Returns:
+            list[Dimension | FunctionSpace]: New dimension descriptors for
+            numerical inputs and the original function-space declarations.
+        """
         return [
             (
                 arg
@@ -202,6 +282,7 @@ class FunctionSpace:
         ]
 
     def output_dimensions(self) -> list[Dimension | FunctionSpace]:
+        """Return one logical dimension per output, retaining nested spaces."""
         return [
             (
                 out
@@ -216,7 +297,15 @@ class FunctionSpace:
         ]
 
     def matches_signature(self, other: FunctionSpace) -> bool:
-        """Return whether another function space has the same I/O shapes."""
+        """Compare ordered I/O dimensions, ignoring names and smoothness metadata.
+
+        Args:
+            other: Function-space declaration to compare.
+
+        Returns:
+            bool: Whether both ordered dimension lists match. Nested spaces
+            use their declaration equality, including their dataclass fields.
+        """
         if not isinstance(other, FunctionSpace):
             return False
         input_dimensions_match = tuple(self.input_dimensions()) == tuple(
@@ -232,7 +321,16 @@ class FunctionSpace:
         argument_dimension: Dimension | FunctionSpace,
         position: int,
     ) -> None:
-        """Validate one argument against this callable's declared input."""
+        """Check one logical argument dimension against a declared input.
+
+        Args:
+            argument_dimension: Numerical dimension or function-space signature.
+            position: Zero-based argument position; must be an actual ``int``.
+
+        Raises:
+            InvalidArgument: The position is not an integer or is out of range.
+            InvalidShape: The dimension or kind of argument does not match.
+        """
         if type(position) is not int:
             raise InvalidArgument("argument position must be an integer")
         input_dimensions = self.input_dimensions()
@@ -264,7 +362,20 @@ class FunctionSpace:
         argument_dimension: Dimension | FunctionSpace,
         position: int,
     ) -> FunctionSpace:
-        """Return this callable signature with one argument bound."""
+        """Return a declaration with one validated argument removed.
+
+        Args:
+            argument_dimension: Dimension of the value being bound.
+            position: Zero-based argument position.
+
+        Returns:
+            FunctionSpace: New declaration with the same name and outputs,
+            and the corresponding differentiability entry removed if present.
+
+        Raises:
+            InvalidArgument: The position is invalid.
+            InvalidShape: The argument does not match its declared space.
+        """
         try:
             self.validate_argument(argument_dimension, position)
         except InvalidShape as exc:
@@ -286,7 +397,11 @@ class FunctionSpace:
         )
 
     def __contains__(self, value) -> bool:
-        """Return whether a Coker function has this input/output signature."""
+        """Check a signature-bearing value against ordered I/O dimensions.
+
+        Output ``None`` slots are omitted for this comparison. Values must
+        implement :class:`coker.interfaces.FunctionSignatureValue`.
+        """
         if not isinstance(value, FunctionSignatureValue):
             return False
         input_dimensions_match = tuple(value.input_shape()) == tuple(
@@ -300,7 +415,12 @@ class FunctionSpace:
     def evaluation_dimension(
         self,
     ) -> Dimension | FunctionSpace | ResultBundleDimension:
-        """Return the graph result shape declared by this callable."""
+        """Return one result dimension, or an ordered result-bundle descriptor.
+
+        Returns:
+            Dimension | FunctionSpace | ResultBundleDimension: The single
+            output directly, or a bundle for zero or multiple outputs.
+        """
         output_dimensions = self.output_dimensions()
         return (
             output_dimensions[0]
@@ -309,6 +429,7 @@ class FunctionSpace:
         )
 
     def is_scalar(self):
+        """Return whether exactly one output has scalar logical metadata."""
         output_dimensions = self.output_dimensions()
         if len(output_dimensions) != 1:
             return False
@@ -320,6 +441,15 @@ class FunctionSpace:
     def create_scalar_function_space(
         name: str, continuity_index: Optional[Tuple[int]] = None
     ):
+        """Declare a scalar-to-scalar function.
+
+        Args:
+            name: Declaration name; also prefixes input and output names.
+            continuity_index: Optional differentiability metadata.
+
+        Returns:
+            FunctionSpace: One scalar input and one scalar output.
+        """
         return FunctionSpace(
             name=name,
             arguments=[Scalar(f"{name}_input")],

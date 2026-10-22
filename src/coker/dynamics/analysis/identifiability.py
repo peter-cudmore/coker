@@ -73,7 +73,46 @@ def analyse_identifiability(
     parameters: Sequence[BoundedVariable | UnboundedVariable | Real] | None = None,
     max_order: int | None = None,
 ) -> IdentifiabilityResult:
-    """Analyse generic local identifiability by augmented observability."""
+    """Analyse generic local identifiability by augmented observability.
+
+    Fitted parameters are appended to differential states with zero dynamics.
+    Full rank tests joint local state/parameter observability, not global
+    parameter uniqueness or a parameter-only test with known initial states.
+
+    Args:
+        system: A supported autonomous ``DynamicalSystem``, ``SymbolicSystem``
+            or semi-explicit index-one ``SymbolicDAESystem`` without controls.
+            General residual models and function-valued parameters are not
+            supported.
+        parameters: Optional roles in flattened scalar parameter order.
+            ``BoundedVariable`` and ``UnboundedVariable`` mark fitted unknowns;
+            real numeric constants are substituted as known values. Bounds do
+            not alter the symbolic rank test. ``None`` fits every parameter.
+        max_order: Non-negative Lie-derivative expansion limit, or ``None`` to
+            continue until full rank or closure. Zero tests output gradients.
+
+    Returns:
+        IdentifiabilityResult: Rank evidence with differential-state then
+        fitted-parameter columns. See :class:`AnalysisStatus` for verdicts and
+        :class:`AnalysisResult` for generic-rank and DAE regularity conditions.
+        Unsupported models, incompatible parameter roles, invalid options or
+        premature limits give ``INCONCLUSIVE`` with ``reason``.
+
+    Examples:
+        >>> import sympy as sp
+        >>> from coker.dynamics import (
+        ...     SymbolicSystem, AnalysisStatus, analyse_identifiability,
+        ... )
+        >>> x, p = sp.symbols("x p")
+        >>> system = SymbolicSystem((x,), (p,), (), (p * x,), (x,))
+        >>> result = analyse_identifiability(system)
+        >>> result.status is AnalysisStatus.TRUE
+        True
+        >>> result.rank, result.required_rank
+        (2, 2)
+        >>> result.reason is None
+        True
+    """
     try:
         symbolic = normalize_symbolic_system(system)
         symbolic = _apply_parameter_roles(symbolic, parameters)

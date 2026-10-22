@@ -8,29 +8,17 @@ ODEs and DAEs, fit parameters, and formulate optimal-control problems.
 Core entry points
 -----------------
 
-Public entry points include:
+Choose a construction path:
 
-- :func:`coker.dynamics.create_autonomous_ode`
-- :func:`coker.dynamics.create_control_system`
-- :class:`coker.dynamics.DynamicsSpec` with :func:`coker.dynamics.create_dynamics_from_spec`
-- :class:`coker.dynamics.ResidualDynamicalSystem` with :func:`coker.dynamics.to_residual_dynamical_system`
-- :func:`coker.dynamics.direct_sum`
-- :class:`coker.dynamics.VariationalProblem`
-- :class:`coker.parameters.BoundedVariable`
-- :class:`coker.parameters.UnboundedVariable`
-- :class:`coker.dynamics.TranscriptionOptions`
-- :class:`coker.toolkits.codesign.SolveInfo` and :class:`coker.toolkits.codesign.SolveFailure`
-- :class:`coker.parameters.BoundVector`
-- :class:`coker.parameters.DenseTensorVariable`
-- :class:`coker.parameters.function_parameters.FunctionParameter`
-- :class:`coker.parameters.function_parameters.ClosureParameter`
-- :class:`coker.parameters.function_parameters.MonotonePiecewiseLinear`
-- :class:`coker.parameters.function_parameters.DenseLayer`
-- :class:`coker.parameters.function_parameters.RadialBasisFunction`
+* :func:`~coker.dynamics.create_autonomous_ode` for time-independent ODEs;
+* :func:`~coker.dynamics.create_control_system` for controlled ODEs;
+* :class:`~coker.dynamics.DynamicsSpec` with
+  :func:`~coker.dynamics.create_dynamics_from_spec` for general semi-explicit
+  systems.
 
-``create_autonomous_ode()`` builds a :class:`~coker.dynamics.DynamicalSystem`
-from initial-condition and ``xdot`` functions. Declare a parameter space to
-use the system in a :class:`~coker.dynamics.VariationalProblem`.
+The :doc:`API reference <api/dynamics>` owns signatures, validation and backend
+support; :doc:`api/parameters` describes decision declarations. The workflows
+below cover construction, composition, residual conversion and fitting.
 
 ``create_control_system(x0, xdot, control, ...)`` builds a controlled ODE with
 the callback ``xdot(t, x, u, p)``, where ``u`` is the control value.
@@ -68,11 +56,9 @@ sentinel:
    assert general_output.shape == (1,)
    np.testing.assert_allclose(general_output, [np.exp(-0.25)], rtol=1e-5)
 
-``DynamicsSpec.initial_conditions(z, u, p)`` returns ``(x0, z0)``. Its dynamics,
-constraints, and quadrature callbacks receive ``(t, x, z, u, p)``; outputs
-receive ``(t, x, z, u, p, q)``. Tuple parameters arrive as one final ``p`` tuple
-(before ``q`` for outputs). ``None`` declares absent inputs, constraints, or
-quadratures. ``system.backend`` exposes the backend name as a read-only property.
+Unlike ``create_control_system``, ``DynamicsSpec`` gives callbacks the input
+trajectory callable, not its current value; use ``u(t)``. Parameter declarations
+and callback layouts are detailed in :class:`~coker.dynamics.DynamicsSpec`.
 
 Composition and projections
 ---------------------------
@@ -97,19 +83,11 @@ system's backend unless ``backend=`` selects another.
    np.testing.assert_allclose(left_matrix @ output, left)
    np.testing.assert_allclose(right_matrix @ output, right)
 
-``ProjectionSet`` exposes ``state``, ``algebraic``, ``quadratures``, ``outputs``,
-``controls``, and ``parameters``. Numeric projections are
-``CompositionOperator`` values: ``inverse(value)`` splits a flat vector,
-``as_matrices()`` returns one projection matrix per subsystem, and
-``offsets()``/``sizes()`` describe the partition. Absent channels produce
-``None`` entries in ``inverse`` and zero-row matrices. Scalar outputs occupy
-one flat slot.
-
-When any subsystem declares a function-valued parameter, ``parameters`` is a
-``StructuredParameterProjection`` instead. ``split(parameter_tuple)`` returns
-one positional tuple per subsystem, and ``widths`` reports declaration counts,
-not flattened scalar widths. Numeric-only parameters retain their flat-vector
-``CompositionOperator`` projection.
+Use the matching ``ProjectionSet`` channel to join or split subsystem values.
+Numeric channels have flat-vector ``CompositionOperator`` projections.
+Function-valued parameters instead use ``StructuredParameterProjection`` to
+keep callable values and per-subsystem positional tuples intact; see
+:func:`composition reference <coker.dynamics.direct_sum>`.
 
 See :doc:`api/index` for the ordinary/extension/internal API boundary.
 
@@ -322,15 +300,9 @@ with matching argument and output shapes. Coker expands its concrete parameter
 blocks into scalar solver decisions. A solver-bound function parameter needs
 a non-empty ``name`` for those blocks.
 
-``DenseLayer`` realises ``activation(weights @ x + bias)`` for vector targets
-and ``activation(weight * x + bias)`` for scalar targets. Vector activations
-and targets use vector inputs and outputs. Scalar activations and targets use
-two unbounded scalar decisions, ``weight`` and ``bias``.
-
-``ClosureParameter`` binds declared scalar or dense blocks to a Coker function.
-The function receives those blocks before the target function's arguments.
-Use ``ClosureParameter.bind_callable`` to trace a Python implementation with
-that calling convention.
+Use ``DenseLayer`` for an affine scalar or vector layer with a Coker activation,
+or ``ClosureParameter.bind_callable`` to bind leading decisions to your own
+implementation. See :doc:`api/parameters` for target signatures and block order.
 
 This declaration constructs a fitting problem whose dense layer maps a
 two-component state to a one-component response with an identity activation;
@@ -556,16 +528,6 @@ constructs the symbolic problem without solving it:
    ) as builder:
        problem = builder.build(Minimise(builder.output(builder.t_final)[0] ** 2))
 
-``DenseLayer`` expands into weight and bias blocks.
-``MonotonePiecewiseLinear`` and ``RadialBasisFunction`` each expand into one
-vector block. The solver flattens these blocks into scalar decisions and
-restores their shapes when reconstructing the fitted function.
-
-``solution.parameters`` maps scalar decisions to ``float`` values and vector
-or dense tensor decisions to shaped NumPy arrays. Function decisions become
-``FittedFunction`` objects with their specification, space, callable, and
-structured fitted parameters.
-
 ``MonotonePiecewiseLinear.domain_knots`` should span the normalised integration
 domain from ``0`` to ``1``; use these as endpoint knots and add interior knots
 where the fitted response needs more resolution. This is the solver's
@@ -631,14 +593,54 @@ evaluate the returned trajectory at physical times:
 Trajectory evaluation and interpolation
 ---------------------------------------
 
-``fit(t)``, ``state(t)``, ``algebraic(t)``, ``quadratures(t)``, and
-``control_law(t)`` accept physical time on ``[0, fit.t_final]``, including for
-an optimized horizon. Output and constraint callbacks also receive physical
-time. ``as_raw()`` returns physical knot times, and ``to_poly()`` returns an
-output interpolant on physical intervals. CasADi and PyTorch store ``fit.path``
-on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time
-mapping. CasADi control coefficients and defect estimation also use normalized
-time; do not pass physical times directly to the underlying path.
+Evaluate fitted trajectories through the public scalar physical-time methods,
+not the normalised-time ``path``. The :ref:`solve-result reference
+<variational-solution>` explains channel access, raw samples, output
+interpolation, ownership and diagnostics.
+
+Inspect the decay fit above without solving a second problem:
+
+.. testcode:: dynamics_decay_fitting
+
+   assert np.isfinite(fit.cost) and fit.cost < 1e-6
+   assert fit.solve_info is not None and fit.solve_info.success
+   assert fit.t_final == 4.0
+   assert fit.algebraic(2.0) is None
+   assert fit.quadratures(2.0) is None
+   assert fit.control_law(2.0) is None
+   assert fit.path_constraints(2.0).shape == (0,)
+   assert fit.terminal_constraints().shape == (0,)
+   np.testing.assert_allclose(
+       fit.state(2.0), [initial_state * np.exp(-true_rate * 2.0)], atol=1e-5
+   )
+
+   raw = fit.as_raw()
+   assert raw.shape[0] == 2  # physical time, then the single internal state
+   assert raw[0, 0] == 0.0 and raw[0, -1] < fit.t_final
+   np.testing.assert_allclose(
+       raw[1], initial_state * np.exp(-true_rate * raw[0]), atol=1e-5
+   )
+   output_poly = fit.to_poly()
+   assert output_poly.intervals[-1][1] == fit.t_final
+   assert fit.path.intervals[-1][1] == 1.0
+   for time in [0.0, 0.5, 1.7, 3.0, fit.t_final]:
+       np.testing.assert_allclose(output_poly(time), fit(time), atol=1e-5)
+
+   assert fit.segment_defects
+   for segment in fit.segment_defects:
+       np.testing.assert_allclose(
+           segment.physical_interval,
+           np.asarray(segment.normalized_interval) * fit.t_final,
+       )
+       assert segment.degree > 0
+       assert segment.full_residual.ndim == 1
+       assert np.isfinite(segment.full_residual).all()
+   assert fit.adaptive_refinement_rounds is None
+   assert fit.adaptive_maximum_defect is None
+
+Stored half-space violations and signed segment residuals help inspect a fit;
+neither is a complete feasibility certificate. Treat result data as read-only:
+editing named parameters does not refit the trajectory.
 
 By default, PyTorch assembles its returned state and quadrature channels into
 four degree-eight LGR polynomials on normalized subintervals. Integration

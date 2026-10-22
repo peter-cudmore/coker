@@ -103,7 +103,36 @@ def _validate_scalar_target(target: FunctionSpace) -> FunctionSpace:
 
 @dataclass(frozen=True)
 class DenseLayer(FunctionParameter):
-    """Affine scalar or vector layer followed by a Coker activation."""
+    """Declare an affine scalar or vector layer with a Coker activation.
+
+    Args:
+        input_size: Positive integer input width; must be one for a scalar
+            activation. Booleans are not accepted.
+        activation: Coker ``Function`` or ``BoundCallable`` with one scalar
+            input/output pair, or one positive-width vector input/output pair.
+        name: Public declaration name and prefix for concrete block names.
+
+    Raises:
+        TypeError: The activation is not a Coker function or bound callable.
+        ValueError: Input width or activation signature is incompatible.
+
+    The concrete blocks are weight then bias, both unbounded. Scalar guesses
+    are one and zero. Vector guesses are an identity-like matrix of shape
+    ``(activation_input_width, input_size)`` and a zero bias vector of activation
+    input width. The output width is the activation output width. Supply an
+    activation and model whose numeric scales and units are consistent; no unit
+    checking or conversion is performed.
+
+    Examples:
+        >>> from coker import Scalar, function
+        >>> from coker.parameters.function_parameters import DenseLayer
+        >>> identity = function([Scalar("x")], lambda x: x, backend="numpy")
+        >>> layer = DenseLayer(1, identity, name="gain")
+        >>> [block.name for block in layer.list_concrete_parameters()]
+        ['gain_weight', 'gain_bias']
+        >>> float(layer.evaluate([2.0, 1.0], 3.0))
+        7.0
+    """
 
     input_size: int
     activation: Function | BoundCallable
@@ -155,13 +184,35 @@ class DenseLayer(FunctionParameter):
 
     @property
     def hidden_size(self) -> int:
+        """int: Activation input width for a vector activation.
+
+        Raises:
+            ValueError: The activation is scalar rather than vector-valued.
+        """
         return _activation_widths(self.activation)[0]
 
     @property
     def output_size(self) -> int:
+        """int: Activation output width for a vector activation.
+
+        Raises:
+            ValueError: The activation is scalar rather than vector-valued.
+        """
         return _activation_widths(self.activation)[1]
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate public input and output widths against the activation.
+
+        Args:
+            target: Requested scalar or vector public function space.
+
+        Returns:
+            FunctionSpace: The unchanged compatible target.
+
+        Raises:
+            TypeError: The target is not a ``FunctionSpace``.
+            ValueError: Target arity, scalar/vector kind or widths do not match.
+        """
         if _is_scalar_activation(self.activation):
             return _validate_scalar_target(target)
 
@@ -182,9 +233,20 @@ class DenseLayer(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return the scalar or dense weight and bias declarations as a tuple."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Apply the activation after an affine scalar or vector transformation.
+
+        Args:
+            parameters: Weight and bias values in declaration order and shapes.
+            argument: Scalar or vector public input matching ``input_size``.
+
+        Returns:
+            Any: Activation result from ``weight * argument + bias`` for
+            scalars or ``weight @ argument + bias`` for vectors.
+        """
         weight, bias = parameters
         if _is_scalar_activation(self.activation):
             return self.activation(weight * argument + bias)

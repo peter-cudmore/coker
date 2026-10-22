@@ -26,9 +26,38 @@ def analyse_observability(
 ) -> ObservabilityResult:
     """Establish generic local observability using the Lie-rank test.
 
-    Inputs are treated as known, arbitrary signals.  Consequently, controlled
-    systems must be affine in their controls; the analysis closes the output
-    codistribution under both the drift and each control vector field.
+    Inputs are known arbitrary signals. The output codistribution is closed
+    under both the drift and each control vector field. The result is local
+    and generic, not a global state-reconstruction guarantee.
+
+    Args:
+        system: A supported ``DynamicalSystem``, ``SymbolicSystem`` or
+            ``SymbolicDAESystem`` with smooth autonomous control-affine rates.
+            DAEs must be semi-explicit index one with control-independent
+            constraints. General residual models are not supported.
+        max_order: Non-negative Lie-derivative expansion limit, or ``None`` to
+            expand until full rank or closure. Zero tests output gradients.
+
+    Returns:
+        ObservabilityResult: Output/Lie-derivative gradient rows, restricted
+        to differential coordinates along DAE constraints when applicable.
+        See :class:`AnalysisStatus` for verdicts and :class:`AnalysisResult`
+        for generic-rank and DAE regularity conditions. Unsupported input,
+        invalid options or premature limits give ``INCONCLUSIVE`` with
+        ``reason``.
+
+    Examples:
+        >>> import sympy as sp
+        >>> from coker.dynamics import (
+        ...     SymbolicSystem, AnalysisStatus, analyse_observability,
+        ... )
+        >>> x = sp.Symbol("x")
+        >>> system = SymbolicSystem((x,), (), (), (-x,), (x,))
+        >>> result = analyse_observability(system)
+        >>> result.status is AnalysisStatus.TRUE
+        True
+        >>> result.rank, result.required_rank
+        (1, 1)
     """
     try:
         symbolic = normalize_symbolic_system(system)

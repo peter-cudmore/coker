@@ -49,7 +49,41 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class MonotonePiecewiseLinear(FunctionParameter):
-    """Bounded monotone scalar realization over normalized-domain knots."""
+    """Declare a bounded increasing scalar piecewise-linear function.
+
+    Args:
+        domain_knots: Finite, strictly increasing vector of at least two knots,
+            in the actual input coordinates; no normalisation is applied.
+        lower_bound: Finite real lower bound on output values.
+        upper_bound: Finite real upper bound, greater than ``lower_bound``.
+        guess: Finite unconstrained coefficient vector with one entry per knot.
+            Defaults to zeros. These are not initial output knot values.
+        name: Public declaration name and prefix for the concrete block name.
+
+    Raises:
+        TypeError: Knots or guesses are non-numeric, or bounds are not real.
+        ValueError: Knot shape, ordering or finiteness, bound ordering or
+            finiteness, or guess shape or finiteness is invalid.
+
+    One unbounded dense coefficient block uses an exponential cumulative
+    parameterisation to place increasing knot values between the output bounds.
+    Interpolation is linear and values are constant beyond either endpoint.
+    Input knots and output bounds must use the model's respective units.
+
+    Examples:
+        >>> from coker.parameters.function_parameters import MonotonePiecewiseLinear
+        >>> curve = MonotonePiecewiseLinear([0, 1], 0, 4, name="curve")
+        >>> curve.size
+        2
+        >>> block, = curve.list_concrete_parameters()
+        >>> block.guess.tolist()
+        [0.0, 0.0]
+        >>> from coker import FunctionSpace, Scalar
+        >>> target = FunctionSpace("curve", [Scalar("x")], [Scalar("y")])
+        >>> realised = curve.build_function(target, "numpy")
+        >>> [float(realised(x, block.guess)) for x in (-1.0, 0.5, 2.0)]
+        [1.0, 1.5, 2.0]
+    """
 
     domain_knots: Sequence[Real]
     lower_bound: Real
@@ -104,12 +138,26 @@ class MonotonePiecewiseLinear(FunctionParameter):
 
     @property
     def size(self) -> int:
+        """int: Number of knots and unconstrained scalar coefficients."""
         return len(self.domain_knots)
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate a scalar-to-scalar public function space.
+
+        Args:
+            target: Requested public function space.
+
+        Returns:
+            FunctionSpace: The unchanged compatible target.
+
+        Raises:
+            TypeError: The target is not a ``FunctionSpace``.
+            ValueError: It does not have one scalar input and one scalar output.
+        """
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return a one-item tuple declaring the ``size``-entry coefficient vector."""
         return self.parameters
 
     def _values(self, theta: Any) -> list[Any]:
@@ -124,6 +172,16 @@ class MonotonePiecewiseLinear(FunctionParameter):
         return values[: self.size]
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Interpolate bounded monotone knot values from concrete coefficients.
+
+        Args:
+            parameters: One coefficient vector with one entry per knot.
+            argument: Scalar public input in the knot coordinate system.
+
+        Returns:
+            Any: Interpolated scalar output, or a constant endpoint value
+            outside the knot range.
+        """
         (basis,) = parameters
         values = self._values(basis)
         result = values[-1]

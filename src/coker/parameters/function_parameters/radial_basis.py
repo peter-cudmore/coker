@@ -67,7 +67,41 @@ def _validate_basis_values(
 
 @dataclass(frozen=True)
 class RadialBasisFunction(FunctionParameter):
-    """Fixed-width scalar Gaussian basis expansion with fitted coefficients."""
+    """Declare a scalar Gaussian expansion with fitted coefficients and offset.
+
+    Args:
+        centers: Non-empty finite vector of fixed Gaussian centres.
+        width: Finite positive common Gaussian width, in input units.
+        lower_bound: Optional inclusive lower bound on every coefficient,
+            including the constant offset. Not an output bound.
+        upper_bound: Optional inclusive upper coefficient bound. Both bounds
+            must be supplied together, ordered, and contain the guess.
+        guess: Finite vector of length ``len(centers) + 1``. Gaussian
+            coefficients precede the constant offset. Defaults to zeros.
+        name: Public declaration name and prefix for the concrete block name.
+
+    Raises:
+        TypeError: Centres or guess are non-numeric, bounds are not real,
+            or width is not a finite real scalar.
+        ValueError: Centres or guess have invalid shape or finiteness, width
+            is non-positive, or bounds are incomplete, unordered or exclude
+            the guess.
+
+    The expansion is ``offset + sum(c[i] * exp(-0.5*((x-center[i])/width)**2))``.
+    The single coefficient block is unbounded unless both bounds are supplied;
+    infinite bounds are allowed. Centres and width share input units, whilst
+    coefficients and offset share output units. No units are attached.
+
+    Examples:
+        >>> from coker.parameters.function_parameters import RadialBasisFunction
+        >>> basis = RadialBasisFunction([0.0], 1.0, guess=[2.0, 1.0],
+        ...                             name="response")
+        >>> block, = basis.list_concrete_parameters()
+        >>> float(basis.evaluate([block.guess], 0.0))
+        3.0
+        >>> block.name
+        'response_coefficients'
+    """
 
     centers: Sequence[Real]
     width: Real
@@ -119,12 +153,34 @@ class RadialBasisFunction(FunctionParameter):
         object.__setattr__(self, "parameters", (parameter,))
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
+        """Validate a scalar-to-scalar public function space.
+
+        Args:
+            target: Requested public function space.
+
+        Returns:
+            FunctionSpace: The unchanged compatible target.
+
+        Raises:
+            TypeError: The target is not a ``FunctionSpace``.
+            ValueError: It does not have one scalar input and one scalar output.
+        """
         return _validate_scalar_target(target)
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
+        """Return a one-item tuple declaring the coefficients followed by offset."""
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
+        """Evaluate the Gaussian expansion and constant offset.
+
+        Args:
+            parameters: One vector of Gaussian coefficients followed by offset.
+            argument: Scalar public input, in the centres' coordinate system.
+
+        Returns:
+            Any: Scalar expansion value, or its traced graph representation.
+        """
         (basis,) = parameters
         value = basis[len(self.centers)]
         for index, center in enumerate(self.centers):

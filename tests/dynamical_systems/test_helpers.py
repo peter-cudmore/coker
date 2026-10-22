@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from coker.dynamics.transcription.collocation import (
     InterpolatingPoly,
     InterpolatingPolyCollection,
@@ -18,6 +20,193 @@ from coker.dynamics import ConstantControlVariable
 import numpy as np
 from functools import reduce
 from operator import mul
+import pytest
+
+from coker import FunctionSpace, Scalar, VectorSpace
+from coker.dynamics import (
+    DynamicsSpec,
+    create_autonomous_ode,
+    create_control_system,
+    create_dynamics_from_spec,
+)
+
+
+@pytest.fixture
+def public_contract_dynamics_spec():
+    return DynamicsSpec(
+        inputs=None,
+        parameters=None,
+        algebraic=None,
+        initial_conditions=lambda z, u, p: (np.ones(2), None),
+        dynamics=lambda t, x, z, u, p: -x,
+        constraints=None,
+        outputs=lambda t, x, z, u, p, q: x,
+        quadratures=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "initial_conditions",
+    [
+        lambda z, u, p: np.ones(2),
+        lambda z, u, p: (np.ones(2), None, None),
+    ],
+)
+def test_public_contract_spec_initial_conditions_require_pair(
+    public_contract_dynamics_spec, initial_conditions
+):
+    public_contract_dynamics_spec.initial_conditions = initial_conditions
+
+    with pytest.raises(ValueError):
+        create_dynamics_from_spec(public_contract_dynamics_spec)
+
+
+def test_public_contract_spec_initial_algebraic_dimension(
+    public_contract_dynamics_spec,
+):
+    public_contract_dynamics_spec.algebraic = VectorSpace("z", 2)
+    public_contract_dynamics_spec.initial_conditions = lambda z, u, p: (
+        np.ones(2),
+        np.zeros(3),
+    )
+    public_contract_dynamics_spec.constraints = lambda t, x, z, u, p: z
+
+    with pytest.raises(ValueError):
+        create_dynamics_from_spec(public_contract_dynamics_spec)
+
+
+@pytest.mark.parametrize(
+    "dynamics",
+    [
+        lambda t, x, z, u, p: (x, x),
+        lambda t, x, z, u, p: np.zeros(3),
+    ],
+)
+def test_public_contract_spec_dynamics_output_shape(
+    public_contract_dynamics_spec, dynamics
+):
+    public_contract_dynamics_spec.dynamics = dynamics
+
+    with pytest.raises(ValueError):
+        create_dynamics_from_spec(public_contract_dynamics_spec)
+
+
+@pytest.mark.parametrize("has_algebraic", [False, True])
+def test_public_contract_spec_constraints_require_algebraic_companion(
+    public_contract_dynamics_spec, has_algebraic
+):
+    if has_algebraic:
+        public_contract_dynamics_spec.algebraic = VectorSpace("z", 2)
+        public_contract_dynamics_spec.initial_conditions = lambda z, u, p: (
+            np.ones(2),
+            np.zeros(2),
+        )
+    else:
+        public_contract_dynamics_spec.constraints = lambda t, x, z, u, p: x
+
+    with pytest.raises(ValueError):
+        create_dynamics_from_spec(public_contract_dynamics_spec)
+
+
+def test_public_contract_spec_quadrature_requires_single_output(
+    public_contract_dynamics_spec,
+):
+    public_contract_dynamics_spec.quadratures = lambda t, x, z, u, p: (x, x)
+
+    with pytest.raises(ValueError):
+        create_dynamics_from_spec(public_contract_dynamics_spec)
+
+
+@pytest.mark.parametrize(
+    "configure",
+    [
+        lambda spec: replace(spec, initial_conditions=42),
+        lambda spec: replace(spec, dynamics=42),
+        lambda spec: replace(
+            spec,
+            algebraic=VectorSpace("z", 2),
+            initial_conditions=lambda z, u, p: (np.ones(2), np.zeros(2)),
+            constraints=42,
+        ),
+        lambda spec: replace(spec, quadratures=42),
+        lambda spec: replace(spec, outputs=42),
+    ],
+)
+def test_public_contract_spec_callback_type(public_contract_dynamics_spec, configure):
+    spec = configure(public_contract_dynamics_spec)
+
+    with pytest.raises(TypeError):
+        create_dynamics_from_spec(spec)
+
+
+@pytest.fixture(params=[create_autonomous_ode, create_control_system])
+def public_contract_ode_constructor(request):
+    if request.param is create_autonomous_ode:
+        return create_autonomous_ode, {"xdot": lambda x, p: -x}
+    return create_control_system, {
+        "xdot": lambda t, x, u, p: -x,
+        "control": FunctionSpace("u", [Scalar("t")], [VectorSpace("u", 2)]),
+    }
+
+
+@pytest.mark.parametrize(
+    "parameters,p_init",
+    [
+        (None, np.ones(2)),
+        (Scalar("p"), np.ones(2)),
+        (VectorSpace("p", 2), np.ones(3)),
+    ],
+)
+def test_public_contract_ode_initial_parameter_configuration(
+    public_contract_ode_constructor, parameters, p_init
+):
+    constructor, kwargs = public_contract_ode_constructor
+
+    with pytest.raises(ValueError):
+        constructor(np.ones(2), parameters=parameters, p_init=p_init, **kwargs)
+
+
+def test_public_contract_ode_dynamics_shape(public_contract_ode_constructor):
+    constructor, kwargs = public_contract_ode_constructor
+    kwargs["xdot"] = (
+        (lambda x, p: np.zeros(3))
+        if constructor is create_autonomous_ode
+        else (lambda t, x, u, p: np.zeros(3))
+    )
+
+    with pytest.raises(ValueError):
+        constructor(np.ones(2), **kwargs)
+
+
+@pytest.mark.parametrize(
+    "u_init,error", [(np.zeros(2), TypeError), (lambda t: np.zeros(3), ValueError)]
+)
+def test_public_contract_control_initial_input(u_init, error):
+    control = FunctionSpace("u", [Scalar("t")], [VectorSpace("u", 2)])
+
+    with pytest.raises(error):
+        create_control_system(np.ones(2), lambda t, x, u, p: -x, control, u_init=u_init)
+
+
+def test_public_contract_control_requires_single_output():
+    control = FunctionSpace(
+        "u", [Scalar("t")], [VectorSpace("left", 2), VectorSpace("right", 2)]
+    )
+
+    with pytest.raises(ValueError):
+        create_control_system(np.ones(2), lambda t, x, u, p: -x, control)
+
+
+def test_public_contract_ode_output_requires_value(public_contract_ode_constructor):
+    constructor, kwargs = public_contract_ode_constructor
+    kwargs["output"] = (
+        (lambda x, p: None)
+        if constructor is create_autonomous_ode
+        else (lambda t, x, u, p: None)
+    )
+
+    with pytest.raises(ValueError):
+        constructor(np.ones(2), **kwargs)
 
 
 def to_float(x: np.ndarray) -> float:
@@ -31,9 +220,7 @@ def test_legendre_coeffs():
     truth = [[1], [0, 1], [-1 / 2, 0, 3 / 2], [0, -3 / 2, 0, 5 / 2]]
 
     for n, coeffs in enumerate(truth):
-        test_values = [
-            (c, legendre_coefficient(n, k)) for k, c in enumerate(coeffs)
-        ]
+        test_values = [(c, legendre_coefficient(n, k)) for k, c in enumerate(coeffs)]
         assert all(
             abs(true_value - test_value) < 1e-4
             for true_value, test_value in test_values
@@ -57,11 +244,7 @@ def test_expand_coeffs():
 def lagrange_polynomial(i, value, points):
     return reduce(
         mul,
-        [
-            (value - p_j) / (points[i] - p_j)
-            for j, p_j in enumerate(points)
-            if j != i
-        ],
+        [(value - p_j) / (points[i] - p_j) for j, p_j in enumerate(points) if j != i],
         1,
     )
 
@@ -82,9 +265,7 @@ def test_generate_discritisation_operators():
     def f(arg):
         return arg
 
-    x, t, bases, deriv_op, integral_op = generate_discritisation_operators(
-        interval, n
-    )
+    x, t, bases, deriv_op, integral_op = generate_discritisation_operators(interval, n)
     assert len(x) == n + 1
     assert deriv_op is not None
     y_i = np.array([f(t(x_i)) for x_i in x])
@@ -115,9 +296,7 @@ def test_generate_discritisation_operators_with_scaling():
     def df(arg):
         return 2 * arg
 
-    x, t, bases, deriv_op, integral_op = generate_discritisation_operators(
-        interval, n
-    )
+    x, t, bases, deriv_op, integral_op = generate_discritisation_operators(interval, n)
     assert len(x) == n + 1
     assert deriv_op is not None
     y_i = np.array([f(t(x_i)) for x_i in x])
@@ -125,9 +304,7 @@ def test_generate_discritisation_operators_with_scaling():
     assert abs(int_f - 1 / 3) < 1e-4
     y_i = np.array(y_i)
     df_at_y = [(d_i @ y_i, df(t(x_i))) for d_i, x_i in zip(deriv_op, x)]
-    assert all(
-        abs(val - true_val) < 1e-4 for val, true_val in df_at_y
-    ), f"{df_at_y}"
+    assert all(abs(val - true_val) < 1e-4 for val, true_val in df_at_y), f"{df_at_y}"
 
     basis_matrix = np.array(bases)
 
@@ -158,18 +335,14 @@ def test_interpolating_poly_collection():
     t_final = 2
     options = TranscriptionOptions(minimum_degree=3)
 
-    intervals = split_at_non_differentiable_points(
-        control_space, t_final, options
-    )
+    intervals = split_at_non_differentiable_points(control_space, t_final, options)
     assert len(intervals) == expected_intervals
     assert intervals[0][0] == 0
     assert intervals[-1][1] == t_final
 
     assert all(
         first_end == second_start
-        for (_, first_end), (second_start, _) in zip(
-            intervals[:-1], intervals[1:]
-        )
+        for (_, first_end), (second_start, _) in zip(intervals[:-1], intervals[1:])
     )
 
 

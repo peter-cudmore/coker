@@ -34,6 +34,59 @@ def quadratic(x, p, z):
     return x.T @ x + p.T @ p + z**2
 
 
+def test_public_contract_problem_builder_requires_an_objective():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x")
+        builder.outputs = [x]
+
+        with pytest.raises(ValueError):
+            builder.build("numpy")
+
+
+@pytest.mark.parametrize(
+    "make_objective",
+    [lambda x: x**2, lambda x: 1.0, lambda x: object()],
+    ids=["expression", "number", "object"],
+)
+def test_public_contract_problem_builder_rejects_wrong_objective_type(
+    make_objective,
+):
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x")
+        builder.objective = make_objective(x)
+        builder.outputs = [x]
+
+        with pytest.raises(TypeError):
+            builder.build("numpy")
+
+
+def test_public_contract_problem_builder_requires_outputs():
+    with ProblemBuilder() as builder:
+        x = builder.new_variable("x")
+        builder.objective = Minimise(x**2)
+
+        with pytest.raises(ValueError):
+            builder.build("numpy")
+
+
+@pytest.mark.parametrize(
+    ("initial_conditions", "exception"),
+    [(1.0, TypeError), ([], ValueError), ([0.0, 1.0], ValueError)],
+)
+def test_public_contract_problem_builder_initial_condition_configuration(
+    initial_conditions,
+    exception,
+):
+    with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        x = builder.new_variable("x")
+        builder.objective = Minimise((x - builder.arguments[0]) ** 2)
+        builder.outputs = [x]
+        builder.initial_conditions = initial_conditions
+
+        with pytest.raises(exception):
+            builder.build("numpy")
+
+
 def test_scipy_solve_info_normalises_documented_result_fields():
     solve_info = solve_info_from_scipy_result(
         OptimizeResult(
@@ -164,9 +217,7 @@ def test_explicit_program_build_lower_and_evaluation_preserve_selection(
     try:
         selected = get_backend_by_name(backend, set_current=True)
         square = function([Scalar("x")], lambda x: x**2)
-        assert evaluate(square, [3.0], backend="numpy")[0] == pytest.approx(
-            9.0
-        )
+        assert evaluate(square, [3.0], backend="numpy")[0] == pytest.approx(9.0)
         assert square.call_inline(3.0) == pytest.approx(9.0)
         assert get_current_backend() is selected
 
@@ -213,9 +264,7 @@ def test_symbolic_program_results_share_one_invocation():
         output_shape=(Dimension.scalar(), Dimension.scalar()),
         implementation=implementation,
     )
-    composed = function(
-        [Scalar("x")], lambda x: sum(program(x)), backend="numpy"
-    )
+    composed = function([Scalar("x")], lambda x: sum(program(x)), backend="numpy")
 
     assert composed(3) == 18
     assert calls == 1
@@ -274,9 +323,7 @@ def test_optimisation_accepts_runtime_parameters(variational_backend):
 
     with ProblemBuilder(arguments=[VectorSpace("target", 3)]) as builder:
         (target,) = builder.arguments
-        x = builder.new_variable(
-            name="x", shape=(2,), initial_value=np.ones(2)
-        )
+        x = builder.new_variable(name="x", shape=(2,), initial_value=np.ones(2))
         delta = x - target[:2]
         builder.objective = Minimise(np.dot(delta, delta))
         builder.outputs = [x]
@@ -355,12 +402,8 @@ def test_mathematical_program_fits_monotone_piecewise_linear_cubic(
 
     with ProblemBuilder() as builder:
         response = builder.new_function_parameter(response_space, declaration)
-        residuals = [
-            response(knot) - target for knot, target in zip(knots, targets)
-        ]
-        builder.objective = Minimise(
-            sum(residual * residual for residual in residuals)
-        )
+        residuals = [response(knot) - target for knot, target in zip(knots, targets)]
+        builder.objective = Minimise(sum(residual * residual for residual in residuals))
         builder.outputs = [response(knots[0])]
         problem = builder.build(variational_backend)
 
@@ -440,9 +483,7 @@ def test_optimisation_norm_helper(variational_backend):
             shape=(2,),
             initial_value=np.array([2.0, 1.0]),
         )
-        builder.objective = Minimise(
-            codesign_norm(x - np.array([1.0, 0.0]), order=2)
-        )
+        builder.objective = Minimise(codesign_norm(x - np.array([1.0, 0.0]), order=2))
         builder.constraints = [x[0] > 1.5]
         builder.outputs = [x]
         problem = builder.build(variational_backend)
