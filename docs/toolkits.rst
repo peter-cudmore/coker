@@ -20,12 +20,18 @@ Rigid-body kinematics and dynamics
 
 :mod:`coker.toolkits.kinematics` provides
 :class:`~coker.toolkits.kinematics.RigidBody`, joint types, and inertia
-declarations for articulated models. Supported joints include welded,
-revolute, prismatic, and free joints. Use the model to calculate forward
-kinematics, Jacobians, energy, mass matrices, and inverse dynamics.
+declarations for articulated models. Exported joints are ``Weld``, ``Free``,
+``Revolute`` and ``Planar``. A ``Revolute`` driven by a pure translation
+:class:`~coker.toolkits.spatial.Screw` provides sliding motion; there is no
+exported ``Prismatic`` class. Use the model to calculate forward kinematics,
+Jacobians, energy, mass matrices, and inverse dynamics. The
+``system_modelling`` module is not a supported public API.
 
 Define links and effectors, then wrap the required calculation in a Coker
-function:
+function. For stacked effector positions and Cartesian Jacobians, use the
+existing ``RigidBody.to_function()`` bridge shown in :doc:`api/kinematics`.
+That reference also specifies frame directions, coordinate order and the
+multi-axis Jacobian and dynamics limits.
 
 .. testcode:: toolkits_kinematics
 

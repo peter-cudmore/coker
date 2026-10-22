@@ -16,6 +16,7 @@ Public entry points include:
 - :class:`coker.dynamics.ResidualDynamicalSystem` with :func:`coker.dynamics.to_residual_dynamical_system`
 - :func:`coker.dynamics.direct_sum`
 - :class:`coker.dynamics.VariationalProblem`
+- :class:`coker.dynamics.VariationalSolution`
 - :class:`coker.parameters.BoundedVariable`
 - :class:`coker.parameters.UnboundedVariable`
 - :class:`coker.dynamics.TranscriptionOptions`
@@ -561,10 +562,11 @@ constructs the symbolic problem without solving it:
 vector block. The solver flattens these blocks into scalar decisions and
 restores their shapes when reconstructing the fitted function.
 
-``solution.parameters`` maps scalar decisions to ``float`` values and vector
-or dense tensor decisions to shaped NumPy arrays. Function decisions become
-``FittedFunction`` objects with their specification, space, callable, and
-structured fitted parameters.
+``solution.parameters`` maps decision names to reconstructed values. CasADi
+returns numeric scalar decisions as ``float`` values and vector or dense tensor
+decisions as shaped NumPy arrays; PyTorch can retain tensors. Function decisions
+become ``FittedFunction`` objects with their specification, space, callable,
+and backend-valued structured fitted parameters.
 
 ``MonotonePiecewiseLinear.domain_knots`` should span the normalised integration
 domain from ``0`` to ``1``; use these as endpoint knots and add interior knots
@@ -631,14 +633,78 @@ evaluate the returned trajectory at physical times:
 Trajectory evaluation and interpolation
 ---------------------------------------
 
-``fit(t)``, ``state(t)``, ``algebraic(t)``, ``quadratures(t)``, and
-``control_law(t)`` accept physical time on ``[0, fit.t_final]``, including for
-an optimized horizon. Output and constraint callbacks also receive physical
-time. ``as_raw()`` returns physical knot times, and ``to_poly()`` returns an
-output interpolant on physical intervals. CasADi and PyTorch store ``fit.path``
-on normalized ``[0, 1]``, with ``fit.t_final`` determining its physical time
-mapping. CasADi control coefficients and defect estimation also use normalized
-time; do not pass physical times directly to the underlying path.
+The canonical :ref:`solve-result reference <variational-solution>` documents
+every post-solve field and inspection method. ``fit(t)``, ``state(t)``,
+``algebraic(t)``, ``quadratures(t)``, and ``control_law(t)`` accept scalar
+physical time on ``[0, fit.t_final]``, including for an optimised horizon.
+Output and constraint callbacks also receive physical time. Absent algebraic,
+quadrature and control channels return ``None``.
+
+``as_raw()`` allocates a table of physical knot times followed by combined
+internal path channels, not the declared output. Each segment's right endpoint
+is omitted, including the final horizon. ``to_poly()`` returns an output
+interpolant on physical intervals with the same segment degrees. It samples
+the output at interpolation nodes; nonlinear output maps and discontinuous
+controls need not agree with direct ``fit(t)`` between nodes.
+
+CasADi and PyTorch store ``fit.path`` on normalised ``[0, 1]``, with
+``fit.t_final`` determining its physical time mapping. CasADi control
+coefficients and defect estimation also use normalised time; do not pass
+physical times directly to the underlying path. Present path channels reject
+out-of-range times with ``ValueError`` rather than extrapolating.
+
+Inspect the decay fit above without solving a second problem:
+
+.. testcode:: dynamics_decay_fitting
+
+   assert np.isfinite(fit.cost) and fit.cost < 1e-6
+   assert fit.solve_info is not None and fit.solve_info.success
+   assert fit.t_final == 4.0
+   assert fit.algebraic(2.0) is None
+   assert fit.quadratures(2.0) is None
+   assert fit.control_law(2.0) is None
+   assert fit.path_constraints(2.0).shape == (0,)
+   assert fit.terminal_constraints().shape == (0,)
+   np.testing.assert_allclose(
+       fit.state(2.0), [initial_state * np.exp(-true_rate * 2.0)], atol=1e-5
+   )
+
+   raw = fit.as_raw()
+   assert raw.shape[0] == 2  # physical time, then the single internal state
+   assert raw[0, 0] == 0.0 and raw[0, -1] < fit.t_final
+   np.testing.assert_allclose(
+       raw[1], initial_state * np.exp(-true_rate * raw[0]), atol=1e-5
+   )
+   output_poly = fit.to_poly()
+   assert output_poly.intervals[-1][1] == fit.t_final
+   assert fit.path.intervals[-1][1] == 1.0
+   for time in [0.0, 0.5, 1.7, 3.0, fit.t_final]:
+       np.testing.assert_allclose(output_poly(time), fit(time), atol=1e-5)
+
+   assert fit.segment_defects
+   for segment in fit.segment_defects:
+       np.testing.assert_allclose(
+           segment.physical_interval,
+           np.asarray(segment.normalized_interval) * fit.t_final,
+       )
+       assert segment.degree > 0
+       assert segment.full_residual.ndim == 1
+       assert np.isfinite(segment.full_residual).all()
+   assert fit.adaptive_refinement_rounds is None
+   assert fit.adaptive_maximum_defect is None
+
+``path_constraints(t)`` and ``terminal_constraints()`` inspect stored
+half-space inequality violations: each component is nonnegative and zero
+means satisfied. Empty stored lists produce empty arrays. They do not include
+all solver constraints, so neither these arrays nor segment diagnostics alone
+certify feasibility. Adaptive refinement, when enabled, records its round
+count and final maximum sampled defect separately from the signed segment
+residual vectors.
+
+Treat result arrays, parameter mappings and stored evaluator data as read-only.
+The mutable result does not promise defensive copies. Editing the named
+``parameters`` mapping does not refit the state or synchronise the numeric
+parameter vector used by output and constraint evaluation.
 
 By default, PyTorch assembles its returned state and quadrature channels into
 four degree-eight LGR polynomials on normalized subintervals. Integration

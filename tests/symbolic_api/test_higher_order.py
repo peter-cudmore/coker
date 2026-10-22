@@ -1,3 +1,5 @@
+import operator
+
 import numpy as np
 import pytest
 
@@ -10,6 +12,34 @@ from coker.algebra.exceptions import InvalidArgument, InvalidShape
 from coker.backends.backend import create_native_symbol_entry
 
 from ..util import is_close
+
+
+@pytest.mark.parametrize("arguments", [(), (1.0, 2.0)])
+def test_public_contract_function_argument_count(arguments):
+    identity = function([Scalar("x")], lambda x: x)
+
+    with pytest.raises(ValueError):
+        identity(*arguments)
+
+
+@pytest.mark.parametrize(
+    "comparison", [operator.le, operator.ge, operator.lt, operator.gt]
+)
+def test_public_contract_function_comparison_requires_single_output(comparison):
+    pair = function([Scalar("x")], lambda x: (x, x + 1))
+
+    with pytest.raises(ValueError):
+        comparison(pair, 0.0)
+
+
+@pytest.mark.parametrize(
+    "comparison", [operator.le, operator.ge, operator.lt, operator.gt]
+)
+def test_public_contract_function_comparison_requires_matching_shape(comparison):
+    identity = function([VectorSpace("x", 2)], lambda x: x)
+
+    with pytest.raises(ValueError):
+        comparison(identity, np.zeros(3))
 
 
 def test_functional(backend):
@@ -86,9 +116,7 @@ def test_bound_callable_emits_base_symbol_and_bind_capture_dependency():
         bound = BoundCallable(target, public_space, (captured_a,))
         function_value = tape.insert_symbol_value(bound)
 
-    bind_op, base_value, bind_capture, bind_position = tape.nodes[
-        function_value.index
-    ]
+    bind_op, base_value, bind_capture, bind_position = tape.nodes[function_value.index]
     function_op, symbol = tape.nodes[base_value.index]
     entry = tape.nodes._symbol_table[0]
     assert function_op is OP.FUNCTION
@@ -138,8 +166,7 @@ def test_bound_callable_captures_share_symbol_and_evaluate(backend):
     assert tape.nodes._symbol_table[0].target is target
     assert (
         sum(
-            isinstance(tape.nodes[index], tuple)
-            and tape.nodes[index][0] is OP.FUNCTION
+            isinstance(tape.nodes[index], tuple) and tape.nodes[index][0] is OP.FUNCTION
             for index in range(len(tape.nodes))
         )
         == 1
@@ -189,9 +216,9 @@ def test_bound_callable_uses_one_bind_node_per_capture():
             BoundCallable(target, public_space, (captured_a, captured_b))
         )
 
-    second_bind_op, first_bound_value, second_capture, second_position = (
-        tape.nodes[function_value.index]
-    )
+    second_bind_op, first_bound_value, second_capture, second_position = tape.nodes[
+        function_value.index
+    ]
     first_bind_op, base_value, first_capture, first_position = tape.nodes[
         first_bound_value.index
     ]
@@ -293,9 +320,7 @@ def test_bound_callable_counts_only_present_target_inputs():
         bound = BoundCallable(target, public_space, (captured_a,))
         function_value = tape.insert_symbol_value(bound)
 
-    bind_op, base_value, bind_capture, bind_position = tape.nodes[
-        function_value.index
-    ]
+    bind_op, base_value, bind_capture, bind_position = tape.nodes[function_value.index]
     assert bind_op is OP.BIND
     assert base_value.dim.arguments == [
         Scalar("x"),
@@ -416,9 +441,7 @@ def test_partial_evaluation(backend):
 
     evaluator_f = function(
         arguments=[
-            FunctionSpace(
-                "f", arguments=[Scalar("x")], output=[Scalar("f(x)")]
-            ),
+            FunctionSpace("f", arguments=[Scalar("x")], output=[Scalar("f(x)")]),
             Scalar("x"),
         ],
         implementation=evaluator,
@@ -432,9 +455,7 @@ def test_partial_evaluation(backend):
 
     evaluator_f_sqr_plus_one = function(
         arguments=[
-            FunctionSpace(
-                "f", arguments=[Scalar("x")], output=[Scalar("f(x)")]
-            ),
+            FunctionSpace("f", arguments=[Scalar("x")], output=[Scalar("f(x)")]),
             Scalar("x"),
         ],
         implementation=f_sqr_plus_one,

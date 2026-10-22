@@ -25,19 +25,45 @@ class DynamicsSpec:
     """Describe a semi-explicit dynamic system before it is traced.
 
     Args:
-        inputs: Optional input trajectory declaration; ``None`` means no input.
-        parameters: Optional scalar, vector, or function parameter declarations.
-        algebraic: Optional algebraic-state declaration.
-        initial_conditions: Callable returning ``(x0, z0)``.
-        dynamics: Callable computing ``dxdt(t, x, z, u, p)``.
-        constraints: Callable computing ``g(t, x, z, u, p)``.
-        outputs: Callable computing ``y(t, x, z, u, p, q)``.
-        quadratures: Callable computing ``dqdt(t, x, z, u, p)``.
+        inputs: Input trajectory ``FunctionSpace``, or ``None`` without inputs.
+        parameters: Scalar, vector or function-space declaration, an ordered
+            tuple/list of declarations, or ``None`` without parameters.
+        algebraic: Algebraic-state vector declaration, or ``None``.
+        initial_conditions: Callback ``initial_conditions(z, u, p)`` returning
+            exactly ``(x0, z0)``; use ``None`` for absent algebraic values.
+        dynamics: Callback ``dynamics(t, x, z, u, p)`` returning one rate with
+            the same shape as ``x0``.
+        constraints: Callback ``constraints(t, x, z, u, p)`` returning the
+            zero-valued algebraic residual, or ``None`` without algebraic state.
+        outputs: Callback ``outputs(t, x, z, u, p, q)`` returning the observable.
+        quadratures: Callback ``quadratures(t, x, z, u, p)`` returning one
+            quadrature rate, or ``None`` without quadratures.
+
+    Raises:
+        TypeError: A tuple/list parameter entry is not a supported declaration.
+
+    Notes:
+        The input ``u`` is a trajectory callable: use ``u(t)`` for its value.
+        Absent channels are passed to callbacks as ``None``. A tuple/list of
+        parameters supplies one ``p`` tuple in declaration order; a single
+        declaration supplies its value directly. This object stores callbacks;
+        :func:`coker.dynamics.create_dynamics_from_spec` traces and checks them.
 
     Examples:
-        Build a system with :func:`create_dynamics_from_spec`::
-
-            spec = DynamicsSpec(...)
+        >>> import numpy as np
+        >>> from coker.dynamics import DynamicsSpec, create_dynamics_from_spec
+        >>> spec = DynamicsSpec(
+        ...     inputs=None, parameters=None, algebraic=None,
+        ...     initial_conditions=lambda z, u, p: (np.array([1.0]), None),
+        ...     dynamics=lambda t, x, z, u, p: -x,
+        ...     constraints=None,
+        ...     outputs=lambda t, x, z, u, p, q: x,
+        ...     quadratures=None,
+        ... )
+        >>> system = create_dynamics_from_spec(spec, backend="numpy")
+        >>> np.testing.assert_allclose(
+        ...     system.dxdt(0.0, np.array([2.0]), None, None, None), [-2.0]
+        ... )
     """
 
     inputs: FunctionSpace | Noop | None
@@ -106,20 +132,42 @@ class DynamicalSystem:
     """Define an explicit or semi-explicit system and its output.
 
     Args:
-        inputs: Optional input trajectory declaration; ``None`` means no input.
-        parameters: Optional model parameter declarations.
-        x0: Initial-condition function.
-        dxdt: Differential-rate function.
-        g: Optional algebraic residual function.
-        dqdt: Optional quadrature-rate function.
-        y: Output function.
-        solver_parameters: Backend-specific integration settings.
+        inputs: Input trajectory declaration, or ``None`` without inputs.
+        parameters: Optional scalar, vector or function-space declarations.
+        x0: Traced initial-condition function returning ``(x0, z0)`` from
+            initial algebraic values, an input trajectory and model parameters.
+        dxdt: Traced rate function with arguments ``(t, x, z, u, p)``.
+        g: Traced algebraic residual, or ``None`` without algebraic state.
+        dqdt: Traced quadrature rate, or ``None`` without quadratures.
+        y: Traced output with arguments ``(t, x, z, u, p, q)``.
+        solver_parameters: Backend-specific integration settings, or ``None``
+            for backend defaults.
+
+    Notes:
+        Prefer :func:`coker.dynamics.create_autonomous_ode`,
+        :func:`coker.dynamics.create_control_system`, or
+        :func:`coker.dynamics.create_dynamics_from_spec` to construct consistent
+        traced functions. Calling this object integrates a trajectory; it does
+        not perform parameter fitting or return a ``VariationalSolution``.
+        Numerical support follows the backend, not just callback traceability.
 
     Examples:
-        Create a simple explicit system with
-        :func:`~coker.dynamics.create_autonomous_ode`::
+        NumPy uses SciPy's default relative integration tolerance of ``1e-3``.
 
-            system = create_autonomous_ode(x0, xdot)
+        >>> import numpy as np
+        >>> from coker.dynamics import create_autonomous_ode
+        >>> system = create_autonomous_ode(
+        ...     x0=np.array([1.0]), xdot=lambda x, p: -x, backend="numpy"
+        ... )
+        >>> np.testing.assert_allclose(system(0.5), np.exp(-0.5), rtol=1e-3)
+        >>> np.testing.assert_allclose(
+        ...     [system(t) for t in (0.0, 0.5, 1.0)],
+        ...     np.exp(-np.array([0.0, 0.5, 1.0])), rtol=1e-3,
+        ... )
+        >>> assert system.backend == "numpy"
+        >>> differential, algebraic, quadrature = system.get_state_dimensions()
+        >>> assert differential.flat() == 1
+        >>> assert system.output_as_function_space().name == "y"
     """
 
     inputs: FunctionSpace | Noop | None
@@ -142,21 +190,65 @@ class DynamicalSystem:
             self.parameters = tuple(self.parameters)
 
     def output_as_function_space(self) -> FunctionSpace:
-        """Return the callable space of the public trajectory output."""
+        """Describe the public trajectory callable's argument and output spaces.
+
+        Returns:
+            FunctionSpace: Space named ``"y"`` accepting time, the input
+            trajectory when declared, and one value per parameter declaration.
+            Its single output is the declared observable, not internal state.
+        """
         return _output_function_space(self.y, self.inputs, self.parameters)
 
     def get_state_dimensions(self) -> Tuple[Dimension, Dimension, Dimension]:
-        """Return the differential, algebraic, and quadrature dimensions."""
+        """Return dimensions of the channels used by the output evaluator.
+
+        Returns:
+            tuple[Dimension, Dimension, Dimension]: Differential, algebraic and
+            quadrature dimensions, in that order. Absent channels retain the
+            output function's absence metadata.
+        """
         shapes = self.y.input_shape()
         return shapes[1], shapes[2], shapes[-1]
 
     @property
     def backend(self) -> str:
-        """Return the backend used by the differential-rate callback."""
+        """Return the backend used by the differential-rate function.
+
+        Returns:
+            str: Registered backend name, such as ``"numpy"`` or ``"casadi"``.
+        """
         return self.dxdt.backend
 
     def __call__(self, *args):
-        """Evaluate a non-quadrature trajectory at time or a time grid."""
+        """Integrate and evaluate the declared observable at physical times.
+
+        Args:
+            *args: Physical endpoint or one-dimensional time grid, followed by
+                the input trajectory callable when declared, then one value
+                per parameter declaration. Omit absent inputs and parameters;
+                do not add ``None`` placeholders.
+
+        Returns:
+            object: Declared output at an endpoint. On a supported time grid,
+            larger vectors have one row per requested time. Numeric values
+            follow the evaluation backend's conventions.
+
+        Raises:
+            NotImplementedError: Quadratures are declared, or the selected
+                integration backend does not support the model.
+            ValueError: The argument count does not match the declarations,
+                or a function parameter has an incompatible space or backend.
+            TypeError: A declared function parameter value is not callable.
+
+        Notes:
+            Use :func:`coker.dynamics.to_residual_dynamical_system` to evaluate
+            trajectories with quadratures; their initial values then start at
+            zero. Integration errors propagate from the selected backend.
+            NumPy squeezes one-component outputs to zero-dimensional values
+            at scalar endpoints. Time-grid evaluation of these outputs
+            currently raises ``ValueError`` when concatenating them; evaluate
+            separate Python scalar endpoints instead.
+        """
         if not isinstance(self.dqdt, Noop):
             raise NotImplementedError
         from coker.dynamics.residual import to_residual_dynamical_system

@@ -14,6 +14,7 @@ parameter ordering and variational results.
      decision declarations, and inspecting reconstructed fitted values.
    - State target shapes, concrete block order, validation and backend limits;
      keep task walkthroughs in the cookbook and custom declaration hooks here.
+   - Keep basic usage in source docstrings so autodoc and doctest share examples.
 
 Scalar and array decisions
 --------------------------
@@ -48,6 +49,11 @@ raises ``ValueError``. The array may have any positive rank; its shape is
 retained during reconstruction, and its size is the scalar decision count.
 There are no explicit bounds.
 
+Names identify fitted values, not units: use ``program.parameters[name]`` for
+ordinary optimisation results. Vector and tensor reconstruction retains the
+declared shape. Guesses, bounds and model equations must use consistent units;
+these declarations do not attach physical units or convert values.
+
 Callable declarations
 ---------------------
 
@@ -68,7 +74,7 @@ Closures and bound inputs
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: coker.parameters.function_parameters.ClosureParameter
-   :members: bind_callable
+   :members: bind_callable, validate_target, list_concrete_parameters, evaluate
 
 ``ClosureParameter(function, parameters)`` binds a non-empty sequence of scalar
 or dense declarations to a Coker ``Function``. The source function's inputs must
@@ -108,6 +114,7 @@ Dense layers
 ~~~~~~~~~~~~
 
 .. autoclass:: coker.parameters.function_parameters.DenseLayer
+   :members: hidden_size, output_size, validate_target, list_concrete_parameters, evaluate
 
 ``DenseLayer(input_size, activation, name=None)`` represents
 ``activation(weight @ argument + bias)`` for a vector target, or
@@ -134,6 +141,7 @@ Monotone functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: coker.parameters.function_parameters.MonotonePiecewiseLinear
+   :members: size, validate_target, list_concrete_parameters, evaluate
 
 ``MonotonePiecewiseLinear(domain_knots, lower_bound, upper_bound, guess=None,
 name=None)`` defines a bounded, increasing scalar piecewise-linear function.
@@ -157,6 +165,7 @@ Radial basis functions
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: coker.parameters.function_parameters.RadialBasisFunction
+   :members: validate_target, list_concrete_parameters, evaluate
 
 ``RadialBasisFunction(centers, width, lower_bound=None, upper_bound=None,
 guess=None, name=None)`` represents the scalar Gaussian expansion

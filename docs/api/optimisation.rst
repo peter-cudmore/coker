@@ -28,9 +28,14 @@ Set ``builder.objective`` to ``Minimise(scalar_expression)``,
 ``builder.constraints`` to a list of comparisons or ``bounded`` constraints,
 and ``builder.outputs`` to a non-empty list of symbolic expressions. All
 expressions must belong to the builder's graph. ``build(backend=None)`` returns
-a :class:`~coker.toolkits.codesign.MathematicalProgram`; a missing ``Minimise``
-objective or empty output list raises ``AssertionError``. The builder's
+a :class:`~coker.toolkits.codesign.MathematicalProgram`. A missing objective
+(``None``) raises ``ValueError``; a present objective that is not ``Minimise``
+raises ``TypeError``. An empty output list raises ``ValueError``. The builder's
 ``input_shape`` and ``output_shape`` are tuple properties, not methods.
+
+The optional ``with ProblemBuilder(...) as builder:`` context returns the
+builder without installing a global tracing context. Leaving it does not
+build, solve or discard the problem, and exceptions propagate normally.
 
 ``new_function_parameter(target, declaration)`` returns a symbolic callable
 whose concrete decisions, guesses and bounds come from the declaration.
@@ -69,6 +74,11 @@ bounds for an explicit equality constraint and infinite bounds for an unbounded
 side. This helper does not validate bound ordering or shape; the selected
 backend checks and lowers the constraint.
 
+The arguments are ``residual`` (the symbolic expression), ``lower_bound`` and
+``upper_bound`` (numeric values or symbolic bounds). The returned record exposes
+those three values unchanged. Its ``tape`` property is the residual's tape, and
+``as_halfplane_bound()`` returns ``(residual, lower_bound, upper_bound)``.
+
 .. autoclass:: coker.toolkits.codesign.BoundedConstraint
    :members: as_halfplane_bound
 
@@ -87,6 +97,10 @@ the resulting vector's dot product. The helper retains factor metadata for
 backends that recognise quadratic objectives; it does not itself select a QP
 solver.
 
+``weight`` is the symbolic weighting matrix and ``residual`` the symbolic
+residual vector. The return value is a scalar symbolic expression; the
+``WeightedNorm`` record attached to it retains those two original factors.
+
 .. autofunction:: coker.toolkits.codesign.norm
 
 Returns ``numpy.linalg.norm(arg, ord=order)``. Symbolic vectors support orders
@@ -102,9 +116,10 @@ Program calls and lowering
 
 A numeric call ``program(*arguments)`` solves for the supplied runtime inputs
 and returns ``(objective, *outputs)``. The objective is a Python ``float``;
-requested outputs are NumPy arrays reshaped to their declared dimensions,
-including zero-dimensional arrays for scalar outputs. The public result never
-includes private parameter captures.
+requested outputs are NumPy arrays reshaped using each declared
+``Dimension.shape``. A scalar output has logical dimension metadata ``None``
+but is returned as an array of shape ``(1,)``, not a zero-dimensional array.
+The public result never includes private parameter captures.
 
 ``input_shape()`` describes runtime inputs in declaration order.
 ``output_shape()`` describes only requested outputs. The ``result_shape``
@@ -151,6 +166,12 @@ backend's ``return_status`` string. ``unified_return_status`` and
 ``iteration_count`` may be ``None`` when unavailable. Inspect these fields
 rather than parsing a backend's raw return values.
 
+Construct ``SolveInfo(backend, solver, success, return_status,
+unified_return_status=None, iteration_count=None)`` when implementing a backend.
+The first two fields identify the backend and solver; ``success`` is the Boolean
+outcome. The last two fields represent optional normalised status and iteration
+metadata. This record does not run or validate a solve.
+
 .. autoexception:: coker.toolkits.codesign.SolveFailure
 
 An unsuccessful solve raises ``SolveFailure`` with the status available as
@@ -158,6 +179,10 @@ An unsuccessful solve raises ``SolveFailure`` with the status available as
 is refreshed from the solver even when its call raises. Invalid inputs, backend
 configuration errors and native solver exceptions are not necessarily wrapped
 in ``SolveFailure``.
+
+``SolveFailure(message, solve_info)`` accepts a diagnostic string and the
+corresponding :class:`~coker.toolkits.codesign.SolveInfo`; the latter is exposed
+unchanged through ``solve_info``.
 
 Solver extension interface
 --------------------------
@@ -167,6 +192,11 @@ Solver extension interface
 
 Solver implementations provide ``last_solve_info`` before returning or raising
 ``SolveFailure``. This interface is not a model builder.
+The call receives runtime arguments in declaration order and returns backend
+values ordered as objective, requested outputs, and any private concrete
+decision captures requested during construction. ``MathematicalProgram``
+strips private captures from the public tuple. Backend validation and native
+errors may propagate; unsuccessful solver status raises ``SolveFailure``.
 
 .. autoclass:: coker.toolkits.codesign.WeightedNorm
 

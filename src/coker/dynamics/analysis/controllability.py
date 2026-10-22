@@ -51,7 +51,39 @@ def _dae_bracket(
 def analyse_controllability(
     system, *, max_order: int | None = None
 ) -> ControllabilityResult:
-    """Establish generic local accessibility through Lie-algebra rank."""
+    """Establish generic local accessibility through Lie-algebra rank.
+
+    This accessibility test is not a guarantee of global controllability or
+    small-time local controllability.
+
+    Args:
+        system: A supported ``DynamicalSystem``, ``SymbolicSystem`` or
+            ``SymbolicDAESystem`` with smooth autonomous control-affine rates.
+            DAEs must be semi-explicit index one with control-independent
+            constraints. General residual models are not supported.
+        max_order: Non-negative bracket-expansion limit, or ``None`` to expand
+            until full rank or closure. Zero tests the initial control fields.
+
+    Returns:
+        Rank evidence with independent vector fields as matrix columns.
+        ``TRUE`` means full differential-state rank, ``FALSE`` means closure
+        below full rank, and ``INCONCLUSIVE`` means unsupported input, invalid
+        options, or an expansion limit. Inspect ``reason`` and nonvanishing
+        ``rank_conditions``; a deficient intermediate matrix is not a verdict.
+
+    Examples:
+        >>> import sympy as sp
+        >>> from coker.dynamics import (
+        ...     SymbolicSystem, AnalysisStatus, analyse_controllability,
+        ... )
+        >>> x, u = sp.symbols("x u")
+        >>> system = SymbolicSystem((x,), (), (u,), (u,), (x,))
+        >>> result = analyse_controllability(system)
+        >>> result.status is AnalysisStatus.TRUE
+        True
+        >>> result.rank, result.required_rank, result.matrix.shape
+        (1, 1, (1, 1))
+    """
     try:
         symbolic = normalize_symbolic_system(system)
         tangent = (

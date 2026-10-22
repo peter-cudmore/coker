@@ -30,33 +30,77 @@ class LegacyFormCertificate:
 
 @dataclass(frozen=True)
 class ResidualDynamicalSystem:
-    """Define a trajectory through an implicit differential-algebraic residual.
+    """Define a trajectory by ``F(t, w, wdot, z, u, *parameters) = 0``.
 
-    ``F`` receives time, differential variables, their rates, algebraic
-    variables, inputs, and parameters. The dimension declarations partition
-    those values; they do not impose a semi-explicit form on ``F``. A declared
-    nonempty quadrature starts at zero for trajectory evaluation.
+    ``w`` concatenates differential state ``x`` and quadrature state ``q``;
+    ``wdot`` has the same layout. ``z`` contains algebraic variables, using an
+    empty vector when absent. The residual must return one vector with
+    ``differential.flat() + quadrature.flat() + algebraic.flat()`` rows,
+    counting absent dimensions as zero. Rows may be coupled; no semi-explicit
+    form is inferred or solved symbolically.
+
+    Integration starts at time zero. ``x0(0, u, *parameters)`` supplies
+    ``(x0, z0)``; the first argument is the initialization slot, not a
+    user-selected initial time. Supply algebraic initial values when present;
+    construction does not project them onto the constraint manifold.
+    Quadratures start at zero. Outputs use
+    ``y(t, x, z, u, *parameters, q)``, with absent ``z``/``q`` represented by
+    ``None``. Parameter-free callbacks retain one ``None`` parameter slot.
+
+    Independent residual simulation is supported by NumPy's implicit
+    state-step solver and CasADi's IDAS/direct-collocation solvers, with their
+    backend-specific restrictions and solver settings. NumPy and IDAS require
+    a differential or quadrature state; no higher-index solvability guarantee
+    is made. Converted semi-explicit systems retain their original direct
+    integration path. Numerical residual support does not imply symbolic
+    analysis support: ``analyse_*`` accepts supported semi-explicit index-one
+    models, not ``ResidualDynamicalSystem``.
 
     Args:
-        inputs: Optional input space; ``None`` means no input.
-        parameters: Optional scalar, vector, or function-valued parameter
-            declarations.
-        x0: Initial-condition function returning differential and algebraic
-            values.
-        F: Residual function ``F(t, w, wdot, z, u, p)``.
-        y: Output function evaluated from the integrated trajectory.
-        differential: Dimension of the differential state.
-        algebraic: Optional dimension of the algebraic state.
-        quadrature: Optional dimension of the integrated quadrature state.
+        inputs: Input ``FunctionSpace``, or ``None``/``Noop`` for no input.
+            Input callbacks receive the trajectory and evaluate it as ``u(t)``.
+        parameters: Scalar, vector or function-valued declarations, a sequence
+            of declarations, or ``None``. Sequence entries become separate
+            callback arguments in declaration order.
+        x0: Initial-condition ``Function`` returning ``(x0, z0)``.
+        F: Residual ``Function`` with the signature and layout above.
+        y: Output ``Function`` returning one model output.
+        differential: Finite differential-state ``Dimension``.
+        algebraic: Finite algebraic-state ``Dimension``, or ``None``.
+        quadrature: Finite quadrature-state ``Dimension``, or ``None``.
         solver_parameters: Backend-specific integration settings.
-        legacy: Internal semi-explicit certificate. Leave at its default.
+        legacy: Internal conversion certificate; leave at its default.
+
+    Raises:
+        TypeError: Dimensions or callbacks have unsupported types, or residual
+            callback arity does not match the parameter declarations.
+        ValueError: Dimensions are invalid or callbacks use different backends.
 
     Examples:
-        Convert an existing explicit system when a residual representation is
-        required::
+        Define the implicit equation ``xdot + x = 0`` without conversion:
 
-            residual = to_residual_dynamical_system(explicit_system)
-            output = residual(1.0)
+        >>> import numpy as np
+        >>> from coker import Dimension, Scalar, VectorSpace, function
+        >>> from coker.dynamics import ResidualDynamicalSystem
+        >>> t, x = Scalar("t"), VectorSpace("x", 1)
+        >>> residual = ResidualDynamicalSystem(
+        ...     inputs=None, parameters=None,
+        ...     x0=function([None, None, None],
+        ...                 lambda z, u, p: (np.ones(1), None), backend="numpy"),
+        ...     F=function(
+        ...         [t, x, VectorSpace("xdot", 1), VectorSpace("z", 0), None, None],
+        ...         lambda t, w, wdot, z, u, p: wdot + w, backend="numpy"),
+        ...     y=function([t, x, None, None, None, None],
+        ...                lambda t, x, z, u, p, q: x, backend="numpy"),
+        ...     differential=Dimension(1), algebraic=None, quadrature=None,
+        ... )
+        >>> np.testing.assert_allclose(
+        ...     residual.F(
+        ...         0.0, np.ones(1), -np.ones(1), np.empty(0), None, None),
+        ...     0.0, atol=1e-12,
+        ... )
+        >>> np.testing.assert_allclose(residual(0.0), 1.0)
+        >>> np.testing.assert_allclose(residual(0.1), np.exp(-0.1), rtol=1e-5)
     """
 
     inputs: FunctionSpace | Noop | None
@@ -84,9 +128,14 @@ class ResidualDynamicalSystem:
             A ``(differential, algebraic, quadrature)`` dimension tuple.
 
         Examples:
-            Inspect a constructed system::
-
-                differential, algebraic, quadrature = residual.get_state_dimensions()
+            >>> from coker.dynamics import (
+            ...     create_autonomous_ode, to_residual_dynamical_system,
+            ... )
+            >>> residual = to_residual_dynamical_system(
+            ...     create_autonomous_ode([1.0], lambda x, p: -x)
+            ... )
+            >>> residual.get_state_dimensions()[0].flat()
+            1
         """
         return self.differential, self.algebraic, self.quadrature
 
@@ -98,9 +147,14 @@ class ResidualDynamicalSystem:
             Registered backend name for this model.
 
         Examples:
-            Inspect a constructed system::
-
-                backend_name = residual.backend
+            >>> from coker.dynamics import (
+            ...     create_autonomous_ode, to_residual_dynamical_system,
+            ... )
+            >>> residual = to_residual_dynamical_system(
+            ...     create_autonomous_ode([1.0], lambda x, p: -x)
+            ... )
+            >>> residual.backend
+            'numpy'
         """
         return self.F.backend
 
@@ -112,27 +166,61 @@ class ResidualDynamicalSystem:
             parameters and returning the model output.
 
         Examples:
-            Inspect a constructed system::
-
-                output_space = residual.output_as_function_space()
+            >>> from coker import FunctionSpace
+            >>> from coker.dynamics import (
+            ...     create_autonomous_ode, to_residual_dynamical_system,
+            ... )
+            >>> residual = to_residual_dynamical_system(
+            ...     create_autonomous_ode([1.0], lambda x, p: -x)
+            ... )
+            >>> isinstance(residual.output_as_function_space(), FunctionSpace)
+            True
         """
         return _output_function_space(self.y, self.inputs, self.parameters)
 
     def __call__(self, *args):
-        """Evaluate the trajectory at a time or one-dimensional time grid.
+        """Evaluate outputs after integration from time zero.
 
         Args:
-            *args: Time followed by the declared input, when present, and
-                declared parameter values.
+            *args: Time followed by the declared input trajectory, if present,
+                then one value per parameter declaration. Do not supply absent
+                input/parameter placeholders. A function-valued parameter must
+                match its declared ``FunctionSpace``; supplied ``Function``
+                objects must also use this system's backend.
 
         Returns:
-            Model output at one time, or outputs stacked over the requested
-            time grid.
+            The model output at a Python scalar endpoint, or outputs stacked
+            over a supported one-dimensional time grid. Larger vector outputs
+            are vertically stacked. This returns outputs, not an analysis
+            result or a state-solution object.
+
+        Raises:
+            ValueError: Argument count or a function-valued parameter differs
+                from the declarations, or the backend rejects times, shapes
+                or solver settings.
+            TypeError: A function-valued parameter is not callable.
+            NotImplementedError: The backend does not support this residual
+                model or its state partition.
+            RuntimeError: The selected numerical solver fails.
+
+        Notes:
+            NumPy squeezes one-component outputs to zero-dimensional values
+            at scalar endpoints. Time-grid evaluation of these outputs
+            currently raises ``ValueError`` when concatenating them; evaluate
+            separate Python scalar endpoints instead.
 
         Examples:
-            Evaluate a no-input, no-parameter model at its final time::
-
-                output = residual(1.0)
+            >>> import numpy as np
+            >>> from coker.dynamics import (
+            ...     create_autonomous_ode, to_residual_dynamical_system,
+            ... )
+            >>> residual = to_residual_dynamical_system(
+            ...     create_autonomous_ode([1.0], lambda x, p: -x)
+            ... )
+            >>> np.testing.assert_allclose(residual(0.0), 1.0)
+            >>> np.testing.assert_allclose(
+            ...     residual(0.1), np.exp(-0.1), rtol=1e-5,
+            ... )
         """
         return _evaluate_residual_trajectory(self, *args)
 
@@ -356,18 +444,37 @@ def _compose_residual_callback(callback: Function, *arguments: Any) -> Any:
 def to_residual_dynamical_system(
     system: DynamicalSystem,
 ) -> ResidualDynamicalSystem:
-    """Convert a semi-explicit system into an equivalent residual model.
+    """Convert a semi-explicit system to an equivalent residual representation.
 
     Args:
-        system: Explicit or semi-explicit dynamical system to convert.
+        system: Explicit or semi-explicit ``DynamicalSystem`` to convert.
 
     Returns:
-        Residual model with rows ordered as differential-rate, quadrature-rate,
-        then algebraic residuals.
+        A model with residual rows ``xdot - f``, then ``qdot - h`` when
+        quadratures exist, then algebraic constraints ``g``. The differential,
+        algebraic and quadrature dimensions, initialization, output, input and
+        parameter declarations, backend and solver settings are preserved.
+        Its internal certificate retains the original semi-explicit direct
+        integration path; conversion is not an implicit symbolic solve.
+
+    Raises:
+        ValueError: A nonempty quadrature or algebraic partition lacks its
+            corresponding ``Function`` callback.
 
     Examples:
-        >>> residual = to_residual_dynamical_system(explicit_system)
-        >>> residual.F(time, state, state_rate, algebraic, inputs, parameters)
+        >>> import numpy as np
+        >>> from coker.dynamics import (
+        ...     create_autonomous_ode, to_residual_dynamical_system,
+        ... )
+        >>> ode = create_autonomous_ode([1.0], lambda x, p: -x)
+        >>> residual = to_residual_dynamical_system(ode)
+        >>> np.testing.assert_allclose(
+        ...     residual.F(
+        ...         0.0, np.ones(1), -np.ones(1), np.empty(0), None, None),
+        ...     0.0, atol=1e-12,
+        ... )
+        >>> np.testing.assert_allclose(residual(0.0), 1.0)
+        >>> np.testing.assert_allclose(residual(0.1), np.exp(-0.1), rtol=1e-5)
     """
     x_dim, z_dim, q_dim = system.get_state_dimensions()
     state_size = x_dim.flat()

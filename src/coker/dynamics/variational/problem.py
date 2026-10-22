@@ -33,6 +33,31 @@ def _space_size(
 
 
 class VariationalIterationCallback:
+    """Receive a reconstructed solution at each supported solver iteration.
+
+    Subclass and override :meth:`__call__`, or supply a callable with the same
+    signature. The default implementation continues unconditionally. CasADi
+    invokes callbacks with a zero-based counter and an unconverged
+    :class:`VariationalSolution`; a callback does not certify feasibility.
+    Other backends need not support iteration callbacks.
+
+    Examples:
+        Configure a callback without starting a solve:
+
+        >>> from coker.dynamics import (
+        ...     TranscriptionOptions, VariationalIterationCallback,
+        ... )
+        >>> class RecordCost(VariationalIterationCallback):
+        ...     def __init__(self):
+        ...         self.costs = []
+        ...     def __call__(self, iterate, solution, **kwargs):
+        ...         self.costs.append((iterate, solution.cost))
+        ...         return True
+        >>> recorder = RecordCost()
+        >>> options = TranscriptionOptions(interation_callback=recorder)
+        >>> options.interation_callback is recorder
+        True
+    """
 
     def __call__(
         self,
@@ -40,16 +65,31 @@ class VariationalIterationCallback:
         solution: VariationalSolution,
         **kwargs,
     ) -> bool:
-        """Handle callbacks at the end of each optimisation step.
+        """Handle one solver iteration and choose whether to continue.
 
         Args:
-            **kwargs: Solver-specific arguments.
+            iterate: Zero-based callback count for the current CasADi solve,
+                not a physical time or a collocation index.
+            solution: Current :class:`VariationalSolution`, with the same
+                channel dimensions and parameter declarations as the problem.
+                Evaluate its trajectories at scalar physical times on
+                ``[0, solution.t_final]``. Its scalar ``cost`` and constraint
+                residuals describe the current, possibly infeasible iterate.
+            **kwargs: Optional solver-specific arguments. The current CasADi
+                wrapper supplies none.
 
         Returns:
-            True if the solver should continue.
+            bool: ``True`` to continue, ``False`` to request solver termination.
+            A termination request is not a successful solve result.
 
-        The shapes of each argument should line up with the
-        `VariationalProblem` class attributes.
+        Examples:
+            Use the result constructed by the problem example:
+
+            .. testcode:: variational-problem-source
+
+                from coker.dynamics import VariationalIterationCallback
+
+                assert VariationalIterationCallback()(iterate=0, solution=solution)
         """
 
         return True
@@ -57,7 +97,7 @@ class VariationalIterationCallback:
 
 @dataclass
 class TranscriptionOptions:
-    """Control the collocation mesh and solve behavior.
+    """Control the collocation mesh and solve behaviour.
 
     Attributes:
         minimum_n_intervals: Minimum number of intervals in the initial mesh.
@@ -84,6 +124,15 @@ class TranscriptionOptions:
         backend_options: Backend-specific solve policy. Use
             ``CasadiVariationalOptions`` to configure CasADi, including
             adaptive mesh refinement.
+
+    Examples:
+        >>> from coker.dynamics import TranscriptionOptions
+        >>> options = TranscriptionOptions(
+        ...     minimum_n_intervals=2, minimum_degree=3,
+        ...     absolute_tolerance=1e-8, initialise_near_guess=False,
+        ... )
+        >>> (options.minimum_n_intervals, options.minimum_degree)
+        (2, 3)
 
     """
 
@@ -142,22 +191,56 @@ class VariationalProblem:
     """Represent a backend-neutral dynamic optimisation problem.
 
     Args:
-        loss: Scalar objective function or symbolic expression.
-        t_final: Fixed duration or bounded duration decision.
+        loss: Scalar symbolic objective, or a callback ``loss(trajectory, p)``
+            without controls and ``loss(trajectory, u, p)`` with controls.
+            ``trajectory`` evaluates declared outputs as
+            ``trajectory(t, p)`` or ``trajectory(t, u, p)`` respectively.
+            ``t`` is physical time and ``p`` is the solver parameter vector.
+        t_final: Fixed horizon in the model's time units, measured from zero,
+            or a bounded scalar duration decision in those same units.
         system: Dynamic system to transcribe.
-        control: Optional control decision declarations.
-        parameters: Optional fitted parameter declarations.
-        system_parameter_map: Optional map from solver to system parameters.
-        quadratures: Registered running-integral channels.
+        control: Scalar control declarations in the system input's order.
+            Their time coordinates are normalised by the solved horizon.
+        parameters: Fitted parameter declarations and fixed numeric values in
+            system parameter order. Function-valued parameters require
+            declarations compatible with the system's parameter spaces.
+        system_parameter_map: Optional numeric matrix of shape
+            ``(system_parameter_width, solver_parameter_count)`` mapping the
+            finite solver parameter vector into system parameters.
+        quadratures: Builder-owned running-integral records. Use
+            :meth:`VariationalProblemBuilder.integrate` rather than creating
+            these internal records.
         transcription_options: Collocation and solve configuration.
-        backend: Backend name used to create the solver.
-        path_constraints: Constraints evaluated across the trajectory.
-        terminal_constraints: Constraints evaluated at the final time.
-        initial_constraints: Constraints evaluated at time zero.
+        backend: Backend name used to create the solver; defaults to CasADi.
+        path_constraints: Comparisons evaluated across the trajectory.
+        terminal_constraints: Comparisons evaluated at the final physical time.
+        initial_constraints: Comparisons evaluated at physical time zero.
 
     Examples:
-        Use :class:`VariationalProblemBuilder` to construct a problem from
-        symbolic expressions, then call :meth:`get_solver`.
+        This example requires the CasADi extra. The initial state is a fitted
+        scalar and the objective compares the final output against one.
+
+        .. testcode:: variational-problem-source
+
+            import numpy as np
+            from coker import VectorSpace
+            from coker.dynamics import VariationalProblem, create_autonomous_ode
+            from coker.parameters import BoundedVariable
+
+            system = create_autonomous_ode(
+                x0=lambda p: p[0],
+                xdot=lambda x, p: 0 * x,
+                parameters=VectorSpace("p", 1),
+                backend="casadi",
+            )
+            problem = VariationalProblem(
+                loss=lambda trajectory, p: (trajectory(1.0, p) - 1.0) ** 2,
+                t_final=1.0,
+                system=system,
+                parameters=[BoundedVariable("initial", 0.0, 2.0, guess=0.5)],
+            )
+            assert problem.horizon_decision is None
+            assert problem.decision_declarations == []
     """
 
     loss: LossFunction | Tracer
@@ -178,12 +261,32 @@ class VariationalProblem:
 
     @property
     def horizon_decision(self) -> Optional[BoundedVariable]:
-        """Return the duration declaration when duration is optimized."""
+        """Return the bounded duration declaration, or ``None`` if fixed.
+
+        Returns:
+            BoundedVariable | None: Horizon decision in physical time units.
+
+        Examples:
+            .. testcode:: variational-problem-source
+
+                assert problem.horizon_decision is None
+        """
         return self.t_final if isinstance(self.t_final, BoundedVariable) else None
 
     @property
     def decision_declarations(self) -> List[ParameterMixin]:
-        """Return horizon and control declarations in decision order."""
+        """Return the horizon and controls in solver declaration order.
+
+        Returns:
+            list[ParameterMixin]: The bounded duration first, when present,
+            followed by control declarations. Fitted system parameters are
+            not included; this is not a flattened coefficient vector.
+
+        Examples:
+            .. testcode:: variational-problem-source
+
+                assert problem.decision_declarations == []
+        """
         decisions: List[ParameterMixin] = []
         if self.horizon_decision is not None:
             decisions.append(self.horizon_decision)
@@ -244,11 +347,18 @@ class VariationalProblem:
         """Create a solver for this problem.
 
         Args:
-            backend: Override the problem's configured backend name.
+            backend: Optional backend name overriding :attr:`backend` for this
+                solver. It does not change the stored problem configuration.
 
         Returns:
-            Solver with a ``solve()`` method that returns a variational
-            solution.
+            VariationalSolver: Backend solver whose ``solve()`` method returns
+            a :class:`VariationalSolution`. Construction does not solve.
+
+        Examples:
+            .. testcode:: variational-problem-source
+
+                solver = problem.get_solver()
+                assert callable(solver.solve)
         """
         from coker.backends import get_backend_by_name
 
@@ -256,5 +366,23 @@ class VariationalProblem:
         return get_backend_by_name(backend_name).create_variational_solver(self)
 
     def __call__(self) -> VariationalSolution:
-        """Solve the problem using its configured backend."""
+        """Solve with the configured backend and return its trajectory result.
+
+        Returns:
+            VariationalSolution: Objective, reconstructed parameters and
+            trajectory channels evaluated in physical time on
+            ``[0, t_final]``. Output dimensions follow the system declaration.
+
+        Raises:
+            SolveFailure: The backend reports an unsuccessful solve.
+                Configuration and native backend errors may propagate
+                separately.
+
+        Examples:
+            .. testcode:: variational-problem-source
+
+                solution = problem()
+                assert solution.cost < 1e-6
+                assert np.isclose(solution.parameters["initial"], 1.0, atol=1e-3)
+        """
         return self.get_solver().solve()

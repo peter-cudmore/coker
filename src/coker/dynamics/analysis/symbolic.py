@@ -26,7 +26,13 @@ __all__ = ("SymbolicSystem", "UnsupportedSystemError", "lower_system")
 
 
 class UnsupportedSystemError(ValueError):
-    """Raised when a model is outside the symbolic analysis domain."""
+    """Signal that a model cannot be lowered into supported symbolic data.
+
+    Public lowering functions raise this ``ValueError`` subclass for
+    unsupported structures or expressions. The ``analyse_*`` entry points
+    instead translate it into an ``AnalysisStatus.INCONCLUSIVE`` result whose
+    ``reason`` explains the unsupported boundary.
+    """
 
 
 class _UnsupportedShapeError(UnsupportedSystemError):
@@ -35,7 +41,28 @@ class _UnsupportedShapeError(UnsupportedSystemError):
 
 @dataclass(frozen=True)
 class SymbolicSystem:
-    """Finite symbolic ODE data in the order declared by a Coker model."""
+    """Finite autonomous ODE expressions in declared coordinate order.
+
+    This is an analysis representation, not a numerical trajectory solver.
+    Direct construction supplies symbolic data without Coker callback lowering;
+    callers are responsible for consistent dimensions and coordinates.
+
+    Args:
+        state: Differential-state symbols, in matrix coordinate order.
+        parameters: Constant scalar parameter symbols, flattened in declaration
+            order. No function-valued parameters are represented.
+        controls: Symbols representing known arbitrary input signal values.
+        dynamics: One smooth time-independent rate expression per state.
+        outputs: Flattened smooth time-independent measured expressions.
+
+    Examples:
+        >>> import sympy as sp
+        >>> from coker.dynamics import SymbolicSystem, analyse_observability
+        >>> x = sp.Symbol("x")
+        >>> system = SymbolicSystem((x,), (), (), (-x,), (x,))
+        >>> analyse_observability(system).rank
+        1
+    """
 
     state: tuple[sp.Symbol, ...]
     parameters: tuple[sp.Symbol, ...]
@@ -45,7 +72,35 @@ class SymbolicSystem:
 
 
 def lower_system(system: DynamicalSystem | SymbolicSystem) -> SymbolicSystem:
-    """Validate and lower a supported autonomous ODE."""
+    """Lower a supported finite autonomous ODE to SymPy expressions.
+
+    Args:
+        system: A ``DynamicalSystem`` with smooth traceable dynamics/outputs,
+            finite scalar/vector states and parameters, and optional input
+            ``FunctionSpace`` depending on scalar time only. An existing
+            ``SymbolicSystem`` is returned unchanged.
+
+    Returns:
+        Symbolic coordinates, rates and outputs in flattened declaration order.
+        Input signal values become independent control symbols; this function
+        does not itself impose the control-affine rank-test restriction.
+
+    Raises:
+        UnsupportedSystemError: The model has algebraic or quadrature states,
+            function-valued parameters, explicit time dependence, nonsmooth or
+            unsupported expressions, or incompatible finite shapes/signatures.
+            Use ``lower_dae_system`` for supported semi-explicit DAEs.
+
+    Examples:
+        >>> import numpy as np
+        >>> from coker.dynamics import create_autonomous_ode, lower_system
+        >>> ode = create_autonomous_ode(
+        ...     np.ones(1), lambda x, p: -x, backend="numpy"
+        ... )
+        >>> symbolic = lower_system(ode)
+        >>> len(symbolic.state), len(symbolic.dynamics)
+        (1, 1)
+    """
     if isinstance(system, SymbolicSystem):
         return system
     _validate_system(system)

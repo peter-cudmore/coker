@@ -35,6 +35,18 @@ class SolverOptions:
     :class:`coker.interfaces.SolverParameters` hierarchy; variational solvers
     expose a dedicated options type only when they require configuration beyond
     their problem definition.
+
+    Args:
+        warm_start: Whether a supporting backend may reuse its preceding solve.
+            Defaults to ``False``. Backend-specific subclasses may add options.
+
+    Raises:
+        TypeError: If ``warm_start`` is not a bool.
+
+    Examples:
+        >>> from coker.toolkits.codesign import SolverOptions
+        >>> SolverOptions().warm_start
+        False
     """
 
     warm_start: bool = False
@@ -45,6 +57,27 @@ class SolverOptions:
 
 
 class Minimise:
+    """Mark a symbolic scalar expression as an objective to minimise.
+
+    This wrapper records an expression; it neither builds nor solves a problem.
+    Assign it to :attr:`ProblemBuilder.objective`. Shape support and lowering
+    are determined by the selected solver backend.
+
+    Args:
+        expression: Scalar symbolic objective on the builder's tape.
+
+    Attributes:
+        expression: The supplied symbolic objective.
+
+    Examples:
+        >>> from coker.toolkits.codesign import Minimise, ProblemBuilder
+        >>> builder = ProblemBuilder()
+        >>> x = builder.new_variable("x")
+        >>> objective = Minimise(x ** 2)
+        >>> objective.expression.dim.is_scalar()
+        True
+    """
+
     def __init__(self, expression: Tracer):
         self.expression = expression
 
@@ -60,25 +93,93 @@ class _ParameterCapture:
 
 
 class OptimisationModule(ABC):
-    """Numerical optimisation implementation with solve-result metadata.
+    """Extension interface for numerical solvers with solve-result metadata.
 
     Implementations set ``last_solve_info`` before returning from a solve and
-    before raising :class:`SolveFailure`.
+    before raising :class:`SolveFailure`. Builders supply a backend-created
+    implementation to :class:`MathematicalProgram`; user models normally use
+    :class:`ProblemBuilder` rather than subclassing this interface.
+
+    Attributes:
+        last_solve_info: Most recent :class:`SolveInfo`, or ``None`` before a
+            solve. Failed solves must also publish their available status.
+
+    Examples:
+        >>> from coker.toolkits.codesign import OptimisationModule, SolveInfo
+        >>> class ConstantSolver(OptimisationModule):
+        ...     last_solve_info = None
+        ...     def __call__(self, target):
+        ...         self.last_solve_info = SolveInfo(
+        ...             "example", "constant", True, "complete")
+        ...         return (0.0, target)
+        >>> solver = ConstantSolver()
+        >>> solver(2.0)
+        (0.0, 2.0)
+        >>> solver.last_solve_info.success
+        True
     """
 
     last_solve_info: SolveInfo | None
 
     @abstractmethod
     def __call__(self, *args: Any) -> Any:
-        """Solve for runtime arguments and return objective and outputs."""
+        """Solve once for concrete runtime arguments.
+
+        Args:
+            *args: Runtime parameters in the builder's declaration order.
+
+        Returns:
+            Objective-first backend values, followed by requested outputs and
+            any private decision-capture blocks requested by the builder.
+            MathematicalProgram removes the private blocks from public results.
+
+        Raises:
+            SolveFailure: If the backend reports an unsuccessful solve.
+        """
 
 
 class MathematicalProgram(SymbolicCallable):
-    """An optimisation module that maps parameters to an objective and outputs.
+    """Callable optimisation program with objective-first public results.
 
-    ``backend`` is the solver backend selected by :class:`ProblemBuilder`.
-    ``lower()`` always lowers with that same backend; a program cannot be
-    embedded in a graph lowered by a different backend.
+    Numeric calls return ``(objective, *outputs)``. The objective is a Python
+    float and outputs are NumPy arrays reshaped to each output dimension's
+    physical shape. Scalar outputs have logical dimension metadata ``None``
+    but physical array shape ``(1,)``. Symbolic calls emit the same ordered
+    results onto the active tape.
+    Programs produced by :meth:`ProblemBuilder.build` also reconstruct named
+    decisions after successful numeric calls.
+
+    Args:
+        input_shape: Runtime argument dimensions in declaration order.
+        output_shape: Requested output dimensions, excluding the objective.
+        implementation: Numerical callable returning objective-first values.
+            Backend extensions additionally supply private decision captures
+            through the builder's internal construction path.
+        backend: Solver backend name, or ``None`` for NumPy lowering. A
+            configured program cannot be embedded in another backend's graph.
+
+    Attributes:
+        backend: Solver backend retained for symbolic calls and lowering.
+        parameters: Named reconstructed decisions from the last successful
+            numeric solve, initially empty. Values may be scalars, arrays or
+            fitted callable parameters. Failed solves preserve previous values.
+        solve_info: Latest backend solve status, initially ``None``. Builder
+            programs refresh it even when a solve raises ``SolveFailure``.
+            Directly supplied callables do not automatically publish status.
+
+    Examples:
+        >>> from coker import Dimension
+        >>> from coker.toolkits.codesign import MathematicalProgram
+        >>> program = MathematicalProgram(
+        ...     (Dimension.scalar(),), (Dimension.scalar(),),
+        ...     lambda value: (value ** 2, value + 1), backend="numpy")
+        >>> objective, output = program(3.0)
+        >>> objective, output.item()
+        (9.0, 4.0)
+        >>> assert output.shape == (1,)
+        >>> assert output[0] == 4.0
+        >>> len(program.result_shape)
+        2
     """
 
     def __init__(
@@ -112,16 +213,24 @@ class MathematicalProgram(SymbolicCallable):
         return program
 
     def input_shape(self) -> Tuple[Dimension, ...]:
-        """Return runtime argument shapes in declaration order."""
+        """Return runtime argument dimensions in declaration order.
+
+        Returns:
+            Tuple of dimensions, excluding optimisation decisions.
+        """
         return self._input_shape
 
     def output_shape(self) -> Tuple[Dimension, ...]:
-        """Return requested output shapes, excluding the objective."""
+        """Return requested output dimensions.
+
+        Returns:
+            Tuple of dimensions, excluding the objective and private captures.
+        """
         return self._output_shape
 
     @property
     def result_shape(self) -> Tuple[Dimension, ...]:
-        """Return the objective-first shapes produced by this program."""
+        """Tuple of public result dimensions with the scalar objective first."""
         return (Dimension.scalar(), *self.output_shape())
 
     def _validate_arguments(self, args) -> None:
@@ -233,13 +342,36 @@ class MathematicalProgram(SymbolicCallable):
         )
 
     def __call__(self, *args):
-        """Call symbolically for tracer arguments and numerically otherwise."""
+        """Evaluate numerically or emit a symbolic solve.
+
+        Args:
+            *args: Runtime arguments in declaration order. Any tracer argument
+                selects symbolic evaluation on the active tracing context.
+
+        Returns:
+            Tuple ``(objective, *outputs)``. Numeric results contain a float
+            objective and NumPy output arrays; symbolic results contain tracers.
+            Private decision captures never appear in this tuple.
+
+        Raises:
+            ValueError: If argument arity or symbolic dimensions are wrong,
+                symbolic backends differ, or the backend result count is wrong.
+            TypeError: If the backend returns a non-scalar objective.
+            RuntimeError: If symbolic evaluation has no active tracing context.
+            SolveFailure: If the backend reports an unsuccessful solve.
+        """
         if any(isinstance(arg, Tracer) for arg in args):
             return self._call_symbolic(*args)
         return self._call_numeric(*args)
 
     def lower(self):
-        """Lower this program using its configured solver backend."""
+        """Wrap the solve in a symbolic Function pinned to this backend.
+
+        Returns:
+            A :class:`coker.Function`, not a lowered execution handle. Calling
+            it solves and returns only the objective and requested outputs.
+            The current backend selection is unchanged.
+        """
         backend_name = self.backend or "numpy"
         from coker.backends import get_backend_by_name
 
@@ -255,6 +387,50 @@ class MathematicalProgram(SymbolicCallable):
 
 
 class ProblemBuilder:
+    """Construct an ordinary mathematical program on one symbolic tape.
+
+    Runtime ``arguments`` are supplied anew to each solve; decisions declared
+    with ``new_variable`` or ``new_function_parameter`` are chosen by the
+    optimiser. A context manager is optional: entry returns this builder, and
+    exit neither builds nor solves, clears the tape, nor suppresses exceptions.
+    Configuration remains available after leaving the context.
+
+    Args:
+        arguments: Ordered scalar or vector spaces for runtime parameters.
+            Defaults to no runtime parameters.
+        solver_options: Backend-specific solver configuration, or ``None``.
+            Each backend determines which option types it supports.
+
+    Attributes:
+        arguments: Symbolic runtime parameters in declaration order.
+        objective: A :class:`Minimise` wrapping a scalar symbolic expression.
+        constraints: Symbolic comparisons or :class:`BoundedConstraint` objects.
+            Defaults to no constraints.
+        outputs: Non-empty list of symbolic expressions returned after the
+            objective. All problem expressions must use this builder's tape.
+        initial_conditions: Initial guesses, normally a mapping from decision
+            tracer indices to values. May be replaced with a sequence aligned
+            with concrete decision declaration order, excluding runtime inputs.
+        solver_options: Configuration forwarded to the selected backend.
+
+    Examples:
+        >>> from coker import Scalar
+        >>> from coker.toolkits.codesign import Minimise, ProblemBuilder
+        >>> with ProblemBuilder(arguments=[Scalar("target")]) as builder:
+        ...     target = builder.arguments[0]
+        ...     x = builder.new_variable("x", initial_value=0.0)
+        ...     builder.objective = Minimise((x - target) ** 2)
+        ...     builder.outputs = [x]
+        ...     program = builder.build("numpy")
+        >>> objective, solution = program(2.0)
+        >>> abs(objective) < 1e-10 and abs(solution.item() - 2.0) < 1e-5
+        True
+        >>> bool(abs(program.parameters["x"] - 2.0) < 1e-5)
+        True
+        >>> program.solve_info.success
+        True
+    """
+
     def __init__(
         self,
         arguments: Optional[List[VectorSpace | Scalar]] = None,
@@ -284,6 +460,17 @@ class ProblemBuilder:
         return variable
 
     def new_variable(self, name, shape=None, initial_value=None):
+        """Declare a scalar or array decision and record its initial guess.
+
+        Args:
+            name: Decision name used in the solved program's ``parameters``.
+            shape: Array shape, or ``None`` to declare a scalar.
+            initial_value: Initial guess. Defaults to scalar zero or an array
+                of zeros matching ``shape``.
+
+        Returns:
+            Symbolic decision tracer owned by this builder's tape.
+        """
         variable = self._add_decision(name, shape, initial_value)
         space = variable.dim.to_space(name)
         self._parameter_captures.append(
@@ -292,7 +479,39 @@ class ProblemBuilder:
         return variable
 
     def new_function_parameter(self, target, declaration):
-        """Add a finite function parameter as optimisation decisions."""
+        """Declare a finite function parameter as optimisation decisions.
+
+        Concrete blocks, guesses and any bounds come from the declaration.
+        After a successful numeric solve, the program's ``parameters`` contains
+        the reconstructed callable under the declaration's name.
+
+        Args:
+            target: FunctionSpace describing the callable's inputs and outputs.
+            declaration: FunctionParameter providing finite concrete decisions.
+
+        Returns:
+            BoundCallable usable symbolically with the declared target.
+
+        Raises:
+            TypeError: If target or declaration has the wrong type, or concrete
+                declarations are not supported scalar, vector or tensor types.
+            ValueError: If a declaration name is empty or its target is
+                incompatible with the supplied function space.
+
+        Examples:
+            >>> from coker import FunctionSpace, Scalar
+            >>> from coker.parameters.function_parameters import MonotonePiecewiseLinear
+            >>> from coker.toolkits.codesign import ProblemBuilder
+            >>> target = FunctionSpace(
+            ...     "response", arguments=[Scalar("x")], output=[Scalar("y")])
+            >>> declaration = MonotonePiecewiseLinear(
+            ...     domain_knots=[0.0, 1.0], lower_bound=0.0,
+            ...     upper_bound=1.0, name="response")
+            >>> builder = ProblemBuilder()
+            >>> response = builder.new_function_parameter(target, declaration)
+            >>> response(0.5).dim.is_scalar()
+            True
+        """
         from coker.parameters.function_parameters import FunctionParameter
         from coker.parameters import (
             BoundedVariable,
@@ -349,10 +568,12 @@ class ProblemBuilder:
 
     @property
     def input_shape(self) -> Tuple[Dimension, ...]:
+        """Tuple of runtime argument dimensions, excluding solver decisions."""
         return tuple(i.dim for i in self.arguments)
 
     @property
     def output_shape(self) -> Tuple[Dimension, ...]:
+        """Tuple of requested output dimensions, excluding the objective."""
         return tuple(o.dim for o in self.outputs)
 
     def _normalise_initial_conditions(self) -> dict[int, Any]:
@@ -379,9 +600,31 @@ class ProblemBuilder:
         return dict(zip(decision_input_indicies, self.initial_conditions))
 
     def build(self, backend: Optional[str] = None) -> MathematicalProgram:
-        assert isinstance(self.objective, Minimise)
+        """Build a solver-backed callable without performing a solve.
+
+        Args:
+            backend: Explicit backend name, or ``None`` to use the current
+                backend. Building does not change the current selection.
+
+        Returns:
+            MathematicalProgram returning ``(objective, *outputs)`` per solve.
+
+        Raises:
+            TypeError: If a present objective is not Minimise, or
+                ``initial_conditions`` is neither a mapping nor a sequence.
+                Backends also reject unsupported solver option types.
+            ValueError: If the objective is missing, outputs are empty, or an
+                initial-condition sequence has the wrong number of decisions.
+
+        Backend-specific construction errors propagate without a solve.
+        """
+        if self.objective is None:
+            raise ValueError("An objective is required to build a problem")
+        if not isinstance(self.objective, Minimise):
+            raise TypeError("The objective must be a Minimise expression")
         assert self.tape is not None
-        assert self.outputs
+        if not self.outputs:
+            raise ValueError("At least one output is required to build a problem")
         from coker.backends import get_backend_by_name, get_current_backend
 
         if backend is None:
@@ -421,14 +664,44 @@ class ProblemBuilder:
         )
 
     def __enter__(self):
+        """Enter the optional configuration context.
+
+        Returns:
+            This builder, without activating a global tracing context.
+        """
         assert self.tape is not None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Leave configuration intact and allow exceptions to propagate.
+
+        Args:
+            exc_type: Exception type supplied by the context protocol, if any.
+            exc_val: Exception instance, if any.
+            exc_tb: Exception traceback, if any.
+
+        Returns:
+            None, so exceptions are not suppressed.
+        """
         pass
 
 
 def norm(arg, order=2):
+    """Return an unsquared NumPy-style norm of a numeric or symbolic value.
+
+    Args:
+        arg: Numeric array or symbolic vector.
+        order: NumPy norm order, defaulting to ``2``. Symbolic vectors support
+            orders ``1`` and ``2``; other cases depend on backend support.
+
+    Returns:
+        Numeric norm or symbolic scalar expression from ``numpy.linalg.norm``.
+
+    Examples:
+        >>> from coker.toolkits.codesign import norm
+        >>> float(norm([3.0, 4.0]))
+        5.0
+    """
     return np.linalg.norm(arg, ord=order)
 
 

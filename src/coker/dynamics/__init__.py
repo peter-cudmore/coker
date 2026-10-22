@@ -1,4 +1,17 @@
-"""Dynamical-system modelling and variational optimisation API."""
+"""Public dynamics, residual simulation, symbolic analysis and optimisation.
+
+Import public residual and analysis contracts from ``coker.dynamics``.
+``ResidualDynamicalSystem`` describes implicit numerical trajectories;
+``to_residual_dynamical_system`` preserves semi-explicit models when converting
+them to residual form. Numerical support depends on the selected backend.
+
+``lower_system`` and ``lower_dae_system`` expose finite autonomous symbolic
+representations. ``analyse_controllability``, ``analyse_observability`` and
+``analyse_identifiability`` return typed rank evidence, not booleans or
+simulation results. Their supported DAE domain is semi-explicit index one,
+not general implicit residual systems. Inspect ``AnalysisStatus``, ``reason``
+and nonvanishing ``rank_conditions`` before interpreting a result.
+"""
 
 from coker.dynamics.variables import (
     ConstantControlSolution,

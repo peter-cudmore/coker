@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from coker import Scalar, VectorSpace, function
 from coker.toolkits.spatial import (
@@ -11,6 +12,7 @@ from coker.toolkits.spatial import (
     se3CoAdjoint,
 )
 from coker.toolkits.spatial.algebra import hat
+from coker.toolkits.spatial.algebra import se3Adjoint
 from coker.toolkits.spatial.unit_quaternion import UnitQuaternion
 
 E_X = np.array([1.0, 0.0, 0.0])
@@ -43,9 +45,7 @@ def test_rotation_cast_accepts_only_numpy_vectors():
         except NotImplementedError:
             pass
         else:
-            raise AssertionError(
-                "Rotation3.cast must reject non-vector inputs"
-            )
+            raise AssertionError("Rotation3.cast must reject non-vector inputs")
 
 
 def test_isometry_composition_inverse_and_homogeneous_action():
@@ -54,9 +54,7 @@ def test_isometry_composition_inverse_and_homogeneous_action():
     homogeneous_point = np.array([[1.0], [0.0], [0.0], [1.0]])
 
     assert np.allclose(transform @ point, np.array([1.0, 1.0, 0.0]))
-    assert np.allclose(
-        transform.inverse() @ (transform @ point), point, atol=1e-9
-    )
+    assert np.allclose(transform.inverse() @ (transform @ point), point, atol=1e-9)
     assert np.allclose(
         (transform @ homogeneous_point)[:3, 0], np.array([1.0, 1.0, 0.0])
     )
@@ -151,3 +149,54 @@ def test_symbolic_spatial_contract(backend):
     args = (E_Z, np.pi / 2, E_X, E_X, 2.0)
     for actual, expected in zip(compiled(*args), implementation(*args)):
         assert np.allclose(actual, expected, atol=1e-9)
+
+
+@pytest.mark.parametrize("shape", [(2,), (3, 1), (1, 3)])
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(lambda vector: Rotation3(E_Z, np.pi / 2) @ vector, id="rotation"),
+        pytest.param(lambda vector: Isometry3.identity().apply(vector), id="isometry"),
+        pytest.param(
+            lambda vector: Rotation3(E_Z, np.pi / 2).as_quaternion() * vector,
+            id="quaternion",
+        ),
+        pytest.param(
+            lambda vector: Rotation3(E_Z, np.pi / 2).as_quaternion().__rmul__(vector),
+            id="quaternion_left",
+        ),
+    ],
+)
+def test_public_contract_spatial_vector_shape_raises_value_error(shape, operation):
+    vector = np.zeros(shape)
+
+    with pytest.raises(ValueError):
+        operation(vector)
+
+
+@pytest.mark.parametrize("shape", [(5,), (7,), (6, 1), (2, 3)])
+def test_public_contract_screw_from_array_shape_raises_value_error(shape):
+    with pytest.raises(ValueError):
+        Screw.from_array(np.zeros(shape))
+
+
+@pytest.mark.parametrize("operator", [SE3Adjoint, SE3CoAdjoint])
+@pytest.mark.parametrize("argument", [np.zeros(6), None, object()])
+def test_public_contract_transform_adjoint_call_type_raises_type_error(
+    operator, argument
+):
+    action = operator(Isometry3.identity())
+
+    with pytest.raises(TypeError):
+        action(argument)
+
+
+@pytest.mark.parametrize("operator", [se3Adjoint, se3CoAdjoint])
+@pytest.mark.parametrize("argument", [np.zeros(6), None, object()])
+def test_public_contract_algebra_adjoint_operand_type_raises_type_error(
+    operator, argument
+):
+    action = operator(Screw.w_z())
+
+    with pytest.raises(TypeError):
+        action @ argument

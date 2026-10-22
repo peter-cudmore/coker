@@ -41,6 +41,26 @@ class BoundFunctionParameter(FunctionParameter):
 
     Every unbound source input remains a public target input. The target output
     space remains identical to the source function output space.
+
+    Raises:
+        TypeError: The source function, bindings, indices or declarations have
+            unsupported types. Boolean indices are not accepted.
+        ValueError: Bindings are empty, indices repeat or lie outside the source
+            signature, or concrete shapes do not match bound source inputs.
+
+    Binding order is normalised to source-input order. Concrete declarations
+    supply bounds, guesses and units; binding performs no unit conversion.
+
+    Examples:
+        >>> from coker import Scalar, function
+        >>> from coker.parameters import UnboundedVariable
+        >>> from coker.parameters.function_parameters import BoundFunctionParameter
+        >>> source = function([Scalar("x"), Scalar("gain")],
+        ...                   lambda x, gain: x * gain, backend="numpy")
+        >>> bound = BoundFunctionParameter(
+        ...     source, {1: UnboundedVariable("gain", 1.0)}, name="scale")
+        >>> float(bound.evaluate([2.0], 3.0))
+        6.0
     """
 
     def __init__(
@@ -128,7 +148,18 @@ class BoundFunctionParameter(FunctionParameter):
         return tuple(sorted(normalised, key=lambda binding: binding[0]))
 
     def validate_target(self, target: FunctionSpace) -> FunctionSpace:
-        """Validate the function space formed by the unbound source inputs."""
+        """Validate the public function space formed by unbound source inputs.
+
+        Args:
+            target: Requested public function space.
+
+        Returns:
+            FunctionSpace: The unchanged compatible target.
+
+        Raises:
+            TypeError: The target is not a ``FunctionSpace``.
+            ValueError: Public input or output dimensions do not match.
+        """
         if not isinstance(target, FunctionSpace):
             raise TypeError("target must be a FunctionSpace")
 
@@ -142,17 +173,48 @@ class BoundFunctionParameter(FunctionParameter):
         return target
 
     def list_concrete_parameters(self) -> tuple[ParameterVariable, ...]:
-        """Return declarations bound to the source function inputs."""
+        """Return declarations bound to source inputs in source-input order.
+
+        Returns:
+            tuple[ParameterVariable, ...]: The concrete declarations.
+        """
         return self.parameters
 
     def evaluate(self, parameters: Sequence[Any], argument: Any) -> Any:
-        """Evaluate the source function with bound and public inputs."""
+        """Evaluate the source function with bound and public inputs.
+
+        Args:
+            parameters: Concrete values in normalised binding order.
+            argument: Single value for one public input, a sequence of values
+                for multiple public inputs, or ``None`` for a fully bound source.
+
+        Returns:
+            Any: Source function result, without conversion.
+
+        Raises:
+            TypeError: Multiple public inputs are not supplied as a sequence.
+            ValueError: Concrete or public input counts do not match, or a
+                fully bound function receives a non-``None`` argument.
+        """
         return self._evaluate_with_arguments(
             parameters, self._normalise_public_argument(argument)
         )
 
     def build_function(self, target: FunctionSpace, backend: str | None) -> Function:
-        """Build the public target followed by bound concrete declarations."""
+        """Build a function taking public inputs then concrete bound values.
+
+        Args:
+            target: Public function space to validate.
+            backend: Tracing backend, or ``None`` for normal backend selection.
+
+        Returns:
+            Function: Coker function exposing public inputs separately, in source
+            order, followed by concrete blocks in normalised binding order.
+
+        Raises:
+            TypeError: The target is not a ``FunctionSpace``.
+            ValueError: The public signature is incompatible.
+        """
         target = self.validate_target(target)
         parameter_spaces = [
             _concrete_parameter_space(declaration) for declaration in self.parameters

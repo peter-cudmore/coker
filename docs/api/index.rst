@@ -24,6 +24,8 @@ backend integration.
    dynamics
    parameters
    backends
+   spatial
+   kinematics
 
 Canonical imports
 -----------------
@@ -48,8 +50,10 @@ in implementation modules are not public APIs.
 - ``coker.backends``: plugin lookup and explicit selection;
   ``coker.backends.lowered``: signatures, input/output specs, lowering options,
   execution handles, and capabilities. See :doc:`backends`.
-- ``coker.toolkits.spatial`` and ``coker.toolkits.kinematics``: rigid-motion
-  primitives and articulated models. See :doc:`../toolkits`.
+- ``coker.toolkits.spatial``: rotation, homogeneous transform and
+  rigid-motion primitives. See :doc:`spatial`.
+- ``coker.toolkits.kinematics``: articulated models and their kinematics.
+  See :doc:`kinematics` and :doc:`../toolkits`.
 
 Extension interfaces
 --------------------
@@ -71,3 +75,7 @@ Extension interfaces
 internals. ``ConstraintSpec``, ``QuadratureSpec``, collocation operators, and
 mesh helpers are builder/backend representations, not ordinary construction
 APIs. Use comparisons, integrals, and the variational builder instead.
+
+``coker.toolkits.system_modelling`` is outside the supported public API.
+Its redesign is deferred; imports from that package do not constitute a
+supported modelling or discovery interface.
