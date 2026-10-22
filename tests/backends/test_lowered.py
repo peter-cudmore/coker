@@ -26,6 +26,7 @@ BACKENDS = (
         optional_module="casadi",
     ),
     BackendCase("pytorch", autograd=True, optional_module="torch"),
+    BackendCase("jax", autograd=True, optional_module="jax"),
 )
 
 

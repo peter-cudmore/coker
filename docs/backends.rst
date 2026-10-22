@@ -60,10 +60,11 @@ Backend capability matrix
      - Included in the base install.
      - Covered by ``tests/backends/sympy/test_sympy_printing.py``.
    * - ``jax``
-     - Alternate array backend when you want JAX-native values.
+     - JAX-native array evaluation and differentiation through public and packed
+       function calls.
      - Install with ``pip install "coker[jax]"``; Python 3.11 or newer.
-     - Array evaluation is included in installed-wheel smoke checks and the
-       all-extra suite; there is no dedicated ``tests/backends/jax/`` directory.
+     - Covered by ``tests/backends/jax/``, shared lowering-contract tests and
+       isolated installed-wheel value/gradient checks.
    * - ``pytorch``
      - Tensor-valued execution, PyTorch autograd, native-module composition,
        and mathematical-program solves.
@@ -103,6 +104,17 @@ The :ref:`backend API <backend-lowering-contract>` defines signatures, packed
 execution, positional calls and output conversion. For native export, follow
 the :ref:`CasADi <backend-export-casadi>` or
 :ref:`PyTorch <backend-export-pytorch>` recipe.
+
+JAX differentiation
+--------------------
+
+JAX-backed functions retain native arrays and tracers, including through
+``f.lower().execute([value])``. Use ``jax.grad`` for scalar-valued functions;
+convert to NumPy only after differentiation. Explicit
+``backend.to_numpy_array`` conversion is a host-side boundary, not a
+differentiable operation. Follow :ref:`backend-jax-autograd` for numerical
+checks of both calling conventions.
+
 
 PyTorch module lowering
 -----------------------

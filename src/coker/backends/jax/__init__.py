@@ -22,11 +22,7 @@ from coker.algebra.ops import (
     ReshapeOP,
     SelectOP,
 )
-from coker.backends.evaluator import (
-    FunctionSymbolResolver,
-    _cast_outputs,
-    bind_callable,
-)
+from coker.backends.evaluator import FunctionSymbolResolver, bind_callable
 from coker.interfaces import SymbolicCallable
 
 from coker.backends.backend import (
@@ -195,6 +191,23 @@ def _evaluate_jax_tape(
         )
 
 
+def _collect_outputs(function: Function, workspace: dict[int, Any]) -> list[Any | None]:
+    """Restore declared shapes without converting JAX values to NumPy."""
+    result = []
+    for output in function.output:
+        if output is None:
+            result.append(None)
+        elif output.tape is not function.tape:
+            result.append(output)
+        else:
+            value = workspace[output.index]
+            shape = () if output.dim.is_scalar() else output.shape
+            result.append(
+                value if isinstance(value, Tracer) else jnp.reshape(value, shape)
+            )
+    return result
+
+
 impls = {
     OP.ADD: jnp.add,
     OP.SUB: jnp.subtract,
@@ -282,14 +295,7 @@ class JaxLoweredFunction(LoweredFunction):
             workspace,
             function_symbol_resolver=self._function_symbol_resolver,
         )
-        return tuple(
-            _cast_outputs(
-                self._function.output,
-                self._function.tape,
-                workspace,
-                self._backend,
-            )
-        )
+        return tuple(_collect_outputs(self._function, workspace))
 
 
 class JaxBackend(Backend):
@@ -383,7 +389,7 @@ class JaxBackend(Backend):
     def evaluate(self, function: Function, inputs: Sequence[Any]) -> list[Any | None]:
         workspace = {}
         _evaluate_jax_tape(function.tape, inputs, self, workspace)
-        return _cast_outputs(function.output, function.tape, workspace, self)
+        return _collect_outputs(function, workspace)
 
     def call(self, op, *args) -> ArrayLike:
 
