@@ -265,7 +265,6 @@ def test_build_array(backend):
     )
 
     output = f(arg)
-    assert isinstance(output, np.ndarray)
     assert is_close(output, expected)
 
 

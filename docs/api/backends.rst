@@ -80,8 +80,11 @@ results. In particular, native CasADi handles retain CasADi values, while
 ``Function`` restores numerical scalars and NumPy arrays where conversion is
 possible. With tensor inputs, PyTorch handles retain tensors and their autograd
 graph; without tensor inputs, their numerical outputs are converted to NumPy
-values. Shapes and output order come from the signature, not argument names
-passed as keywords.
+values. JAX handles and public calls retain JAX arrays, including scalar
+zero-dimensional arrays and tracers during differentiation; they do not convert
+results to NumPy. Shapes and output order come from the signature, not argument
+names passed as keywords. See :ref:`backend-jax-autograd` for public and packed
+gradient examples.
 
 Signature records
 ~~~~~~~~~~~~~~~~~
@@ -114,9 +117,7 @@ need an explicit signature unless their backend can derive one.
 .. autoclass:: coker.backends.lowered.LoweringCapabilities
 
    These flags advertise execution mechanisms, not numerical correctness,
-   ownership, lifetime or thread-safety guarantees. In particular, advertised
-   JAX autograd support does not resolve the known derivative-correctness
-   limitations tracked in issue 99.
+   ownership, lifetime or thread-safety guarantees.
 
 .. autoclass:: coker.backends.lowered.LoweredFunction
    :members: backend_name,signature,capabilities,execute,restore_public_outputs

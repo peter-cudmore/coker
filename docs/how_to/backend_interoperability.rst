@@ -9,16 +9,16 @@ and capabilities, see the :doc:`backend guide <../backends>`.
 Dependencies and entry points
 -----------------------------
 
-SymPy and NumPy are included in the base installation. For CasADi and PyTorch,
-install the optional backends:
+SymPy and NumPy are included in the base installation. Install the optional
+backends needed by your chosen recipes:
 
 .. code-block:: console
 
-   pip install "coker[casadi,pytorch]"
+   pip install "coker[casadi,jax,pytorch]"
 
-The CasADi export recipe continues its import recipe; the other recipes are
-independent. The PyTorch recipes use CPU ``float64`` tensors; CUDA is not
-required.
+JAX requires Python 3.11 or newer. The CasADi export recipe continues its import
+recipe; the other recipes are independent. The PyTorch recipes use CPU
+``float64`` tensors; CUDA is not required.
 
 .. list-table:: Supported interfaces
    :header-rows: 1
@@ -46,6 +46,40 @@ For ordinary scalar/vector outputs, Coker calls and positional lowered-handle
 calls return one output directly or multiple outputs as a tuple.
 ``handle.execute([arg0, arg1, ...])`` always returns a tuple. All adapters
 preserve argument order and declared shapes; none automatically batches samples.
+
+.. _backend-jax-autograd:
+
+Differentiate a JAX-backed function
+-----------------------------------
+
+Keep inputs and outputs as JAX arrays while differentiating. The public call
+returns its single output directly; packed execution returns a tuple with the
+same differentiable value. Convert results to NumPy only for the assertions:
+
+.. testcode:: backend_jax_autograd
+
+   import jax
+   import jax.numpy as jnp
+   import numpy as np
+   from coker import VectorSpace, function
+
+   squared_norm = function(
+       [VectorSpace("x", 2)],
+       lambda x: x[0] * x[0] + x[1] * x[1],
+       backend="jax",
+   )
+   x = jnp.array([2.0, -3.0])
+   lowered = squared_norm.lower()
+
+   value, = lowered.execute([x])
+   assert isinstance(value, jax.Array)
+   np.testing.assert_allclose(value, 13.0)
+   np.testing.assert_allclose(jax.grad(squared_norm)(x), [4.0, -6.0])
+   packed_gradient = jax.grad(lambda value: lowered.execute([value])[0])(x)
+   np.testing.assert_allclose(packed_gradient, [4.0, -6.0])
+
+This recipe covers array evaluation and differentiation, not JAX optimisation
+programs or cross-backend native imports.
 
 .. _backend-import-casadi:
 

@@ -3,7 +3,7 @@ import pytest
 
 from coker import Dimension, Scalar, VectorSpace, function
 from coker.algebra.ops import Noop
-from coker.backends.numpy import NumpyBackend
+from coker.backends.numpy import NumpyBackend, NumpySolverParameters
 from coker.dynamics import ResidualDynamicalSystem
 
 
@@ -123,6 +123,45 @@ def test_numpy_solves_coupled_residual_as_implicit_state_steps(end_point, shape)
     np.testing.assert_allclose(x, expected_x, rtol=1e-5, atol=1e-7)
     np.testing.assert_allclose(z, expected_z, rtol=1e-5, atol=1e-7)
     np.testing.assert_allclose(q, expected_q, rtol=1e-5, atol=1e-7)
+
+
+def test_numpy_refinement_reduces_coupled_residual_error():
+    backend = NumpyBackend()
+    system = _coupled_residual_system()
+    end_point = 1.5
+    expected = np.asarray(_coupled_continuous_values(end_point))
+    errors = []
+
+    # Keep the endpoint fixed: these binary-exact steps divide the interval,
+    # so refinement controls internal steps rather than observation times.
+    for maximum_time_step in (0.125, 0.0625, 0.03125):
+        x, z, q = backend.evaluate_integrals(
+            system,
+            [np.array([0.0]), np.array([2.0 / 3.0]), np.array([0.0])],
+            end_point,
+            [None, None],
+            solver_parameters=NumpySolverParameters(
+                implicit_maximum_time_step=maximum_time_step,
+                implicit_nonlinear_tolerance=1e-11,
+            ),
+        )
+
+        assert x.shape == (1,)
+        assert z.shape == (1,)
+        assert q.shape == (1,)
+        values = np.concatenate((x, z, q))
+        np.testing.assert_allclose(
+            values, expected, rtol=0.0, atol=0.08 * maximum_time_step**2
+        )
+        # The coupled residual enforces z = (x + 2) / 3 and xdot + qdot = 1.
+        np.testing.assert_allclose(z, (x + 2.0) / 3.0, rtol=0.0, atol=1e-10)
+        np.testing.assert_allclose(x + q, [end_point], rtol=0.0, atol=1e-10)
+        errors.append(np.abs(values - expected))
+
+    # Require substantial improvement in every component without pinning the
+    # integration formula or rejecting a future, more accurate method.
+    errors = np.asarray(errors)
+    assert np.all(errors[1:] <= errors[:-1] / 3.0)
 
 
 def test_numpy_requires_coupled_residual_algebraic_initial_condition():

@@ -252,8 +252,14 @@ def check_jax() -> None:
         all(device.platform == "cpu" for device in argument.devices()),
         "Non-CPU JAX array",
     )
+    lowered = function.lower()
     np.testing.assert_allclose(np.asarray(function(argument)), 13.0)
-    print("JAX CPU array through Coker function: squared norm = 13")
+    np.testing.assert_allclose(np.asarray(lowered.execute([argument])[0]), 13.0)
+    np.testing.assert_allclose(jax.grad(function)(argument), [4.0, -6.0])
+    np.testing.assert_allclose(
+        jax.grad(lambda value: lowered.execute([value])[0])(argument), [4.0, -6.0]
+    )
+    print("JAX CPU public/packed execution: squared norm = 13, gradient = [4,-6]")
 
 
 def check_pytorch() -> None:
