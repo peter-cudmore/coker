@@ -94,6 +94,22 @@ def check_base() -> None:
     numerical = coker.function(spaces, polynomial, backend="numpy")
     np.testing.assert_allclose(numerical(3.0, 2.0), 11.0)
 
+    displacements = np.array([1.0, 2.0])
+    stiffness = np.array([[4.0, -1.0], [-1.0, 2.0]])
+    spring_spaces = [coker.VectorSpace("x", 2), coker.VectorSpace("K", (2, 2))]
+    restoring_force = coker.function(
+        spring_spaces, lambda x, K: -(K @ x), backend="numpy"
+    )
+    energy = coker.function(
+        spring_spaces, lambda x, K: 0.5 * np.dot(x, K @ x), backend="numpy"
+    )
+    matrix_square = coker.function(
+        [coker.VectorSpace("K", (2, 2))], lambda K: K @ K, backend="numpy"
+    )
+    np.testing.assert_allclose(restoring_force(displacements, stiffness), [-2.0, -3.0])
+    np.testing.assert_allclose(energy(displacements, stiffness), 4.0)
+    np.testing.assert_allclose(matrix_square(stiffness), [[17.0, -6.0], [-6.0, 5.0]])
+
     symbolic = coker.function(spaces, polynomial, backend="sympy")
     backend = get_backend_by_name("sympy", set_current=False)
     arguments, expression = backend.lower_to_symbolic(symbolic)
@@ -104,7 +120,10 @@ def check_base() -> None:
     np.testing.assert_allclose(
         float(expression.subs(dict(zip(arguments, (3.0, 2.0))))), 11.0
     )
-    print("NumPy evaluation and SymPy lowering/substitution: x² + p = 11")
+    print(
+        "NumPy scalar/vector/matrix evaluation: polynomial=11, force=[-2,-3], energy=4"
+    )
+    print("SymPy lowering/substitution: x² + p = 11")
 
 
 def check_casadi() -> None:
@@ -118,6 +137,31 @@ def check_casadi() -> None:
         CasadiResidualSolverOptions,
     )
     from coker.dynamics import ResidualDynamicalSystem
+    from coker.toolkits.codesign import Minimise, ProblemBuilder
+
+    force = coker.function(
+        [coker.Scalar("extension"), coker.Scalar("stiffness")],
+        lambda extension, stiffness: stiffness * extension,
+        backend="casadi",
+    )
+    np.testing.assert_allclose(float(force(0.02, 150.0)), 3.0)
+    extensions = np.array([0.01, 0.02, 0.03])
+    measurements = np.array([1.5, 3.0, 4.5])
+    with ProblemBuilder() as builder:
+        k = builder.new_variable("stiffness", initial_value=100.0)
+        residuals = [force(x, k) - y for x, y in zip(extensions, measurements)]
+        builder.objective = Minimise(sum(r * r for r in residuals))
+        builder.constraints = [k >= 0]
+        builder.outputs = [k]
+        fit = builder.build("casadi")
+    loss, stiffness = fit()
+    require(
+        fit.solve_info is not None and fit.solve_info.success,
+        f"README spring fit did not succeed: {fit.solve_info}",
+    )
+    np.testing.assert_allclose(loss, 0.0, rtol=0, atol=1e-10)
+    np.testing.assert_allclose(stiffness, 150.0, rtol=0, atol=1e-5)
+    print("README spring fit: successful solve, loss near zero, stiffness=150 N/m")
 
     polynomial = coker.function(
         [coker.Scalar("x")], lambda x: x * x + 2, backend="casadi"

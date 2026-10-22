@@ -2,13 +2,18 @@ name: Publish Coker
 
 on:
   pull_request:
-    branches: ["main"]
+    branches: ["main", "develop"]
     types: [opened, synchronize, reopened]
   push:
     branches: ["main"]
 
 permissions:
   contents: read
+
+concurrency:
+  # Hold the production lock through live docs verification and package publication.
+  group: ${{ github.event_name == 'push' && 'coker-production-release' || format('coker-release-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: false
 
 jobs:
   detect-version-bump:
@@ -18,25 +23,29 @@ jobs:
       version_bumped: ${{ steps.compare.outputs.version_bumped }}
       head_version: ${{ steps.compare.outputs.head_version }}
       base_version: ${{ steps.compare.outputs.base_version }}
+      release-sha: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: >-
             ${{
               github.event_name == 'pull_request' &&
               github.event.pull_request.head.sha ||
               github.sha
             }}
-      - name: Fetch base branch
+      - name: Fetch exact base commit
         if: github.event_name == 'pull_request'
-        run: git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags origin "$BASE_SHA"
       - name: Compare package versions
         id: compare
         shell: python
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before }}
         run: |
           import os
@@ -63,9 +72,9 @@ jobs:
           head_version = tomllib.loads(head_pyproject.decode())["project"]["version"]
 
           if event_name == "pull_request":
-              base_ref = os.environ["BASE_REF"]
+              base_sha = os.environ["BASE_SHA"]
               base_pyproject = subprocess.check_output(
-                  ["git", "show", f"origin/{base_ref}:pyproject.toml"]
+                  ["git", "show", f"{base_sha}:pyproject.toml"]
               )
               base_version = tomllib.loads(base_pyproject.decode())["project"]["version"]
               version_bumped = version_is_bumped(head_version, base_version)
@@ -90,26 +99,16 @@ jobs:
                   f"version_bumped={'true' if version_bumped else 'false'}\n"
               )
 
-  build:
-    name: Build distribution
+  prepare-release:
+    name: Validate prepared release
     needs: detect-version-bump
-    if: >-
-      needs.detect-version-bump.outputs.version_bumped == 'true' &&
-      (
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
+    if: needs.detect-version-bump.outputs.version_bumped == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-          ref: >-
-            ${{
-              github.event_name == 'pull_request' &&
-              github.event.pull_request.head.sha ||
-              github.sha
-            }}
+          ref: ${{ needs.detect-version-bump.outputs.release-sha }}
       - name: Validate prepared release notes
         shell: python
         env:
@@ -143,23 +142,58 @@ jobs:
           section = changelog[heading.start():end]
           if notes != section:
               raise RuntimeError(f"{notes_path} must exactly match its CHANGELOG.md section")
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          python-version: "3.13"
-          enable-cache: true
-      - name: Build distribution packages
-        run: uv build
-      - name: Store distribution packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
+      - name: Reject conflicting existing release tags before publication
+        shell: python
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_VERSION: ${{ needs.detect-version-bump.outputs.head_version }}
+          RELEASE_SHA: ${{ needs.detect-version-bump.outputs.release-sha }}
+        run: |
+          import json
+          import os
+          import subprocess
+
+          tag = f"v{os.environ['HEAD_VERSION']}"
+          remote_tag = subprocess.run(
+              ["gh", "api", f"repos/{os.environ['GH_REPO']}/commits/refs/tags/{tag}"],
+              capture_output=True, text=True, encoding="utf-8",
+          )
+          if remote_tag.returncode == 0:
+              tag_sha = json.loads(remote_tag.stdout)["sha"]
+              if tag_sha != os.environ["RELEASE_SHA"]:
+                  raise RuntimeError(
+                      f"Existing tag {tag} resolves to {tag_sha}, not the release commit; refusing publication"
+                  )
+          elif "HTTP 404" not in remote_tag.stderr:
+              raise RuntimeError(remote_tag.stderr)
+
+  release-checks:
+    name: Check exact release source and documentation
+    needs: [detect-version-bump, prepare-release]
+    uses: ./.github/workflows/test-and-lint.yml
+    with:
+      ref: ${{ needs.detect-version-bump.outputs.release-sha }}
+      release-documentation: true
+
+  deploy-release-docs:
+    name: Deploy and verify the exact release documentation
+    needs: [detect-version-bump, release-checks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      ref: ${{ needs.detect-version-bump.outputs.release-sha }}
 
   publish-to-test-pypi:
     name: Publish to TestPyPI
-    needs: [detect-version-bump, build]
-    if: github.event_name == 'pull_request'
+    needs: release-checks
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -170,17 +204,17 @@ jobs:
       - name: Download distribution packages
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          artifact-ids: ${{ needs.release-checks.outputs.distribution-artifact-id }}
+          merge-multiple: true
           path: dist/
       - name: Publish distribution packages to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
 
   publish-to-pypi:
     name: Publish to PyPI
-    needs: [detect-version-bump, build]
+    needs: [release-checks, deploy-release-docs]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
@@ -192,12 +226,11 @@ jobs:
       - name: Download distribution packages
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          artifact-ids: ${{ needs.release-checks.outputs.distribution-artifact-id }}
+          merge-multiple: true
           path: dist/
       - name: Publish distribution packages to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          skip-existing: true
 
   publish-github-release:
     name: Publish GitHub Release
@@ -210,14 +243,14 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ needs.detect-version-bump.outputs.release-sha }}
       - name: Publish prepared release notes
         shell: python
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           HEAD_VERSION: ${{ needs.detect-version-bump.outputs.head_version }}
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ needs.detect-version-bump.outputs.release-sha }}
         run: |
           import json
           import os

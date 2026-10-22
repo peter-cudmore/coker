@@ -16,9 +16,8 @@ model parameters, and building robotics models.
 **Coker is alpha software.** Backend capabilities differ; check the supported
 workflows and limitations before choosing a backend.
 
-**[Get started](docs/basics/getting_started.rst) ·
-[Browse practical examples](docs/how_to/index.rst) ·
-[Backend support](docs/backends.rst)**
+**[Documentation][documentation] · [Get started][getting-started] ·
+[Browse practical examples][how-to] · [Backend support][backend-guide]**
 
 ## Install and try
 
@@ -67,8 +66,8 @@ print(round(np.asarray(stiffness).item(), 1))  # 150.0 N/m
 ```
 
 The fit recovers a stiffness of **150 N/m**. CasADi uses IPOPT, which also
-prints its solver log. See the [solver tuning recipe](docs/how_to/casadi_solver_tuning.rst)
-for solver options and result inspection.
+prints its solver log. See the [solver tuning recipe][solver-tuning] for solver
+options and result inspection.
 
 ### Inspect symbolic matrix maths, then differentiate with PyTorch
 
@@ -109,25 +108,24 @@ With displacements in metres and stiffness in N/m, the energy is **4 J**.
 For symmetric `K`, the gradient is `Kx`; its negative gives the restoring
 forces, here **[-2, -3] N**. The NumPy-style formula becomes a Coker graph,
 not a conversion of the input tensors to NumPy, so PyTorch retains the gradient
-path. See the [backend interoperability recipes](docs/how_to/backend_interoperability.rst)
-to export functions as PyTorch modules.
+path. See the [backend interoperability recipes][interoperability] to export
+functions as PyTorch modules.
 
 ## What can I build?
 
 - **Simulate a dynamical system:** define an ODE and evaluate its state and
-  outputs over time. [Simulation recipe](docs/how_to/simulation.rst).
+  outputs over time. [Simulation recipe][simulation].
 - **Fit model parameters:** estimate unknown parameters from observations.
-  [System identification recipe](docs/how_to/system_identification.rst).
+  [System identification recipe][identification].
 - **Solve a constrained path-planning problem:** optimise waypoints subject to
-  geometric constraints. [Path-planning recipe](docs/how_to/path_planning.rst).
+  geometric constraints. [Path-planning recipe][path-planning].
 - **Build a robot-arm model:** compose joints and rigid bodies, evaluate forward
-  kinematics, and plot the result. [Robot-arm recipe](docs/how_to/robot_arm.rst).
+  kinematics, and plot the result. [Robot-arm recipe][robot-arm].
 - **Work with PyTorch modules:** export a Coker function as a module or use a
   native module inside a Coker computation.
-  [Backend interoperability recipes](docs/how_to/backend_interoperability.rst).
+  [Backend interoperability recipes][interoperability].
 
-For the execution model and design rationale, read the
-[architecture guide](docs/architecture/index.rst).
+For the execution model and design rationale, read the [architecture guide][architecture].
 
 ## Choose a backend
 
@@ -140,9 +138,9 @@ For the execution model and design rationale, read the
 | JAX | Alternate array execution; Python 3.11 or newer | `pip install "coker[jax]"` |
 
 Backends are not interchangeable for every operation or solver. Follow the
-[backend tutorial](docs/tutorials/backends.rst) to compare numerical and symbolic
-execution, the [backend guide](docs/backends.rst) for capability limits, and the
-[CasADi tuning recipe](docs/how_to/casadi_solver_tuning.rst) for solver options.
+[backend tutorial][backend-tutorial] to compare numerical and symbolic execution,
+the [backend guide][backend-guide] for capability limits, and the
+[CasADi tuning recipe][solver-tuning] for solver options.
 
 ## Status and limitations
 
@@ -156,8 +154,8 @@ outside this isolated-wheel coverage. These checks do not certify every backend
 feature on every platform.
 
 Backend CI checks use CPU execution. CUDA support remains experimental and
-unverified; see the [backend support boundaries](docs/backends.rst). See
-[CHANGELOG.md](CHANGELOG.md) for changes and the
+unverified; see the [backend support boundaries][backend-guide].
+See [CHANGELOG.md](CHANGELOG.md) for changes and the
 [issue tracker](https://github.com/peter-cudmore/coker/issues) for known problems.
 
 ## Contributing and credit
@@ -179,3 +177,16 @@ Copyright (c) 2026 **Pneumatica Bio**. **Peter Cudmore** is the sole author to d
 Coker is licensed under **MPL-2.0**. See [LICENSE.TXT](LICENSE.TXT).
 External contributions are accepted under the same licence without copyright
 assignment; see [contribution licensing](CONTRIBUTING.md#contribution-licensing).
+
+[documentation]: https://peter-cudmore.github.io/coker/
+[getting-started]: https://peter-cudmore.github.io/coker/basics/getting_started.html
+[how-to]: https://peter-cudmore.github.io/coker/how_to/index.html
+[backend-guide]: https://peter-cudmore.github.io/coker/backends.html
+[solver-tuning]: https://peter-cudmore.github.io/coker/how_to/casadi_solver_tuning.html
+[interoperability]: https://peter-cudmore.github.io/coker/how_to/backend_interoperability.html
+[simulation]: https://peter-cudmore.github.io/coker/how_to/simulation.html
+[identification]: https://peter-cudmore.github.io/coker/how_to/system_identification.html
+[path-planning]: https://peter-cudmore.github.io/coker/how_to/path_planning.html
+[robot-arm]: https://peter-cudmore.github.io/coker/how_to/robot_arm.html
+[architecture]: https://peter-cudmore.github.io/coker/architecture/index.html
+[backend-tutorial]: https://peter-cudmore.github.io/coker/tutorials/backends.html
